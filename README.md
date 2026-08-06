@@ -1,8 +1,6 @@
 # Superopen
 
 <p align="center">
-  <img src="web/public/brand-mark.png" alt="SO shield" width="120" />
-  <br />
   <img src="web/public/brand-wordmark.png" alt="SUPEROPEN" width="420" />
 </p>
 
