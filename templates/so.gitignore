@@ -1,0 +1,15 @@
+# Superopen - commit team-useful harness docs; ignore local runtime state.
+*
+!.gitignore
+!knowledge/
+!knowledge/**
+!rules/
+!rules/**
+!skills/
+!skills/**
+!guardrails/
+!guardrails/**
+!evals/
+!evals/**
+!AGENT.md
+!config.yaml

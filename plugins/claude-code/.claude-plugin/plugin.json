@@ -1,0 +1,11 @@
+{
+  "name": "superopen-cc",
+  "version": "0.1.0",
+  "description": "Superopen telemetry for Claude Code: sessions, tool calls, edit decisions, and cost rollups.",
+  "author": {
+    "name": "Superopen",
+    "url": "https://openlit.io"
+  },
+  "repository": "https://github.com/openlit/openlit",
+  "homepage": "https://openlit.io"
+}

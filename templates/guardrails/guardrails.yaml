@@ -1,0 +1,52 @@
+# Superopen guardrails - advisory rules + narrow hard enforcement.
+#
+# Philosophy:
+# - Hard denies are rare and must not block normal coding.
+# - Secrets protection prefers redaction/transcript hygiene over blocking reads.
+# - Advisory `rules` guide the agent; only denied_commands / sensitive_paths gate tools.
+#
+# severity:block is reserved for secrets/credentials guidance (advisory text).
+# Edit freely; so sync / so init will not overwrite once present.
+
+rules:
+  - id: no-secrets
+    description: Never commit secrets, API keys, or credentials
+    severity: block
+  - id: no-credential-logs
+    description: Never log credentials, tokens, or secrets
+    severity: block
+  - id: no-generated
+    description: Avoid editing generated files (dist/, vendor/, *.generated.*) unless required
+    severity: warn
+  - id: run-tests
+    description: Always run relevant tests before finishing
+    severity: warn
+  - id: respect-formatting
+    description: Respect project formatting and lint rules
+    severity: warn
+  - id: avoid-unrelated
+    description: Avoid changing unrelated code
+    severity: warn
+
+approval: interactive
+redact_output: true
+
+# Hard shell denies: catastrophic / obvious malware footguns only.
+# Do NOT put routine commands here (tests, git, package managers, force-push with care).
+denied_commands:
+  - "rm -rf /"
+  - "rm -rf /*"
+  - "mkfs*"
+  - "dd if=/dev/zero*"
+  - ":(){ :|:& };:"
+  - "curl *| sh"
+  - "curl *| bash"
+  - "wget *| sh"
+  - "wget *| bash"
+  - "chmod -R 777 /"
+
+# Hard path denies: protect Superopen's own audit trail only.
+# Do NOT block .env / .ssh / credentials by default -
+# agents often need to read them; redact instead of bricking the session.
+sensitive_paths:
+  - "**/.so/audit/**"

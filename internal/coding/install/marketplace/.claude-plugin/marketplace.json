@@ -1,0 +1,17 @@
+{
+  "name": "superopen",
+  "owner": {
+    "name": "Superopen",
+    "email": "support@superopen.dev"
+  },
+  "plugins": [
+    {
+      "name": "superopen-cc",
+      "description": "OpenTelemetry-native session, tool, and edit-decision capture for Claude Code.",
+      "author": {
+        "name": "Superopen"
+      },
+      "source": "./plugins/claude-code"
+    }
+  ]
+}

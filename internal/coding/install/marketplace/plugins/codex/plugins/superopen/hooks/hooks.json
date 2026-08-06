@@ -1,0 +1,67 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "so coding hook --vendor=codex --event=SessionStart",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "so coding hook --vendor=codex --event=UserPromptSubmit",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "so coding hook --vendor=codex --event=PreToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "so coding hook --vendor=codex --event=PostToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "so coding hook --vendor=codex --event=Stop",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "so sessions finalize",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

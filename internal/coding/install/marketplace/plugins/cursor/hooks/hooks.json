@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "so coding hook --vendor=cursor --event=sessionStart",
+        "timeout": 5000
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "so coding hook --vendor=cursor --event=sessionEnd",
+        "timeout": 5000
+      },
+      {
+        "command": "so sessions finalize",
+        "timeout": 30000
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "so coding hook --vendor=cursor --event=beforeSubmitPrompt",
+        "timeout": 5000
+      }
+    ],
+    "afterAgentResponse": [
+      {
+        "command": "so coding hook --vendor=cursor --event=afterAgentResponse",
+        "timeout": 5000
+      }
+    ],
+    "afterAgentThought": [
+      {
+        "command": "so coding hook --vendor=cursor --event=afterAgentThought",
+        "timeout": 5000
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "so coding hook --vendor=cursor --event=preToolUse",
+        "timeout": 5000
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "so coding hook --vendor=cursor --event=postToolUse",
+        "timeout": 5000
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "command": "so coding hook --vendor=cursor --event=postToolUseFailure",
+        "timeout": 5000
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": "so coding hook --vendor=cursor --event=subagentStart",
+        "timeout": 5000
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": "so coding hook --vendor=cursor --event=subagentStop",
+        "timeout": 5000
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "so coding hook --vendor=cursor --event=beforeShellExecution",
+        "timeout": 5000
+      }
+    ],
+    "afterShellExecution": [
+      {
+        "command": "so coding hook --vendor=cursor --event=afterShellExecution",
+        "timeout": 5000
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "so coding hook --vendor=cursor --event=beforeMCPExecution",
+        "timeout": 5000
+      }
+    ],
+    "afterMCPExecution": [
+      {
+        "command": "so coding hook --vendor=cursor --event=afterMCPExecution",
+        "timeout": 5000
+      }
+    ],
+    "beforeReadFile": [
+      {
+        "command": "so coding hook --vendor=cursor --event=beforeReadFile",
+        "timeout": 5000
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "so coding hook --vendor=cursor --event=afterFileEdit",
+        "timeout": 5000
+      }
+    ],
+    "preCompact": [
+      {
+        "command": "so coding hook --vendor=cursor --event=preCompact",
+        "timeout": 5000
+      }
+    ],
+    "stop": [
+      {
+        "command": "so coding hook --vendor=cursor --event=stop",
+        "timeout": 5000
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "superopen",
+  "version": "0.1.0",
+  "description": "Superopen - Open source Agent Harness Engineering",
+  "bin": {
+    "so": "bin/so.js"
+  },
+  "files": [
+    "bin/"
+  ],
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  }
+}
