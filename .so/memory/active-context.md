@@ -9,6 +9,7 @@ Read this pack before exploring. Prefer `so graph query` / `.so/knowledge` for c
 How agents should work in this workspace.
 
 - Prefer `so graph query` and `.so/knowledge` before broad code search.
+- Check and use `.so` skills/context before starting exploration - agent previously skipped this and underused the harness.
 - Run tests for packages you change (`go test ./…` or the package under edit).
 - No drive-by refactors - keep diffs focused on the task.
 - Never commit secrets, API keys, or `.env` files with real credentials.
@@ -43,100 +44,16 @@ How agents should work in this workspace.
 - Open question raised repeatedly: attach a UI screenshot to the README, or instead emphasize CLI strengths like recommendations - still unresolved.
 - A `.so` gitignore policy session ran 2026-08-07 on branch `ui-fixes` (~43min, 718k tokens, $0.44, eval "ok") but transcript content was truncated/not visible, so the actual decision (whole `.so` folder vs. only traces) is still not confirmed - re-check with the user or `git log`/`.gitignore` directly before assuming a resolution.
 - A short session on 2026-08-07 (branch `ui-fixes`, prompt "yoyo") produced a commit "fixsync" (c950a0683b0e8b9e34e920732f696c21943e12dd) but transcript content was not visible - purpose of this commit is unconfirmed, check `git show c950a068` for details.
+- Lesson logged 2026-08-07 (lesson_03038f3d49a2bb3e): agent skipped `.so` skills/context during a recurring exploration pattern - consider adding a dedicated skill for this pattern so it's not missed again.
 
 ## [History]
 
 #### 2026-08-07
-### 2026-08-07T03:32:37Z
-## Meta
-{
-  "id": "019fda2f-a371-7f00-9d70-03b028b2db0a",
-  "vendor": "",
-  "model": "gpt-5.6-terra",
-  "title": "Update README to match Graphify",
-  "status": "ended",
-  "started_at": "2026-08-07T03:32:24.030308Z",
-  "ended_at": "2026-08-07T03:32:32.754081Z",
-  "duration_ms": 8723,
-  "project_id": "2a249b6e996bf384",
-  "repo_root": "/Users/ishanjain/work/superopen",
-  "branch": "main"
-}
-## Transcript (truncated)
+### 2026-08-07T13:40:18Z
+# Lessons
 
-### 2026-08-07T03:32:39Z
-## Meta
-{
-  "id": "019fda2f-a371-7f00-9d70-03b028b2db0a",
-  "vendor": "",
-  "model": "gpt-5.6-terra",
-  "title": "Update README to match Graphify",
-  "status": "ended",
-  "started_at": "2026-08-07T03:32:24.030308Z",
-  "ended_at": "2026-08-07T03:32:32.754081Z",
-  "duration_ms": 8723,
-  "eval_badge": "poor",
-  "project_id": "2a249b6e996bf384",
-  "repo_root": "/Users/ishanjain/work/superopen",
-  "branch": "main"
-}
-## Transcript (truncated)
-
-### 2026-08-07T03:38:14Z
-## Meta
-{
-  "id": "019fda2f-a371-7f00-9d70-03b028b2db0a",
-  "vendor": "",
-  "model": "gpt-5.6-terra",
-  "title": "Update README to match Graphify",
-  "prompt_preview": "Should we attach a UI screenshot, or maybe CLI has some strenthts like recommendations or something",
-  "status": "ended",
-  "started_at": "2026-08-07T03:32:24.030308Z",
-  "ended_at": "2026-08-07T03:38:05.655156Z",
-  "duration_ms": 341624,
-  "tokens": 61262,
-  "cost_usd": 0.020695,
-  "eval_badge": "poor",
-  "project_id": "2a249b6e996bf384",
-  "repo_root": "/Users/ishanjain/work/superopen",
-  "branch": "main",
-  "base_sha": "[REDACTED]",
-  "head_sha": "[REDACTED]"
-}
-## Transcript (truncated)
-
-### 2026-08-07T03:43:21Z
-## Meta
-{
-  "id": "019fda2f-a371-7f00-9d70-03b028b2db0a",
-  "vendor": "",
-  "model": "gpt-5.6-terra",
-  "title": "Update README to match Graphify",
-  "prompt_preview": "Should we attach a UI screenshot, or maybe CLI has some strenthts like recommendations or something",
-  "status": "ended",
-  "started_at": "2026-08-07T03:32:24.030308Z",
-  "ended_at": "2026-08-07T03:43:13.871847Z",
-  "duration_ms": 649841,
-  "tokens": 2585872,
-  "cost_usd": 2.073072,
-  "eval_badge": "poor",
-  "project_id": "2a249b6e996bf384",
-  "repo_root": "/Users/ishanjain/work/superopen",
-  "branch": "main",
-  "base_sha": "[REDACTED]",
-  "head_sha": "[REDACTED]"
-}
-## Transcript (truncated)
-
-### 2026-08-07T05:00:08Z
-## Meta
-{
-  "id": "019fda2f-a371-7f00-9d70-03b028b2db0a",
-  "vendor": "",
-  "model": "gpt-5.6-terra",
-  "title": "Update README to match Graphify",
-  "prompt_preview": "Should we attach a UI screenshot, or maybe CLI has some strenthts like recommendations or someth
-…[truncated]
+## lesson_03038f3d49a2bb3e (2026-08-07T03:38:09Z)
+Add skill for recurring exploration pattern - Harness underused - agent skipped .so skills/context.
 
 ## [Semantic Memory]
 
@@ -161,6 +78,7 @@ How agents should work in this workspace.
 ## [Learned corrections]
 
 - Add skill for recurring exploration pattern - Harness underused - agent skipped .so skills/context.
+- Always check `.so/skills` and `.so/context` before starting exploration — don't skip the harness even for tasks that seem simple.
 
 ## [Skills]
 

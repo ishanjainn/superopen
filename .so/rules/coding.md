@@ -15,3 +15,6 @@ Guardrails (`.so/guardrails/`) are hard stop/warn policies. **Rules** here are g
 - [ ] Prefer `so graph query` and `.so/knowledge/` before broad Grep
 - [ ] Follow PR / commit conventions for this repo
 - [ ] Never commit secrets; use parameterized SQL; respect rate limits
+
+
+- [ ] Check `.so/skills/` for a matching skill before broad exploration
