@@ -4,7 +4,7 @@ llm:
     api_key_env: SUPEROPEN_LLM_API_KEY
 graph:
     code: true
-    semantic: true
+    semantic: false
     semantic_backend: auto
 evals:
     auto: true

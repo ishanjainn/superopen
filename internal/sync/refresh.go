@@ -53,6 +53,11 @@ func Refresh(opts RefreshOptions) error {
 	marker := loadRefreshMarker(paths)
 	sharedChanged := sharedHarnessChanged(paths, marker.At) || opts.Force
 	shaChanged := sha != "" && sha != marker.SHA
+	// A commit always changes HEAD, but Graphify's own clustering is not
+	// deterministic - rebuilding on every commit regardless of what changed
+	// churns graph.json/graph.html/GRAPH_REPORT.md even when nothing Graphify
+	// would index actually moved (e.g. a commit touching only .so/ or docs).
+	sourceChanged := shaChanged && (marker.SHA == "" || indexableFilesChanged(root, marker.SHA, sha))
 
 	_ = guardrails.EnsureDefaults(paths)
 	_ = memory.NewStore(paths).Ensure()
@@ -64,7 +69,7 @@ func Refresh(opts RefreshOptions) error {
 	_ = recommend.MarkStaleFlags(paths)
 
 	builtGraph := false
-	if !opts.SkipGraph && (sharedChanged || shaChanged || opts.Force) {
+	if !opts.SkipGraph && (sharedChanged || sourceChanged || opts.Force) {
 		codeOnly := !cfg.Graph.Semantic
 		if _, err := graph.Build(root, paths, codeOnly, cfg.Graph.SemanticBackend); err != nil {
 			return fmt.Errorf("graph: %w", err)
@@ -83,6 +88,52 @@ func gitSHA(root string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// nonIndexablePrefixes are paths Graphify never indexes for code structure, so
+// a commit that only touches these should not trigger a graph rebuild.
+var nonIndexablePrefixes = []string{".so/", ".git/"}
+
+// nonIndexableExts are file types that don't change code structure/edges even
+// when they legitimately change (docs, lockfiles, generated data).
+var nonIndexableExts = map[string]bool{
+	".md": true, ".txt": true, ".lock": true,
+}
+
+func isIndexablePath(p string) bool {
+	for _, prefix := range nonIndexablePrefixes {
+		if strings.HasPrefix(p, prefix) {
+			return false
+		}
+	}
+	base := filepath.Base(p)
+	if base == "package-lock.json" || base == "go.sum" {
+		return false
+	}
+	return !nonIndexableExts[filepath.Ext(p)]
+}
+
+// indexableFilesChanged reports whether any file Graphify would actually
+// index changed between two commits. Fails open (true) on any git error so a
+// diff failure never silently suppresses a real rebuild.
+func indexableFilesChanged(root, fromSHA, toSHA string) bool {
+	if fromSHA == "" || toSHA == "" || fromSHA == toSHA {
+		return true
+	}
+	out, err := exec.Command("git", "-C", root, "diff", "--name-only", fromSHA, toSHA).Output()
+	if err != nil {
+		return true
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if isIndexablePath(line) {
+			return true
+		}
+	}
+	return false
 }
 
 func loadRefreshMarker(paths harness.Paths) refreshMarker {
