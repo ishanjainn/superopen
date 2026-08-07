@@ -22,6 +22,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/discover"
 	"github.com/ishanjainn/superopen/internal/doctor"
 	"github.com/ishanjainn/superopen/internal/eval"
+	"github.com/ishanjainn/superopen/internal/execx"
 	"github.com/ishanjainn/superopen/internal/gitruntime"
 	"github.com/ishanjainn/superopen/internal/graph"
 	"github.com/ishanjainn/superopen/internal/guardrails"
@@ -523,18 +524,38 @@ func cmdSessions() *cobra.Command {
 			return enc.Encode(m)
 		},
 	})
-	c.AddCommand(&cobra.Command{
+	finalizeCmd := &cobra.Command{
 		Use:   "finalize [session-id]",
 		Short: "Materialize traces into a session (post-session pipeline)",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Runs eval → recommendations → optional auto-apply → harvest for a session.
+
+Prefer agent SessionEnd / the coding hook to invoke this. Pass --detach so the
+caller (agent hooks) returns immediately while work continues in the background.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := ""
 			if len(args) > 0 {
 				id = strings.TrimSpace(args[0])
 			}
-			return finalizeSession(repoRoot(), id)
+			detach, _ := cmd.Flags().GetBool("detach")
+			if detach {
+				root := repoRoot()
+				if id == "" {
+					execx.SpawnSO(root, "sessions", "finalize")
+				} else {
+					execx.SpawnSO(root, "sessions", "finalize", id)
+				}
+				return nil
+			}
+			// Fail-soft for agent companions: never fail the hook hard.
+			if err := finalizeSession(repoRoot(), id); err != nil {
+				fmt.Fprintf(os.Stderr, "finalize: %v\n", err)
+			}
+			return nil
 		},
-	})
+	}
+	finalizeCmd.Flags().Bool("detach", false, "Return immediately; run finalize in a background process")
+	c.AddCommand(finalizeCmd)
 	c.AddCommand(&cobra.Command{
 		Use:   "refresh [session-id]",
 		Short: "Materialize current traces while keeping the session active",

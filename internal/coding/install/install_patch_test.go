@@ -29,3 +29,22 @@ func TestCodexStopHookUsesSessionsRefresh(t *testing.T) {
 		t.Fatalf("Codex hooks must not finalize on Stop (that closes every turn); hooks.json:\n%s", body)
 	}
 }
+
+func TestSessionEndFinalizeIsDetached(t *testing.T) {
+	raw, err := marketplaceFS.ReadFile("marketplace/plugins/claude-code/hooks/hooks.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, `so sessions finalize --detach`) {
+		t.Fatalf("Claude SessionEnd must detach finalize; hooks.json:\n%s", body)
+	}
+	raw, err = marketplaceFS.ReadFile("marketplace/plugins/cursor/hooks/hooks.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = string(raw)
+	if !strings.Contains(body, `so sessions finalize --detach`) {
+		t.Fatalf("Cursor sessionEnd must detach finalize; hooks.json:\n%s", body)
+	}
+}

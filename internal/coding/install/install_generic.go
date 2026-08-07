@@ -31,7 +31,7 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
     "SessionStart": [{"hooks": [{"type": "command", "command": %s}]}],
     "SessionEnd": [{"hooks": [
       {"type": "command", "command": %s},
-      {"type": "command", "command": %s, "timeout": 30}
+      {"type": "command", "command": %s, "timeout": 5}
     ]}],
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": %s}]}],
     "PreToolUse": [{"hooks": [{"type": "command", "command": %s}]}]
@@ -39,7 +39,7 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
 }
 `, q(soBin+" coding hook --vendor=gemini --event=SessionStart"),
 			q(soBin+" coding hook --vendor=gemini --event=SessionEnd"),
-			q(soBin+" sessions finalize"),
+			q(soBin+" sessions finalize --detach"),
 			q(soBin+" coding hook --vendor=gemini --event=UserPromptSubmit"),
 			q(soBin+" coding hook --vendor=gemini --event=PreToolUse"))
 	case "opencode":
@@ -82,7 +82,7 @@ export default {
     fire(type, Object.assign({}, props, { type: type, event: type }), sync);
     if (type === "session.idle" || type === "session.deleted") {
       fire("session.end", { type: "session.end", session_id: props.sessionID || props.session_id }, true);
-      try { spawnSync(so, ["sessions", "finalize"], { timeout: 30000, stdio: "ignore" }); } catch {}
+      try { spawnSync(so, ["sessions", "finalize", "--detach"], { timeout: 5000, stdio: "ignore" }); } catch {}
     }
   },
   async "chat.message"(input, output) {
@@ -112,7 +112,7 @@ export default {
     async dispose() {
       fire("dispose", { type: "dispose" }, true);
       fire("session.end", { type: "session.end" }, true);
-      try { spawnSync(so, ["sessions", "finalize"], { timeout: 30000, stdio: "ignore" }); } catch {}
+      try { spawnSync(so, ["sessions", "finalize", "--detach"], { timeout: 5000, stdio: "ignore" }); } catch {}
     },
 };
 `, q(soBin))
@@ -130,7 +130,7 @@ export default {
 }
 `, q(soBin+" coding hook --vendor=copilot-cli --event=sessionStart"),
 			q(soBin+" coding hook --vendor=copilot-cli --event=sessionEnd"),
-			q(soBin+" sessions finalize"),
+			q(soBin+" sessions finalize --detach"),
 			q(soBin+" coding hook --vendor=copilot-cli --event=preToolUse"))
 	case "pi":
 		path = filepath.Join(home, ".pi", "extensions", "superopen", "index.ts")
@@ -237,13 +237,13 @@ export default function (pi) {
       type: "agent_end", cwd: ctx.cwd, session_file: ctx.sessionManager.getSessionFile(),
       session_id: lastSid,
     }, true);
-    try { spawnSync(so, ["sessions", "finalize"], { timeout: 30000, stdio: "ignore" }); } catch {}
+    try { spawnSync(so, ["sessions", "finalize", "--detach"], { timeout: 5000, stdio: "ignore" }); } catch {}
   });
   pi.on("session_shutdown", async () => {
     fire("session_shutdown", {
       type: "session_shutdown", cwd: lastCwd, session_file: lastFile, session_id: lastSid,
     }, true);
-    try { spawnSync(so, ["sessions", "finalize"], { timeout: 30000, stdio: "ignore" }); } catch {}
+    try { spawnSync(so, ["sessions", "finalize", "--detach"], { timeout: 5000, stdio: "ignore" }); } catch {}
   });
 }
 `, q(soBin))

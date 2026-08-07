@@ -78,8 +78,8 @@
           },
           {
             "type": "command",
-            "command": "so sessions finalize",
-            "timeout": 30
+            "command": "so sessions finalize --detach",
+            "timeout": 5
           }
         ]
       }

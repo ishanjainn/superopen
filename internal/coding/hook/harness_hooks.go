@@ -10,6 +10,7 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/audit"
 	"github.com/ishanjainn/superopen/internal/config"
+	"github.com/ishanjainn/superopen/internal/execx"
 	"github.com/ishanjainn/superopen/internal/guardrails"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/harvest"
@@ -120,8 +121,19 @@ func maybeHarvestOnSessionEnd(vendor, event, sessionID, cwd string) {
 	}
 
 	if isSessionStartEvent(event) {
-		_ = harvest.FlushPending(paths, cfg, sessionID)
+		flushed := harvest.FlushPending(paths, cfg, sessionID)
 		_, _ = retention.Prune(paths, cfg)
+		// Codex/Stop-only vendors get SessionEnd parity here: harvest already
+		// ran in FlushPending; kick detached finalize+eval+recommend per id.
+		for _, r := range flushed {
+			if r.SessionID == "" || r.SessionID == sessionID {
+				continue
+			}
+			if r.Skipped && (r.Reason == "empty_summary" || r.Reason == "no_session") {
+				continue
+			}
+			scheduleFinalize(root, r.SessionID)
+		}
 		return
 	}
 
@@ -133,6 +145,9 @@ func maybeHarvestOnSessionEnd(vendor, event, sessionID, cwd string) {
 		_, _ = harvest.Run(paths, cfg, sessionID, harvest.TriggerSessionEnd)
 		_ = harvest.MarkFinalizePending(paths, sessionID)
 		_, _ = harvest.IdleSweep(paths, cfg)
+		// Detached post-session pipeline: eval → recommend → auto-apply.
+		// Must not block the agent SessionEnd hook (Entire-style fire-and-forget).
+		scheduleFinalize(root, sessionID)
 		return
 	}
 
@@ -144,7 +159,19 @@ func maybeHarvestOnSessionEnd(vendor, event, sessionID, cwd string) {
 			_ = harvest.MarkFinalizePending(paths, sessionID)
 		}
 		_, _ = harvest.IdleSweep(paths, cfg)
+		// Do NOT finalize on Stop — that would close every Codex turn.
+		// Finalize runs when the next SessionStart FlushPending completes.
 	}
+}
+
+// scheduleFinalize kicks off so sessions finalize in the background so the
+// agent hook can return immediately. Failures are swallowed (fail-soft).
+func scheduleFinalize(repoRoot, sessionID string) {
+	if strings.TrimSpace(sessionID) == "" {
+		execx.SpawnSO(repoRoot, "sessions", "finalize")
+		return
+	}
+	execx.SpawnSO(repoRoot, "sessions", "finalize", sessionID)
 }
 
 func isSessionEndEvent(event string) bool {
