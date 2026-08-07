@@ -89,72 +89,6 @@
       "runtimeerror"
     ],
     "1": [
-      "web_src_app_api_checkpoints_route",
-      "web_src_app_api_checkpoints_route_dynamic",
-      "web_src_app_api_checkpoints_route_post",
-      "web_src_app_api_checkpoints_route_runtime",
-      "web_src_app_api_evals_route",
-      "web_src_app_api_evals_route_dynamic",
-      "web_src_app_api_evals_route_get",
-      "web_src_app_api_evals_route_post",
-      "web_src_app_api_evals_route_runtime",
-      "web_src_app_api_files_path_route",
-      "web_src_app_api_files_path_route_delete",
-      "web_src_app_api_files_path_route_dynamic",
-      "web_src_app_api_files_path_route_get",
-      "web_src_app_api_files_path_route_post",
-      "web_src_app_api_files_path_route_put",
-      "web_src_app_api_files_path_route_runtime",
-      "web_src_app_api_graph_query_route",
-      "web_src_app_api_graph_query_route_dynamic",
-      "web_src_app_api_graph_query_route_get",
-      "web_src_app_api_graph_query_route_rungraphquery",
-      "web_src_app_api_graph_query_route_runtime",
-      "web_src_app_api_recommendations_id_action_route",
-      "web_src_app_api_recommendations_id_action_route_dynamic",
-      "web_src_app_api_recommendations_id_action_route_post",
-      "web_src_app_api_recommendations_id_action_route_runtime",
-      "web_src_app_api_retrieve_route",
-      "web_src_app_api_retrieve_route_dynamic",
-      "web_src_app_api_retrieve_route_get",
-      "web_src_app_api_retrieve_route_runtime",
-      "web_src_app_api_sessions_port_route",
-      "web_src_app_api_sessions_port_route_get",
-      "web_src_app_api_sessions_port_route_portbody",
-      "web_src_app_api_sessions_port_route_post",
-      "web_src_app_api_sessions_start_route",
-      "web_src_app_api_sessions_start_route_post",
-      "web_src_lib_so_evals_listevalsdashboard",
-      "web_src_lib_so_exec",
-      "web_src_lib_so_exec_repocwd",
-      "web_src_lib_so_exec_sobinary",
-      "web_src_lib_so_exec_sojson",
-      "web_src_lib_so_files",
-      "web_src_lib_so_files_asserteditable",
-      "web_src_lib_so_files_createharnessfile",
-      "web_src_lib_so_files_defaultcontent",
-      "web_src_lib_so_files_deleteharnessfile",
-      "web_src_lib_so_files_editable_roots",
-      "web_src_lib_so_files_listorread",
-      "web_src_lib_so_files_safejoin",
-      "web_src_lib_so_files_sanitizefilename",
-      "web_src_lib_so_files_writeharnessfile",
-      "web_src_lib_so_misc_project",
-      "web_src_lib_so_nodeio_abspath",
-      "web_src_lib_so_root",
-      "web_src_lib_so_root_defaultreporoot",
-      "web_src_lib_so_root_reporoot",
-      "web_src_lib_so_root_runwithworkspaceasync",
-      "web_src_lib_so_root_soroot",
-      "web_src_lib_so_root_workspaceoverride",
-      "web_src_lib_so_root_workspacestorage",
-      "web_src_lib_so_sessions_sessiondir",
-      "web_src_lib_so_workspace",
-      "web_src_lib_so_workspace_projectidfromrequest",
-      "web_src_lib_so_workspace_resolveworkspace",
-      "web_src_lib_so_workspace_runwithprojectasync"
-    ],
-    "2": [
       "audit_event",
       "internal_audit_audit",
       "internal_audit_audit_append",
@@ -227,6 +161,73 @@
       "memory_store_status",
       "memory_store_updatelesson",
       "memory_store_upsertsemantic"
+    ],
+    "2": [
+      "web_src_app_api_checkpoints_route",
+      "web_src_app_api_checkpoints_route_dynamic",
+      "web_src_app_api_checkpoints_route_post",
+      "web_src_app_api_checkpoints_route_runtime",
+      "web_src_app_api_evals_route",
+      "web_src_app_api_evals_route_dynamic",
+      "web_src_app_api_evals_route_get",
+      "web_src_app_api_evals_route_post",
+      "web_src_app_api_evals_route_runtime",
+      "web_src_app_api_files_path_route",
+      "web_src_app_api_files_path_route_delete",
+      "web_src_app_api_files_path_route_dynamic",
+      "web_src_app_api_files_path_route_get",
+      "web_src_app_api_files_path_route_post",
+      "web_src_app_api_files_path_route_put",
+      "web_src_app_api_files_path_route_runtime",
+      "web_src_app_api_graph_positions_route",
+      "web_src_app_api_graph_positions_route_body",
+      "web_src_app_api_graph_positions_route_dynamic",
+      "web_src_app_api_graph_positions_route_post",
+      "web_src_app_api_graph_positions_route_runtime",
+      "web_src_app_api_graph_query_route",
+      "web_src_app_api_graph_query_route_dynamic",
+      "web_src_app_api_graph_query_route_get",
+      "web_src_app_api_graph_query_route_rungraphquery",
+      "web_src_app_api_graph_query_route_runtime",
+      "web_src_app_api_map_sessions_route",
+      "web_src_app_api_map_sessions_route_dynamic",
+      "web_src_app_api_map_sessions_route_get",
+      "web_src_app_api_map_sessions_route_runtime",
+      "web_src_app_api_recommendations_id_action_route",
+      "web_src_app_api_recommendations_id_action_route_dynamic",
+      "web_src_app_api_recommendations_id_action_route_post",
+      "web_src_app_api_recommendations_id_action_route_runtime",
+      "web_src_app_api_recommendations_id_route",
+      "web_src_app_api_recommendations_id_route_dynamic",
+      "web_src_app_api_recommendations_id_route_get",
+      "web_src_app_api_recommendations_id_route_runtime",
+      "web_src_app_api_retrieve_route",
+      "web_src_app_api_retrieve_route_dynamic",
+      "web_src_app_api_retrieve_route_get",
+      "web_src_app_api_retrieve_route_runtime",
+      "web_src_app_api_sessions_id_route",
+      "web_src_app_api_sessions_id_route_dynamic",
+      "web_src_app_api_sessions_id_route_get",
+      "web_src_app_api_sessions_id_route_runtime",
+      "web_src_app_api_sessions_port_route",
+      "web_src_app_api_sessions_port_route_get",
+      "web_src_app_api_sessions_port_route_portbody",
+      "web_src_app_api_sessions_port_route_post",
+      "web_src_app_api_sessions_start_route",
+      "web_src_app_api_sessions_start_route_post",
+      "web_src_lib_so_evals_listevalsdashboard",
+      "web_src_lib_so_exec",
+      "web_src_lib_so_exec_repocwd",
+      "web_src_lib_so_exec_sobinary",
+      "web_src_lib_so_exec_sojson",
+      "web_src_lib_so_misc_getrecommendation",
+      "web_src_lib_so_misc_project",
+      "web_src_lib_so_root_runwithworkspaceasync",
+      "web_src_lib_so_root_workspaceoverride",
+      "web_src_lib_so_workspace",
+      "web_src_lib_so_workspace_projectidfromrequest",
+      "web_src_lib_so_workspace_runwithproject",
+      "web_src_lib_so_workspace_runwithprojectasync"
     ],
     "3": [
       "agentcli_claudeenvelope",
@@ -345,6 +346,7 @@
       "normalize_subagent",
       "normalize_toolcall",
       "opencode_rec_emiteditdecision",
+      "opencode_rec_emitevent",
       "opencode_rec_emitsubagent",
       "pi_rec",
       "pi_rec_emiteditdecision",
@@ -416,60 +418,59 @@
       "projects_removeresult"
     ],
     "6": [
-      "codex_codexpayload",
-      "internal_coding_hook_codex_handle",
-      "internal_coding_hook_codex_handle_applypatchbody",
-      "internal_coding_hook_codex_handle_boolfield",
-      "internal_coding_hook_codex_handle_buildsession",
-      "internal_coding_hook_codex_handle_buildtoolcall",
-      "internal_coding_hook_codex_handle_canonicalstatus",
-      "internal_coding_hook_codex_handle_clearturnfragment",
-      "internal_coding_hook_codex_handle_commandfromtoolinput",
-      "internal_coding_hook_codex_handle_durationmsor",
-      "internal_coding_hook_codex_handle_effectivetoolname",
-      "internal_coding_hook_codex_handle_emitapplypatcheditdecisions",
-      "internal_coding_hook_codex_handle_emitturnonstop",
-      "internal_coding_hook_codex_handle_emptyjsonvalue",
-      "internal_coding_hook_codex_handle_errormessage",
-      "internal_coding_hook_codex_handle_formatint",
-      "internal_coding_hook_codex_handle_go_rawmessage",
-      "internal_coding_hook_codex_handle_go_session",
-      "internal_coding_hook_codex_handle_go_time",
-      "internal_coding_hook_codex_handle_go_toolcall",
-      "internal_coding_hook_codex_handle_guesslanguagecodex",
-      "internal_coding_hook_codex_handle_handle",
-      "internal_coding_hook_codex_handle_haserrorevidence",
-      "internal_coding_hook_codex_handle_isapplypatchtool",
-      "internal_coding_hook_codex_handle_jsonnumberstring",
-      "internal_coding_hook_codex_handle_loadturnfragment",
-      "internal_coding_hook_codex_handle_nonempty",
-      "internal_coding_hook_codex_handle_normalizestatus",
-      "internal_coding_hook_codex_handle_numberfield",
-      "internal_coding_hook_codex_handle_parseeventtime",
-      "internal_coding_hook_codex_handle_patchliteralfromcodemode",
-      "internal_coding_hook_codex_handle_pruneturnfragments",
-      "internal_coding_hook_codex_handle_shellcommand",
-      "internal_coding_hook_codex_handle_shellstdout",
-      "internal_coding_hook_codex_handle_shouldemitcodexsessionroot",
-      "internal_coding_hook_codex_handle_statusfromtoolresponse",
-      "internal_coding_hook_codex_handle_statusfromvalue",
-      "internal_coding_hook_codex_handle_stringfield",
-      "internal_coding_hook_codex_handle_test",
-      "internal_coding_hook_codex_handle_test_go_t",
-      "internal_coding_hook_codex_handle_test_testapplypatchbodysupportscodexhookcommand",
-      "internal_coding_hook_codex_handle_test_testapplypatchbodyunwrapscodemode",
-      "internal_coding_hook_codex_handle_test_testcodemodeapplypatchemitsfiledecisions",
-      "internal_coding_hook_codex_handle_test_testcodexendtoendoneturn",
-      "internal_coding_hook_codex_handle_test_testcodexmetadatamodedropsbodies",
-      "internal_coding_hook_codex_handle_test_testcodexreasoningobservedwithemptysummary",
-      "internal_coding_hook_codex_handle_test_testcodexreasoningsummaryfromrollout",
-      "internal_coding_hook_codex_handle_test_testcodexstopemitspublicreasoningsummary",
-      "internal_coding_hook_codex_handle_test_testcodexsubagentlinkfromsessionmeta",
-      "internal_coding_hook_codex_handle_test_testcodextokensnapshotfromrollout",
-      "internal_coding_hook_codex_handle_test_testeffectivetoolnameunwrapscodemode",
-      "internal_coding_hook_codex_handle_test_withisolatedcache",
-      "internal_coding_hook_codex_transcript_findrolloutforsession",
-      "state"
+      "web_src_app_api_map_sessions_key_agents_id_trace_route",
+      "web_src_app_api_map_sessions_key_agents_id_trace_route_dynamic",
+      "web_src_app_api_map_sessions_key_agents_id_trace_route_get",
+      "web_src_app_api_map_sessions_key_agents_id_trace_route_runtime",
+      "web_src_app_api_map_sessions_key_agents_route",
+      "web_src_app_api_map_sessions_key_agents_route_dynamic",
+      "web_src_app_api_map_sessions_key_agents_route_get",
+      "web_src_app_api_map_sessions_key_agents_route_runtime",
+      "web_src_lib_so_agents",
+      "web_src_lib_so_agents_agentlabel",
+      "web_src_lib_so_agents_buildagentgraph",
+      "web_src_lib_so_agents_buildagenttrace",
+      "web_src_lib_so_agents_eventcountfor",
+      "web_src_lib_so_agents_linkmethodfor",
+      "web_src_lib_so_agents_readmeta",
+      "web_src_lib_so_agents_sessionmetafile",
+      "web_src_lib_so_citymap_sessionkey",
+      "web_src_lib_so_nodeio_readtext",
+      "web_src_lib_so_sessions_humanizepromptpreview",
+      "web_src_lib_so_sessions_isnestedsubagentsession",
+      "web_src_lib_so_trace",
+      "web_src_lib_so_trace_action",
+      "web_src_lib_so_trace_assignfileids",
+      "web_src_lib_so_trace_buildtrace",
+      "web_src_lib_so_trace_classifymark",
+      "web_src_lib_so_trace_codexrolloutevents",
+      "web_src_lib_so_trace_decodedstringliteral",
+      "web_src_lib_so_trace_emptystats",
+      "web_src_lib_so_trace_footprintevents",
+      "web_src_lib_so_trace_listmapsessions",
+      "web_src_lib_so_trace_mapsessionmeta",
+      "web_src_lib_so_trace_markseq",
+      "web_src_lib_so_trace_mergeparsedspans",
+      "web_src_lib_so_trace_nestedcodexcommand",
+      "web_src_lib_so_trace_nestedcodexpatch",
+      "web_src_lib_so_trace_parsecodexrolloutlines",
+      "web_src_lib_so_trace_parsedspans",
+      "web_src_lib_so_trace_parselivetraceevents",
+      "web_src_lib_so_trace_parsespanlines",
+      "web_src_lib_so_trace_parsetranscriptevents",
+      "web_src_lib_so_trace_patchtargets",
+      "web_src_lib_so_trace_pathfromcommand",
+      "web_src_lib_so_trace_reltorepo",
+      "web_src_lib_so_trace_resolvemapsession",
+      "web_src_lib_so_trace_resolvenestedmapsession",
+      "web_src_lib_so_trace_span",
+      "web_src_lib_so_trace_subagentmarksfromchildren",
+      "web_src_lib_so_trace_test",
+      "web_src_lib_so_trace_toolcommand",
+      "web_src_lib_so_trace_touch",
+      "web_src_lib_so_trace_traceevent",
+      "web_src_lib_so_trace_tracemark",
+      "web_src_lib_so_trace_tracetarget"
     ],
     "7": [
       "entitlement_status",
@@ -582,92 +583,19 @@
       "web_src_lib_so_memory_writemarkdown"
     ],
     "9": [
-      "web_src_app_api_map_sessions_key_agents_id_trace_route",
-      "web_src_app_api_map_sessions_key_agents_id_trace_route_dynamic",
-      "web_src_app_api_map_sessions_key_agents_id_trace_route_get",
-      "web_src_app_api_map_sessions_key_agents_id_trace_route_runtime",
-      "web_src_app_api_map_sessions_key_agents_route",
-      "web_src_app_api_map_sessions_key_agents_route_dynamic",
-      "web_src_app_api_map_sessions_key_agents_route_get",
-      "web_src_app_api_map_sessions_key_agents_route_runtime",
-      "web_src_app_api_map_sessions_route",
-      "web_src_app_api_map_sessions_route_dynamic",
-      "web_src_app_api_map_sessions_route_get",
-      "web_src_app_api_map_sessions_route_runtime",
-      "web_src_lib_so_agents",
-      "web_src_lib_so_agents_agentlabel",
-      "web_src_lib_so_agents_buildagentgraph",
-      "web_src_lib_so_agents_buildagenttrace",
-      "web_src_lib_so_agents_eventcountfor",
-      "web_src_lib_so_agents_linkmethodfor",
-      "web_src_lib_so_agents_readmeta",
-      "web_src_lib_so_agents_sessionmetafile",
-      "web_src_lib_so_citymap_sessionkey",
-      "web_src_lib_so_nodeio_readtext",
-      "web_src_lib_so_sessions_humanizepromptpreview",
-      "web_src_lib_so_trace",
-      "web_src_lib_so_trace_action",
-      "web_src_lib_so_trace_assignfileids",
-      "web_src_lib_so_trace_buildtrace",
-      "web_src_lib_so_trace_classifymark",
-      "web_src_lib_so_trace_codexrolloutevents",
-      "web_src_lib_so_trace_decodedstringliteral",
-      "web_src_lib_so_trace_emptystats",
-      "web_src_lib_so_trace_footprintevents",
-      "web_src_lib_so_trace_listmapsessions",
-      "web_src_lib_so_trace_mapsessionmeta",
-      "web_src_lib_so_trace_markseq",
-      "web_src_lib_so_trace_mergeparsedspans",
-      "web_src_lib_so_trace_nestedcodexcommand",
-      "web_src_lib_so_trace_nestedcodexpatch",
-      "web_src_lib_so_trace_parsecodexrolloutlines",
-      "web_src_lib_so_trace_parsedspans",
-      "web_src_lib_so_trace_parselivetraceevents",
-      "web_src_lib_so_trace_parsespanlines",
-      "web_src_lib_so_trace_parsetranscriptevents",
-      "web_src_lib_so_trace_patchtargets",
-      "web_src_lib_so_trace_pathfromcommand",
-      "web_src_lib_so_trace_reltorepo",
-      "web_src_lib_so_trace_resolvemapsession",
-      "web_src_lib_so_trace_resolvenestedmapsession",
-      "web_src_lib_so_trace_span",
-      "web_src_lib_so_trace_subagentmarksfromchildren",
-      "web_src_lib_so_trace_test",
-      "web_src_lib_so_trace_toolcommand",
-      "web_src_lib_so_trace_touch",
-      "web_src_lib_so_trace_traceevent",
-      "web_src_lib_so_trace_tracemark",
-      "web_src_lib_so_trace_tracetarget"
-    ],
-    "10": [
-      "web_src_app_api_meta_route",
-      "web_src_app_api_meta_route_dynamic",
-      "web_src_app_api_meta_route_get",
-      "web_src_app_api_meta_route_runtime",
       "web_src_app_api_projects_route",
       "web_src_app_api_projects_route_delete",
       "web_src_app_api_projects_route_dynamic",
       "web_src_app_api_projects_route_get",
       "web_src_app_api_projects_route_runtime",
-      "web_src_app_api_recommendations_id_route",
-      "web_src_app_api_recommendations_id_route_dynamic",
-      "web_src_app_api_recommendations_id_route_get",
-      "web_src_app_api_recommendations_id_route_runtime",
       "web_src_app_api_recommendations_route",
       "web_src_app_api_recommendations_route_dynamic",
       "web_src_app_api_recommendations_route_get",
       "web_src_app_api_recommendations_route_runtime",
-      "web_src_lib_so_git",
-      "web_src_lib_so_git_currentrepometa",
-      "web_src_lib_so_git_gitremoteurl",
-      "web_src_lib_so_git_reposlug",
-      "web_src_lib_so_git_slugfromremoteurl",
       "web_src_lib_so_misc",
       "web_src_lib_so_misc_compactpendingrecommendations",
-      "web_src_lib_so_misc_enrich",
       "web_src_lib_so_misc_ensurefingerprint",
       "web_src_lib_so_misc_fingerprintkey",
-      "web_src_lib_so_misc_getrecommendation",
       "web_src_lib_so_misc_historypath",
       "web_src_lib_so_misc_listallrecommendations",
       "web_src_lib_so_misc_listprojects",
@@ -687,25 +615,21 @@
       "web_src_lib_so_misc_safepurgeso",
       "web_src_lib_so_misc_writeprojectsfile",
       "web_src_lib_so_root_processreporoot",
-      "web_src_lib_so_root_reponame",
-      "web_src_lib_version",
-      "web_src_lib_version_displayversion",
-      "web_src_lib_version_test",
-      "web_src_lib_version_version"
+      "web_src_lib_so_sessions_collectallsessions",
+      "web_src_lib_so_workspace_projectsforfilter",
+      "web_src_lib_so_workspace_resolveworkspace"
     ],
-    "11": [
+    "10": [
       "web_src_app_api_sessions_route",
       "web_src_app_api_sessions_route_dynamic",
       "web_src_app_api_sessions_route_get",
       "web_src_app_api_sessions_route_runtime",
-      "web_src_lib_so_nodeio_fileexists",
       "web_src_lib_so_sessions",
       "web_src_lib_so_sessions_applysessionquery",
       "web_src_lib_so_sessions_chat_attr_keys",
       "web_src_lib_so_sessions_clearagentlink",
       "web_src_lib_so_sessions_clearfalsenesting",
       "web_src_lib_so_sessions_codexrolloutupdatedat",
-      "web_src_lib_so_sessions_collectallsessions",
       "web_src_lib_so_sessions_countcheckpointdirs",
       "web_src_lib_so_sessions_countturnsfromspans",
       "web_src_lib_so_sessions_discovercursorparent",
@@ -716,7 +640,6 @@
       "web_src_lib_so_sessions_getsessiondetail",
       "web_src_lib_so_sessions_isemptysession",
       "web_src_lib_so_sessions_isnestedsubagent",
-      "web_src_lib_so_sessions_isnestedsubagentsession",
       "web_src_lib_so_sessions_listcheckpoints",
       "web_src_lib_so_sessions_listitem",
       "web_src_lib_so_sessions_listsessions",
@@ -740,14 +663,14 @@
       "web_src_lib_so_sessions_repairorphansubagentflag",
       "web_src_lib_so_sessions_repairsubagentmeta",
       "web_src_lib_so_sessions_restorecheckpoint",
+      "web_src_lib_so_sessions_sessiondir",
       "web_src_lib_so_sessions_sessionslistresult",
       "web_src_lib_so_sessions_spansessionids",
       "web_src_lib_so_sessions_tool_attr_keys",
       "web_src_lib_so_sessions_tracespan",
-      "web_src_lib_so_sessions_truncatematch",
-      "web_src_lib_so_workspace_projectsforfilter"
+      "web_src_lib_so_sessions_truncatematch"
     ],
-    "12": [
+    "11": [
       "web_src_components_shell_theme_provider_usethemeoptional",
       "web_src_map_scene_cityscene",
       "web_src_map_scene_cityscene_applycityscenetheme",
@@ -801,42 +724,7 @@
       "web_src_map_scene_treescene_treescene",
       "web_src_map_types_touchword"
     ],
-    "13": [
-      "web_src_app_api_graph_positions_route",
-      "web_src_app_api_graph_positions_route_body",
-      "web_src_app_api_graph_positions_route_dynamic",
-      "web_src_app_api_graph_positions_route_post",
-      "web_src_app_api_graph_positions_route_runtime",
-      "web_src_app_api_ui_prefs_route",
-      "web_src_app_api_ui_prefs_route_dynamic",
-      "web_src_app_api_ui_prefs_route_get",
-      "web_src_app_api_ui_prefs_route_post",
-      "web_src_app_api_ui_prefs_route_put",
-      "web_src_app_api_ui_prefs_route_runtime",
-      "web_src_lib_so_graph_positions",
-      "web_src_lib_so_graph_positions_applycachedpositions",
-      "web_src_lib_so_graph_positions_cachepath",
-      "web_src_lib_so_graph_positions_graphhtmlstamp",
-      "web_src_lib_so_graph_positions_positionscache",
-      "web_src_lib_so_graph_positions_readcachedpositions",
-      "web_src_lib_so_graph_positions_test",
-      "web_src_lib_so_graph_positions_test_makeworkspace",
-      "web_src_lib_so_graph_positions_writecachedpositions",
-      "web_src_lib_so_nodeio",
-      "web_src_lib_so_nodeio_pathexists",
-      "web_src_lib_so_nodeio_readjsonfile",
-      "web_src_lib_so_nodeio_writetext",
-      "web_src_lib_so_prefs",
-      "web_src_lib_so_prefs_getallprefs",
-      "web_src_lib_so_prefs_getpref",
-      "web_src_lib_so_prefs_load",
-      "web_src_lib_so_prefs_prefs",
-      "web_src_lib_so_prefs_prefsfile",
-      "web_src_lib_so_prefs_save",
-      "web_src_lib_so_prefs_setpref",
-      "web_src_lib_so_root_runwithworkspace"
-    ],
-    "14": [
+    "12": [
       "web_src_app_app_evaluations_items_id_page",
       "web_src_app_app_evaluations_items_id_page_evaluationitempage",
       "web_src_app_app_guardrails_items_id_page",
@@ -886,7 +774,7 @@
       "web_src_lib_so_harness_yaml_updateguardrailrule",
       "web_src_lib_so_harness_yaml_yamlquote"
     ],
-    "15": [
+    "13": [
       "web_src_app_app_evaluations_page_evaluationsinner",
       "web_src_app_app_guardrails_page",
       "web_src_app_app_guardrails_page_guard_dash_cols",
@@ -934,7 +822,51 @@
       "web_src_lib_so_misc_recommendationsdashboard",
       "web_src_lib_utils_cn"
     ],
-    "16": [
+    "14": [
+      "codex_codexpayload",
+      "internal_coding_hook_codex_handle",
+      "internal_coding_hook_codex_handle_applypatchbody",
+      "internal_coding_hook_codex_handle_boolfield",
+      "internal_coding_hook_codex_handle_buildsession",
+      "internal_coding_hook_codex_handle_buildtoolcall",
+      "internal_coding_hook_codex_handle_canonicalstatus",
+      "internal_coding_hook_codex_handle_clearturnfragment",
+      "internal_coding_hook_codex_handle_commandfromtoolinput",
+      "internal_coding_hook_codex_handle_durationmsor",
+      "internal_coding_hook_codex_handle_effectivetoolname",
+      "internal_coding_hook_codex_handle_emitapplypatcheditdecisions",
+      "internal_coding_hook_codex_handle_emitturnonstop",
+      "internal_coding_hook_codex_handle_emptyjsonvalue",
+      "internal_coding_hook_codex_handle_errormessage",
+      "internal_coding_hook_codex_handle_formatint",
+      "internal_coding_hook_codex_handle_go_rawmessage",
+      "internal_coding_hook_codex_handle_go_session",
+      "internal_coding_hook_codex_handle_go_time",
+      "internal_coding_hook_codex_handle_go_toolcall",
+      "internal_coding_hook_codex_handle_guesslanguagecodex",
+      "internal_coding_hook_codex_handle_handle",
+      "internal_coding_hook_codex_handle_haserrorevidence",
+      "internal_coding_hook_codex_handle_isapplypatchtool",
+      "internal_coding_hook_codex_handle_jsonnumberstring",
+      "internal_coding_hook_codex_handle_loadturnfragment",
+      "internal_coding_hook_codex_handle_nonempty",
+      "internal_coding_hook_codex_handle_normalizestatus",
+      "internal_coding_hook_codex_handle_numberfield",
+      "internal_coding_hook_codex_handle_parseeventtime",
+      "internal_coding_hook_codex_handle_patchliteralfromcodemode",
+      "internal_coding_hook_codex_handle_primesubagentlink",
+      "internal_coding_hook_codex_handle_pruneturnfragments",
+      "internal_coding_hook_codex_handle_shellcommand",
+      "internal_coding_hook_codex_handle_shellstdout",
+      "internal_coding_hook_codex_handle_shouldemitcodexsessionroot",
+      "internal_coding_hook_codex_handle_stampturnfragment",
+      "internal_coding_hook_codex_handle_statusfromtoolresponse",
+      "internal_coding_hook_codex_handle_statusfromvalue",
+      "internal_coding_hook_codex_handle_stringfield",
+      "internal_coding_hook_codex_transcript_findrolloutforsession",
+      "state"
+    ],
+    "15": [
       "cursor_cursorattachment",
       "cursor_cursoredit",
       "cursor_cursorpayload",
@@ -977,7 +909,7 @@
       "internal_coding_hook_cursor_handle_totallines",
       "internal_coding_hook_cursor_handle_truncatestr"
     ],
-    "17": [
+    "16": [
       "harness_paths",
       "harness_paths_exists",
       "harness_paths_sessiondir",
@@ -1020,7 +952,7 @@
       "internal_harvest_harvest_test_testpendingharvestflush",
       "internal_harvest_harvest_truncaterunes"
     ],
-    "18": [
+    "17": [
       "indexentry",
       "internal_session_agentlinks_agentlinks_loadmap",
       "internal_session_empty",
@@ -1063,7 +995,7 @@
       "session_store_upsertactivefromspans",
       "session_store_upsertindex"
     ],
-    "19": [
+    "18": [
       "web_src_map_types",
       "web_src_map_types_agentkind",
       "web_src_map_types_agentlinkmethod",
@@ -1106,7 +1038,7 @@
       "web_src_map_ui_reportpanel_severityclass",
       "web_src_map_ui_reportpanel_verdictword"
     ],
-    "20": [
+    "19": [
       "web_src_components_session_timeline",
       "web_src_components_session_timeline_basename",
       "web_src_components_session_timeline_buildtimeline",
@@ -1148,7 +1080,7 @@
       "web_src_components_session_timeline_vendoravatar",
       "web_src_components_session_timeline_vendorfrommeta"
     ],
-    "21": [
+    "20": [
       "cmd_so_cmds_extra_cmdcheckpoint",
       "cmd_so_cmds_extra_cmdimport",
       "cmd_so_cmds_extra_cmdprojects",
@@ -1188,35 +1120,7 @@
       "internal_harness_harness_resolve",
       "internal_session_backend_newlocalmulti"
     ],
-    "22": [
-      "web_src_app_api_map_sessions_key_report_route",
-      "web_src_app_api_map_sessions_key_report_route_dynamic",
-      "web_src_app_api_map_sessions_key_report_route_get",
-      "web_src_app_api_map_sessions_key_report_route_runtime",
-      "web_src_lib_so_judge",
-      "web_src_lib_so_judge_availablejudgeclis",
-      "web_src_lib_so_judge_digesttrace",
-      "web_src_lib_so_judge_errorpath",
-      "web_src_lib_so_judge_extractjson",
-      "web_src_lib_so_judge_getreportstatus",
-      "web_src_lib_so_judge_heuristicreport",
-      "web_src_lib_so_judge_judge_clis",
-      "web_src_lib_so_judge_judgeprompt",
-      "web_src_lib_so_judge_normalizereport",
-      "web_src_lib_so_judge_readjson",
-      "web_src_lib_so_judge_reportpath",
-      "web_src_lib_so_judge_runclaude",
-      "web_src_lib_so_judge_runcodex",
-      "web_src_lib_so_judge_runjudge",
-      "web_src_lib_so_judge_running",
-      "web_src_lib_so_judge_runningjob",
-      "web_src_lib_so_judge_startanalyze",
-      "web_src_lib_so_judge_trace",
-      "web_src_lib_so_judge_which",
-      "web_src_lib_so_root_sopath",
-      "web_src_lib_so_trace_trace"
-    ],
-    "23": [
+    "21": [
       "agentlinks_entry",
       "agentlinks_filedoc",
       "agentlinks_pendingdoc",
@@ -1253,7 +1157,7 @@
       "internal_session_agentlinks_agentlinks_test_testunregister",
       "internal_session_agentlinks_agentlinks_unregister"
     ],
-    "24": [
+    "22": [
       "adapters_claudeexport",
       "adapters_claudeexport_detect",
       "adapters_claudeexport_harness",
@@ -1289,7 +1193,7 @@
       "port_exportresult",
       "port_writeoptions"
     ],
-    "25": [
+    "23": [
       "anyvalue",
       "internal_otlp_receiver",
       "internal_otlp_receiver_anyvaluestring",
@@ -1324,7 +1228,7 @@
       "responsewriter",
       "server"
     ],
-    "26": [
+    "24": [
       "internal_session_store_humanizepromptpreview",
       "internal_session_store_previewfrommessages",
       "internal_session_title",
@@ -1359,7 +1263,41 @@
       "internal_session_title_vendortitlelookups",
       "session_titlelookup"
     ],
-    "27": [
+    "25": [
+      "web_src_app_api_ui_prefs_route",
+      "web_src_app_api_ui_prefs_route_dynamic",
+      "web_src_app_api_ui_prefs_route_get",
+      "web_src_app_api_ui_prefs_route_post",
+      "web_src_app_api_ui_prefs_route_put",
+      "web_src_app_api_ui_prefs_route_runtime",
+      "web_src_lib_so_files",
+      "web_src_lib_so_files_asserteditable",
+      "web_src_lib_so_files_createharnessfile",
+      "web_src_lib_so_files_defaultcontent",
+      "web_src_lib_so_files_deleteharnessfile",
+      "web_src_lib_so_files_editable_roots",
+      "web_src_lib_so_files_listorread",
+      "web_src_lib_so_files_safejoin",
+      "web_src_lib_so_files_sanitizefilename",
+      "web_src_lib_so_files_writeharnessfile",
+      "web_src_lib_so_nodeio",
+      "web_src_lib_so_nodeio_abspath",
+      "web_src_lib_so_nodeio_fileexists",
+      "web_src_lib_so_nodeio_pathexists",
+      "web_src_lib_so_nodeio_readjsonfile",
+      "web_src_lib_so_nodeio_writetext",
+      "web_src_lib_so_prefs",
+      "web_src_lib_so_prefs_getallprefs",
+      "web_src_lib_so_prefs_getpref",
+      "web_src_lib_so_prefs_load",
+      "web_src_lib_so_prefs_prefs",
+      "web_src_lib_so_prefs_prefsfile",
+      "web_src_lib_so_prefs_save",
+      "web_src_lib_so_prefs_setpref",
+      "web_src_lib_so_root_defaultreporoot",
+      "web_src_lib_so_root_soroot"
+    ],
+    "26": [
       "web_src_app_app_guardrails_page_guardrailsdashboardview",
       "web_src_components_file_content_view",
       "web_src_components_file_content_view_buildevalrows",
@@ -1394,7 +1332,7 @@
       "web_src_lib_so_harness_yaml_guardrailsdoc",
       "web_src_lib_so_harness_yaml_harnessitemhref"
     ],
-    "28": [
+    "27": [
       "codingotlp_emitter",
       "codingotlp_emitter_bumpllmcounter",
       "codingotlp_emitter_bumpsubagentcounter",
@@ -1427,11 +1365,7 @@
       "internal_codingotlp_host_detect_test_testdetecthostfrombinary",
       "sdk_go_sdk_isinitialized"
     ],
-    "29": [
-      "web_src_app_api_map_sessions_key_analyze_route",
-      "web_src_app_api_map_sessions_key_analyze_route_dynamic",
-      "web_src_app_api_map_sessions_key_analyze_route_post",
-      "web_src_app_api_map_sessions_key_analyze_route_runtime",
+    "28": [
       "web_src_app_api_map_sessions_key_snapshot_route",
       "web_src_app_api_map_sessions_key_snapshot_route_dynamic",
       "web_src_app_api_map_sessions_key_snapshot_route_get",
@@ -1460,7 +1394,7 @@
       "web_src_lib_so_citymap_walkfiles",
       "web_src_lib_so_citymap_worstaspect"
     ],
-    "30": [
+    "29": [
       "web_src_app_app_layout",
       "web_src_app_app_layout_applayout",
       "web_src_components_shell_breadcrumb_context",
@@ -1493,7 +1427,7 @@
       "web_src_components_ui_tooltip",
       "web_src_components_ui_tooltip_tooltipcontent"
     ],
-    "31": [
+    "30": [
       "agentconfig_defaults",
       "agentconfig_flags",
       "agentconfig_resolved",
@@ -1525,7 +1459,7 @@
       "internal_redact_redact_test_teststringtier1leavesnonsecretsalone",
       "internal_redact_redact_test_teststringtier1redactsknownsecrets"
     ],
-    "32": [
+    "31": [
       "codex_adapter",
       "codex_adapter_handle",
       "codex_adapter_vendor",
@@ -1557,7 +1491,7 @@
       "internal_coding_hook_generic_generic_new",
       "internal_coding_hook_generic_generic_str"
     ],
-    "33": [
+    "32": [
       "detect_patchlinecounts",
       "internal_coding_detect_detect",
       "internal_coding_detect_detect_countinlinediff",
@@ -1589,7 +1523,7 @@
       "internal_coding_sessionstate_sessionstate_bumpprcount",
       "regexp"
     ],
-    "34": [
+    "33": [
       "web_src_map_api",
       "web_src_map_api_apiurl",
       "web_src_map_api_describeerror",
@@ -1620,6 +1554,37 @@
       "web_src_map_ui_dock_panelsection",
       "web_src_map_ui_hud_hudsessionextras",
       "web_src_map_ui_reportpanel_reportpanelprops"
+    ],
+    "34": [
+      "checkpoint_meta",
+      "checkpoint_store",
+      "checkpoint_store_create",
+      "checkpoint_store_createfromfootprint",
+      "checkpoint_store_dir",
+      "checkpoint_store_get",
+      "checkpoint_store_list",
+      "checkpoint_store_nextid",
+      "checkpoint_store_restore",
+      "internal_checkpoint_checkpoint",
+      "internal_checkpoint_checkpoint_containsdotdot",
+      "internal_checkpoint_checkpoint_go_time",
+      "internal_checkpoint_checkpoint_newstore",
+      "internal_checkpoint_checkpoint_splitslash",
+      "internal_checkpoint_checkpoint_stringshasdotdot",
+      "internal_checkpoint_checkpoint_test",
+      "internal_checkpoint_checkpoint_test_go_t",
+      "internal_checkpoint_checkpoint_test_testcreaterestore",
+      "internal_port_ledger_newledger",
+      "internal_port_port_test",
+      "internal_port_port_test_go_t",
+      "internal_port_port_test_testclaudeparserecoversworkingstatefromtooluse",
+      "internal_port_port_test_testclauderoundtripviasohub",
+      "internal_port_port_test_testcodexparseexport",
+      "internal_port_port_test_testcodexparserecoversworkingstate",
+      "internal_port_port_test_testcodexparserepeatedcommandkeepslatestexitcode",
+      "internal_port_port_test_testledgeridempotency",
+      "internal_port_port_test_testremapcwd",
+      "internal_port_port_test_testsohubroundtrippreservesworkingstate"
     ],
     "35": [
       "claudecode_adapter_handle",
@@ -1777,37 +1742,6 @@
       "web_src_types_sidebar_sidebarsection"
     ],
     "40": [
-      "checkpoint_meta",
-      "checkpoint_store",
-      "checkpoint_store_create",
-      "checkpoint_store_createfromfootprint",
-      "checkpoint_store_dir",
-      "checkpoint_store_get",
-      "checkpoint_store_list",
-      "checkpoint_store_nextid",
-      "checkpoint_store_restore",
-      "internal_checkpoint_checkpoint",
-      "internal_checkpoint_checkpoint_containsdotdot",
-      "internal_checkpoint_checkpoint_go_time",
-      "internal_checkpoint_checkpoint_newstore",
-      "internal_checkpoint_checkpoint_splitslash",
-      "internal_checkpoint_checkpoint_stringshasdotdot",
-      "internal_checkpoint_checkpoint_test",
-      "internal_checkpoint_checkpoint_test_go_t",
-      "internal_checkpoint_checkpoint_test_testcreaterestore",
-      "internal_port_ledger_newledger",
-      "internal_port_port_test",
-      "internal_port_port_test_go_t",
-      "internal_port_port_test_testclaudeparserecoversworkingstatefromtooluse",
-      "internal_port_port_test_testclauderoundtripviasohub",
-      "internal_port_port_test_testcodexparseexport",
-      "internal_port_port_test_testcodexparserecoversworkingstate",
-      "internal_port_port_test_testcodexparserepeatedcommandkeepslatestexitcode",
-      "internal_port_port_test_testledgeridempotency",
-      "internal_port_port_test_testremapcwd",
-      "internal_port_port_test_testsohubroundtrippreservesworkingstate"
-    ],
-    "41": [
       "codingotlp_scrubfn",
       "internal_codingotlp_attrs",
       "internal_codingotlp_attrs_bodyallowed",
@@ -1837,7 +1771,7 @@
       "semconv_attributebuilder_float64",
       "semconv_attributebuilder_stringslice"
     ],
-    "42": [
+    "41": [
       "discover_profile",
       "internal_llm_client_extractjson",
       "internal_seed_seed",
@@ -1867,7 +1801,7 @@
       "internal_seed_upgrade_writeupgradebrief",
       "seed_seedoptions"
     ],
-    "43": [
+    "42": [
       "guardrails_decision",
       "guardrails_engine",
       "guardrails_engine_approval",
@@ -1897,7 +1831,7 @@
       "internal_guardrails_guardrails_wildmatch",
       "seed_llmharnessout"
     ],
-    "44": [
+    "43": [
       "graph_result",
       "graph_stubgraph",
       "internal_graph_graph",
@@ -1926,7 +1860,7 @@
       "internal_graph_graph_truncateout",
       "internal_graph_graph_truncatesnippet"
     ],
-    "45": [
+    "44": [
       "web_src_app_app_graph_page",
       "web_src_app_app_graph_page_graphpage",
       "web_src_app_app_sessions_id_page",
@@ -1955,7 +1889,7 @@
       "web_src_components_shell_project_context_useproject",
       "web_src_components_shell_theme_provider_usetheme"
     ],
-    "46": [
+    "45": [
       "config_config",
       "config_config_allowsautoapplytier",
       "config_config_autoapplytiersresolved",
@@ -1983,7 +1917,7 @@
       "internal_config_config_load",
       "internal_config_config_save"
     ],
-    "47": [
+    "46": [
       "internal_otlpremote_remote_go_listitem",
       "internal_session_attribution",
       "internal_session_attribution_computeattribution",
@@ -2010,6 +1944,37 @@
       "session_localmulti_storefor",
       "session_projectbinding",
       "session_prref"
+    ],
+    "47": [
+      "web_src_app_api_map_sessions_key_analyze_route",
+      "web_src_app_api_map_sessions_key_analyze_route_dynamic",
+      "web_src_app_api_map_sessions_key_analyze_route_post",
+      "web_src_app_api_map_sessions_key_analyze_route_runtime",
+      "web_src_app_api_map_sessions_key_report_route",
+      "web_src_app_api_map_sessions_key_report_route_dynamic",
+      "web_src_app_api_map_sessions_key_report_route_get",
+      "web_src_app_api_map_sessions_key_report_route_runtime",
+      "web_src_lib_so_judge",
+      "web_src_lib_so_judge_availablejudgeclis",
+      "web_src_lib_so_judge_digesttrace",
+      "web_src_lib_so_judge_errorpath",
+      "web_src_lib_so_judge_extractjson",
+      "web_src_lib_so_judge_getreportstatus",
+      "web_src_lib_so_judge_heuristicreport",
+      "web_src_lib_so_judge_judge_clis",
+      "web_src_lib_so_judge_judgeprompt",
+      "web_src_lib_so_judge_normalizereport",
+      "web_src_lib_so_judge_readjson",
+      "web_src_lib_so_judge_reportpath",
+      "web_src_lib_so_judge_runclaude",
+      "web_src_lib_so_judge_runcodex",
+      "web_src_lib_so_judge_runjudge",
+      "web_src_lib_so_judge_running",
+      "web_src_lib_so_judge_runningjob",
+      "web_src_lib_so_judge_startanalyze",
+      "web_src_lib_so_judge_trace",
+      "web_src_lib_so_judge_which",
+      "web_src_lib_so_trace_trace"
     ],
     "48": [
       "web_src_app_app_evaluations_page",
@@ -2148,23 +2113,20 @@
       "internal_axi_axi_usage"
     ],
     "53": [
+      "internal_agentimport_import",
+      "internal_agentimport_import_claudecode",
+      "internal_agentimport_import_codex",
+      "internal_agentimport_import_porttohub",
       "internal_port_adapter",
       "internal_port_adapter_newregistry",
-      "internal_port_memory_refresh",
-      "internal_port_memory_refresh_refreshmemoryafterport",
-      "internal_port_orchestrator",
-      "internal_port_orchestrator_go_port_orchestrator",
-      "internal_port_orchestrator_go_sessionref",
+      "internal_port_adapters_register",
+      "internal_port_adapters_register_registerall",
+      "internal_port_ledger_defaultledgerpath",
       "internal_port_resume_go_time",
-      "port_event",
       "port_exportadapter",
       "port_harnessid",
       "port_importadapter",
-      "port_orchestrator_detect",
-      "port_orchestrator_port",
       "port_pendingresume",
-      "port_portoptions",
-      "port_portresult",
       "port_registry",
       "port_registry_export",
       "port_registry_import",
@@ -2325,8 +2287,8 @@
       "eslint",
       "eslint_config_next",
       "postcss",
-      "tailwindcss",
       "types_node",
+      "types_react",
       "types_react_dom",
       "types_three",
       "typescript",
@@ -2336,8 +2298,8 @@
       "web_package_devdependencies_eslint",
       "web_package_devdependencies_eslint_config_next",
       "web_package_devdependencies_postcss",
-      "web_package_devdependencies_tailwindcss",
       "web_package_devdependencies_types_node",
+      "web_package_devdependencies_types_react",
       "web_package_devdependencies_types_react_dom",
       "web_package_devdependencies_types_three",
       "web_package_devdependencies_typescript",
@@ -2390,27 +2352,45 @@
       "internal_coding_hook_hook_test_testisrealclaudecodeinvocation"
     ],
     "63": [
-      "internal_coding_hook_codex_handle_markcodexsessionrootemitted",
-      "internal_coding_hook_codex_handle_primesubagentlink",
-      "internal_coding_hook_codex_handle_stampturnfragment",
-      "internal_coding_hook_cursor_handle_accumulatestoptokens",
-      "internal_coding_sessionstate_sessionstate",
-      "internal_coding_sessionstate_sessionstate_addpendingedit",
-      "internal_coding_sessionstate_sessionstate_bumpcodecounters",
-      "internal_coding_sessionstate_sessionstate_drainpendingedits",
-      "internal_coding_sessionstate_sessionstate_gc",
-      "internal_coding_sessionstate_sessionstate_go_duration",
-      "internal_coding_sessionstate_sessionstate_go_time",
-      "internal_coding_sessionstate_sessionstate_load",
-      "internal_coding_sessionstate_sessionstate_maybegc",
-      "internal_coding_sessionstate_sessionstate_path",
-      "internal_coding_sessionstate_sessionstate_save",
-      "internal_coding_sessionstate_sessionstate_takependingedit",
-      "sessionstate_codexsubagentlink",
-      "sessionstate_codextoolrecord",
-      "sessionstate_codexturnfragment",
-      "sessionstate_pendingedit",
-      "sessionstate_state"
+      "web_src_app_api_config_route",
+      "web_src_app_api_config_route_dynamic",
+      "web_src_app_api_config_route_formatyamlvalue",
+      "web_src_app_api_config_route_get",
+      "web_src_app_api_config_route_istoplevelkey",
+      "web_src_app_api_config_route_patchbody",
+      "web_src_app_api_config_route_put",
+      "web_src_app_api_config_route_runtime",
+      "web_src_app_api_config_route_setyamlpath",
+      "web_src_app_api_graph_html_route",
+      "web_src_app_api_graph_html_route_dynamic",
+      "web_src_app_api_graph_html_route_get",
+      "web_src_app_api_graph_html_route_head",
+      "web_src_app_api_graph_html_route_loadgraphhtml",
+      "web_src_app_api_graph_html_route_runtime",
+      "web_src_app_api_graph_html_route_themefromrequest",
+      "web_src_lib_so_graph_html",
+      "web_src_lib_so_graph_html_graphhtmlstatus",
+      "web_src_lib_so_graph_html_inspectgraphhtml",
+      "web_src_lib_so_graph_positions",
+      "web_src_lib_so_graph_positions_applycachedpositions",
+      "web_src_lib_so_graph_positions_cachepath",
+      "web_src_lib_so_graph_positions_graphhtmlstamp",
+      "web_src_lib_so_graph_positions_position_report_script",
+      "web_src_lib_so_graph_positions_positionscache",
+      "web_src_lib_so_graph_positions_readcachedpositions",
+      "web_src_lib_so_graph_positions_test",
+      "web_src_lib_so_graph_positions_test_makeworkspace",
+      "web_src_lib_so_graph_positions_writecachedpositions",
+      "web_src_lib_so_graphify_theme",
+      "web_src_lib_so_graphify_theme_applydarktheme",
+      "web_src_lib_so_graphify_theme_applygraphperformancetuning",
+      "web_src_lib_so_graphify_theme_applylighttheme",
+      "web_src_lib_so_graphify_theme_test",
+      "web_src_lib_so_misc_loadconfig",
+      "web_src_lib_so_root",
+      "web_src_lib_so_root_runwithworkspace",
+      "web_src_lib_so_root_sopath",
+      "web_src_lib_so_root_workspacestorage"
     ],
     "64": [
       "web_src_map_playback_reducer",
@@ -2586,24 +2566,25 @@
       "internal_viz_citymap_go_span"
     ],
     "72": [
-      "internal_agentimport_import",
-      "internal_agentimport_import_claudecode",
-      "internal_agentimport_import_codex",
-      "internal_agentimport_import_porttohub",
-      "internal_port_adapters_register",
-      "internal_port_adapters_register_registerall",
-      "internal_port_ledger",
-      "internal_port_ledger_defaultledgerpath",
-      "internal_port_ledger_go_mutex",
-      "internal_port_ledger_go_time",
-      "port_ledger",
-      "port_ledger_key",
-      "port_ledger_load",
-      "port_ledger_lookup",
-      "port_ledger_save",
-      "port_ledger_upsert",
-      "port_ledgerentry",
-      "port_ledgerfile"
+      "internal_coding_hook_codex_handle_markcodexsessionrootemitted",
+      "internal_coding_hook_cursor_handle_accumulatestoptokens",
+      "internal_coding_sessionstate_sessionstate",
+      "internal_coding_sessionstate_sessionstate_addpendingedit",
+      "internal_coding_sessionstate_sessionstate_bumpcodecounters",
+      "internal_coding_sessionstate_sessionstate_drainpendingedits",
+      "internal_coding_sessionstate_sessionstate_gc",
+      "internal_coding_sessionstate_sessionstate_go_duration",
+      "internal_coding_sessionstate_sessionstate_go_time",
+      "internal_coding_sessionstate_sessionstate_load",
+      "internal_coding_sessionstate_sessionstate_maybegc",
+      "internal_coding_sessionstate_sessionstate_path",
+      "internal_coding_sessionstate_sessionstate_save",
+      "internal_coding_sessionstate_sessionstate_takependingedit",
+      "sessionstate_codexsubagentlink",
+      "sessionstate_codextoolrecord",
+      "sessionstate_codexturnfragment",
+      "sessionstate_pendingedit",
+      "sessionstate_state"
     ],
     "73": [
       "config_resolvedllm",
@@ -2646,6 +2627,29 @@
       "internal_coding_uninstall_vendor_config_scrub_test_teststripcodexsuperopensections"
     ],
     "75": [
+      "internal_port_ledger",
+      "internal_port_ledger_go_mutex",
+      "internal_port_ledger_go_time",
+      "internal_port_memory_refresh",
+      "internal_port_memory_refresh_refreshmemoryafterport",
+      "internal_port_orchestrator",
+      "internal_port_orchestrator_go_port_orchestrator",
+      "internal_port_orchestrator_go_sessionref",
+      "port_event",
+      "port_ledger",
+      "port_ledger_key",
+      "port_ledger_load",
+      "port_ledger_lookup",
+      "port_ledger_save",
+      "port_ledger_upsert",
+      "port_ledgerentry",
+      "port_ledgerfile",
+      "port_orchestrator_detect",
+      "port_orchestrator_port",
+      "port_portoptions",
+      "port_portresult"
+    ],
+    "76": [
       "cmd_so_cmds_extra",
       "cmd_so_cmds_extra_cmdblame",
       "cmd_so_cmds_extra_cmdlogin",
@@ -2664,7 +2668,7 @@
       "cmd_so_main_truncate",
       "orchestrator"
     ],
-    "76": [
+    "77": [
       "internal_coding_install_install_generic",
       "internal_coding_install_install_generic_installgenericvendor",
       "internal_coding_install_install_patch",
@@ -2683,7 +2687,7 @@
       "internal_coding_install_install_vendors_vendordestroot",
       "internal_userpaths_userpaths_issobinary"
     ],
-    "77": [
+    "78": [
       "internal_coding_pricing_pricing",
       "internal_coding_pricing_pricing_lookup",
       "internal_coding_pricing_pricing_test",
@@ -2702,7 +2706,7 @@
       "pricing_rate",
       "pricing_rate_cost"
     ],
-    "78": [
+    "79": [
       "harness_paths_ensuredirs",
       "initcmd_options",
       "initcmd_report",
@@ -2720,7 +2724,7 @@
       "internal_initcmd_init_run",
       "seed_upgraderesult"
     ],
-    "79": [
+    "80": [
       "internal_coding_identity_base64",
       "internal_coding_identity_base64_base64urldecode",
       "internal_coding_identity_identity",
@@ -2738,7 +2742,7 @@
       "internal_coding_identity_identity_test_testresolveforvendor_missingfilereturnsempty",
       "internal_coding_identity_identity_test_testresolveforvendor_unknownvendorreturnsempty"
     ],
-    "80": [
+    "81": [
       "internal_coding_hook_opencode_handle",
       "internal_coding_hook_opencode_handle_accumulateusage",
       "internal_coding_hook_opencode_handle_applyaccumulated",
@@ -2755,7 +2759,7 @@
       "opencode_adapter_vendor",
       "opencode_payload"
     ],
-    "81": [
+    "82": [
       "internal_coding_install_install_patch_shellquote",
       "internal_githooks_hooks",
       "internal_githooks_hooks_hooksdir",
@@ -2763,7 +2767,6 @@
       "internal_githooks_hooks_writehook",
       "internal_userpaths_userpaths",
       "internal_userpaths_userpaths_codexmarketplacedir",
-      "internal_userpaths_userpaths_configdir",
       "internal_userpaths_userpaths_datadir",
       "internal_userpaths_userpaths_legacydatadirso",
       "internal_userpaths_userpaths_quoteforhook",
@@ -2773,7 +2776,7 @@
       "internal_userpaths_userpaths_test_testconfiganddatadirs",
       "internal_userpaths_userpaths_test_testquoteandshellpath"
     ],
-    "82": [
+    "83": [
       "cmd_so_watcher",
       "cmd_so_watcher_maxsharedmtime",
       "cmd_so_watcher_startrefreshwatcher",
@@ -2789,7 +2792,7 @@
       "sync_refreshmarker",
       "sync_refreshoptions"
     ],
-    "83": [
+    "84": [
       "decision",
       "internal_coding_hook_harness_hooks",
       "internal_coding_hook_harness_hooks_extracttooltargets",
@@ -2805,7 +2808,23 @@
       "internal_coding_hook_harness_hooks_writedeny",
       "internal_coding_hook_harness_hooks_writehookjson"
     ],
-    "84": [
+    "85": [
+      "internal_coding_hook_codex_handle_test",
+      "internal_coding_hook_codex_handle_test_go_t",
+      "internal_coding_hook_codex_handle_test_testapplypatchbodysupportscodexhookcommand",
+      "internal_coding_hook_codex_handle_test_testapplypatchbodyunwrapscodemode",
+      "internal_coding_hook_codex_handle_test_testcodemodeapplypatchemitsfiledecisions",
+      "internal_coding_hook_codex_handle_test_testcodexendtoendoneturn",
+      "internal_coding_hook_codex_handle_test_testcodexmetadatamodedropsbodies",
+      "internal_coding_hook_codex_handle_test_testcodexreasoningobservedwithemptysummary",
+      "internal_coding_hook_codex_handle_test_testcodexreasoningsummaryfromrollout",
+      "internal_coding_hook_codex_handle_test_testcodexstopemitspublicreasoningsummary",
+      "internal_coding_hook_codex_handle_test_testcodexsubagentlinkfromsessionmeta",
+      "internal_coding_hook_codex_handle_test_testcodextokensnapshotfromrollout",
+      "internal_coding_hook_codex_handle_test_testeffectivetoolnameunwrapscodemode",
+      "internal_coding_hook_codex_handle_test_withisolatedcache"
+    ],
+    "86": [
       "internal_coding_uninstall_uninstall_cursor",
       "internal_coding_uninstall_uninstall_cursor_go_rawmessage",
       "internal_coding_uninstall_uninstall_cursor_isourhookentry",
@@ -2821,7 +2840,7 @@
       "internal_coding_uninstall_uninstall_cursor_uninstallcursorhooks",
       "internal_coding_uninstall_uninstall_cursor_usercursorhookspath"
     ],
-    "85": [
+    "87": [
       "internal_memory_memory_newstore",
       "internal_memory_memory_test",
       "internal_memory_memory_test_go_t",
@@ -2837,7 +2856,7 @@
       "internal_memory_seed_isstubmarkdown",
       "memory_store_seedfromtemplates"
     ],
-    "86": [
+    "88": [
       "meterprovider",
       "sdk_go_helpers_config",
       "sdk_go_helpers_config_getcapturemessagecontent",
@@ -2853,7 +2872,7 @@
       "sdk_go_sdk_shutdown",
       "tracerprovider"
     ],
-    "87": [
+    "89": [
       "web_src_app_api_audit_route",
       "web_src_app_api_audit_route_get",
       "web_src_app_api_guardrails_dashboard_route",
@@ -2869,7 +2888,7 @@
       "web_src_lib_so_guardrails_dashboard_listguardrailsdashboard",
       "web_src_lib_so_guardrails_dashboard_loadconfig"
     ],
-    "88": [
+    "90": [
       "adapters_codexexport",
       "adapters_codexexport_detect",
       "adapters_codexexport_harness",
@@ -2884,7 +2903,7 @@
       "internal_port_adapters_codex_go_sessionref",
       "internal_port_adapters_codex_peekcodex"
     ],
-    "89": [
+    "91": [
       "adapters_piexport",
       "adapters_piexport_detect",
       "adapters_piexport_harness",
@@ -2899,7 +2918,7 @@
       "internal_port_adapters_pi_pihome",
       "internal_port_adapters_pi_pitext"
     ],
-    "90": [
+    "92": [
       "adapters_sohubexport",
       "adapters_sohubexport_detect",
       "adapters_sohubexport_harness",
@@ -2914,7 +2933,7 @@
       "internal_port_adapters_sohub",
       "internal_port_adapters_sohub_go_sessionref"
     ],
-    "91": [
+    "93": [
       "internal_session_empty_test",
       "internal_session_empty_test_go_t",
       "internal_session_empty_test_testisemptylistitem",
@@ -2929,7 +2948,7 @@
       "internal_session_store_nesting_test_testupsertactivefromspansusesagentlinks",
       "internal_session_store_newstore"
     ],
-    "92": [
+    "94": [
       "internal_session_state",
       "internal_session_state_go_time",
       "session_phase",
@@ -2944,7 +2963,7 @@
       "session_statestore_save",
       "session_statestore_warnconcurrent"
     ],
-    "93": [
+    "95": [
       "web_src_map_types_agentgraph",
       "web_src_map_types_agentnode",
       "web_src_map_ui_agentspanel",
@@ -2959,7 +2978,7 @@
       "web_src_map_ui_agentspanel_eventcount",
       "web_src_map_ui_agentspanel_popoverposition"
     ],
-    "94": [
+    "96": [
       "config_config_modelforcli",
       "internal_config_config_default",
       "internal_config_config_normalizemodelslug",
@@ -2973,7 +2992,7 @@
       "internal_retention_retention_test_go_t",
       "internal_retention_retention_test_testpruneemptyandexpired"
     ],
-    "95": [
+    "97": [
       "internal_coding_bridge",
       "internal_coding_bridge_hookbinaryavailable",
       "internal_coding_bridge_install",
@@ -2984,9 +3003,10 @@
       "internal_coding_bridge_test_teststatusclaudecodemissingmanifest",
       "internal_coding_bridge_test_teststatusclaudecodeokwithvalidbinarypath",
       "internal_coding_bridge_test_writeclaudemanifest",
-      "internal_coding_bridge_writeendpointconfig"
+      "internal_coding_bridge_writeendpointconfig",
+      "internal_userpaths_userpaths_configdir"
     ],
-    "96": [
+    "98": [
       "web_src_app_app_knowledge_page",
       "web_src_app_app_knowledge_page_knowledgepage",
       "web_src_app_app_rules_page",
@@ -3000,7 +3020,7 @@
       "web_src_components_harness_files_page_harnessfilespageinner",
       "web_src_components_harness_files_page_matchentry"
     ],
-    "97": [
+    "99": [
       "web_src_app_layout",
       "web_src_app_layout_metadata",
       "web_src_app_layout_rootlayout",
@@ -3014,7 +3034,7 @@
       "web_src_components_shell_theme_provider_themecontextvalue",
       "web_src_components_shell_theme_provider_themeprovider"
     ],
-    "98": [
+    "100": [
       "classify_classification",
       "classify_inputs",
       "internal_coding_classify_classify",
@@ -3027,7 +3047,7 @@
       "internal_coding_classify_classify_test_testclassify",
       "internal_coding_classify_classify_test_testsplitallowlist"
     ],
-    "99": [
+    "101": [
       "internal_coding_hook_harness_hooks_decideguardrail",
       "internal_coding_hook_harness_hooks_test",
       "internal_coding_hook_harness_hooks_test_go_t",
@@ -3040,21 +3060,20 @@
       "internal_coding_hook_harness_hooks_test_testturnboundaryharvestiscodexclassonly",
       "internal_guardrails_guardrails_defaultpolicy"
     ],
-    "100": [
+    "102": [
       "internal_coding_hook_opencode_handle_test",
       "internal_coding_hook_opencode_handle_test_go_session",
       "internal_coding_hook_opencode_handle_test_go_t",
       "internal_coding_hook_opencode_handle_test_go_toolcall",
       "internal_coding_hook_opencode_handle_test_testopencodemessageusageprefershostcost",
       "opencode_rec",
-      "opencode_rec_emitevent",
       "opencode_rec_emitgitcommit",
       "opencode_rec_emitgitpullrequest",
       "opencode_rec_emitllmturn",
       "opencode_rec_emitsession",
       "opencode_rec_emittoolcall"
     ],
-    "101": [
+    "103": [
       "internal_graph_graph_queryretrieve",
       "internal_retrieve_retrieve",
       "internal_retrieve_retrieve_indexpath",
@@ -3067,7 +3086,7 @@
       "retrieve_hit",
       "retrieve_indexdoc"
     ],
-    "102": [
+    "104": [
       "internal_sync_sync",
       "internal_sync_sync_run",
       "internal_viz_citymap",
@@ -3080,7 +3099,7 @@
       "viz_replay",
       "viz_replayevent"
     ],
-    "103": [
+    "105": [
       "npm_package",
       "npm_package_bin",
       "npm_package_bin_so",
@@ -3093,7 +3112,7 @@
       "npm_package_version",
       "ref_bin"
     ],
-    "104": [
+    "106": [
       "web_src_map_types_action",
       "web_src_map_types_mark",
       "web_src_map_ui_timeline",
@@ -3106,7 +3125,7 @@
       "web_src_map_ui_timeline_strip_actions",
       "web_src_map_ui_timeline_timeline"
     ],
-    "105": [
+    "107": [
       "claudecode_assistantcontentblock",
       "claudecode_assistantmessage",
       "claudecode_assistantusage",
@@ -3118,7 +3137,7 @@
       "internal_coding_hook_claudecode_transcript_mergeassistantgroup",
       "internal_coding_hook_claudecode_transcript_readtranscript"
     ],
-    "106": [
+    "108": [
       "codingotlp_spannamesampler",
       "codingotlp_spannamesampler_description",
       "codingotlp_spannamesampler_shouldsample",
@@ -3130,7 +3149,7 @@
       "samplingparameters",
       "samplingresult"
     ],
-    "107": [
+    "109": [
       "harnessvalid_softwrite",
       "internal_harnessvalid_harnessvalid",
       "internal_harnessvalid_harnessvalid_applyable",
@@ -3142,7 +3161,25 @@
       "internal_harnessvalid_harnessvalid_validatepath",
       "internal_harnessvalid_harnessvalid_validatesoftwrite"
     ],
-    "108": [
+    "110": [
+      "web_src_app_api_meta_route",
+      "web_src_app_api_meta_route_dynamic",
+      "web_src_app_api_meta_route_get",
+      "web_src_app_api_meta_route_runtime",
+      "web_src_lib_so_git",
+      "web_src_lib_so_git_currentrepometa",
+      "web_src_lib_so_git_gitremoteurl",
+      "web_src_lib_so_git_reposlug",
+      "web_src_lib_so_git_slugfromremoteurl",
+      "web_src_lib_so_misc_enrich",
+      "web_src_lib_so_root_reponame",
+      "web_src_lib_so_root_reporoot",
+      "web_src_lib_version",
+      "web_src_lib_version_displayversion",
+      "web_src_lib_version_test",
+      "web_src_lib_version_version"
+    ],
+    "111": [
       "web_src_components_port_wizard",
       "web_src_components_port_wizard_harnesses",
       "web_src_components_port_wizard_portwizard",
@@ -3154,7 +3191,7 @@
       "web_src_components_ui_dropdown_dropdownprops",
       "web_src_components_ui_dropdown_menupos"
     ],
-    "109": [
+    "112": [
       "codingotlp_emitter_emiteditdecision",
       "internal_codingotlp_metrics",
       "internal_codingotlp_metrics_commonattrs",
@@ -3165,7 +3202,7 @@
       "internal_codingotlp_metrics_recordlines",
       "internal_codingotlp_metrics_recordpullrequest"
     ],
-    "110": [
+    "113": [
       "internal_retention_retention",
       "internal_retention_retention_go_config",
       "internal_retention_retention_go_time",
@@ -3176,7 +3213,7 @@
       "internal_retention_retention_prunetracefiles",
       "retention_report"
     ],
-    "111": [
+    "114": [
       "internal_session_explain",
       "internal_session_explain_explain",
       "internal_session_explain_go_client",
@@ -3187,7 +3224,7 @@
       "session_footprintfile",
       "session_store_getfootprint"
     ],
-    "112": [
+    "115": [
       "web_src_map_nearby",
       "web_src_map_nearby_centerof",
       "web_src_map_nearby_nearbyfiles",
@@ -3198,7 +3235,7 @@
       "web_src_map_scene_treelayout_treelayout",
       "web_src_map_types_cityfile"
     ],
-    "113": [
+    "116": [
       "web_src_map_scene_dirlabels",
       "web_src_map_scene_dirlabels_dirlabel",
       "web_src_map_scene_dirlabels_dirlabelentry",
@@ -3209,7 +3246,7 @@
       "web_src_map_scene_dirlabels_dirlabelset_updatetargets",
       "web_src_map_scene_textures_labeltexture"
     ],
-    "114": [
+    "117": [
       "blame_lineinfo",
       "blame_whyresult",
       "internal_blame_blame",
@@ -3219,7 +3256,7 @@
       "internal_blame_blame_sessionidforcommit",
       "internal_blame_blame_why"
     ],
-    "115": [
+    "118": [
       "event",
       "internal_port_verify",
       "internal_port_verify_go_port_orchestrator",
@@ -3229,7 +3266,7 @@
       "port_orchestrator_verify",
       "port_verifyresult"
     ],
-    "116": [
+    "119": [
       "internal_config_config_llmsetupguide",
       "internal_config_config_test",
       "internal_config_config_test_go_t",
@@ -3239,7 +3276,7 @@
       "internal_config_config_test_testresolvellmlocal",
       "internal_config_config_test_testresolvellmopenrouter"
     ],
-    "117": [
+    "120": [
       "web_package_scripts",
       "web_package_scripts_build",
       "web_package_scripts_dev",
@@ -3249,7 +3286,7 @@
       "web_package_scripts_test_watch",
       "web_package_scripts_typecheck"
     ],
-    "118": [
+    "121": [
       "adapters_cursorimport",
       "adapters_cursorimport_detect",
       "adapters_cursorimport_discover",
@@ -3258,7 +3295,7 @@
       "adapters_cursorimport_soroot",
       "internal_port_adapters_cursor_go_sessionref"
     ],
-    "119": [
+    "122": [
       "internal_coding_hook_claudecode_handle_test",
       "internal_coding_hook_claudecode_handle_test_go_t",
       "internal_coding_hook_claudecode_handle_test_inputbuilder",
@@ -3267,7 +3304,7 @@
       "internal_coding_hook_claudecode_handle_test_testclaudesubagentstopwithoutpretooluse",
       "internal_coding_hook_claudecode_handle_test_withisolatedcache"
     ],
-    "120": [
+    "123": [
       "internal_coding_install_marketplace_plugins_opencode_superopen",
       "internal_coding_install_marketplace_plugins_opencode_superopen_fire",
       "internal_coding_install_marketplace_plugins_opencode_superopen_parsedeny",
@@ -3276,7 +3313,7 @@
       "internal_coding_install_marketplace_plugins_opencode_superopen_sobin",
       "internal_coding_install_marketplace_plugins_opencode_superopen_superopenplugin"
     ],
-    "121": [
+    "124": [
       "internal_coding_launch_launch",
       "internal_coding_launch_launch_agentbinary",
       "internal_coding_launch_launch_ensureinstalled",
@@ -3285,7 +3322,7 @@
       "internal_coding_launch_launch_vendorof",
       "internal_coding_launch_launch_writememorypack"
     ],
-    "122": [
+    "125": [
       "internal_coding_pricing_tokens",
       "internal_coding_pricing_tokens_estimatetokens",
       "internal_coding_pricing_tokens_test",
@@ -3294,7 +3331,7 @@
       "internal_coding_pricing_tokens_test_testestimatetokensshort",
       "internal_coding_pricing_tokens_test_testestimatetokenswordfloor"
     ],
-    "123": [
+    "126": [
       "plugins_opencode_superopen",
       "plugins_opencode_superopen_fire",
       "plugins_opencode_superopen_parsedeny",
@@ -3303,7 +3340,7 @@
       "plugins_opencode_superopen_sobin",
       "plugins_opencode_superopen_superopenplugin"
     ],
-    "124": [
+    "127": [
       "go_config",
       "go_config_setdefaults",
       "idgenerator",
@@ -3311,7 +3348,7 @@
       "sdk_go_config_go_duration",
       "sdk_go_config_go_sampler"
     ],
-    "125": [
+    "128": [
       "internal_coding_install_marketplace_plugins_pi_index",
       "internal_coding_install_marketplace_plugins_pi_index_fire",
       "internal_coding_install_marketplace_plugins_pi_index_parsedeny",
@@ -3319,7 +3356,7 @@
       "internal_coding_install_marketplace_plugins_pi_index_runfinalize",
       "internal_coding_install_marketplace_plugins_pi_index_sobin"
     ],
-    "126": [
+    "129": [
       "internal_version_version",
       "internal_version_version_display",
       "internal_version_version_newcmd",
@@ -3327,7 +3364,7 @@
       "internal_version_version_test_go_t",
       "internal_version_version_test_testdisplaysemver"
     ],
-    "127": [
+    "130": [
       "plugins_pi_index",
       "plugins_pi_index_fire",
       "plugins_pi_index_parsedeny",
@@ -3335,7 +3372,7 @@
       "plugins_pi_index_runfinalize",
       "plugins_pi_index_sobin"
     ],
-    "128": [
+    "131": [
       "scripts_install_fatal",
       "scripts_install_info",
       "scripts_install_need",
@@ -3343,296 +3380,261 @@
       "scripts_install_sh_scripts_install",
       "scripts_install_warn"
     ],
-    "129": [
+    "132": [
       "claudecode_adapter",
       "claudecode_adapter_vendor",
       "internal_coding_hook_claudecode_claudecode",
       "internal_coding_hook_claudecode_claudecode_go_adapter",
       "internal_coding_hook_claudecode_claudecode_new"
     ],
-    "130": [
+    "133": [
       "cmd_so_dev_proc_unix",
       "cmd_so_dev_proc_unix_go_cmd",
       "cmd_so_dev_proc_unix_killprocesstree",
       "cmd_so_dev_proc_unix_processalive",
       "cmd_so_dev_proc_unix_setdetachedprocattr"
     ],
-    "131": [
+    "134": [
       "cmd_so_dev_proc_windows",
       "cmd_so_dev_proc_windows_go_cmd",
       "cmd_so_dev_proc_windows_killprocesstree",
       "cmd_so_dev_proc_windows_processalive",
       "cmd_so_dev_proc_windows_setdetachedprocattr"
     ],
-    "132": [
+    "135": [
       "config_config_apikey",
       "config_config_hasllm",
       "config_config_lookupapikey",
       "config_config_resolvellm",
       "internal_config_config_islocalbase"
     ],
-    "133": [
+    "136": [
       "doctor_check",
       "internal_doctor_doctor",
       "internal_doctor_doctor_detectagentclis",
       "internal_doctor_doctor_format",
       "internal_doctor_doctor_run"
     ],
-    "134": [
+    "137": [
       "internal_axi_axi_test",
       "internal_axi_axi_test_go_t",
       "internal_axi_axi_test_testemptytext",
       "internal_axi_axi_test_testrowsjson",
       "internal_axi_axi_test_testtruncate"
     ],
-    "135": [
+    "138": [
       "formula",
       "scripts_so",
       "scripts_so_so",
       "scripts_so_so_install"
     ],
-    "136": [
+    "139": [
       "internal_coding_install_install",
       "internal_coding_install_install_newcmd",
       "internal_coding_install_install_run",
       "internal_coding_install_install_vendorsfromarg"
     ],
-    "137": [
+    "140": [
       "scripts_install_ps1_scripts_install",
       "scripts_install_stop_so",
       "scripts_install_write_so",
       "scripts_install_write_sowarn"
     ],
-    "138": [
+    "141": [
       "web_package",
       "web_package_name",
       "web_package_private",
       "web_package_version"
     ],
-    "139": [
+    "142": [
       "internal_codingotlp_process_windows",
       "internal_codingotlp_process_windows_queryfullimagename",
       "internal_codingotlp_process_windows_readprocessnameandppidos"
     ],
-    "140": [
+    "143": [
       "internal_harness_harness_test",
       "internal_harness_harness_test_go_t",
       "internal_harness_harness_test_testresolveandensuredirs"
     ],
-    "141": [
+    "144": [
       "web_tailwind_config",
       "web_tailwind_config_config",
       "web_tailwind_config_scale"
     ],
-    "142": [
+    "145": [
       "cmdk",
       "web_package_dependencies_cmdk"
     ],
-    "143": [
+    "146": [
       "internal_coding_cmd",
       "internal_coding_cmd_newcmd"
     ],
-    "144": [
+    "147": [
       "internal_coding_launch_exec_unix",
       "internal_coding_launch_exec_unix_defaultexecreplace"
     ],
-    "145": [
+    "148": [
       "internal_coding_launch_exec_windows",
       "internal_coding_launch_exec_windows_defaultexecreplace"
     ],
-    "146": [
+    "149": [
       "internal_coding_sessionstate_flock_unix",
       "internal_coding_sessionstate_flock_unix_withfilelock"
     ],
-    "147": [
+    "150": [
       "internal_coding_sessionstate_flock_windows",
       "internal_coding_sessionstate_flock_windows_withfilelock"
     ],
-    "148": [
+    "151": [
       "internal_codingotlp_process_other",
       "internal_codingotlp_process_other_readprocessnameandppidos"
     ],
-    "149": [
+    "152": [
       "internal_codingotlp_process_unix",
       "internal_codingotlp_process_unix_readprocessnameandppidos"
     ],
-    "150": [
+    "153": [
       "internal_llm_agentcli_go_llm_client",
       "llm_client_backend"
     ],
-    "151": [
-      "web_src_app_api_graph_html_route",
-      "web_src_app_api_graph_html_route_dynamic",
-      "web_src_app_api_graph_html_route_get",
-      "web_src_app_api_graph_html_route_head",
-      "web_src_app_api_graph_html_route_loadgraphhtml",
-      "web_src_app_api_graph_html_route_runtime",
-      "web_src_app_api_graph_html_route_themefromrequest",
-      "web_src_app_api_sessions_id_route",
-      "web_src_app_api_sessions_id_route_dynamic",
-      "web_src_app_api_sessions_id_route_get",
-      "web_src_app_api_sessions_id_route_runtime",
-      "web_src_lib_so_graph_html",
-      "web_src_lib_so_graph_html_graphhtmlstatus",
-      "web_src_lib_so_graph_html_inspectgraphhtml",
-      "web_src_lib_so_graph_positions_position_report_script",
-      "web_src_lib_so_graphify_theme",
-      "web_src_lib_so_graphify_theme_applydarktheme",
-      "web_src_lib_so_graphify_theme_applygraphperformancetuning",
-      "web_src_lib_so_graphify_theme_applylighttheme",
-      "web_src_lib_so_graphify_theme_test",
-      "web_src_lib_so_workspace_runwithproject"
-    ],
-    "152": [
+    "154": [
       "pkg_github_com_ishanjainn_superopen",
       "pkg_github_com_ishanjainn_superopen_sdk_go"
     ],
-    "153": [
+    "155": [
       "radix_ui_react_dialog",
       "web_package_dependencies_radix_ui_react_dialog"
     ],
-    "154": [
+    "156": [
       "radix_ui_react_slot",
       "web_package_dependencies_radix_ui_react_slot"
     ],
-    "155": [
+    "157": [
       "react_dom",
       "web_package_dependencies_react_dom"
     ],
-    "156": [
+    "158": [
       "scripts_sync_plugins",
       "scripts_sync_plugins_sh__entry"
     ],
-    "157": [
-      "types_react",
-      "web_package_devdependencies_types_react"
+    "159": [
+      "three",
+      "web_package_dependencies_three"
     ],
-    "158": [
+    "160": [
+      "tailwindcss",
+      "web_package_devdependencies_tailwindcss"
+    ],
+    "161": [
       "web_eslint_config",
       "web_eslint_config_eslintconfig"
     ],
-    "159": [
+    "162": [
       "web_next_config",
       "web_next_config_nextconfig"
     ],
-    "160": [
+    "163": [
       "web_next_env_d",
       "web_next_env_d_rationale_6"
     ],
-    "161": [
+    "164": [
       "web_postcss_config",
       "web_postcss_config_config"
     ],
-    "162": [
+    "165": [
       "web_src_app_app_context_page",
       "web_src_app_app_context_page_contextredirect"
     ],
-    "163": [
+    "166": [
       "web_src_app_app_docs_page",
       "web_src_app_app_docs_page_docsredirect"
     ],
-    "164": [
+    "167": [
       "web_src_app_app_evals_page",
       "web_src_app_app_evals_page_evalsredirectpage"
     ],
-    "165": [
+    "168": [
       "web_src_app_app_page",
       "web_src_app_app_page_homepage"
     ],
-    "166": [
+    "169": [
       "web_vitest_config",
       "web_vitest_config_root"
     ],
-    "167": [
+    "170": [
       "internal_memory_hybrid"
     ],
-    "168": [
+    "171": [
       "sdk_go_semconv_coding_agent"
     ],
-    "169": [
+    "172": [
       "sdk_go_semconv_genai"
     ],
-    "170": [
+    "173": [
       "sdk_go_version"
     ],
-    "171": [
+    "174": [
       "web_src_lib_so_evals_dashboard_test"
     ],
-    "172": [
+    "175": [
       "web_src_lib_so_misc_projects_test"
-    ],
-    "173": [
-      "web_src_app_api_config_route",
-      "web_src_app_api_config_route_dynamic",
-      "web_src_app_api_config_route_formatyamlvalue",
-      "web_src_app_api_config_route_get",
-      "web_src_app_api_config_route_istoplevelkey",
-      "web_src_app_api_config_route_patchbody",
-      "web_src_app_api_config_route_put",
-      "web_src_app_api_config_route_runtime",
-      "web_src_app_api_config_route_setyamlpath",
-      "web_src_lib_so_misc_loadconfig"
-    ],
-    "174": [
-      "three",
-      "web_package_dependencies_three"
     ]
   },
   "cohesion": {
     "0": 0.06155950752393981,
-    "1": 0.08680555555555555,
-    "2": 0.07589984350547731,
+    "1": 0.07589984350547731,
+    "2": 0.07692307692307693,
     "3": 0.059395801331285206,
-    "4": 0.06229508196721312,
+    "4": 0.060814383923849816,
     "5": 0.08145363408521303,
-    "6": 0.09014675052410902,
+    "6": 0.08780841799709724,
     "7": 0.06313497822931785,
     "8": 0.10377358490566038,
-    "9": 0.08116883116883117,
-    "10": 0.08144796380090498,
+    "9": 0.11932773109243698,
+    "10": 0.08928571428571429,
     "11": 0.0942684766214178,
-    "12": 0.0942684766214178,
-    "13": 0.11931818181818182,
-    "14": 0.09574468085106383,
-    "15": 0.07536231884057971,
-    "16": 0.13170731707317074,
-    "17": 0.13902439024390245,
-    "18": 0.12439024390243902,
-    "19": 0.06463414634146342,
-    "20": 0.08076923076923077,
-    "21": 0.19772403982930298,
-    "22": 0.15076923076923077,
-    "23": 0.146218487394958,
-    "24": 0.09269162210338681,
-    "25": 0.10984848484848485,
-    "26": 0.11553030303030302,
-    "27": 0.07765151515151515,
-    "28": 0.11397849462365592,
-    "29": 0.10967741935483871,
-    "30": 0.11827956989247312,
-    "31": 0.11724137931034483,
-    "32": 0.09425287356321839,
-    "33": 0.15402298850574714,
-    "34": 0.1425287356321839,
+    "12": 0.09574468085106383,
+    "13": 0.07536231884057971,
+    "14": 0.1173054587688734,
+    "15": 0.13170731707317074,
+    "16": 0.13902439024390245,
+    "17": 0.12439024390243902,
+    "18": 0.06463414634146342,
+    "19": 0.08076923076923077,
+    "20": 0.19772403982930298,
+    "21": 0.146218487394958,
+    "22": 0.09269162210338681,
+    "23": 0.10984848484848485,
+    "24": 0.11553030303030302,
+    "25": 0.14516129032258066,
+    "26": 0.07765151515151515,
+    "27": 0.11397849462365592,
+    "28": 0.1282051282051282,
+    "29": 0.11827956989247312,
+    "30": 0.11724137931034483,
+    "31": 0.09425287356321839,
+    "32": 0.15402298850574714,
+    "33": 0.1425287356321839,
+    "34": 0.13054187192118227,
     "35": 0.1625615763546798,
     "36": 0.19950738916256158,
     "37": 0.06896551724137931,
     "38": 0.15270935960591134,
     "39": 0.12315270935960591,
-    "40": 0.13054187192118227,
-    "41": 0.1931216931216931,
-    "42": 0.1455026455026455,
-    "43": 0.15343915343915343,
-    "44": 0.16809116809116809,
-    "45": 0.10541310541310542,
-    "46": 0.12615384615384614,
-    "47": 0.12923076923076923,
+    "40": 0.1931216931216931,
+    "41": 0.1455026455026455,
+    "42": 0.15343915343915343,
+    "43": 0.16809116809116809,
+    "44": 0.10541310541310542,
+    "45": 0.12615384615384614,
+    "46": 0.12923076923076923,
+    "47": 0.12315270935960591,
     "48": 0.1076923076923077,
     "49": 0.14461538461538462,
     "50": 0.19,
     "51": 0.16666666666666666,
     "52": 0.14855072463768115,
-    "53": 0.14492753623188406,
+    "53": 0.16666666666666666,
     "54": 0.10869565217391304,
     "55": 0.2015810276679842,
     "56": 0.2077922077922078,
@@ -3642,7 +3644,7 @@
     "60": 0.09523809523809523,
     "61": 0.11428571428571428,
     "62": 0.18095238095238095,
-    "63": 0.22380952380952382,
+    "63": 0.10931174089068826,
     "64": 0.1761904761904762,
     "65": 0.19473684210526315,
     "66": 0.15263157894736842,
@@ -3651,86 +3653,86 @@
     "69": 0.10526315789473684,
     "70": 0.2222222222222222,
     "71": 0.14035087719298245,
-    "72": 0.1895424836601307,
+    "72": 0.24561403508771928,
     "73": 0.21568627450980393,
     "74": 0.2549019607843137,
-    "75": 0.16911764705882354,
-    "76": 0.19117647058823528,
-    "77": 0.22794117647058823,
-    "78": 0.19166666666666668,
-    "79": 0.225,
-    "80": 0.20952380952380953,
-    "81": 0.19166666666666668,
-    "82": 0.27472527472527475,
-    "83": 0.25274725274725274,
-    "84": 0.2857142857142857,
-    "85": 0.25274725274725274,
-    "86": 0.25274725274725274,
+    "75": 0.1619047619047619,
+    "76": 0.16911764705882354,
+    "77": 0.19117647058823528,
+    "78": 0.22794117647058823,
+    "79": 0.19166666666666668,
+    "80": 0.225,
+    "81": 0.20952380952380953,
+    "82": 0.2,
+    "83": 0.27472527472527475,
+    "84": 0.25274725274725274,
+    "85": 0.31868131868131866,
+    "86": 0.2857142857142857,
     "87": 0.25274725274725274,
-    "88": 0.23076923076923078,
-    "89": 0.23076923076923078,
+    "88": 0.25274725274725274,
+    "89": 0.25274725274725274,
     "90": 0.23076923076923078,
-    "91": 0.28205128205128205,
-    "92": 0.32051282051282054,
-    "93": 0.21794871794871795,
-    "94": 0.24242424242424243,
-    "95": 0.34545454545454546,
+    "91": 0.23076923076923078,
+    "92": 0.23076923076923078,
+    "93": 0.28205128205128205,
+    "94": 0.32051282051282054,
+    "95": 0.21794871794871795,
     "96": 0.24242424242424243,
-    "97": 0.25757575757575757,
-    "98": 0.2909090909090909,
-    "99": 0.43636363636363634,
-    "100": 0.19696969696969696,
-    "101": 0.2909090909090909,
-    "102": 0.23636363636363636,
-    "103": 0.18181818181818182,
-    "104": 0.2545454545454545,
-    "105": 0.4222222222222222,
-    "106": 0.2,
-    "107": 0.35555555555555557,
-    "108": 0.2222222222222222,
-    "109": 0.4722222222222222,
-    "110": 0.4444444444444444,
-    "111": 0.25,
-    "112": 0.3333333333333333,
-    "113": 0.25,
-    "114": 0.39285714285714285,
-    "115": 0.2857142857142857,
-    "116": 0.39285714285714285,
-    "117": 0.25,
-    "118": 0.5238095238095238,
-    "119": 0.7619047619047619,
-    "120": 0.5714285714285714,
-    "121": 0.5714285714285714,
-    "122": 0.47619047619047616,
+    "97": 0.30303030303030304,
+    "98": 0.24242424242424243,
+    "99": 0.25757575757575757,
+    "100": 0.2909090909090909,
+    "101": 0.43636363636363634,
+    "102": 0.21818181818181817,
+    "103": 0.2909090909090909,
+    "104": 0.23636363636363636,
+    "105": 0.18181818181818182,
+    "106": 0.2545454545454545,
+    "107": 0.4222222222222222,
+    "108": 0.2,
+    "109": 0.35555555555555557,
+    "110": 0.25833333333333336,
+    "111": 0.2222222222222222,
+    "112": 0.4722222222222222,
+    "113": 0.4444444444444444,
+    "114": 0.25,
+    "115": 0.3333333333333333,
+    "116": 0.25,
+    "117": 0.39285714285714285,
+    "118": 0.2857142857142857,
+    "119": 0.39285714285714285,
+    "120": 0.25,
+    "121": 0.5238095238095238,
+    "122": 0.7619047619047619,
     "123": 0.5714285714285714,
-    "124": 0.3333333333333333,
-    "125": 0.4666666666666667,
-    "126": 0.4,
-    "127": 0.4666666666666667,
-    "128": 0.6666666666666666,
+    "124": 0.5714285714285714,
+    "125": 0.47619047619047616,
+    "126": 0.5714285714285714,
+    "127": 0.3333333333333333,
+    "128": 0.4666666666666667,
     "129": 0.4,
-    "130": 0.4,
-    "131": 0.4,
+    "130": 0.4666666666666667,
+    "131": 0.6666666666666666,
     "132": 0.4,
-    "133": 0.7,
-    "134": 0.6,
-    "135": 0.5,
-    "136": 0.8333333333333334,
-    "137": 0.5,
+    "133": 0.4,
+    "134": 0.4,
+    "135": 0.4,
+    "136": 0.7,
+    "137": 0.6,
     "138": 0.5,
-    "139": 1.0,
-    "140": 0.6666666666666666,
-    "141": 0.6666666666666666,
+    "139": 0.8333333333333334,
+    "140": 0.5,
+    "141": 0.5,
     "142": 1.0,
-    "143": 1.0,
-    "144": 1.0,
+    "143": 0.6666666666666666,
+    "144": 0.6666666666666666,
     "145": 1.0,
     "146": 1.0,
     "147": 1.0,
     "148": 1.0,
     "149": 1.0,
     "150": 1.0,
-    "151": 0.1761904761904762,
+    "151": 1.0,
     "152": 1.0,
     "153": 1.0,
     "154": 1.0,
@@ -3752,8 +3754,9 @@
     "170": 1.0,
     "171": 1.0,
     "172": 1.0,
-    "173": 0.3111111111111111,
-    "174": 1.0
+    "173": 1.0,
+    "174": 1.0,
+    "175": 1.0
   },
   "gods": [
     {
@@ -3872,12 +3875,12 @@
     },
     {
       "type": "bridge_node",
-      "question": "Why does `cn()` connect `cn` to `sessions/page.tsx`, `shell/sidebar.tsx`, `memory.ts`, `utils.ts`, `dropdown.tsx`, `sessions/[id]/page.tsx`, `harness-yaml.ts`, `evaluations/page.tsx`, `session-timeline.tsx`, `file-content-view.tsx`, `playground-shell.tsx`?",
+      "question": "Why does `cn()` connect `cn` to `sessions/page.tsx`, `shell/sidebar.tsx`, `memory.ts`, `sessions/[id]/page.tsx`, `harness-yaml.ts`, `dropdown.tsx`, `evaluations/page.tsx`, `session-timeline.tsx`, `file-content-view.tsx`, `utils.ts`, `playground-shell.tsx`?",
       "why": "High betweenness centrality (0.208) - this node is a cross-community bridge."
     },
     {
       "type": "bridge_node",
-      "question": "Why does `Resolve()` connect `Resolve` to `cli.go`, `Run`, `TestResolveAndEnsureDirs`, `Paths`, `home`, `Emitter`, `recommend.go`, `.Create`, `Profile`, `guardrails.go`, `graph.go`, `backend.go`, `HarnessID`, `cmdGitHook`, `discover.go`, `cmds_dev.go`, `finalizeSession`, `cmds_extra.go`, `Run`, `Refresh`, `harness_hooks.go`, `NewStore`, `.paths`, `Default`, `Rebuild`, `Run`, `CursorImport`, `launch.go`?",
+      "question": "Why does `Resolve()` connect `Resolve` to `cli.go`, `Run`, `TestResolveAndEnsureDirs`, `Paths`, `home`, `Emitter`, `.Create`, `recommend.go`, `Profile`, `guardrails.go`, `graph.go`, `backend.go`, `cmdGitHook`, `discover.go`, `cmds_dev.go`, `finalizeSession`, `Ledger`, `cmds_extra.go`, `Run`, `Refresh`, `harness_hooks.go`, `NewStore`, `.paths`, `Default`, `Rebuild`, `Run`, `CursorImport`, `launch.go`?",
       "why": "High betweenness centrality (0.200) - this node is a cross-community bridge."
     },
     {
@@ -3897,8 +3900,8 @@
     },
     {
       "type": "low_cohesion",
-      "question": "Should `projectIdFromRequest` be split into smaller, more focused modules?",
-      "why": "Cohesion score 0.08680555555555555 - nodes in this community are weakly interconnected."
+      "question": "Should `Store` be split into smaller, more focused modules?",
+      "why": "Cohesion score 0.07589984350547731 - nodes in this community are weakly interconnected."
     }
   ]
 }

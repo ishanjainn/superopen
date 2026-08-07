@@ -1,41 +1,40 @@
-# Graph Report - /var/folders/fr/660k4_4n1gs3g_d3c939lcm40000gn/T/so-graphify-1320680955  (2026-08-07)
+# Graph Report - /var/folders/fr/660k4_4n1gs3g_d3c939lcm40000gn/T/so-graphify-2752193901  (2026-08-07)
 
 ## Corpus Check
 - cluster-only mode — file stats not available
 
 ## Summary
-- 3227 nodes · 7662 edges · 175 communities (153 shown, 22 thin omitted)
+- 3227 nodes · 7662 edges · 176 communities (154 shown, 22 thin omitted)
 - Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 960 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
 - release-packages.py
-- projectIdFromRequest
 - Store
+- projectIdFromRequest
 - cli.go
 - LLMTurn
 - Remove
-- codex/handle.go
+- trace.ts
 - entitlement.go
 - memory.ts
-- trace.ts
 - misc.ts
 - sessions.ts
 - CityScene.tsx
-- nodeio.ts
 - harness-yaml.ts
 - cn
+- codex/handle.go
 - handle
 - Paths
 - Store
 - types.ts
 - session-timeline.tsx
 - Resolve
-- soPath
 - agentlinks.go
 - home
 - receiver.go
 - title.go
+- fileExists
 - file-content-view.tsx
 - Emitter
 - citymap.ts
@@ -44,12 +43,12 @@
 - Context
 - emitGitArtifactsCodex
 - MapView.tsx
+- .Create
 - Input
 - recommend.go
 - compilerOptions
 - sessions/page.tsx
 - shell/sidebar.tsx
-- .Create
 - attrs.go
 - Profile
 - guardrails.go
@@ -57,6 +56,7 @@
 - sessions/[id]/page.tsx
 - Config
 - backend.go
+- judge.ts
 - evaluations/page.tsx
 - evals.ts
 - sessionTraceContext
@@ -72,7 +72,7 @@
 - devDependencies
 - cmdGitHook
 - run
-- Load
+- soPath
 - reducer.ts
 - discover.go
 - handle
@@ -81,9 +81,10 @@
 - dependencies
 - cmds_dev.go
 - finalizeSession
-- portToHub
+- Load
 - client.go
 - vendor_config_scrub_test.go
+- Ledger
 - cmds_extra.go
 - InstallVendor
 - Lookup
@@ -93,6 +94,7 @@
 - userpaths.go
 - Refresh
 - harness_hooks.go
+- codex/handle_test.go
 - stripCursorHooks
 - NewStore
 - Init
@@ -117,6 +119,7 @@
 - claudecode/transcript.go
 - defaultSampler
 - harnessvalid.go
+- repoRoot
 - dropdown.tsx
 - .EmitEditDecision
 - Prune
@@ -152,20 +155,18 @@
 - tailwind.config.ts
 - cmdk
 - Client
-- runWithProject
 - github.com/ishanjainn/superopen
 - @radix-ui/react-dialog
 - @radix-ui/react-slot
 - react-dom
 - sync-plugins.sh
-- @types/react
+- three
+- tailwindcss
 - eslint.config.mjs
 - next.config.mjs
 - next-env.d.ts
 - postcss.config.mjs
 - vitest.config.mts
-- config/route.ts
-- three
 
 ## God Nodes (most connected - your core abstractions)
 1. `Paths` - 109 edges
@@ -194,19 +195,19 @@
 ## Import Cycles
 - None detected.
 
-## Communities (175 total, 22 thin omitted)
+## Communities (176 total, 22 thin omitted)
 
 ### Community 0 - "release-packages.py"
 Cohesion: 0.06
 Nodes (46): Any, apply_version_files(), body_for_component_evidence(), build_pr_evidence(), bump(), chunk_prs(), collect_prs(), collect_single_pr() (+38 more)
 
-### Community 1 - "projectIdFromRequest"
-Cohesion: 0.09
-Nodes (52): dynamic, POST(), runtime, dynamic, GET(), POST(), runtime, DELETE() (+44 more)
-
-### Community 2 - "Store"
+### Community 1 - "Store"
 Cohesion: 0.08
 Nodes (41): Event, Append(), Time, List(), Path(), splitLines(), contains(), T (+33 more)
+
+### Community 2 - "projectIdFromRequest"
+Cohesion: 0.08
+Nodes (51): dynamic, POST(), runtime, dynamic, GET(), POST(), runtime, DELETE() (+43 more)
 
 ### Community 3 - "cli.go"
 Cohesion: 0.06
@@ -220,9 +221,9 @@ Nodes (24): recordingEmitter, recordingEmitter, recordingEmitter, Session, ToolC
 Cohesion: 0.08
 Nodes (51): InstallOptions, InstallResult, UninstallResult, Apply(), Brief(), EnsureGlobalSkill(), EnsureSkills(), fileExists() (+43 more)
 
-### Community 6 - "codex/handle.go"
+### Community 6 - "trace.ts"
 Cohesion: 0.09
-Nodes (52): codexPayload, applyPatchBody(), boolField(), buildSession(), buildToolCall(), canonicalStatus(), clearTurnFragment(), commandFromToolInput() (+44 more)
+Nodes (48): dynamic, GET(), runtime, dynamic, GET(), runtime, agentLabel(), buildAgentGraph() (+40 more)
 
 ### Community 7 - "entitlement.go"
 Cohesion: 0.06
@@ -232,109 +233,109 @@ Nodes (35): Status, Clear(), CloudOTLPEnabled(), configDir(), Time, Load(), Logi
 Cohesion: 0.10
 Nodes (47): dynamic, GET(), POST(), refreshActive(), runtime, Lesson, MemoryPage(), Pack (+39 more)
 
-### Community 9 - "trace.ts"
-Cohesion: 0.08
-Nodes (50): dynamic, GET(), runtime, dynamic, GET(), runtime, dynamic, GET() (+42 more)
+### Community 9 - "misc.ts"
+Cohesion: 0.12
+Nodes (32): DELETE(), dynamic, GET(), runtime, dynamic, GET(), runtime, compactPendingRecommendations() (+24 more)
 
-### Community 10 - "misc.ts"
-Cohesion: 0.08
-Nodes (44): dynamic, GET(), runtime, DELETE(), dynamic, GET(), runtime, dynamic (+36 more)
-
-### Community 11 - "sessions.ts"
+### Community 10 - "sessions.ts"
 Cohesion: 0.09
-Nodes (49): dynamic, GET(), runtime, fileExists(), applySessionQuery(), CHAT_ATTR_KEYS, clearAgentLink(), clearFalseNesting() (+41 more)
+Nodes (46): dynamic, GET(), runtime, applySessionQuery(), CHAT_ATTR_KEYS, clearAgentLink(), clearFalseNesting(), codexRolloutUpdatedAt() (+38 more)
 
-### Community 12 - "CityScene.tsx"
+### Community 11 - "CityScene.tsx"
 Cohesion: 0.09
 Nodes (41): useThemeOptional(), applyCitySceneTheme(), attentionColumnGeometry(), attentionHeight(), baseColor(), centerFor(), CityScene(), colors (+33 more)
 
-### Community 13 - "nodeio.ts"
-Cohesion: 0.12
-Nodes (25): Body, dynamic, POST(), runtime, dynamic, GET(), POST(), PUT() (+17 more)
-
-### Community 14 - "harness-yaml.ts"
+### Community 12 - "harness-yaml.ts"
 Cohesion: 0.10
 Nodes (40): FileContentView(), Domain, FILE, HarnessItemDetailPage(), hydrate(), KIND_BLURB, CONFIG, EvaluationComposer() (+32 more)
 
-### Community 15 - "cn"
+### Community 13 - "cn"
 Cohesion: 0.08
 Nodes (38): EvaluationsInner(), GUARD_DASH_COLS, GuardrailsInner(), GuardRow, LOG_COLS, LogFilter, LogRow, PageTab (+30 more)
 
-### Community 16 - "handle"
+### Community 14 - "codex/handle.go"
+Cohesion: 0.12
+Nodes (41): codexPayload, applyPatchBody(), boolField(), buildSession(), buildToolCall(), canonicalStatus(), clearTurnFragment(), commandFromToolInput() (+33 more)
+
+### Community 15 - "handle"
 Cohesion: 0.13
 Nodes (39): cursorAttachment, cursorEdit, cursorPayload, agentIDFromPath(), applyAccumulatedTokens(), buildPromptTurn(), buildResponseTurn(), buildSession() (+31 more)
 
-### Community 17 - "Paths"
+### Community 16 - "Paths"
 Cohesion: 0.14
 Nodes (37): Paths, Delta, ledgerEntry, ledgerFile, pendingFile, Result, Trigger, maybeHarvestOnSessionEnd() (+29 more)
 
-### Community 18 - "Store"
+### Community 17 - "Store"
 Cohesion: 0.12
 Nodes (17): IndexEntry, LoadMap(), ListItem, Store, IsEmptyListItem(), countCheckpointDirs(), Client, Store (+9 more)
 
-### Community 19 - "types.ts"
+### Community 18 - "types.ts"
 Cohesion: 0.06
 Nodes (35): AgentKind, AgentLinkMethod, AgentLinkQuality, AgentStatus, CityDir, Coverage, DimensionName, Observability (+27 more)
 
-### Community 20 - "session-timeline.tsx"
+### Community 19 - "session-timeline.tsx"
 Cohesion: 0.08
 Nodes (33): basename(), buildTimeline(), buildTimelineFromPortableTurns(), ChatMinimap(), classifyTool(), decodeFiltersParam(), DEFAULT_FILTERS, encodeFiltersParam() (+25 more)
 
-### Community 21 - "Resolve"
+### Community 20 - "Resolve"
 Cohesion: 0.20
 Nodes (35): cmdCheckpoint(), cmdImport(), cmdProjects(), cmdStatus(), cmdHarvest(), attachSessionsStart(), cmdAudit(), cmdLearn() (+27 more)
 
-### Community 22 - "soPath"
-Cohesion: 0.15
-Nodes (24): dynamic, GET(), runtime, availableJudgeClis(), digestTrace(), errorPath(), extractJSON(), getReportStatus() (+16 more)
-
-### Community 23 - "agentlinks.go"
+### Community 21 - "agentlinks.go"
 Cohesion: 0.15
 Nodes (33): Entry, fileDoc, pendingDoc, PendingSpawn, AllowRegister(), ClaimPending(), DiscoverCursorParent(), ExtractAgentID() (+25 more)
 
-### Community 24 - "home"
+### Community 22 - "home"
 Cohesion: 0.09
 Nodes (15): ClaudeExport, ClaudeImport, CursorExport, OpenCodeExport, OpenCodeImport, encodeClaudeProjectDir(), SessionRef, writeTranscript() (+7 more)
 
-### Community 25 - "receiver.go"
+### Community 23 - "receiver.go"
 Cohesion: 0.11
 Nodes (28): AnyValue, anyValueString(), KeyValue, Span, Store, IsSubagentAttrs(), kvMap(), NewReceiver() (+20 more)
 
-### Community 26 - "title.go"
+### Community 24 - "title.go"
 Cohesion: 0.12
 Nodes (31): humanizePromptPreview(), previewFromMessages(), DisplayName(), EnsureTitle(), generateTitle(), Client, Meta, loadCodexTitles() (+23 more)
 
-### Community 27 - "file-content-view.tsx"
+### Community 25 - "fileExists"
+Cohesion: 0.15
+Nodes (27): dynamic, GET(), POST(), PUT(), runtime, assertEditable(), createHarnessFile(), defaultContent() (+19 more)
+
+### Community 26 - "file-content-view.tsx"
 Cohesion: 0.08
 Nodes (29): GuardrailsDashboardView(), buildEvalRows(), buildGuardRows(), EVAL_COLUMNS, EVAL_VISIBILITY, EvalColumnKey, EvalRow, EvalRowKind (+21 more)
 
-### Community 28 - "Emitter"
+### Community 27 - "Emitter"
 Cohesion: 0.11
 Nodes (20): Emitter, perEventSpansAllowed(), detectHostFromBinary(), detectHostFromProcessTree(), drainCodeCounters(), drainCounters(), Mutex, Session (+12 more)
 
-### Community 29 - "citymap.ts"
-Cohesion: 0.11
-Nodes (28): dynamic, POST(), runtime, dynamic, GET(), runtime, applyTreemap(), buildTree() (+20 more)
+### Community 28 - "citymap.ts"
+Cohesion: 0.13
+Nodes (25): dynamic, GET(), runtime, applyTreemap(), buildTree(), cachePath(), capAspect(), CityDir (+17 more)
 
-### Community 30 - "playground-shell.tsx"
+### Community 29 - "playground-shell.tsx"
 Cohesion: 0.12
 Nodes (23): BreadcrumbContext, BreadcrumbContextValue, BreadcrumbCrumb, BreadcrumbProvider(), useBreadcrumb(), HeaderContextRow(), Option, pageTitle() (+15 more)
 
-### Community 31 - "agentconfig/config.go"
+### Community 30 - "agentconfig/config.go"
 Cohesion: 0.12
 Nodes (26): Defaults, Flags, Resolved, builtinDefaults(), configDir(), isLocalHost(), isSecretKey(), Load() (+18 more)
 
-### Community 32 - "Context"
+### Community 31 - "Context"
 Cohesion: 0.09
 Nodes (17): adapter, adapter, Adapter, Context, NormalizeRepoURL(), remoteURL(), run(), Snapshot() (+9 more)
 
-### Community 33 - "emitGitArtifactsCodex"
+### Community 32 - "emitGitArtifactsCodex"
 Cohesion: 0.15
 Nodes (28): PatchLineCounts, CountInlineDiff(), CountPatchLines(), ExtractCommitMessage(), ExtractCommitSHA(), ExtractPRTitle(), ExtractPRURLAndNumber(), firstGroup() (+20 more)
 
-### Community 34 - "MapView.tsx"
+### Community 33 - "MapView.tsx"
 Cohesion: 0.14
 Nodes (25): apiURL(), describeError(), getAgentTrace(), getJSON(), getSessionAgents(), getSessionReport(), getSessionSnapshot(), listSessions() (+17 more)
+
+### Community 34 - ".Create"
+Cohesion: 0.13
+Nodes (19): Meta, Store, containsDotDot(), Time, NewStore(), splitSlash(), stringsHasDotDot(), T (+11 more)
 
 ### Community 35 - "Input"
 Cohesion: 0.16
@@ -356,37 +357,37 @@ Nodes (21): dateGroupLabel(), modelLabel(), Session, SessionsPage(), vendorLabel
 Cohesion: 0.12
 Nodes (23): FeaturePageHeader(), FeaturePageHeaderProps, iconForPath(), iconForTitle(), flatItems(), isActive(), NavigationLink(), PrimaryItem() (+15 more)
 
-### Community 40 - ".Create"
-Cohesion: 0.13
-Nodes (19): Meta, Store, containsDotDot(), Time, NewStore(), splitSlash(), stringsHasDotDot(), T (+11 more)
-
-### Community 41 - "attrs.go"
+### Community 40 - "attrs.go"
 Cohesion: 0.19
 Nodes (23): scrubFn, bodyAllowed(), buildInputMessagesJSON(), buildOutputMessagesJSON(), Session, Span, ToolCall, inferProvider() (+15 more)
 
-### Community 42 - "Profile"
+### Community 41 - "Profile"
 Cohesion: 0.15
 Nodes (24): Profile, ExtractJSON(), dedupeRules(), enrichArchitecture(), enrichConventions(), T, TestSeedUpgradesOnlyGeneratedDefaultGitignore(), TestSeedUpgradesPreviousDefaultToIgnoreSessions() (+16 more)
 
-### Community 43 - "guardrails.go"
+### Community 42 - "guardrails.go"
 Cohesion: 0.15
 Nodes (20): Decision, Engine, File, Policy, Rule, CheckCommandString(), CheckPathString(), EnsureDefaults() (+12 more)
 
-### Community 44 - "graph.go"
+### Community 43 - "graph.go"
 Cohesion: 0.17
 Nodes (25): Result, stubGraph, Build(), buildStub(), buildWithGraphify(), copyDir(), countGraph(), ensureGraphifyCommunitySidecars() (+17 more)
 
-### Community 45 - "sessions/[id]/page.tsx"
+### Community 44 - "sessions/[id]/page.tsx"
 Cohesion: 0.11
 Nodes (22): GraphPage(), MapView, NestedSession, projectFromURL(), SessionDetailInner(), Tab, TabButton(), SettingsPage() (+14 more)
 
-### Community 46 - "Config"
+### Community 45 - "Config"
 Cohesion: 0.13
 Nodes (15): Config, CostConfig, EvalsConfig, ExporterConfig, GraphConfig, GuardrailsConfig, InjectConfig, LLMConfig (+7 more)
 
-### Community 47 - "backend.go"
+### Community 46 - "backend.go"
 Cohesion: 0.13
 Nodes (16): ListItem, ComputeAttribution(), ListItem, Meta, Store, Time, metaHasCommit(), metaHasPR() (+8 more)
+
+### Community 47 - "judge.ts"
+Cohesion: 0.12
+Nodes (26): dynamic, POST(), runtime, dynamic, GET(), runtime, availableJudgeClis(), digestTrace() (+18 more)
 
 ### Community 48 - "evaluations/page.tsx"
 Cohesion: 0.11
@@ -409,8 +410,8 @@ Cohesion: 0.15
 Nodes (13): Error, Flags, Out, Bind(), chainPreRun(), envTruthy(), ExitCode(), Fail() (+5 more)
 
 ### Community 53 - "HarnessID"
-Cohesion: 0.14
-Nodes (13): NewRegistry(), RefreshMemoryAfterPort(), Orchestrator, SessionRef, Time, Event, ExportAdapter, HarnessID (+5 more)
+Cohesion: 0.17
+Nodes (12): ClaudeCode(), Codex(), portToHub(), NewRegistry(), RegisterAll(), DefaultLedgerPath(), Time, ExportAdapter (+4 more)
 
 ### Community 54 - "Hud.tsx"
 Cohesion: 0.11
@@ -438,7 +439,7 @@ Nodes (14): actorLabel(), decisionDialogTitle(), decisionLabel(), decisionPlaceh
 
 ### Community 60 - "devDependencies"
 Cohesion: 0.10
-Nodes (21): autoprefixer, eslint, eslint-config-next, postcss, tailwindcss, @types/node, @types/react-dom, @types/three (+13 more)
+Nodes (21): autoprefixer, eslint, eslint-config-next, postcss, @types/node, @types/react, @types/react-dom, @types/three (+13 more)
 
 ### Community 61 - "cmdGitHook"
 Cohesion: 0.11
@@ -448,9 +449,9 @@ Nodes (17): cmdGitHook(), firstLine(), finalizeLatestSession(), AppendTrailer(),
 Cohesion: 0.18
 Nodes (19): peekedContext, canonicalVendor(), firstHookEnv(), firstNonEmpty(), foreignParentID(), Adapter, isClaudeCodeVendor(), isRealClaudeCodeInvocation() (+11 more)
 
-### Community 63 - "Load"
-Cohesion: 0.22
-Nodes (20): markCodexSessionRootEmitted(), primeSubagentLink(), stampTurnFragment(), accumulateStopTokens(), AddPendingEdit(), BumpCodeCounters(), DrainPendingEdits(), GC() (+12 more)
+### Community 63 - "soPath"
+Cohesion: 0.11
+Nodes (30): dynamic, formatYamlValue(), GET(), isTopLevelKey(), PatchBody, PUT(), runtime, setYamlPath() (+22 more)
 
 ### Community 64 - "reducer.ts"
 Cohesion: 0.18
@@ -484,9 +485,9 @@ Nodes (18): cmdDev(), logFile(), maybeOpenUI(), pidFile(), readDevStatus(), runD
 Cohesion: 0.14
 Nodes (17): Config, mineOnFinalize(), applyTracesDir(), demoSession(), finalizeSession(), Config, refreshSession(), Span (+9 more)
 
-### Community 72 - "portToHub"
-Cohesion: 0.19
-Nodes (10): ClaudeCode(), Codex(), portToHub(), RegisterAll(), DefaultLedgerPath(), Mutex, Time, Ledger (+2 more)
+### Community 72 - "Load"
+Cohesion: 0.25
+Nodes (18): markCodexSessionRootEmitted(), accumulateStopTokens(), AddPendingEdit(), BumpCodeCounters(), DrainPendingEdits(), GC(), Duration, Time (+10 more)
 
 ### Community 73 - "client.go"
 Cohesion: 0.22
@@ -496,245 +497,249 @@ Nodes (12): ResolvedLLM, Config, Duration, Client, New(), NewFromConfig(), NewFr
 Cohesion: 0.25
 Nodes (16): FileMode, writeFileAtomic(), stripClaudeMarketplaceJSON(), stripCodexConfigTOML(), stripCodexOwnedSections(), T, mustJSONRead(), mustJSONWrite() (+8 more)
 
-### Community 75 - "cmds_extra.go"
+### Community 75 - "Ledger"
+Cohesion: 0.16
+Nodes (11): Mutex, Time, RefreshMemoryAfterPort(), Orchestrator, SessionRef, Event, Ledger, LedgerEntry (+3 more)
+
+### Community 76 - "cmds_extra.go"
 Cohesion: 0.17
 Nodes (14): cmdBlame(), cmdLogin(), cmdLogout(), cmdWhy(), extendSessionsCmd(), harnessIDFromVendor(), materializeCursorResumePack(), parseFileLine() (+6 more)
 
-### Community 76 - "InstallVendor"
+### Community 77 - "InstallVendor"
 Cohesion: 0.19
 Nodes (13): installGenericVendor(), enableClaudeCodePlugin(), enableCodexPlugin(), extractEmbeddedDir(), materializeClaudeMarketplace(), patchManifestBytes(), resolveCodexBin(), resolveSoBin() (+5 more)
 
-### Community 77 - "Lookup"
+### Community 78 - "Lookup"
 Cohesion: 0.23
 Nodes (14): Lookup(), T, TestCostBasic(), TestCostCacheCreationFallback(), TestCostCacheCreationPremium(), TestCostWithCacheRead(), TestCostZeroRate(), TestLookupAnthropic() (+6 more)
 
-### Community 78 - "Run"
+### Community 79 - "Run"
 Cohesion: 0.19
 Nodes (13): Options, Report, FindRoot(), migrateDir(), migrateFile(), detectStack(), detectStructure(), findPlugins() (+5 more)
 
-### Community 79 - "ResolveForVendor"
+### Community 80 - "ResolveForVendor"
 Cohesion: 0.23
 Nodes (13): base64URLDecode(), claudeCodeEmail(), codexEmail(), decodeJWTSegment(), emailFromJWT(), FromGitConfig(), ResolveForVendor(), T (+5 more)
 
-### Community 80 - "handle"
+### Community 81 - "handle"
 Cohesion: 0.21
 Nodes (11): accumulateUsage(), applyAccumulated(), capture(), firstNonEmpty(), RawMessage, Session, handle(), stampUsage() (+3 more)
 
-### Community 81 - "userpaths.go"
-Cohesion: 0.19
-Nodes (13): shellQuote(), hooksDir(), Install(), writeHook(), CodexMarketplaceDir(), ConfigDir(), DataDir(), LegacyDataDirSO() (+5 more)
+### Community 82 - "userpaths.go"
+Cohesion: 0.20
+Nodes (12): shellQuote(), hooksDir(), Install(), writeHook(), CodexMarketplaceDir(), DataDir(), LegacyDataDirSO(), QuoteForHook() (+4 more)
 
-### Community 82 - "Refresh"
+### Community 83 - "Refresh"
 Cohesion: 0.27
 Nodes (12): maxSharedMtime(), startRefreshWatcher(), writeRefreshStatus(), gitSHA(), Time, loadRefreshMarker(), Refresh(), refreshMarkerPath() (+4 more)
 
-### Community 83 - "harness_hooks.go"
+### Community 84 - "harness_hooks.go"
 Cohesion: 0.25
 Nodes (13): Decision, extractToolTargets(), findRepoRoot(), isSessionEndEvent(), isSessionStartEvent(), isToolGateEvent(), isTurnBoundaryHarvestEvent(), maybeAuditApproval() (+5 more)
 
-### Community 84 - "stripCursorHooks"
+### Community 85 - "codex/handle_test.go"
+Cohesion: 0.32
+Nodes (13): T, TestApplyPatchBodySupportsCodexHookCommand(), TestApplyPatchBodyUnwrapsCodeMode(), TestCodeModeApplyPatchEmitsFileDecisions(), TestCodexEndToEndOneTurn(), TestCodexMetadataModeDropsBodies(), TestCodexReasoningObservedWithEmptySummary(), TestCodexReasoningSummaryFromRollout() (+5 more)
+
+### Community 86 - "stripCursorHooks"
 Cohesion: 0.29
 Nodes (12): RawMessage, isOurHookEntry(), stripCursorHooks(), T, TestStripCursorHooks_DeletesFileWhenOnlyOursAndVersion(), TestStripCursorHooks_KeepsFileWhenOtherTopLevelKeysExist(), TestStripCursorHooks_MissingFileIsNoOp(), TestStripCursorHooks_NoOpWhenNothingOurs() (+4 more)
 
-### Community 85 - "NewStore"
+### Community 87 - "NewStore"
 Cohesion: 0.25
 Nodes (11): NewStore(), T, TestBuildSessionContextAndLesson(), TestDeleteLesson(), TestIsStubMarkdown(), TestSeedReplacesStubOnly(), TestTemporaryMode(), defaultTemplate() (+3 more)
 
-### Community 86 - "Init"
+### Community 88 - "Init"
 Cohesion: 0.25
 Nodes (11): MeterProvider, SetCaptureMessageContent(), GetConfig(), Config, Resource, Init(), newMeterProvider(), newResource() (+3 more)
 
-### Community 87 - "guardrails-dashboard.ts"
+### Community 89 - "guardrails-dashboard.ts"
 Cohesion: 0.25
 Nodes (10): GET(), dynamic, GET(), runtime, AuditEvent, listAuditEvents(), classify(), dayKey() (+2 more)
 
-### Community 88 - ".Write"
+### Community 90 - ".Write"
 Cohesion: 0.23
 Nodes (6): CodexExport, CodexImport, codexMessageText(), codexRoot(), SessionRef, peekCodex()
 
-### Community 89 - ".Write"
+### Community 91 - ".Write"
 Cohesion: 0.23
 Nodes (6): PiExport, PiImport, SessionRef, peekPi(), piHome(), piText()
 
-### Community 90 - ".paths"
+### Community 92 - ".paths"
 Cohesion: 0.23
 Nodes (3): SOHubExport, SOHubImport, SessionRef
 
-### Community 91 - "NewStore"
+### Community 93 - "NewStore"
 Cohesion: 0.28
 Nodes (11): T, TestIsEmptyListItem(), TestSpansHaveActivity(), TestUpsertSkipsIdentityOnly(), T, TestResolveNestedParentClearsOrphanSubagentFlag(), TestUpsertActiveFromSpansDoesNotPoisonParentWithSubagentType(), TestUpsertActiveFromSpansNestsSubagents() (+3 more)
 
-### Community 92 - "StateStore"
+### Community 94 - "StateStore"
 Cohesion: 0.32
 Nodes (4): Time, Phase, State, StateStore
 
-### Community 93 - "AgentsPanel.tsx"
+### Community 95 - "AgentsPanel.tsx"
 Cohesion: 0.22
 Nodes (11): AgentGraph, AgentNode, agentDetail(), AgentDetailPopover(), AgentDetailState, AgentRow(), AgentsPanel(), AgentsPanelProps (+3 more)
 
-### Community 94 - "Default"
+### Community 96 - "Default"
 Cohesion: 0.24
 Nodes (9): Default(), NormalizeModelSlug(), T, TestAutoApplyTiers(), TestModelForCLI(), TestNormalizeModelSlug(), TestNormalizeObservabilityLocalOnly(), T (+1 more)
 
-### Community 95 - "Status"
-Cohesion: 0.35
-Nodes (9): hookBinaryAvailable(), Install(), Status(), T, TestStatusClaudeCodeDetectsStaleBinaryPath(), TestStatusClaudeCodeMissingManifest(), TestStatusClaudeCodeOKWithValidBinaryPath(), writeClaudeManifest() (+1 more)
+### Community 97 - "Status"
+Cohesion: 0.30
+Nodes (10): hookBinaryAvailable(), Install(), Status(), T, TestStatusClaudeCodeDetectsStaleBinaryPath(), TestStatusClaudeCodeMissingManifest(), TestStatusClaudeCodeOKWithValidBinaryPath(), writeClaudeManifest() (+2 more)
 
-### Community 96 - "harness-files-page.tsx"
+### Community 98 - "harness-files-page.tsx"
 Cohesion: 0.24
 Nodes (5): FileEntry, fileNameFromPath(), HarnessFilesPage(), HarnessFilesPageInner(), matchEntry()
 
-### Community 97 - "theme-provider.tsx"
+### Community 99 - "theme-provider.tsx"
 Cohesion: 0.26
 Nodes (9): metadata, applyDomTheme(), isPreference(), readStoredPreference(), ResolvedTheme, systemResolved(), ThemeContext, ThemeContextValue (+1 more)
 
-### Community 98 - "Classify"
+### Community 100 - "Classify"
 Cohesion: 0.29
 Nodes (9): Classification, Inputs, Classify(), EnvAllowlist(), matchAllowlist(), SplitAllowlist(), T, TestClassify() (+1 more)
 
-### Community 99 - "DefaultPolicy"
+### Community 101 - "DefaultPolicy"
 Cohesion: 0.44
 Nodes (10): decideGuardrail(), T, TestDecideGuardrailAllowsEmptyTargets(), TestDecideGuardrailAllowsNormalPath(), TestDecideGuardrailDeniesCommand(), TestDecideGuardrailDeniesSensitivePath(), TestDecideGuardrailPathOnlyDoesNotUseZeroValueDeny(), TestIsSessionEndEventParity() (+2 more)
 
-### Community 100 - "rec"
-Cohesion: 0.20
+### Community 102 - "rec"
+Cohesion: 0.22
 Nodes (5): Session, T, ToolCall, TestOpenCodeMessageUsagePrefersHostCost(), rec
 
-### Community 101 - "Rebuild"
+### Community 103 - "Rebuild"
 Cohesion: 0.29
 Nodes (9): QueryRetrieve(), indexPath(), Rebuild(), Search(), snippetAround(), T, TestRebuildAndSearch(), Hit (+1 more)
 
-### Community 102 - "Run"
+### Community 104 - "Run"
 Cohesion: 0.24
 Nodes (9): Run(), BuildCitymap(), BuildReplayFromFootprint(), Meta, Options, Citymap, CitymapNode, Replay (+1 more)
 
-### Community 103 - "npm/package.json"
+### Community 105 - "npm/package.json"
 Cohesion: 0.18
 Nodes (10): bin, so, description, engines, node, files, license, name (+2 more)
 
-### Community 104 - "Timeline.tsx"
+### Community 106 - "Timeline.tsx"
 Cohesion: 0.25
 Nodes (10): Action, Mark, Bucket, clock(), MARK_LABEL, MarkGroup, Speed, SPEEDS (+2 more)
 
-### Community 105 - "claudecode/transcript.go"
+### Community 107 - "claudecode/transcript.go"
 Cohesion: 0.42
 Nodes (9): assistantContentBlock, assistantMessage, assistantUsage, coalescedTurn, transcriptLine, coalesceAssistants(), RawMessage, mergeAssistantGroup() (+1 more)
 
-### Community 106 - "defaultSampler"
+### Community 108 - "defaultSampler"
 Cohesion: 0.20
 Nodes (6): spanNameSampler, firstEnv(), defaultSampler(), Sampler, SamplingParameters, SamplingResult
 
-### Community 107 - "harnessvalid.go"
+### Community 109 - "harnessvalid.go"
 Cohesion: 0.36
 Nodes (9): SoftWrite, Applyable(), HasEvidence(), SafeJoin(), stripYAMLComments(), ValidateEvalsBody(), ValidateGuardrailsBody(), ValidatePath() (+1 more)
 
-### Community 108 - "dropdown.tsx"
+### Community 110 - "repoRoot"
+Cohesion: 0.26
+Nodes (12): dynamic, GET(), runtime, currentRepoMeta(), gitRemoteURL(), repoSlug(), slugFromRemoteURL(), enrich() (+4 more)
+
+### Community 111 - "dropdown.tsx"
 Cohesion: 0.22
 Nodes (8): HARNESSES, PortWizard(), PortWizardProps, SessionRef, Dropdown(), DropdownOption, DropdownProps, MenuPos
 
-### Community 109 - ".EmitEditDecision"
+### Community 112 - ".EmitEditDecision"
 Cohesion: 0.47
 Nodes (7): commonAttrs(), KeyValue, initMetrics(), recordCommit(), recordEditDecision(), recordLines(), recordPullRequest()
 
-### Community 110 - "Prune"
+### Community 113 - "Prune"
 Cohesion: 0.44
 Nodes (8): Config, Time, Prune(), pruneAudit(), pruneEvalHistory(), pruneRecommendations(), pruneTraceFiles(), Report
 
-### Community 111 - "Explain"
+### Community 114 - "Explain"
 Cohesion: 0.25
 Nodes (7): Explain(), Client, Meta, shortSHA(), truncate(), Footprint, FootprintFile
 
-### Community 112 - "treeLayout.ts"
+### Community 115 - "treeLayout.ts"
 Cohesion: 0.33
 Nodes (7): centerOf(), nearbyFiles(), Node, TreeDir, TreeEdge, TreeLayout, CityFile
 
-### Community 113 - "dirLabels.ts"
+### Community 116 - "dirLabels.ts"
 Cohesion: 0.25
 Nodes (4): DirLabel, DirLabelEntry, DirLabelSet, labelTexture()
 
-### Community 114 - "blame.go"
+### Community 117 - "blame.go"
 Cohesion: 0.39
 Nodes (7): LineInfo, WhyResult, File(), Store, isHex(), sessionIDForCommit(), Why()
 
-### Community 115 - ".Verify"
+### Community 118 - ".Verify"
 Cohesion: 0.29
 Nodes (5): Event, Orchestrator, RemapCWD(), HubFactory, VerifyResult
 
-### Community 116 - "config_test.go"
+### Community 119 - "config_test.go"
 Cohesion: 0.39
 Nodes (7): LLMSetupGuide(), T, TestGuardrailsEnabledEnv(), TestLLMSetupGuide(), TestLoadMigratesLegacyGovernanceKey(), TestResolveLLMLocal(), TestResolveLLMOpenRouter()
 
-### Community 117 - "scripts"
+### Community 120 - "scripts"
 Cohesion: 0.25
 Nodes (8): scripts, build, dev, lint, start, test, test:watch, typecheck
 
-### Community 119 - "inputBuilder"
+### Community 122 - "inputBuilder"
 Cohesion: 0.76
 Nodes (6): T, inputBuilder(), TestClaudePreToolUseTaskLinksSubagent(), TestClaudeSessionDurationCachedAcrossInvocations(), TestClaudeSubagentStopWithoutPreToolUse(), withIsolatedCache()
 
-### Community 120 - "marketplace/plugins/opencode/superopen.ts"
+### Community 123 - "marketplace/plugins/opencode/superopen.ts"
 Cohesion: 0.57
 Nodes (6): fire(), parseDeny(), parseInject(), runFinalize(), soBin(), SuperopenPlugin()
 
-### Community 121 - "launch.go"
+### Community 124 - "launch.go"
 Cohesion: 0.57
 Nodes (6): agentBinary(), ensureInstalled(), NewCmd(), run(), vendorOf(), writeMemoryPack()
 
-### Community 122 - "EstimateTokens"
+### Community 125 - "EstimateTokens"
 Cohesion: 0.48
 Nodes (5): EstimateTokens(), T, TestEstimateTokensEmpty(), TestEstimateTokensShort(), TestEstimateTokensWordFloor()
 
-### Community 123 - "plugins/opencode/superopen.ts"
+### Community 126 - "plugins/opencode/superopen.ts"
 Cohesion: 0.57
 Nodes (6): fire(), parseDeny(), parseInject(), runFinalize(), soBin(), SuperopenPlugin()
 
-### Community 124 - "Config"
+### Community 127 - "Config"
 Cohesion: 0.33
 Nodes (4): Config, IDGenerator, Duration, Sampler
 
-### Community 125 - "marketplace/plugins/pi/index.ts"
+### Community 128 - "marketplace/plugins/pi/index.ts"
 Cohesion: 0.47
 Nodes (3): fire(), runFinalize(), soBin()
 
-### Community 126 - "Display"
+### Community 129 - "Display"
 Cohesion: 0.40
 Nodes (4): Display(), NewCmd(), T, TestDisplaySemver()
 
-### Community 127 - "plugins/pi/index.ts"
+### Community 130 - "plugins/pi/index.ts"
 Cohesion: 0.47
 Nodes (3): fire(), runFinalize(), soBin()
 
-### Community 128 - "install.sh script"
+### Community 131 - "install.sh script"
 Cohesion: 0.67
 Nodes (5): fatal(), info(), need(), install.sh script, warn()
 
-### Community 129 - "adapter"
+### Community 132 - "adapter"
 Cohesion: 0.40
 Nodes (3): adapter, Adapter, New()
 
-### Community 133 - "Run"
+### Community 136 - "Run"
 Cohesion: 0.70
 Nodes (4): Check, detectAgentCLIs(), Format(), Run()
 
-### Community 134 - "axi_test.go"
+### Community 137 - "axi_test.go"
 Cohesion: 0.60
 Nodes (4): T, TestEmptyText(), TestRowsJSON(), TestTruncate()
 
-### Community 136 - "install.go"
+### Community 139 - "install.go"
 Cohesion: 0.83
 Nodes (3): NewCmd(), run(), vendorsFromArg()
 
-### Community 138 - "web/package.json"
+### Community 141 - "web/package.json"
 Cohesion: 0.50
 Nodes (3): name, private, version
-
-### Community 151 - "runWithProject"
-Cohesion: 0.18
-Nodes (16): dynamic, GET(), HEAD(), loadGraphHtml(), runtime, themeFromRequest(), dynamic, GET() (+8 more)
-
-### Community 173 - "config/route.ts"
-Cohesion: 0.31
-Nodes (9): dynamic, formatYamlValue(), GET(), isTopLevelKey(), PatchBody, PUT(), runtime, setYamlPath() (+1 more)
 
 ## Knowledge Gaps
 - **293 isolated node(s):** `github.com/ishanjainn/superopen`, `claudeEnvelope`, `Adapter`, `Emitter`, `sessionRootMarkerKey` (+288 more)
@@ -746,9 +751,9 @@ _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Command` connect `cmds_dev.go` to `shell/sidebar.tsx`, `cmds_extra.go`, `Resolve`, `launch.go`, `cmdGitHook`?**
   _High betweenness centrality (0.401) - this node is a cross-community bridge._
-- **Why does `cn()` connect `cn` to `sessions/page.tsx`, `shell/sidebar.tsx`, `memory.ts`, `utils.ts`, `dropdown.tsx`, `sessions/[id]/page.tsx`, `harness-yaml.ts`, `evaluations/page.tsx`, `session-timeline.tsx`, `file-content-view.tsx`, `playground-shell.tsx`?**
+- **Why does `cn()` connect `cn` to `sessions/page.tsx`, `shell/sidebar.tsx`, `memory.ts`, `sessions/[id]/page.tsx`, `harness-yaml.ts`, `dropdown.tsx`, `evaluations/page.tsx`, `session-timeline.tsx`, `file-content-view.tsx`, `utils.ts`, `playground-shell.tsx`?**
   _High betweenness centrality (0.208) - this node is a cross-community bridge._
-- **Why does `Resolve()` connect `Resolve` to `cli.go`, `Run`, `TestResolveAndEnsureDirs`, `Paths`, `home`, `Emitter`, `recommend.go`, `.Create`, `Profile`, `guardrails.go`, `graph.go`, `backend.go`, `HarnessID`, `cmdGitHook`, `discover.go`, `cmds_dev.go`, `finalizeSession`, `cmds_extra.go`, `Run`, `Refresh`, `harness_hooks.go`, `NewStore`, `.paths`, `Default`, `Rebuild`, `Run`, `CursorImport`, `launch.go`?**
+- **Why does `Resolve()` connect `Resolve` to `cli.go`, `Run`, `TestResolveAndEnsureDirs`, `Paths`, `home`, `Emitter`, `.Create`, `recommend.go`, `Profile`, `guardrails.go`, `graph.go`, `backend.go`, `cmdGitHook`, `discover.go`, `cmds_dev.go`, `finalizeSession`, `Ledger`, `cmds_extra.go`, `Run`, `Refresh`, `harness_hooks.go`, `NewStore`, `.paths`, `Default`, `Rebuild`, `Run`, `CursorImport`, `launch.go`?**
   _High betweenness centrality (0.200) - this node is a cross-community bridge._
 - **Are the 78 inferred relationships involving `Resolve()` (e.g. with `.paths()` and `.soRoot()`) actually correct?**
   _`Resolve()` has 78 INFERRED edges - model-reasoned connections that need verification._
@@ -756,5 +761,5 @@ _Questions this graph is uniquely positioned to answer:_
   _293 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `release-packages.py` be split into smaller, more focused modules?**
   _Cohesion score 0.06155950752393981 - nodes in this community are weakly interconnected._
-- **Should `projectIdFromRequest` be split into smaller, more focused modules?**
-  _Cohesion score 0.08680555555555555 - nodes in this community are weakly interconnected._
+- **Should `Store` be split into smaller, more focused modules?**
+  _Cohesion score 0.07589984350547731 - nodes in this community are weakly interconnected._

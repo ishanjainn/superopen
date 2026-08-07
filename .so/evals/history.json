@@ -69,5 +69,16 @@
     "score": 0.54,
     "badge": "ok",
     "evidence_status": "sufficient"
+  },
+  {
+    "session_id": "a833bfd5-ade2-414b-9d86-790de485206f",
+    "at": "2026-08-07T06:10:34.202332Z",
+    "dimensions": {},
+    "notes": [
+      "Insufficient activity telemetry to score this session."
+    ],
+    "score": 0,
+    "badge": "unknown",
+    "evidence_status": "insufficient"
   }
 ]
