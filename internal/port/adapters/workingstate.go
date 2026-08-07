@@ -137,11 +137,20 @@ func (w *wsCollector) addCommand(cmd string, exit *int) {
 // attachExit sets the exit status on the command a just-seen tool output
 // belongs to (the most recently touched one, first-run or repeat), always
 // overwriting so the most recent run's status wins. No-op if none recorded.
+// Prefer attachExitAt when the harness correlates outputs by call_id.
 func (w *wsCollector) attachExit(exit int) {
-	if w.lastCommandIdx < 0 || w.lastCommandIdx >= len(w.commands) {
+	w.attachExitAt(w.lastCommandIdx, exit)
+}
+
+// attachExitAt stamps an exit code onto a specific command index. Used when
+// harness outputs carry a call_id that may arrive out of order relative to
+// later shell calls. No-op for an invalid index.
+func (w *wsCollector) attachExitAt(idx int, exit int) {
+	if idx < 0 || idx >= len(w.commands) {
 		return
 	}
-	w.commands[w.lastCommandIdx].ExitCode = &exit
+	code := exit
+	w.commands[idx].ExitCode = &code
 }
 
 // noteBranch recovers an intended branch from checkout/switch commands.
@@ -167,15 +176,17 @@ func (w *wsCollector) noteBranch(cmd string) {
 
 // observe classifies one tool call into working state. input is the tool's
 // argument object; it is read defensively since shapes vary by harness.
-func (w *wsCollector) observe(toolName string, input map[string]any, exit *int) {
+// Returns the command index when a shell/search command was recorded (so a
+// later call_id-correlated output can attachExitAt), otherwise -1.
+func (w *wsCollector) observe(toolName string, input map[string]any, exit *int) int {
 	name := normalizeToolName(toolName)
 	if name == "" {
-		return
+		return -1
 	}
 
 	if cmd := firstStringField(input, "command", "cmd", "script", "shell_command"); cmd != "" {
 		w.addCommand(cmd, exit)
-		return
+		return w.lastCommandIdx
 	}
 
 	path := firstStringField(input, "file_path", "filePath", "path", "target_file", "filename", "file", "notebook_path")
@@ -183,8 +194,9 @@ func (w *wsCollector) observe(toolName string, input map[string]any, exit *int) 
 		if pattern := firstStringField(input, "pattern", "query"); pattern != "" && matchesAny(name, readTools) {
 			// Searches have no single path; the search itself is the useful signal.
 			w.addCommand(name+" "+pattern, nil)
+			return w.lastCommandIdx
 		}
-		return
+		return -1
 	}
 	switch {
 	case matchesAny(name, editTools):
@@ -192,6 +204,7 @@ func (w *wsCollector) observe(toolName string, input map[string]any, exit *int) 
 	case matchesAny(name, readTools):
 		w.addFile(path, false)
 	}
+	return -1
 }
 
 // extractExitCode probes a tool-output value for an exit/status code. The value

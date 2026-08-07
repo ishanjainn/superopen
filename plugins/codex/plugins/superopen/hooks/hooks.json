@@ -57,7 +57,7 @@
           },
           {
             "type": "command",
-            "command": "so sessions finalize",
+            "command": "so sessions refresh",
             "timeout": 30
           }
         ]

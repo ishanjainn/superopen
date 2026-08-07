@@ -247,6 +247,7 @@ func (c CursorExport) Write(ps port.PortableSession, opts port.WriteOptions) (po
 	if err := writeTranscript(dir, ps); err != nil {
 		return port.ExportResult{}, err
 	}
+	writeWorkingStateSidecar(dir, ps)
 
 	// Native Cursor resume pack under project .cursor/so-port/<id>/
 	portDir := filepath.Join(repoRoot, ".cursor", "so-port", destID)
@@ -254,6 +255,7 @@ func (c CursorExport) Write(ps port.PortableSession, opts port.WriteOptions) (po
 	if err := writeTranscript(portDir, ps); err != nil {
 		return port.ExportResult{}, err
 	}
+	writeWorkingStateSidecar(portDir, ps)
 	portMeta, _ := json.MarshalIndent(map[string]any{
 		"id": destID, "title": meta.Title, "source": ps.SourceHarness,
 		"source_session_id": ps.SourceSessionID, "turns": len(ps.Turns),
@@ -304,4 +306,21 @@ func writeTranscript(dir string, ps port.PortableSession) error {
 		}
 	}
 	return nil
+}
+
+// writeWorkingStateSidecar persists recovered files/commands beside the
+// role/text transcript. CursorImport.Parse (and SO hub round-trips) read it
+// back; without it, hub mirrors and so-port packs lose working state.
+func writeWorkingStateSidecar(dir string, ps port.PortableSession) {
+	if ps.WorkingState.Empty() && ps.DroppedTurns == 0 {
+		return
+	}
+	ws, err := json.Marshal(map[string]any{
+		"working_state": ps.WorkingState,
+		"dropped_turns": ps.DroppedTurns,
+	})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(dir, "working-state.json"), ws, 0o644)
 }

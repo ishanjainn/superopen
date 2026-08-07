@@ -100,13 +100,7 @@ func (s SOHubExport) Write(ps port.PortableSession, opts port.WriteOptions) (por
 	// Working state (files/commands recovered from dropped tool calls) has no
 	// home in transcript.jsonl's role/text shape, so it rides a sidecar file.
 	// CursorImport.Parse reads it back on hub round-trip.
-	if !ps.WorkingState.Empty() || ps.DroppedTurns > 0 {
-		ws, _ := json.Marshal(map[string]any{
-			"working_state": ps.WorkingState,
-			"dropped_turns": ps.DroppedTurns,
-		})
-		_ = os.WriteFile(filepath.Join(dir, "working-state.json"), ws, 0o644)
-	}
+	writeWorkingStateSidecar(dir, ps)
 	_ = store.UpdateMeta(meta)
 	return port.ExportResult{DestSessionID: destID}, nil
 }

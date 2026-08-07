@@ -249,6 +249,67 @@ func TestCodexParseRepeatedCommandKeepsLatestExitCode(t *testing.T) {
 	}
 }
 
+func TestCodexParseInterleavedOutputsAttachExitByCallID(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	sessDir := filepath.Join(home, ".codex", "sessions", "2026", "01", "04")
+	_ = os.MkdirAll(sessDir, 0o755)
+	path := filepath.Join(sessDir, "rollout-interleaved.jsonl")
+	appCwd := filepath.Join(home, "app")
+	// Parallel-style ordering: both calls observed before either output.
+	// lastCommandIdx would stamp both exits onto "npm run build".
+	rows := []map[string]any{
+		{"type": "session_meta", "payload": map[string]any{"id": "codex-interleave", "cwd": appCwd, "timestamp": "2026-01-01T00:00:00Z"}},
+		{"type": "response_item", "payload": map[string]any{
+			"type": "function_call", "name": "shell", "call_id": "c1",
+			"arguments": `{"command":"go test ./..."}`, "timestamp": "2026-01-01T00:00:01Z",
+		}},
+		{"type": "response_item", "payload": map[string]any{
+			"type": "function_call", "name": "shell", "call_id": "c2",
+			"arguments": `{"command":"npm run build"}`, "timestamp": "2026-01-01T00:00:02Z",
+		}},
+		{"type": "response_item", "payload": map[string]any{
+			"type": "function_call_output", "call_id": "c1",
+			"output": `{"exit_code":1}`, "timestamp": "2026-01-01T00:00:03Z",
+		}},
+		{"type": "response_item", "payload": map[string]any{
+			"type": "function_call_output", "call_id": "c2",
+			"output": `{"exit_code":0}`, "timestamp": "2026-01-01T00:00:04Z",
+		}},
+		{"type": "event_msg", "payload": map[string]any{"type": "agent_message", "message": "done", "timestamp": "2026-01-01T00:00:05Z"}},
+	}
+	f, _ := os.Create(path)
+	enc := json.NewEncoder(f)
+	for _, r := range rows {
+		_ = enc.Encode(r)
+	}
+	_ = f.Close()
+
+	imp := adapters.CodexImport{}
+	refs, err := imp.Discover()
+	if err != nil || len(refs) == 0 {
+		t.Fatalf("discover: %v %v", err, refs)
+	}
+	ps, err := imp.Parse(refs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps.WorkingState.Commands) != 2 {
+		t.Fatalf("commands=%+v", ps.WorkingState.Commands)
+	}
+	byCmd := map[string]*int{}
+	for _, c := range ps.WorkingState.Commands {
+		byCmd[c.Cmd] = c.ExitCode
+	}
+	if got := byCmd["go test ./..."]; got == nil || *got != 1 {
+		t.Fatalf("go test exit want 1, got %v", got)
+	}
+	if got := byCmd["npm run build"]; got == nil || *got != 0 {
+		t.Fatalf("npm build exit want 0, got %v", got)
+	}
+}
+
 func TestClaudeParseRecoversWorkingStateFromToolUse(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -350,5 +411,60 @@ func TestSOHubRoundTripPreservesWorkingState(t *testing.T) {
 	}
 	if back.DroppedTurns != 2 {
 		t.Fatalf("dropped turns not preserved: %d", back.DroppedTurns)
+	}
+}
+
+func TestCursorExportPreservesWorkingStateOnHubMirror(t *testing.T) {
+	hubRoot := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(hubRoot, ".so"), 0o755)
+	ps := port.NewPortableSession(port.HarnessCodex, "src-cursor-ws", "/x", hubRoot, "t")
+	ps.Turns = []port.PortableTurn{{Role: "user", Text: "hi"}}
+	ps.DroppedTurns = 3
+	ps.WorkingState = port.WorkingState{
+		FilesEdited: []string{"b.go"},
+		GitBranch:   "feature/ws",
+		Commands:    []port.RanCommand{{Cmd: "go test ./..."}},
+	}
+
+	exp := adapters.CursorExport{RepoRoot: hubRoot}
+	out, err := exp.Write(ps, port.WriteOptions{Force: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Hub mirror under .so/sessions must carry the sidecar so a later
+	// CursorImport / SOHubImport can restore recovered files/commands.
+	imp := adapters.CursorImport{SORoot: filepath.Join(hubRoot, ".so")}
+	refs, err := imp.Discover()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ref port.SessionRef
+	for _, r := range refs {
+		if r.SourceSessionID == out.DestSessionID {
+			ref = r
+		}
+	}
+	if ref.SourceSessionID == "" {
+		t.Fatalf("could not find cursor hub mirror %s among %v", out.DestSessionID, refs)
+	}
+	back, err := imp.Parse(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.WorkingState.FilesEdited) != 1 || back.WorkingState.FilesEdited[0] != "b.go" {
+		t.Fatalf("hub mirror lost working state: %+v", back.WorkingState)
+	}
+	if back.WorkingState.GitBranch != "feature/ws" {
+		t.Fatalf("git branch not preserved: %+v", back.WorkingState)
+	}
+	if back.DroppedTurns != 3 {
+		t.Fatalf("dropped turns not preserved: %d", back.DroppedTurns)
+	}
+
+	// Native so-port pack must also keep the sidecar for re-import from there.
+	portDir := filepath.Join(hubRoot, ".cursor", "so-port", out.DestSessionID)
+	if _, err := os.Stat(filepath.Join(portDir, "working-state.json")); err != nil {
+		t.Fatalf("so-port pack missing working-state.json: %v", err)
 	}
 }

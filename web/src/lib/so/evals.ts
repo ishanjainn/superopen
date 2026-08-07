@@ -563,6 +563,7 @@ export function buildDailySeries(runs: EvalRun[]) {
     };
     cur.runs++;
     if (r.badge === "good") cur.good++;
+    else if (r.badge === "ok") cur.ok++;
     else if (r.badge === "unknown") cur.unknown++;
     else cur.poor++;
     cur.tokens += r.tokens || 0;

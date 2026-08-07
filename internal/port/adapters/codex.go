@@ -147,8 +147,10 @@ func codexCallArgs(payload map[string]any) map[string]any {
 func (CodexImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 	sess := port.NewPortableSession(port.HarnessCodex, ref.SourceSessionID, ref.SourcePath, ref.CWD, ref.Title)
 	ws := newWSCollector(ref.CWD)
-	// call_id → tool name, so a later function_call_output can attach its status.
-	pendingCalls := map[string]string{}
+	// call_id → command index in wsCollector, so a later function_call_output
+	// attaches its exit code to the matching command even when another shell
+	// call was observed in between (parallel / out-of-order outputs).
+	pendingCmdIdx := map[string]int{}
 	f, err := os.Open(ref.SourcePath)
 	if err != nil {
 		return sess, err
@@ -213,19 +215,20 @@ func (CodexImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 				sess.DroppedTurns++
 				name := firstStringField(payload, "name", "tool_name")
 				args := codexCallArgs(payload)
-				ws.observe(name, args, nil)
-				if id := firstStringField(payload, "call_id", "id"); id != "" && name != "" {
-					pendingCalls[id] = name
+				idx := ws.observe(name, args, nil)
+				if id := firstStringField(payload, "call_id", "id"); id != "" && idx >= 0 {
+					pendingCmdIdx[id] = idx
 				}
 			case "function_call_output", "custom_tool_call_output":
 				sess.DroppedTurns++
-				// Outputs carry the exit status; re-observe to attach it to the command.
+				// Outputs carry the exit status; attach by call_id, not "last command".
 				id := firstStringField(payload, "call_id", "id")
-				name := pendingCalls[id]
-				if exit, ok := extractExitCode(payload["output"]); ok && name != "" {
-					ws.attachExit(exit)
+				if idx, ok := pendingCmdIdx[id]; ok {
+					if exit, ok := extractExitCode(payload["output"]); ok {
+						ws.attachExitAt(idx, exit)
+					}
 				}
-				delete(pendingCalls, id)
+				delete(pendingCmdIdx, id)
 			case "reasoning":
 				sess.DroppedTurns++
 			}

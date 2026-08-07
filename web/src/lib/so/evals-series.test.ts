@@ -39,4 +39,22 @@ describe("evaluation daily series", () => {
     expect(series).toHaveLength(30);
     expect(series.at(-1)?.date).toBe("2026-08-07");
   });
+
+  it("counts ok badges as ok, not poor", () => {
+    const series = buildDailySeries([
+      run("2026-08-01T12:00:00Z", "ok"),
+      run("2026-08-01T13:00:00Z", "good"),
+      run("2026-08-01T14:00:00Z", "poor"),
+    ]);
+
+    expect(series).toHaveLength(1);
+    expect(series[0]).toMatchObject({
+      runs: 3,
+      good: 1,
+      ok: 1,
+      poor: 1,
+      unknown: 0,
+      pass_rate: 1 / 3,
+    });
+  });
 });
