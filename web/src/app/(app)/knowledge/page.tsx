@@ -7,7 +7,7 @@ export default function KnowledgePage() {
     <HarnessFilesPage
       title="Knowledge"
       dir="knowledge"
-      emptyHint="No knowledge yet. Create one with New, or run so init / so sync."
+      emptyHint="No AGENTS.md yet. Create one with New, or run so init / so sync."
     />
   );
 }

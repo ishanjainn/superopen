@@ -8,17 +8,24 @@ import (
 
 const DirName = ".so"
 
-// Paths holds absolute paths into a project's .so/ harness.
+// Paths holds absolute paths into a project's Superopen layout.
+// Guidance (AGENTS.md + vendor rules/skills) lives at the repo root.
+// Runtime state lives under .so/.
 type Paths struct {
-	Root            string
-	Config          string
-	AgentBrief      string
-	GraphDir        string
-	GraphJSON       string
-	GraphReport     string
-	KnowledgeDir    string // .so/knowledge (team feedforward docs)
-	RulesDir        string // .so/rules
-	SkillsDir       string
+	RepoRoot string
+
+	Root        string
+	Config      string
+	AgentBrief  string
+	GraphDir    string
+	GraphJSON   string
+	GraphReport string
+
+	// Native developer guidance (not under .so/).
+	AgentsMD  string // AGENTS.md
+	RulesDir  string // discovered vendor rules dir
+	SkillsDir string // discovered vendor skills dir
+
 	GuardrailsDir   string
 	GuardrailsFile  string
 	EvalsDir        string
@@ -35,7 +42,7 @@ type Paths struct {
 	MemoryDir       string
 	Lessons         string
 	LessonsJSONL    string
-	MemoryActive    string // .so/memory/active-context.md
+	MemoryActive    string
 	AuditDir        string
 	AuditEvents     string
 }
@@ -63,18 +70,21 @@ func FindRoot(start string) (string, error) {
 }
 
 // Resolve returns harness paths for a repo root.
+// RulesDir / SkillsDir follow existing vendor trees when present.
 func Resolve(repoRoot string) Paths {
 	root := filepath.Join(repoRoot, DirName)
+	rulesDir, skillsDir := discoverNativeRoots(repoRoot)
 	return Paths{
+		RepoRoot:        repoRoot,
 		Root:            root,
 		Config:          filepath.Join(root, "config.yaml"),
 		AgentBrief:      filepath.Join(root, "AGENT.md"),
 		GraphDir:        filepath.Join(root, "graph"),
 		GraphJSON:       filepath.Join(root, "graph", "graph.json"),
 		GraphReport:     filepath.Join(root, "graph", "GRAPH_REPORT.md"),
-		KnowledgeDir:    filepath.Join(root, "knowledge"),
-		RulesDir:        filepath.Join(root, "rules"),
-		SkillsDir:       filepath.Join(root, "skills"),
+		AgentsMD:        filepath.Join(repoRoot, "AGENTS.md"),
+		RulesDir:        rulesDir,
+		SkillsDir:       skillsDir,
 		GuardrailsDir:   filepath.Join(root, "guardrails"),
 		GuardrailsFile:  filepath.Join(root, "guardrails", "guardrails.yaml"),
 		EvalsDir:        filepath.Join(root, "evals"),
@@ -103,17 +113,13 @@ func (p Paths) Exists() bool {
 	return err == nil && info.IsDir()
 }
 
-// EnsureDirs creates the standard .so/ directory tree and migrates old names once.
+// EnsureDirs creates .so/ runtime dirs and the discovered rules/skills dirs.
 func (p Paths) EnsureDirs() error {
-	// One-shot migrations (no ongoing aliases in APIs).
-	migrateDir(filepath.Join(p.Root, "docs"), p.KnowledgeDir)
-	migrateDir(filepath.Join(p.Root, "context"), p.KnowledgeDir)
-	migrateFile(filepath.Join(p.MemoryDir, "ACTIVE.md"), p.MemoryActive)
-
 	dirs := []string{
-		p.Root, p.GraphDir, p.KnowledgeDir, p.RulesDir, p.SkillsDir, p.GuardrailsDir,
+		p.Root, p.GraphDir, p.GuardrailsDir,
 		p.EvalsDir, p.TracesDir, p.SessionsDir, p.Recommendations,
 		p.VizDir, p.MemoryDir, filepath.Join(p.MemoryDir, "history"), p.AuditDir,
+		p.RulesDir, p.SkillsDir,
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -123,27 +129,19 @@ func (p Paths) EnsureDirs() error {
 	return nil
 }
 
-func migrateDir(from, to string) {
-	info, err := os.Stat(from)
-	if err != nil || !info.IsDir() {
-		return
-	}
-	if _, err := os.Stat(to); err == nil {
-		return
-	}
-	_ = os.Rename(from, to)
+// SkillSKILL returns <SkillsDir>/<name>/SKILL.md
+func (p Paths) SkillSKILL(name string) string {
+	return filepath.Join(p.SkillsDir, name, "SKILL.md")
 }
 
-func migrateFile(from, to string) {
-	if _, err := os.Stat(from); err != nil {
-		return
+// AgentsPaths is the ordered multi-path registry of AGENTS.md files
+// (repo root first, then nested dir/AGENTS.md discovered on disk).
+func (p Paths) AgentsPaths() []string {
+	found := ListAgentsFiles(p.RepoRoot)
+	if len(found) > 0 {
+		return found
 	}
-	if _, err := os.Stat(to); err == nil {
-		_ = os.Remove(from)
-		return
-	}
-	_ = os.MkdirAll(filepath.Dir(to), 0o755)
-	_ = os.Rename(from, to)
+	return []string{p.AgentsMD}
 }
 
 // SessionDir returns the path for a session id.

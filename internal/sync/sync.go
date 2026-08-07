@@ -37,7 +37,7 @@ func Run(opts Options) error {
 	if err := inject.Apply(root); err != nil {
 		return fmt.Errorf("inject: %w", err)
 	}
-	if err := coding.Install(root, cfg.Observability.Listen, cfg.Observability.Vendors, "plugins"); err != nil {
+	if err := coding.Install(root, cfg.Observability.Listen, cfg.Observability.Vendors); err != nil {
 		return fmt.Errorf("coding hooks: %w", err)
 	}
 	soBin, _ := os.Executable()

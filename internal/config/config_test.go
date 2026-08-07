@@ -1,7 +1,6 @@
 package config_test
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -52,32 +51,14 @@ func TestLLMSetupGuide(t *testing.T) {
 	}
 }
 
-func TestLoadMigratesLegacyGovernanceKey(t *testing.T) {
-	dir := t.TempDir()
-	path := dir + "/config.yaml"
-	raw := "governance:\n  enabled: false\n"
-	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.GuardrailsEnabled() {
-		t.Fatal("expected legacy governance.enabled=false to disable guardrails")
-	}
-}
-
 func TestGuardrailsEnabledEnv(t *testing.T) {
 	cfg := config.Default()
 	t.Setenv("SUPEROPEN_GUARDRAILS", "off")
-	t.Setenv("SUPEROPEN_GOVERNANCE", "")
 	if cfg.GuardrailsEnabled() {
 		t.Fatal("expected SUPEROPEN_GUARDRAILS=off")
 	}
-	t.Setenv("SUPEROPEN_GUARDRAILS", "")
-	t.Setenv("SUPEROPEN_GOVERNANCE", "off")
-	if cfg.GuardrailsEnabled() {
-		t.Fatal("expected deprecated SUPEROPEN_GOVERNANCE=off alias")
+	t.Setenv("SUPEROPEN_GUARDRAILS", "on")
+	if !cfg.GuardrailsEnabled() {
+		t.Fatal("expected SUPEROPEN_GUARDRAILS=on")
 	}
 }

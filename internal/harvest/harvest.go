@@ -17,6 +17,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/harnessvalid"
 	"github.com/ishanjainn/superopen/internal/llm"
 	"github.com/ishanjainn/superopen/internal/memory"
+	"github.com/ishanjainn/superopen/internal/nativedocs"
 	"github.com/ishanjainn/superopen/internal/retention"
 	"github.com/ishanjainn/superopen/internal/session"
 )
@@ -64,17 +65,23 @@ type ledgerFile struct {
 }
 
 // Delta is the JSON shape we ask the coding-agent CLI to return.
+// Prefer update/remove over endless append — prune superseded guidance.
 type Delta struct {
-	Lessons      []string          `json:"lessons,omitempty"`
-	PrefsAppend  string            `json:"prefs_append,omitempty"`
-	ProjectsNote string            `json:"projects_note,omitempty"`
-	Knowledge    map[string]string `json:"knowledge,omitempty"`
-	RulesAppend  map[string]string `json:"rules_append,omitempty"`
-	Skills       map[string]string `json:"skills,omitempty"`
-	Guardrails   string            `json:"guardrails_note,omitempty"`
-	EvalsNote    string            `json:"evals_note,omitempty"`
-	NeedRecs     bool              `json:"need_recs,omitempty"`
-	RecsWhy      string            `json:"recs_why,omitempty"`
+	Lessons         []string            `json:"lessons,omitempty"`
+	PrefsAppend     string              `json:"prefs_append,omitempty"`
+	ProjectsNote    string              `json:"projects_note,omitempty"`
+	Knowledge       map[string]string   `json:"knowledge,omitempty"`        // agents_rel → append text ("" = root AGENTS.md)
+	KnowledgeRemove map[string][]string `json:"knowledge_remove,omitempty"` // agents_rel → needles to drop from learned
+	RulesAppend     map[string]string   `json:"rules_append,omitempty"`
+	RulesSet        map[string]string   `json:"rules_set,omitempty"` // replace whole rule file
+	RulesRemove     map[string][]string `json:"rules_remove,omitempty"`
+	Skills          map[string]string   `json:"skills,omitempty"`
+	SkillsSet       map[string]string   `json:"skills_set,omitempty"`
+	SkillsRemove    []string            `json:"skills_remove,omitempty"`
+	Guardrails      string              `json:"guardrails_note,omitempty"`
+	EvalsNote       string              `json:"evals_note,omitempty"`
+	NeedRecs        bool                `json:"need_recs,omitempty"`
+	RecsWhy         string              `json:"recs_why,omitempty"`
 }
 
 // Run harvests one session: local summary → budgeted agent CLI → apply deltas.
@@ -117,6 +124,11 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, trigger Trigg
 		return res, nil
 	}
 
+	vendor := ""
+	if meta, err := session.NewStore(paths).Get(sessionID); err == nil {
+		vendor = meta.Vendor
+	}
+
 	snippets := currentSnippets(paths)
 	delta, usedAgent, err := proposeDelta(cfg, summary, snippets)
 	if err != nil {
@@ -127,7 +139,7 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, trigger Trigg
 		return res, nil
 	}
 
-	applied := applyDelta(paths, delta)
+	applied := applyDelta(paths, delta, vendor)
 	_, _ = memory.NewStore(paths).Consolidate(summary, llm.NewMemoryCompleter(cfg))
 	applied++
 
@@ -359,8 +371,10 @@ func currentSnippets(paths harness.Paths) string {
 	files := []string{
 		filepath.Join(paths.MemoryDir, "preferences.md"),
 		filepath.Join(paths.MemoryDir, "projects.md"),
-		filepath.Join(paths.KnowledgeDir, "architecture.md"),
-		filepath.Join(paths.RulesDir, "coding.md"),
+		paths.AgentsMD,
+	}
+	if codingPath, err := nativedocs.RulePath(paths, "coding"); err == nil {
+		files = append(files, codingPath)
 	}
 	n := len(files)
 	if n == 0 {
@@ -380,10 +394,15 @@ func currentSnippets(paths harness.Paths) string {
 }
 
 func proposeDelta(cfg config.Config, summary, snippets string) (Delta, bool, error) {
-	system := `You update a Superopen harness after a coding session.
-Return ONLY compact JSON matching:
-{"lessons":["..."],"prefs_append":"","projects_note":"","knowledge":{"architecture.md":"append md"},"rules_append":{"coding.md":"..."},"skills":{},"guardrails_note":"","evals_note":"","need_recs":false,"recs_why":""}
-Rules: prefer empty fields; lessons only for durable always/never/prefer; knowledge/rules only when team-useful; need_recs true only if a concrete harness gap exists.`
+	system := `You update Superopen guidance after a coding session.
+Return ONLY compact JSON:
+{"lessons":[],"prefs_append":"","projects_note":"","knowledge":{"":"append to root AGENTS.md learned"},"knowledge_remove":{"":["outdated needle"]},"rules_append":{"coding":"..."},"rules_set":{},"rules_remove":{"coding":["line needle"]},"skills":{},"skills_set":{},"skills_remove":[],"need_recs":false,"recs_why":""}
+Rules:
+- Prefer empty fields. Do not keep appending forever — use knowledge_remove / rules_remove / skills_remove when guidance is obsolete or wrong.
+- knowledge keys are AGENTS.md locations: "" or omit for root; "internal/pkg" for nested internal/pkg/AGENTS.md (create only when that area needs local guidance).
+- rules_* write into existing vendor rules copies of that stem (keep Cursor/Claude/… in sync); if none exist, create under the session's vendor rules tree.
+- skills_* same for skills trees; never touch the so skill. AGENTS.md knowledge_* is always shared.
+- lessons only for durable always/never/prefer; need_recs true only for a concrete harness gap.`
 	user := "SESSION SUMMARY (local extract, truncated):\n" + summary + "\n\nCURRENT SNIPPETS:\n" + snippets
 
 	completer := llm.NewMemoryCompleter(cfg)
@@ -416,10 +435,10 @@ func parseDelta(text string) (Delta, error) {
 	return d, nil
 }
 
-func applyDelta(paths harness.Paths, d Delta) int {
+func applyDelta(paths harness.Paths, d Delta, vendor string) int {
 	n := 0
+	wopts := nativedocs.WriteOpts{Vendor: vendor}
 	store := memory.NewStore(paths)
-	ev := []string{"harvest_delta"}
 	for _, lesson := range d.Lessons {
 		lesson = strings.TrimSpace(lesson)
 		if lesson == "" {
@@ -448,52 +467,65 @@ func applyDelta(paths harness.Paths, d Delta) int {
 		}
 	}
 	for rel, body := range d.Knowledge {
-		rel = filepath.Clean(rel)
-		if strings.Contains(rel, "..") || filepath.IsAbs(rel) {
+		agentsPath, err := nativedocs.AgentsFile(paths.RepoRoot, rel)
+		if err != nil {
 			continue
 		}
-		full := filepath.Join(paths.KnowledgeDir, rel)
-		if err := harnessvalid.ValidateSoftWrite(harnessvalid.SoftWrite{
-			Path: full, Body: body, Evidence: ev, AppendOnly: true,
-		}); err != nil {
+		_ = nativedocs.EnsureAgentsAt(agentsPath, nativedocs.DefaultAgentsBody("", "", ""), false)
+		if err := nativedocs.AppendLearnedAt(agentsPath, body); err == nil {
+			n++
+		}
+	}
+	for rel, needles := range d.KnowledgeRemove {
+		agentsPath, err := nativedocs.AgentsFile(paths.RepoRoot, rel)
+		if err != nil {
 			continue
 		}
-		appendFile(full, "\n\n"+strings.TrimSpace(body)+"\n")
-		n++
+		for _, needle := range needles {
+			if err := nativedocs.RemoveLearnedContaining(agentsPath, needle); err == nil {
+				n++
+			}
+		}
+	}
+	for rel, body := range d.RulesSet {
+		if err := nativedocs.UpsertRule(paths, rel, body, wopts); err == nil {
+			n++
+		}
 	}
 	for rel, body := range d.RulesAppend {
-		rel = filepath.Clean(rel)
-		if strings.Contains(rel, "..") || filepath.IsAbs(rel) {
-			continue
+		if err := nativedocs.AppendRule(paths, rel, body, wopts); err == nil {
+			n++
 		}
-		full := filepath.Join(paths.RulesDir, rel)
-		if err := harnessvalid.ValidateSoftWrite(harnessvalid.SoftWrite{
-			Path: full, Body: body, Evidence: ev, AppendOnly: true,
-		}); err != nil {
-			continue
+	}
+	for rel, needles := range d.RulesRemove {
+		for _, needle := range needles {
+			if err := nativedocs.RemoveRuleContaining(paths, rel, needle, wopts); err == nil {
+				n++
+			}
 		}
-		appendFile(full, "\n\n"+strings.TrimSpace(body)+"\n")
-		n++
+	}
+	for name, body := range d.SkillsSet {
+		name = filepath.Base(name)
+		name = strings.TrimSuffix(name, ".md")
+		if err := nativedocs.UpsertSkill(paths, name, body, wopts); err == nil {
+			n++
+		}
 	}
 	for name, body := range d.Skills {
 		name = filepath.Base(name)
-		if name == "." || name == "/" {
-			continue
+		name = strings.TrimSuffix(name, ".md")
+		if err := nativedocs.WriteSkillCreateOnly(paths, name, body, wopts); err == nil {
+			n++
 		}
-		if !strings.HasSuffix(name, ".md") {
-			name += ".md"
+	}
+	for _, name := range d.SkillsRemove {
+		name = filepath.Base(name)
+		name = strings.TrimSuffix(name, ".md")
+		if err := nativedocs.RemoveSkill(paths, name, wopts); err == nil {
+			n++
 		}
-		p := filepath.Join(paths.SkillsDir, name)
-		if err := harnessvalid.ValidateSoftWrite(harnessvalid.SoftWrite{
-			Path: p, Body: body, Evidence: ev, CreateOnly: true,
-		}); err != nil {
-			continue
-		}
-		_ = os.WriteFile(p, []byte(strings.TrimSpace(body)+"\n"), 0o644)
-		n++
 	}
 	// Do NOT mutate guardrails.yaml or evals configs from harvest.
-	// Recommendations come from eval (so finalize / so eval), not harvest.
 	_ = d.Guardrails
 	_ = d.EvalsNote
 	_ = d.NeedRecs

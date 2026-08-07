@@ -126,7 +126,7 @@ func TestConsumePendingResumeArchivesFullTranscriptWhenTrimmed(t *testing.T) {
 
 func intPtr(i int) *int { return &i }
 
-func TestArmResumeAlsoSetsCursorLegacyPending(t *testing.T) {
+func TestArmResumeAlsoSetsCursorPending(t *testing.T) {
 	root := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(root, ".so"), 0o755)
 	sess := NewPortableSession(HarnessClaude, "src-2", "/x", root, "t")
@@ -144,6 +144,6 @@ func TestArmResumeAlsoSetsCursorLegacyPending(t *testing.T) {
 	}
 	_ = ConsumePendingResume(root)
 	if _, err := os.Stat(pending); !os.IsNotExist(err) {
-		t.Fatalf("legacy PENDING should be cleared: %v", err)
+		t.Fatalf("Cursor PENDING should be cleared: %v", err)
 	}
 }

@@ -13,10 +13,8 @@ import (
 
 // Install installs coding-agent observability for the given vendors.
 // endpoint is best-effort written to the platform config.env when non-empty.
-// pluginRoot is unused (manifests are embedded); kept for call-site compatibility.
-func Install(repoRoot, endpoint string, vendors []string, pluginRoot string) error {
+func Install(repoRoot, endpoint string, vendors []string) error {
 	_ = repoRoot
-	_ = pluginRoot
 	if endpoint != "" {
 		_ = writeEndpointConfig(endpoint)
 	}
@@ -45,7 +43,6 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 		return out
 	}
 	codexDir, _ := userpaths.CodexMarketplaceDir()
-	legacySO, _ := userpaths.LegacyDataDirSO()
 
 	for _, v := range vendors {
 		switch v {
@@ -59,17 +56,10 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 				strings.Contains(string(data), " coding hook --vendor=cursor"))
 		case "codex":
 			ok := false
-			for _, p := range []string{
-				codexDir,
-				filepath.Join(legacySO, "codex-marketplace"),
-			} {
-				if p == "" {
-					continue
-				}
-				manifest := filepath.Join(p, "plugins", "superopen", "hooks", "hooks.json")
+			if codexDir != "" {
+				manifest := filepath.Join(codexDir, "plugins", "superopen", "hooks", "hooks.json")
 				if data, e := os.ReadFile(manifest); e == nil && hookBinaryAvailable(string(data), "codex") {
 					ok = true
-					break
 				}
 			}
 			out["codex"] = ok

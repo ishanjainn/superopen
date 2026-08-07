@@ -173,7 +173,7 @@ export default function RecDetailPage() {
                 <Field label={decisionLabel(String(rec.status || ""))}>
                   {rec.decision_reason || (
                     <span className="text-neutral-500">
-                      No decision reason was recorded for this legacy action.
+                      No decision reason was recorded for this action.
                     </span>
                   )}
                 </Field>

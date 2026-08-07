@@ -75,9 +75,8 @@ func installVendor(vendor string, dryRun bool) ([]string, error) {
 		return nil, fmt.Errorf("locate so binary: %w (install so and ensure it is on PATH)", binErr)
 	}
 
-	// Codex materializes a whole marketplace tree - wipe stale plugin
-	// dirs (e.g. leftover legacy plugin dirs) so the registered marketplace only
-	// exposes the current Superopen plugin.
+	// Codex materializes a whole marketplace tree - wipe the dest tree
+	// so the registered marketplace only exposes the current Superopen plugin.
 	if !dryRun && vendor == "codex" {
 		_ = os.RemoveAll(dest)
 	}
@@ -134,7 +133,7 @@ func installVendor(vendor string, dryRun bool) ([]string, error) {
 // vendorDestRoot returns the directory under $HOME where this vendor's
 // manifests must land. We honor each vendor's own conventions:
 //
-//	Claude Code → ~/.claude/plugins/superopen/ (also cleans legacy plugin ids)
+//	Claude Code → ~/.claude/plugins/superopen-cc/
 //	Codex       → ~/.local/share/so/codex-marketplace/  (local
 //	              marketplace registered via `codex plugin marketplace add`)
 //

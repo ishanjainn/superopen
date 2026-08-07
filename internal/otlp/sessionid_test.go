@@ -5,7 +5,7 @@ import "testing"
 func TestResolveSessionIDPrefersConversation(t *testing.T) {
 	attrs := map[string]string{
 		"coding_agent.session.id": "ephemeral-session",
-		"coding_agent.session_id": "legacy",
+		"coding_agent.session_id": "sess-a",
 		"gen_ai.conversation.id":  "stable-chat",
 	}
 	if got := ResolveSessionID(attrs, "trace"); got != "stable-chat" {

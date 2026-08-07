@@ -47,9 +47,10 @@ func Install(repoRoot, soBinary string) error {
 		args string
 	}{
 		{"prepare-commit-msg", "appends SO-Session trailer when a session is active", "prepare-commit-msg"},
-		{"post-commit", "finalize session + optional attribution", "post-commit"},
+		{"post-commit", "finalize session into untracked store + side ref", "post-commit"},
 		{"post-merge", "refresh harness after git pull/merge", "post-merge"},
 		{"post-checkout", "refresh harness after branch checkout", "post-checkout"},
+		{"pre-push", "fast-forward push refs/so/sessions/* (never force)", "pre-push"},
 	}
 	for _, h := range hooks {
 		body := fmt.Sprintf(`#!/bin/sh

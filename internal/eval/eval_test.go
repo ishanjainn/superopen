@@ -61,3 +61,32 @@ func TestRunMarksMissingActivityEvidenceUnknown(t *testing.T) {
 		t.Fatalf("missing evidence must not create scored dimensions: %+v", res.Dimensions)
 	}
 }
+
+func TestHotAreasFromFiles(t *testing.T) {
+	files := map[string]bool{
+		"internal/recommend/recommend.go": true,
+		"internal/recommend/recommend_test.go": true,
+		"internal/recommend/merge.go":     true,
+		"internal/eval/eval.go":           true,
+		"cmd/so/main.go":                  true,
+	}
+	got := hotAreasFromFiles(files)
+	if len(got) == 0 || got[0] != "internal/recommend" {
+		t.Fatalf("hot areas = %v, want internal/recommend first", got)
+	}
+}
+
+func TestGuidanceArea(t *testing.T) {
+	cases := map[string]string{
+		"internal/foo/bar.go": "internal/foo",
+		"cmd/so/main.go":      "cmd/so",
+		"web/src/app.tsx":     "web/src",
+		"README.md":           "",
+		".so/config.json":     "",
+	}
+	for in, want := range cases {
+		if got := guidanceArea(in); got != want {
+			t.Fatalf("guidanceArea(%q)=%q want %q", in, got, want)
+		}
+	}
+}

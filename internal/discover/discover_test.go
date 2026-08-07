@@ -17,6 +17,11 @@ func TestCollectAgentFilesAndProfile(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(dir, ".cursor", "rules"), 0o755)
 	_ = os.WriteFile(filepath.Join(dir, ".cursor", "rules", "pr.mdc"), []byte("---\ntitle: PR\n---\n# PR Title\n\nPR titles must follow Plugin (feat): description\n"), 0o644)
 
+	_ = os.MkdirAll(filepath.Join(dir, ".claude", "rules"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, ".claude", "rules", "go-concurrency.md"), []byte("# Go concurrency\n\nAlways run race-sensitive packages with go test -race.\n"), 0o644)
+	_ = os.MkdirAll(filepath.Join(dir, ".cursor", "skills", "pr-hygiene"), 0o755)
+	_ = os.WriteFile(filepath.Join(dir, ".cursor", "skills", "pr-hygiene", "SKILL.md"), []byte("# PR hygiene\n\nPrefer Conventional Commit titles.\n"), 0o644)
+
 	paths := harness.Resolve(dir)
 	_ = paths.EnsureDirs()
 	_ = os.WriteFile(paths.GraphJSON, []byte(`{"nodes":[{"id":"pkg/a.go","source_file":"pkg/a.go"},{"id":"cmd/main.go","source_file":"cmd/main.go"}],"edges":[]}`), 0o644)
@@ -24,6 +29,18 @@ func TestCollectAgentFilesAndProfile(t *testing.T) {
 	agents := discover.CollectAgentFiles(dir)
 	if len(agents) < 2 {
 		t.Fatalf("expected agent files, got %d", len(agents))
+	}
+	var sawClaudeRule, sawCursorSkill bool
+	for _, a := range agents {
+		if a.Kind == "claude-rule" {
+			sawClaudeRule = true
+		}
+		if a.Kind == "cursor-skill" {
+			sawCursorSkill = true
+		}
+	}
+	if !sawClaudeRule || !sawCursorSkill {
+		t.Fatalf("expected claude-rule and cursor-skill sources, got %+v", agents)
 	}
 	p := discover.BuildProfile(dir, paths, "Go", "- pkg")
 	if len(p.DerivedRules) == 0 {

@@ -11,7 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// SoftWrite is a candidate soft-tier mutation (knowledge/rules/skills/memory).
+// SoftWrite is a candidate soft-tier mutation (AGENTS.md / .agents rules|skills / memory).
 type SoftWrite struct {
 	Path     string
 	Body     string

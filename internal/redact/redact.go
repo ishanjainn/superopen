@@ -78,7 +78,7 @@ var tier1Patterns = []*regexp.Regexp{
 	// a base64-encoded user id, fairly distinctive.
 	regexp.MustCompile(`[MN][A-Za-z0-9]{23}\.[A-Za-z0-9_\-]{6}\.[A-Za-z0-9_\-]{20,}`),
 
-	// npm tokens - both the legacy 36-char hex format and the
+	// npm tokens - both the classic 36-char hex format and the
 	// modern `npm_…` prefix.
 	regexp.MustCompile(`npm_[A-Za-z0-9]{30,}`),
 }

@@ -18,7 +18,7 @@ func TestFingerprintDedupeAcrossSessions(t *testing.T) {
 	_ = os.MkdirAll(paths.SkillsDir, 0o755)
 	_ = os.MkdirAll(paths.MemoryDir, 0o755)
 
-	path := filepath.Join(paths.SkillsDir, "prefer-harness-before-search.md")
+	path := paths.SkillSKILL("prefer-harness-before-search")
 	r1 := Recommendation{
 		ID: "a", Type: "skill", Title: "Follow guides",
 		Fingerprint: FingerprintKey("skill", path, "prefer-harness"),
@@ -57,7 +57,7 @@ func TestApplyAndRevert(t *testing.T) {
 	_ = os.MkdirAll(paths.MemoryDir, 0o755)
 	_ = paths.EnsureDirs()
 
-	skill := filepath.Join(paths.SkillsDir, "new-skill.md")
+	skill := paths.SkillSKILL("new-skill")
 	r := Recommendation{
 		ID: "rec1", Type: "skill", Title: "Add skill", Rationale: "because",
 		Fingerprint: FingerprintKey("skill", skill, "new"),
@@ -101,7 +101,7 @@ func TestSuppressAfterDismiss(t *testing.T) {
 	paths := harness.Resolve(root)
 	_ = os.MkdirAll(filepath.Dir(paths.PendingRecs), 0o755)
 	_ = os.MkdirAll(paths.SkillsDir, 0o755)
-	path := filepath.Join(paths.SkillsDir, "x.md")
+	path := paths.SkillSKILL("x")
 	fp := FingerprintKey("skill", path, "x")
 	r := Recommendation{
 		ID: "d1", Type: "skill", Title: "t", Fingerprint: fp,
@@ -141,7 +141,7 @@ func TestDecisionReasonRequired(t *testing.T) {
 	_ = paths.EnsureDirs()
 	r := Recommendation{
 		ID: "required", Type: "skill", Title: "t",
-		ProposedPath: filepath.Join(paths.SkillsDir, "required.md"),
+		ProposedPath: paths.SkillSKILL("required"),
 		ProposedBody: "# required\n", Evidence: []string{"e"}, Status: "pending",
 	}
 	_, _ = MergePending(paths, []Recommendation{r})
@@ -165,5 +165,77 @@ func TestInsufficientEvidenceDoesNotGenerateRecommendations(t *testing.T) {
 	}
 	if len(recs) != 0 {
 		t.Fatalf("insufficient evidence generated recommendations: %+v", recs)
+	}
+}
+
+func TestGenerateNestedAgentsWhenHotArea(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	_ = paths.EnsureDirs()
+
+	recs, err := Generate(paths, "s1", eval.Result{
+		SessionID:       "s1",
+		EvidenceStatus:  "sufficient",
+		HotAreas:        []string{"internal/recommend"},
+		Dimensions:      map[string]float64{"wandering": 0.8, "harness_use": 0.5, "scope": 0.7},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var docs *Recommendation
+	for i := range recs {
+		if recs[i].Type == "docs" {
+			docs = &recs[i]
+			break
+		}
+	}
+	if docs == nil {
+		t.Fatal("expected docs recommendation")
+	}
+	wantPath := filepath.Join(root, "internal", "recommend", "AGENTS.md")
+	if docs.ProposedPath != wantPath {
+		t.Fatalf("proposed path = %q, want %q", docs.ProposedPath, wantPath)
+	}
+	if !strings.Contains(docs.Why, "Why:") || !strings.Contains(docs.Why, "How it helps:") {
+		t.Fatalf("why must spell out problem and benefit: %q", docs.Why)
+	}
+	if !strings.Contains(docs.ProposedBody, "internal/recommend") {
+		t.Fatalf("body should mention hot area: %q", docs.ProposedBody)
+	}
+
+	if err := Apply(paths, docs.ID, Decision{Reason: "Nested AGENTS.md will cut rediscovery in this package.", Actor: "agent"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# Agent instructions") {
+		t.Fatalf("nested AGENTS.md should be a full document: %s", data)
+	}
+}
+
+func TestGenerateRootAgentsWithoutHotArea(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	_ = paths.EnsureDirs()
+	recs, err := Generate(paths, "s2", eval.Result{
+		SessionID:      "s2",
+		EvidenceStatus: "sufficient",
+		Dimensions:     map[string]float64{"wandering": 0.9, "harness_use": 0.5, "scope": 0.7},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range recs {
+		if r.Type == "docs" && r.ProposedPath == paths.AgentsMD {
+			found = true
+			if !strings.Contains(r.Why, "How it helps:") {
+				t.Fatalf("root docs why incomplete: %q", r.Why)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected root AGENTS.md docs rec, got %+v", recs)
 	}
 }

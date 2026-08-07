@@ -37,13 +37,13 @@ func trimResumeBody(body []byte, fullPath string) string {
 
 // PendingResume is the one-shot SessionStart inject armed after Port.
 type PendingResume struct {
-	To              HarnessID `json:"to"`
-	DestSessionID   string    `json:"dest_session_id"`
-	SourceHarness   HarnessID `json:"source_harness,omitempty"`
-	SourceSessionID string    `json:"source_session_id,omitempty"`
-	Title           string    `json:"title,omitempty"`
-	ConversationPath string   `json:"conversation_path,omitempty"`
-	ArmedAt         time.Time `json:"armed_at"`
+	To               HarnessID `json:"to"`
+	DestSessionID    string    `json:"dest_session_id"`
+	SourceHarness    HarnessID `json:"source_harness,omitempty"`
+	SourceSessionID  string    `json:"source_session_id,omitempty"`
+	Title            string    `json:"title,omitempty"`
+	ConversationPath string    `json:"conversation_path,omitempty"`
+	ArmedAt          time.Time `json:"armed_at"`
 }
 
 func portRunDir(repoRoot string) string {
@@ -97,13 +97,11 @@ func ArmResume(repoRoot string, to HarnessID, destID string, sess PortableSessio
 	if err := os.WriteFile(filepath.Join(dir, pendingFileName), raw, 0o644); err != nil {
 		return err
 	}
-	// Keep Cursor's legacy PENDING marker in sync when destination is Cursor
-	// (older hooks / RESUME.md still reference .cursor/so-port/PENDING).
+	// Cursor also keeps a pack under .cursor/so-port/<id>/ plus PENDING marker.
 	if to == HarnessCursor {
 		cursorDir := filepath.Join(repoRoot, ".cursor", "so-port")
 		_ = os.MkdirAll(cursorDir, 0o755)
 		_ = os.WriteFile(filepath.Join(cursorDir, "PENDING"), []byte(destID+"\n"), 0o644)
-		// Mirror conversation for Cursor pack consumers.
 		packDir := filepath.Join(cursorDir, destID)
 		_ = os.MkdirAll(packDir, 0o755)
 		_ = os.WriteFile(filepath.Join(packDir, "conversation.md"), []byte(b.String()), 0o644)
@@ -117,12 +115,10 @@ func ConsumePendingResume(repoRoot string) string {
 	if repoRoot == "" {
 		return ""
 	}
-	// Prefer harness-agnostic .so/port pending.
 	if body := consumeSOPortPending(repoRoot); body != "" {
 		return body
 	}
-	// Legacy Cursor-only PENDING.
-	return consumeLegacyCursorPending(repoRoot)
+	return consumeCursorPortPending(repoRoot)
 }
 
 func consumeSOPortPending(repoRoot string) string {
@@ -143,19 +139,16 @@ func consumeSOPortPending(repoRoot string) string {
 	}
 	archivePath := ""
 	if len(body) > maxResumeInject {
-		// Keep the untrimmed transcript around a beat longer than the one-shot
-		// pending file, since the inject below will reference it as "full".
 		archivePath = filepath.Join(portRunDir(repoRoot), "last-conversation.md")
 		_ = os.WriteFile(archivePath, body, 0o644)
 	}
 	_ = os.Remove(metaPath)
 	_ = os.Remove(convPath)
-	// Clear legacy Cursor marker if present.
 	_ = os.Remove(filepath.Join(repoRoot, ".cursor", "so-port", "PENDING"))
 	return trimResumeBody(body, archivePath)
 }
 
-func consumeLegacyCursorPending(repoRoot string) string {
+func consumeCursorPortPending(repoRoot string) string {
 	pending := filepath.Join(repoRoot, ".cursor", "so-port", "PENDING")
 	data, err := os.ReadFile(pending)
 	if err != nil {

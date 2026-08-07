@@ -35,8 +35,8 @@ func NewCmd() *cobra.Command {
 		Long: `Remove host plugin manifests previously written by 'so coding install'.
 
 Vendors:
-  claude-code   legacy + current Claude plugin dirs + 'claude plugin uninstall'
-  cursor        strips Superopen (and legacy) entries from ~/.cursor/hooks.json (preserves other tools')
+  claude-code   current Claude plugin dirs + 'claude plugin uninstall'
+  cursor        strips Superopen entries from ~/.cursor/hooks.json (preserves other tools')
   codex         ~/.local/share/so/codex-marketplace/ + 'codex plugin remove'
   all           shorthand for all three
 

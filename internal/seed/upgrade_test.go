@@ -2,7 +2,6 @@ package seed_test
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,9 +34,9 @@ func TestExtractJSONAndApplyUpgrade(t *testing.T) {
 	if err := seed.ApplyUpgradeJSON(paths, p, raw); err != nil {
 		t.Fatal(err)
 	}
-	arch, _ := os.ReadFile(filepath.Join(paths.KnowledgeDir, "architecture.md"))
-	if !strings.Contains(string(arch), "Go monorepo") {
-		t.Fatalf("architecture not written: %s", arch)
+	agents, _ := os.ReadFile(paths.AgentsMD)
+	if !strings.Contains(string(agents), "Go monorepo") {
+		t.Fatalf("AGENTS.md not written: %s", agents)
 	}
 	g, _ := os.ReadFile(paths.GuardrailsFile)
 	if !strings.Contains(string(g), "no-secrets") {

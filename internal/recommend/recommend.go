@@ -13,6 +13,8 @@ import (
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/harnessvalid"
 	"github.com/ishanjainn/superopen/internal/memory"
+	"github.com/ishanjainn/superopen/internal/nativedocs"
+	"github.com/ishanjainn/superopen/internal/session"
 	"gopkg.in/yaml.v3"
 )
 
@@ -68,10 +70,18 @@ func FingerprintKey(recType, proposedPath, kind string) string {
 	p = strings.ReplaceAll(p, "\\", "/")
 	if i := strings.LastIndex(p, "/.so/"); i >= 0 {
 		p = p[i+5:] // strip up to .so/
-	} else if i := strings.LastIndex(p, "/skills/"); i >= 0 {
-		p = "skills/" + filepath.Base(p)
-	} else if i := strings.LastIndex(p, "/knowledge/"); i >= 0 {
-		p = "knowledge/" + filepath.Base(p)
+	} else if strings.Contains(p, "/skills/") {
+		base := filepath.Base(p)
+		if base == "SKILL.md" {
+			p = "skills/" + filepath.Base(filepath.Dir(p))
+		} else {
+			p = "skills/" + base
+		}
+	} else if strings.HasSuffix(p, "/AGENTS.md") || filepath.Base(p) == "AGENTS.md" {
+		// Nested vs root distinguished via Fingerprint kind (area:… vs architecture).
+		p = "AGENTS.md"
+	} else if strings.Contains(p, "/rules/") || strings.Contains(p, "/instructions/") {
+		p = "rules/" + filepath.Base(p)
 	} else if strings.HasSuffix(p, "guardrails.yaml") {
 		p = "guardrails/guardrails.yaml"
 	}
@@ -89,58 +99,122 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 	var draft []Recommendation
 	now := time.Now().UTC()
 
+	vendor := ""
+	if meta, err := session.NewStore(paths).Get(sessionID); err == nil {
+		vendor = meta.Vendor
+	}
+	skillPath := paths.SkillSKILL("reduce-exploration")
+	if vendor != "" {
+		skillPath = filepath.Join(harness.SkillsDirForVendor(paths.RepoRoot, vendor), "reduce-exploration", "SKILL.md")
+	}
+	vendorLabel := harness.NormalizeVendorKind(vendor)
+	if vendorLabel == "" {
+		vendorLabel = "project"
+	}
+
 	if evalRes.Dimensions["wandering"] > 0.6 {
-		draft = append(draft, Recommendation{
-			ID: fmt.Sprintf("rec_%d_graph", now.UnixNano()), SessionID: sessionID,
-			Type: "docs", Title: "Improve architecture map for hot paths",
-			Rationale: "High wandering - agent searched excessively.",
-			Why: "Enriching .so/knowledge/architecture.md (or rebuilding the semantic graph) gives the next session clearer boundaries so it spends fewer tokens rediscovering structure.",
-			RelatedSessions: nonEmpty(sessionID),
-			Evidence: []string{
-				fmt.Sprintf("wandering score %.2f", evalRes.Dimensions["wandering"]),
-			},
-			ProposedPath: filepath.Join(paths.KnowledgeDir, "architecture.md"),
-			ProposedBody: "## Hot paths\n\n- Document primary services and entrypoints discovered this session.\n",
-			Status: "pending", CreatedAt: now,
-			Fingerprint: FingerprintKey("docs", filepath.Join(paths.KnowledgeDir, "architecture.md"), "architecture"),
-		})
+		hot := ""
+		if len(evalRes.HotAreas) > 0 {
+			hot = evalRes.HotAreas[0]
+		}
+		if hot != "" {
+			nestedPath := filepath.Join(paths.RepoRoot, filepath.FromSlash(hot), "AGENTS.md")
+			draft = append(draft, Recommendation{
+				ID: fmt.Sprintf("rec_%d_area_agents", now.UnixNano()), SessionID: sessionID,
+				Type:  "docs",
+				Title: "Add " + hot + "/AGENTS.md for this hot path",
+				Rationale: "Eval wandering is high and file activity concentrated under " + hot + ".",
+				Why: "Why: the agent searched broadly while mostly touching " + hot + ".\n" +
+					"Change: create a focused " + hot + "/AGENTS.md with entrypoints, invariants, and where to look first.\n" +
+					"How it helps: the next session in that package reads local guidance instead of re-grepping the whole repo, cutting tokens and wrong-file edits.",
+				RelatedSessions: nonEmpty(sessionID),
+				Evidence: []string{
+					fmt.Sprintf("wandering score %.2f", evalRes.Dimensions["wandering"]),
+					"hot_area=" + hot,
+				},
+				ProposedPath: nestedPath,
+				ProposedBody: nestedAgentsBody(hot),
+				Status:       "pending", CreatedAt: now,
+				Fingerprint: FingerprintKey("docs", nestedPath, "area:"+hot),
+			})
+		} else {
+			draft = append(draft, Recommendation{
+				ID: fmt.Sprintf("rec_%d_root_agents", now.UnixNano()), SessionID: sessionID,
+				Type:  "docs",
+				Title: "Clarify hot paths in root AGENTS.md",
+				Rationale: "Eval wandering is high without a single dominant package — root map is the shared fix.",
+				Why: "Why: the agent ran many searches without a clear package home.\n" +
+					"Change: append a short Hot paths section to root AGENTS.md (shared by every coding agent).\n" +
+					"How it helps: the next session starts from documented entrypoints and spends fewer tokens rediscovering structure.",
+				RelatedSessions: nonEmpty(sessionID),
+				Evidence: []string{
+					fmt.Sprintf("wandering score %.2f", evalRes.Dimensions["wandering"]),
+				},
+				ProposedPath: paths.AgentsMD,
+				ProposedBody: "## Hot paths\n\n- Document primary services and entrypoints discovered this session.\n- Prefer `so graph query` before broad Grep when asking how an area works.\n",
+				Status:       "pending", CreatedAt: now,
+				Fingerprint: FingerprintKey("docs", paths.AgentsMD, "architecture"),
+			})
+		}
 	}
 	if evalRes.Dimensions["harness_use"] < 0.4 {
+		where := ".agents/skills"
+		if vendor != "" {
+			where = harness.SkillsRelForKind(vendorLabel)
+			if where == "" {
+				where = ".agents/skills"
+			}
+		}
 		draft = append(draft, Recommendation{
 			ID: fmt.Sprintf("rec_%d_skill", now.UnixNano()), SessionID: sessionID,
-			Type: "skill", Title: "Add skill for recurring exploration pattern",
-			Rationale: "Harness underused - agent skipped .so skills/context.",
-			Why: "A focused skill that points at graph query + context before Grep/Glob reduces token waste on the next similar task.",
+			Type:  "skill",
+			Title: "Add a " + vendorLabel + " skill to prefer harness before search",
+			Rationale: "Eval harness_use is low — this " + vendorLabel + " session skipped AGENTS.md / rules / skills / so graph.",
+			Why: "Why: the agent explored without reading durable guidance.\n" +
+				"Change: create `" + where + "/reduce-exploration/SKILL.md` for this vendor (Cursor→.cursor, Claude→.claude, …).\n" +
+				"How it helps: the next " + vendorLabel + " session can invoke that skill and jump to graph + AGENTS.md instead of broad Grep, saving tokens.",
 			RelatedSessions: nonEmpty(sessionID),
 			Evidence: []string{
 				fmt.Sprintf("harness_use score %.2f", evalRes.Dimensions["harness_use"]),
+				"vendor=" + vendorLabel,
 			},
-			ProposedPath: filepath.Join(paths.SkillsDir, "reduce-exploration.md"),
-			ProposedBody: "# Reduce exploration\n\n1. Run `so graph query` before Grep/Glob.\n2. Read `.so/knowledge/architecture.md` for service boundaries.\n3. Prefer skills over broad searches.\n",
-			Status: "pending", CreatedAt: now,
-			Fingerprint: FingerprintKey("skill", filepath.Join(paths.SkillsDir, "reduce-exploration.md"), "reduce-exploration"),
+			ProposedPath: skillPath,
+			ProposedBody: "# Reduce exploration\n\nUse this when starting a codebase question.\n\n1. Run `so graph query \"…\"` before Grep/Glob.\n2. Read root `AGENTS.md` and any nested `*/AGENTS.md` for the area you touch.\n3. Prefer existing project skills/rules over inventing a search plan.\n",
+			Status:       "pending", CreatedAt: now,
+			Fingerprint: FingerprintKey("skill", skillPath, "reduce-exploration"),
 		})
 	}
 	if evalRes.Dimensions["scope"] < 0.5 {
 		guardBody := advisoryGuardrailBody("avoid-unrelated-drift", "Keep edits scoped to the requested task; avoid unrelated drive-by refactors.")
 		draft = append(draft, Recommendation{
 			ID: fmt.Sprintf("rec_%d_guard", now.UnixNano()), SessionID: sessionID,
-			Type: "guardrail", Title: "Tighten unrelated-change guardrail",
-			Rationale: "Low scope score - edits drifted outside the task.",
-			Why: "Reinforcing the avoid-unrelated guardrail keeps the next session's diffs smaller and reviewable.",
+			Type:  "guardrail",
+			Title: "Warn on unrelated drive-by edits",
+			Rationale: "Eval scope is low — edits look broader than the asked task.",
+			Why: "Why: the session edited without enough read context or drifted outside the request.\n" +
+				"Change: add/strengthen the avoid-unrelated-drift warn rule in `.so/guardrails/guardrails.yaml`.\n" +
+				"How it helps: the next session gets an explicit stop/warn signal before sprawling diffs, keeping PRs reviewable.",
 			RelatedSessions: nonEmpty(sessionID),
 			Evidence: []string{
 				fmt.Sprintf("scope score %.2f", evalRes.Dimensions["scope"]),
 			},
 			ProposedPath: paths.GuardrailsFile,
 			ProposedBody: guardBody,
-			Status: "pending", CreatedAt: now,
+			Status:       "pending", CreatedAt: now,
 			Fingerprint: FingerprintKey("guardrail", paths.GuardrailsFile, "avoid-unrelated"),
 		})
 	}
 
 	// No title-rewrite agent calls (token budget).
 	return MergePending(paths, draft)
+}
+
+func nestedAgentsBody(hot string) string {
+	return nativedocs.DefaultAgentsBody(
+		"Area: `"+hot+"`\n\nFocus guidance for this package. Prefer this file over root AGENTS.md when working here.\n\n## Where to look first\n\n- Read neighboring packages only when this area imports them.\n- Use `so graph query` scoped to this package's symbols before repo-wide Grep.\n",
+		"## Conventions\n\n- Keep changes inside `"+hot+"` unless the task explicitly requires cross-package edits.\n- Run focused tests for this package before finishing.\n",
+		"",
+	)
 }
 
 func advisoryGuardrailBody(id, desc string) string {
@@ -306,29 +380,63 @@ func Apply(paths harness.Paths, id string, decision Decision) error {
 		if err := mergeGuardrails(paths, applied.ProposedBody); err != nil {
 			return err
 		}
+	case "skill":
+		name := skillNameFromPath(applied.ProposedPath)
+		if name == "" {
+			name = "reduce-exploration"
+		}
+		vendor := sessionVendor(paths, applied)
+		if err := nativedocs.UpsertSkill(paths, name, applied.ProposedBody, nativedocs.WriteOpts{Vendor: vendor}); err != nil {
+			return err
+		}
+		applied.AppliedPaths = harness.FindExistingSkills(paths.RepoRoot, name)
+		if len(applied.AppliedPaths) == 0 && applied.ProposedPath != "" {
+			applied.AppliedPaths = []string{applied.ProposedPath}
+		}
+	case "docs":
+		if applied.ProposedPath != "" && applied.ProposedBody != "" {
+			// Root or nested AGENTS.md — shared across vendors.
+			body := strings.TrimSpace(applied.ProposedBody) + "\n"
+			if err := os.MkdirAll(filepath.Dir(applied.ProposedPath), 0o755); err != nil {
+				return err
+			}
+			isAgents := filepath.Base(applied.ProposedPath) == "AGENTS.md"
+			switch {
+			case isAgents && !prevExisted:
+				// Create nested (or missing root) AGENTS.md as a full document.
+				if !strings.HasPrefix(strings.TrimSpace(body), "#") {
+					body = nativedocs.DefaultAgentsBody(body, "", "")
+				}
+				if err := nativedocs.EnsureAgentsAt(applied.ProposedPath, body, true); err != nil {
+					return err
+				}
+			case isAgents:
+				// Existing AGENTS — append into the learned section when possible.
+				if err := nativedocs.AppendLearnedAt(applied.ProposedPath, body); err != nil {
+					f, err2 := os.OpenFile(applied.ProposedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+					if err2 != nil {
+						return err
+					}
+					_, _ = f.WriteString("\n\n" + body)
+					_ = f.Close()
+				}
+			default:
+				f, err := os.OpenFile(applied.ProposedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+				if err != nil {
+					return err
+				}
+				_, _ = f.WriteString("\n\n" + body)
+				_ = f.Close()
+			}
+			applied.AppliedPaths = []string{applied.ProposedPath}
+		}
 	default:
 		if applied.ProposedPath != "" && applied.ProposedBody != "" {
 			if err := os.MkdirAll(filepath.Dir(applied.ProposedPath), 0o755); err != nil {
 				return err
 			}
-			// skills: create-only if exists with content → append for docs
-			if strings.ToLower(applied.Type) == "skill" {
-				if info, err := os.Stat(applied.ProposedPath); err == nil && info.Size() > 0 {
-					// keep existing; still mark applied with lesson
-				} else if err := os.WriteFile(applied.ProposedPath, []byte(applied.ProposedBody), 0o644); err != nil {
-					return err
-				}
-			} else if strings.ToLower(applied.Type) == "docs" {
-				f, err := os.OpenFile(applied.ProposedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-				if err != nil {
-					return err
-				}
-				_, _ = f.WriteString("\n\n" + strings.TrimSpace(applied.ProposedBody) + "\n")
-				_ = f.Close()
-			} else {
-				if err := os.WriteFile(applied.ProposedPath, []byte(applied.ProposedBody), 0o644); err != nil {
-					return err
-				}
+			if err := os.WriteFile(applied.ProposedPath, []byte(applied.ProposedBody), 0o644); err != nil {
+				return err
 			}
 		}
 	}
@@ -347,7 +455,7 @@ func Apply(paths harness.Paths, id string, decision Decision) error {
 	applied.DecisionReason = decision.Reason
 	applied.DecisionActor = decision.Actor
 	applied.DecisionAt = applied.AppliedAt
-	if applied.ProposedPath != "" {
+	if len(applied.AppliedPaths) == 0 && applied.ProposedPath != "" {
 		applied.AppliedPaths = []string{applied.ProposedPath}
 	}
 
@@ -546,4 +654,27 @@ func nonEmpty(ids ...string) []string {
 		}
 	}
 	return out
+}
+
+func sessionVendor(paths harness.Paths, r *Recommendation) string {
+	ids := append([]string{r.SessionID}, r.RelatedSessions...)
+	store := session.NewStore(paths)
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if meta, err := store.Get(id); err == nil && meta.Vendor != "" {
+			return meta.Vendor
+		}
+	}
+	return ""
+}
+
+func skillNameFromPath(p string) string {
+	p = filepath.ToSlash(p)
+	base := filepath.Base(p)
+	if strings.EqualFold(base, "SKILL.md") {
+		return filepath.Base(filepath.Dir(p))
+	}
+	return strings.TrimSuffix(base, filepath.Ext(base))
 }

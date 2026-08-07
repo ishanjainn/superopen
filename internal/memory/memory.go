@@ -87,7 +87,6 @@ func (s *Store) Ensure() error {
 		return err
 	}
 	_ = s.repairMemoryStructure()
-	_ = s.migrateLessonsMD()
 	return nil
 }
 
@@ -124,31 +123,6 @@ func (s *Store) episodicPath() string {
 
 func (s *Store) ActivePath() string {
 	return filepath.Join(s.Paths.MemoryDir, "active-context.md")
-}
-
-func (s *Store) migrateLessonsMD() error {
-	legacy := s.Paths.Lessons
-	data, err := os.ReadFile(legacy)
-	if err != nil || len(strings.TrimSpace(string(data))) == 0 {
-		return nil
-	}
-	if _, err := os.Stat(s.lessonsPath()); err == nil {
-		return nil
-	}
-	text := strings.TrimSpace(string(data))
-	if text == "" || text == "# Lessons" || strings.HasPrefix(text, "# Lessons\n\nApproved") {
-		return nil
-	}
-	// Write directly - do not call AddLesson (which calls Ensure → recurse).
-	l := Lesson{
-		Text:       text,
-		Scope:      "workspace",
-		Confidence: 0.5,
-		CreatedAt:  time.Now().UTC(),
-	}
-	sum := sha1.Sum([]byte(strings.ToLower(text)))
-	l.ID = "lesson_" + hex.EncodeToString(sum[:8])
-	return appendJSONL(s.lessonsPath(), l)
 }
 
 var injectionRe = regexp.MustCompile(`(?i)(ignore (all )?(previous|prior) (instructions|rules)|system\s*:|<\s*/?\s*system\s*>|do not follow|disregard (the )?above)`)
@@ -453,7 +427,7 @@ func (s *Store) BuildSessionContext(budget int, query string, mode Mode) (Contex
 
 	var b strings.Builder
 	b.WriteString("# Superopen session memory\n\n")
-	b.WriteString("Read this pack before exploring. Prefer `so graph query` / `.so/knowledge` for code structure.\n\n")
+	b.WriteString("Read this pack before exploring. Prefer `so graph query` / `AGENTS.md` for code structure.\n\n")
 
 	writeSection := func(title, body string, capn int) {
 		body = strings.TrimSpace(body)

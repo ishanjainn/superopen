@@ -350,7 +350,7 @@ func setLLMTurnAttrs(span trace.Span, t normalize.LLMTurn, scrub scrubFn, captur
 	}
 	if t.UserEmail != "" {
 		// Mirror onto both keys until consumers cut over. `user.email`
-		// is the legacy `coding_agent.*` shape; `gen_ai.request.user`
+		// is the prior `coding_agent.*` shape; `gen_ai.request.user`
 		// is the OTel GenAI canonical (matches the per-request user
 		// identifier semconv).
 		setStr(span, "user.email", t.UserEmail, scrub)

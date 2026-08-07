@@ -1,19 +1,8 @@
 // File-level scrubbers that run after the vendor-CLI based uninstall
-// steps. In practice, both the Claude Code and Codex CLIs have been
-// observed to leave residual legacy-plugin-owned state in their on-disk
-// config files even after their advertised "uninstall" / "marketplace
-// remove" subcommands run to success. The scrubbers here are
-// defense in depth: surgical edits that delete only the keys / TOML
-// sections Superopen (or legacy) owns, preserve everything else, and treat the
-// missing-file case as a no-op.
-//
-// We deliberately do not use a TOML library here - adding one for
-// this single janitorial use case is more risk (line-noise diff,
-// dep churn) than benefit. The stripper is line-based and section-
-// aware; the test in vendor_config_scrub_test.go covers the
-// interesting cases (mixed sections, nested project blocks,
-// inline tables on adjacent lines).
-
+// steps. Claude Code and Codex CLIs can leave Superopen-owned state in
+// on-disk config even after their uninstall commands succeed. These
+// scrubbers delete only Superopen-owned keys/sections and preserve
+// everything else. Missing files are a no-op.
 package uninstall
 
 import (
@@ -25,13 +14,9 @@ import (
 	"strings"
 )
 
-// stripClaudeMarketplaceJSON removes legacy marketplace entries from
-// `~/.claude/plugins/known_marketplaces.json` when present. Returns
-// the file path it touched (empty string if nothing to do) and any
-// error encountered. Missing file / missing key are not errors.
-//
-// In dry-run mode the file is left unchanged but a present legacy
-// key is still reported as "would touch".
+// stripClaudeMarketplaceJSON removes the Superopen marketplace entry from
+// `~/.claude/plugins/known_marketplaces.json` when present. The marketplace
+// key matches the current install registration name ("so").
 func stripClaudeMarketplaceJSON(dryRun bool) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -45,14 +30,8 @@ func stripClaudeMarketplaceJSON(dryRun bool) (string, error) {
 		}
 		return "", err
 	}
-	// Unmarshal into a generic map so we don't have to track
-	// Claude's schema. We only need to know "does the legacy
-	// key exist?". The file is small (a few dozen entries at
-	// most) so the round-trip cost is negligible.
 	var data map[string]any
 	if err := json.Unmarshal(raw, &data); err != nil {
-		// If the file is unparseable, leave it alone rather than
-		// blow it away - user may have hand-edited it.
 		return "", fmt.Errorf("parse %s: %w", path, err)
 	}
 	if _, ok := data["so"]; !ok {
@@ -62,9 +41,6 @@ func stripClaudeMarketplaceJSON(dryRun bool) (string, error) {
 		return path, nil
 	}
 	delete(data, "so")
-	// Re-marshal with the same indentation Claude itself uses
-	// (two spaces) so the diff in the user's dotfiles repo is
-	// minimal.
 	out, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return path, err
@@ -76,34 +52,19 @@ func stripClaudeMarketplaceJSON(dryRun bool) (string, error) {
 	return path, nil
 }
 
-// codexOwnedSectionRe matches every TOML section header that Superopen
-// owns. The patterns mirror exactly what `install_patch.go` causes
-// Codex to write.
-//
-//	[marketplaces.superopen]
-//	[plugins."superopen@superopen"]
-//	[hooks.state."…:hooks/hooks.json:*"]
+// codexOwnedSectionRe matches every TOML section header that Superopen owns.
 var codexOwnedSectionRe = regexp.MustCompile(
 	`^\[(?:` +
-		`marketplaces\.(?:superopen|so)` +
-		`|plugins\."(?:superopen@superopen|so@so)"` +
-		`|hooks\.state\."(?:superopen@superopen|so@so):[^"]*"` +
+		`marketplaces\.superopen` +
+		`|plugins\."superopen@superopen"` +
+		`|hooks\.state\."superopen@superopen:[^"]*"` +
 		`)\]\s*$`,
 )
 
-// codexAnySectionRe matches a bare `[section.name]` line. Used to
-// detect the boundary that ends a legacy section we're stripping.
 var codexAnySectionRe = regexp.MustCompile(`^\[[^\]]+\]\s*$`)
 
-// stripCodexConfigTOML rewrites `~/.codex/config.toml` so that
-// every Superopen-owned section is removed. Other sections -
-// including `[projects."/Users/.../superopen"]` (which is a user
-// trust-level entry, not a Superopen artifact) - are preserved
-// verbatim.
-//
-// Returns the file path that was touched (empty string when nothing
-// changed) plus any error from the read/write path. Missing file
-// is a no-op.
+// stripCodexConfigTOML rewrites `~/.codex/config.toml` so that every
+// Superopen-owned section is removed.
 func stripCodexConfigTOML(dryRun bool) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -130,17 +91,7 @@ func stripCodexConfigTOML(dryRun bool) (string, error) {
 	return path, nil
 }
 
-// stripCodexOwnedSections is the pure string transformation that
-// `stripCodexConfigTOML` wraps. Split out for direct table-driven
-// testing without touching the filesystem.
-//
-// Returns (rewritten, changed). `changed` is true iff at least one
-// legacy section was removed.
 func stripCodexOwnedSections(src string) (string, bool) {
-	// Preserve the original line-ending style by working on raw
-	// bytes via strings.Split. CRLF inputs come through as
-	// trailing \r on each split element - that's fine; we join
-	// with the same separator.
 	sep := "\n"
 	if strings.Contains(src, "\r\n") && !strings.Contains(strings.ReplaceAll(src, "\r\n", ""), "\n") {
 		sep = "\r\n"
@@ -166,15 +117,8 @@ func stripCodexOwnedSections(src string) (string, bool) {
 		out = append(out, line)
 	}
 
-	// Collapse runs of >2 blank lines that the deletions may
-	// have left behind. We do it on the joined string so the
-	// regex sees the actual separator boundaries.
 	joined := strings.Join(out, sep)
 	collapsePattern := regexp.MustCompile(`(?:` + regexp.QuoteMeta(sep) + `){3,}`)
 	joined = collapsePattern.ReplaceAllString(joined, sep+sep)
 	return joined, changed
 }
-
-// writeFileAtomic is shared with uninstall_cursor.go - both
-// callers want the same temp-file-and-rename semantics. Defined
-// there so we don't duplicate the implementation.

@@ -7,7 +7,7 @@ export default function SkillsPage() {
     <HarnessFilesPage
       title="Skills"
       dir="skills"
-      emptyHint="No skills yet. Create one with New, or run so init / so sync."
+      emptyHint="No skills yet across vendor trees. New skills land in the preferred Claude/Cursor/… skills dir as <name>/SKILL.md."
     />
   );
 }

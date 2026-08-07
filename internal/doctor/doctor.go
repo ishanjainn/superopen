@@ -2,16 +2,13 @@ package doctor
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/ishanjainn/superopen/internal/coding"
 	"github.com/ishanjainn/superopen/internal/config"
-	"github.com/ishanjainn/superopen/internal/entitlement"
 	"github.com/ishanjainn/superopen/internal/githooks"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/inject"
@@ -63,8 +60,11 @@ func Run(repoRoot string) []Check {
 		}
 		checks = append(checks, Check{Name: "llm", OK: true, Detail: detail})
 	} else {
-		detail := "optional API key - memory/evals prefer coding-agent CLI (claude/codex); set OPENAI_API_KEY / ANTHROPIC_API_KEY only for headless llm_api"
-		checks = append(checks, Check{Name: "llm", OK: true, Warn: true, Detail: detail})
+		checks = append(checks, Check{
+			Name:   "llm",
+			OK:     true,
+			Detail: "no API key (evals/memory prefer coding-agent CLI; keys only for headless llm_api)",
+		})
 	}
 
 	// Coding-agent CLIs reused for sealed backend evals/recommendations.
@@ -135,27 +135,10 @@ func Run(repoRoot string) []Check {
 		checks = append(checks, Check{Name: "retrieve_index", OK: false, Detail: "run so sync to build corpus index"})
 	}
 
-	// Port ledger
+	// Port ledger (only report when present; empty is normal)
 	ledger := filepath.Join(paths.Root, "port", "ledger.json")
 	if _, err := os.Stat(ledger); err == nil {
 		checks = append(checks, Check{Name: "port_ledger", OK: true, Detail: ledger})
-	} else {
-		checks = append(checks, Check{Name: "port_ledger", OK: true, Warn: true, Detail: "no ports yet - so sessions port creates .so/port/ledger.json"})
-	}
-
-	// OTLP health
-	endpoint := strings.TrimRight(cfg.Observability.Listen, "/")
-	client := &http.Client{Timeout: 1 * time.Second}
-	resp, err := client.Get(endpoint + "/health")
-	if err != nil {
-		checks = append(checks, Check{Name: "otlp_receiver", OK: true, Warn: true, Detail: "not running - start with so dev (" + err.Error() + ")"})
-	} else {
-		resp.Body.Close()
-		if resp.StatusCode == 200 {
-			checks = append(checks, Check{Name: "otlp_receiver", OK: true, Detail: endpoint})
-		} else {
-			checks = append(checks, Check{Name: "otlp_receiver", OK: true, Warn: true, Detail: fmt.Sprintf("%s status=%d", endpoint, resp.StatusCode)})
-		}
 	}
 
 	// Project registry
@@ -178,14 +161,6 @@ func Run(repoRoot string) []Check {
 	}
 	_ = githooks.TrailerSession
 	checks = append(checks, Check{Name: "git_hooks", OK: hooksOK, Detail: "prepare-commit-msg SO-Session"})
-
-	// Paid entitlement (informational - OK either way)
-	st, _ := entitlement.Load()
-	if st.Authenticated && st.Paid {
-		checks = append(checks, Check{Name: "cloud_otlp", OK: true, Detail: "paid auth unlocked"})
-	} else {
-		checks = append(checks, Check{Name: "cloud_otlp", OK: true, Detail: "local-only (login to unlock paid OTLP)"})
-	}
 
 	return checks
 }

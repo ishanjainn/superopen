@@ -97,7 +97,7 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 			}
 		}
 		if touched, e := stripClaudeMarketplaceJSON(dryRun); touched != "" {
-			removed = append(removed, touched+" (legacy entry)")
+			removed = append(removed, touched+" (residual entry)")
 			if e != nil {
 				errs = append(errs, e.Error())
 			}
@@ -122,7 +122,7 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 			}
 		}
 		if touched, e := stripCodexConfigTOML(dryRun); touched != "" {
-			removed = append(removed, touched+" (legacy sections)")
+			removed = append(removed, touched+" (residual sections)")
 			if e != nil {
 				errs = append(errs, e.Error())
 			}
@@ -131,7 +131,7 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 	return removed, errs
 }
 
-// purgeShared removes shared legacy config/cache state. Triggered by
+// purgeShared removes shared residual config/cache state. Triggered by
 // `--purge`; left out by default so re-onboarding doesn't require
 // re-entering the API key / endpoint.
 func purgeShared(dryRun bool) (removed []string, errs []string) {
@@ -245,7 +245,7 @@ func removePath(p string, dryRun bool) (string, error) {
 }
 
 // disableClaudeCodePlugin asks the `claude` CLI to drop the superopen-cc
-// plugin AND the legacy marketplace registration. Both are
+// plugin AND the residual marketplace registration. Both are
 // best-effort: a missing CLI or a "nothing to do" outcome is
 // collapsed to nil so we don't block the directory cleanup that
 // already ran. The JSON-level fallback in stripClaudeMarketplaceJSON
@@ -290,39 +290,35 @@ func disableClaudeCodePlugin() error {
 }
 
 // disableCodexPlugin tells the `codex` CLI to remove the Superopen
-// plugin (and legacy marketplace slugs) then forget the marketplace
-// registration. Best-effort; "already gone" is success.
+// plugin then forget the marketplace registration. Best-effort;
+// "already gone" is success.
 func disableCodexPlugin() error {
 	codexBin, err := exec.LookPath("codex")
 	if err != nil {
 		return nil
 	}
 
-	for _, slug := range []string{"superopen@superopen", "so@so"} {
-		rm := exec.Command(codexBin, "plugin", "remove", slug) //nolint:gosec
-		if out, err := rm.CombinedOutput(); err != nil {
-			msg := strings.TrimSpace(string(out))
-			lower := strings.ToLower(msg)
-			if msg != "" &&
-				!strings.Contains(lower, "not installed") &&
-				!strings.Contains(lower, "not found") &&
-				!strings.Contains(lower, "no such plugin") {
-				return fmt.Errorf("codex plugin remove %s: %s", slug, msg)
-			}
+	rm := exec.Command(codexBin, "plugin", "remove", "superopen@superopen") //nolint:gosec
+	if out, err := rm.CombinedOutput(); err != nil {
+		msg := strings.TrimSpace(string(out))
+		lower := strings.ToLower(msg)
+		if msg != "" &&
+			!strings.Contains(lower, "not installed") &&
+			!strings.Contains(lower, "not found") &&
+			!strings.Contains(lower, "no such plugin") {
+			return fmt.Errorf("codex plugin remove: %s", msg)
 		}
 	}
 
-	for _, mpName := range []string{"superopen", "so"} {
-		mp := exec.Command(codexBin, "plugin", "marketplace", "remove", mpName) //nolint:gosec
-		if out, err := mp.CombinedOutput(); err != nil {
-			msg := strings.TrimSpace(string(out))
-			lower := strings.ToLower(msg)
-			if msg != "" &&
-				!strings.Contains(lower, "not registered") &&
-				!strings.Contains(lower, "not found") &&
-				!strings.Contains(lower, "no such marketplace") {
-				return fmt.Errorf("codex plugin marketplace remove %s: %s", mpName, msg)
-			}
+	mp := exec.Command(codexBin, "plugin", "marketplace", "remove", "superopen") //nolint:gosec
+	if out, err := mp.CombinedOutput(); err != nil {
+		msg := strings.TrimSpace(string(out))
+		lower := strings.ToLower(msg)
+		if msg != "" &&
+			!strings.Contains(lower, "not registered") &&
+			!strings.Contains(lower, "not found") &&
+			!strings.Contains(lower, "no such marketplace") {
+			return fmt.Errorf("codex plugin marketplace remove: %s", msg)
 		}
 	}
 	return nil

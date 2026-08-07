@@ -7,7 +7,7 @@ export default function RulesPage() {
     <HarnessFilesPage
       title="Rules"
       dir="rules"
-      emptyHint="No rules yet. Create one with New, or add markdown under .so/rules/."
+      emptyHint="No rules yet across Cursor/Claude/agents/… trees. New files land in the preferred vendor rules dir."
     />
   );
 }

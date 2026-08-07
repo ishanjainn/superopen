@@ -39,37 +39,34 @@ func TestDenyCommandAndSensitivePath(t *testing.T) {
 	}
 }
 
-func TestEnsureDefaultsMigratesLegacy(t *testing.T) {
+func TestEnsureDefaultsCreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "repo")
 	paths := harness.Resolve(root)
 	_ = paths.EnsureDirs()
-	legacyDefaults := filepath.Join(paths.GuardrailsDir, "defaults.yaml")
-	legacyPolicy := filepath.Join(paths.GuardrailsDir, "policy.yaml")
-	if err := os.WriteFile(legacyDefaults, []byte("rules:\n  - id: legacy-rule\n    description: from defaults\n    severity: warn\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(legacyPolicy, []byte("approval: yolo\ndenied_commands: [\"rm -rf /\"]\nsensitive_paths: [\"**/.env\"]\nredact_output: true\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	if err := EnsureDefaults(paths); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(Path(paths)); err != nil {
 		t.Fatal("expected guardrails.yaml", err)
 	}
-	if _, err := os.Stat(legacyDefaults); !os.IsNotExist(err) {
-		t.Fatal("legacy defaults should be removed")
-	}
-	if _, err := os.Stat(legacyPolicy); !os.IsNotExist(err) {
-		t.Fatal("legacy policy should be removed")
-	}
 	eng, err := Load(paths)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(eng.Rules) == 0 || eng.Rules[0].ID != "legacy-rule" {
-		t.Fatalf("rules=%#v", eng.Rules)
+	if eng.Approval() == "" {
+		t.Fatal("expected default approval")
+	}
+	// Second call must not clobber edits.
+	if err := os.WriteFile(Path(paths), []byte("approval: yolo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureDefaults(paths); err != nil {
+		t.Fatal(err)
+	}
+	eng, err = Load(paths)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if eng.Approval() != "yolo" {
 		t.Fatalf("approval=%s", eng.Approval())

@@ -57,7 +57,7 @@ type codexReasoningItem struct {
 }
 
 // sessionMeta captures the subset of fields Codex's `session_meta`
-// record exposes about subagent linkage. We collapse the legacy
+// record exposes about subagent linkage. We collapse the alternate
 // `parent_thread_id` / `Source.Subagent.ThreadSpawn.*` fallbacks
 // into the same struct so both old and new transcript versions are
 // handled.

@@ -10,6 +10,11 @@ import (
 
 // HybridSearch merges memory hits with harness corpus retrieve hits.
 func (s *Store) HybridSearch(q string, limit int) ([]SearchHit, error) {
+	return s.HybridSearchVendor(q, limit, "")
+}
+
+// HybridSearchVendor is HybridSearch with session-vendor weighting on corpus hits.
+func (s *Store) HybridSearchVendor(q string, limit int, vendor string) ([]SearchHit, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -17,7 +22,7 @@ func (s *Store) HybridSearch(q string, limit int) ([]SearchHit, error) {
 	if err != nil {
 		return nil, err
 	}
-	corpus, err := retrieve.Search(s.Paths, q, limit)
+	corpus, err := retrieve.SearchWith(s.Paths, q, retrieve.SearchOptions{Limit: limit, Vendor: vendor})
 	if err != nil {
 		return memHits, nil
 	}

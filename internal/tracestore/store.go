@@ -154,7 +154,7 @@ func (s *LocalJSONL) SessionCost(sessionID string) (int64, float64, error) {
 			fmt.Sscanf(v, "%d", &n)
 			tokens += n
 		}
-		// Prefer gen_ai.usage.cost (semconv); accept legacy aliases.
+		// Prefer gen_ai.usage.cost (semconv); accept alternate aliases.
 		for _, key := range []string{"gen_ai.usage.cost", "gen_ai.usage.cost_usd", "coding_agent.session.cost_usd"} {
 			if v := sp.Attributes[key]; v != "" {
 				var c float64

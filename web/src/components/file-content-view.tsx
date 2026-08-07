@@ -34,7 +34,7 @@ export function FileContentView({
   const name = path.split("/").pop() || path;
   const lower = name.toLowerCase();
 
-  if (lower.endsWith(".md")) {
+  if (lower.endsWith(".md") || lower.endsWith(".mdc") || lower.endsWith(".instructions.md")) {
     return (
       <article className="mx-auto max-w-3xl">
         <MarkdownView source={content} />

@@ -50,7 +50,15 @@ func startRefreshWatcher(root string) {
 
 func maxSharedMtime(paths harness.Paths) int64 {
 	var best int64
-	for _, d := range []string{paths.KnowledgeDir, paths.RulesDir, paths.SkillsDir, paths.GuardrailsDir, paths.EvalsDir} {
+	touch := func(path string) {
+		if info, err := os.Stat(path); err == nil {
+			if t := info.ModTime().Unix(); t > best {
+				best = t
+			}
+		}
+	}
+	touch(paths.AgentsMD)
+	for _, d := range []string{paths.RulesDir, paths.SkillsDir, paths.GuardrailsDir, paths.EvalsDir} {
 		_ = filepath.Walk(d, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info == nil || info.IsDir() {
 				return nil

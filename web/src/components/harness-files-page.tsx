@@ -8,18 +8,49 @@ import { useStringQueryParam } from "@/hooks/use-flag-query-param";
 
 type FileEntry = { name: string; path: string; isDir: boolean };
 
-function fileNameFromPath(path: string): string {
+/** Unique URL/query key under a harness dir (skills all share basename SKILL.md). */
+function fileParamFromPath(dir: string, path: string): string {
+  const prefix = `${dir}/`;
+  if (path.startsWith(prefix)) {
+    const rest = path.slice(prefix.length);
+    // skills/<vendor>/<name>/SKILL.md → <vendor>/<name> (matches entry.name)
+    if (dir === "skills" && rest.endsWith("/SKILL.md")) {
+      return rest.slice(0, -"/SKILL.md".length);
+    }
+    return rest;
+  }
   const parts = path.split("/");
   return parts[parts.length - 1] || path;
 }
 
-function matchEntry(list: FileEntry[], fileParam: string): FileEntry | undefined {
-  const q = fileParam.trim();
+function displayLabel(dir: string, path: string, entries: FileEntry[]): string {
+  const hit = entries.find((e) => e.path === path);
+  if (hit?.name) return hit.name;
+  return fileParamFromPath(dir, path);
+}
+
+function matchEntry(
+  dir: string,
+  list: FileEntry[],
+  fileParam: string
+): FileEntry | undefined {
+  const q = fileParam.trim().replace(/^\/+/, "");
   if (!q) return undefined;
+  const underDir = `${dir}/${q}`;
   return (
     list.find((e) => !e.isDir && e.path === q) ||
+    list.find((e) => !e.isDir && e.path === underDir) ||
     list.find((e) => !e.isDir && e.name === q) ||
-    list.find((e) => !e.isDir && e.path.endsWith("/" + q))
+    // skills: ?file=cursor/foo matches path …/cursor/foo/SKILL.md
+    list.find(
+      (e) =>
+        !e.isDir &&
+        (e.path === `${underDir}/SKILL.md` || e.path.endsWith(`/${q}/SKILL.md`))
+    ) ||
+    // Unique basenames only (e.g. rules/coding.md) — never SKILL.md alone
+    (q !== "SKILL.md" && !q.includes("/")
+      ? list.find((e) => !e.isDir && e.path.endsWith("/" + q))
+      : undefined)
   );
 }
 
@@ -66,7 +97,7 @@ function HarnessFilesPageInner({
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
 
-  const crumbLabel = selected ? fileNameFromPath(selected) : null;
+  const crumbLabel = selected ? displayLabel(dir, selected, entries) : null;
   useBreadcrumbCrumb(crumbLabel);
 
   const reloadList = useCallback(async () => {
@@ -84,7 +115,7 @@ function HarnessFilesPageInner({
       setError("");
       setStatus("");
       setEditing(edit);
-      if (syncUrl) setFileParam(fileNameFromPath(path));
+      if (syncUrl) setFileParam(fileParamFromPath(dir, path));
       const r = await fetch(`/api/files/${path}`);
       if (!r.ok) {
         setError(await r.text());
@@ -94,7 +125,7 @@ function HarnessFilesPageInner({
       setContent(text);
       setDraft(text);
     },
-    [setFileParam]
+    [dir, setFileParam]
   );
 
   useEffect(() => {
@@ -106,7 +137,7 @@ function HarnessFilesPageInner({
     reloadList()
       .then((list) => {
         if (cancelled) return;
-        const fromUrl = matchEntry(list, fileParam);
+        const fromUrl = matchEntry(dir, list, fileParam);
         const first = list.find((e) => !e.isDir);
         const pick = fromUrl || first;
         if (pick) {
@@ -131,7 +162,7 @@ function HarnessFilesPageInner({
   // When the user navigates via back/forward and `file` changes, open that file.
   useEffect(() => {
     if (!fileParam || entries.length === 0) return;
-    const match = matchEntry(entries, fileParam);
+    const match = matchEntry(dir, entries, fileParam);
     if (match && match.path !== selected) {
       void openFile(match.path, false, false);
     }
@@ -169,21 +200,20 @@ function HarnessFilesPageInner({
     try {
       let name = newName.trim();
       if (!name) throw new Error("Name required");
-      if (!name.endsWith(".md")) name += ".md";
-      const path = `${dir}/${name}`;
-      const r = await fetch(`/api/files/${path}`, {
-        method: "PUT",
+      const r = await fetch(`/api/files/${dir}`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: `# ${name.replace(/\.md$/, "")}\n\n` }),
+        body: JSON.stringify({ name }),
       });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
         throw new Error(j.error || (await r.text()));
       }
+      const j = (await r.json()) as { path?: string };
       setCreating(false);
       setNewName("");
       await reloadList();
-      await openFile(path, true);
+      if (j.path) await openFile(j.path, true);
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
     }

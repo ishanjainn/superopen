@@ -36,8 +36,9 @@ func refreshMarkerPath(paths harness.Paths) string {
 	return filepath.Join(paths.MemoryDir, "last-refresh.json")
 }
 
-// Refresh is a lite sync for post-merge / post-checkout / so refresh.
-// Skips coding-hook reinstall and citymap; rebuilds graph only when shared harness or HEAD changed.
+// Refresh is a lite sync for post-merge / post-checkout / so refresh after HEAD moves.
+// Rebuilds untracked runtime (graph, memory packs, retrieve). Injectors are
+// byte-idempotent so tracked docs are not rewritten when unchanged.
 func Refresh(opts RefreshOptions) error {
 	root := opts.RepoRoot
 	paths := harness.Resolve(root)
@@ -160,8 +161,11 @@ func sharedHarnessChanged(paths harness.Paths, since time.Time) bool {
 		return true
 	}
 	dirs := []string{
-		paths.KnowledgeDir, paths.RulesDir, paths.SkillsDir,
+		paths.RulesDir, paths.SkillsDir,
 		paths.GuardrailsDir, paths.EvalsDir,
+	}
+	if info, err := os.Stat(paths.AgentsMD); err == nil && info.ModTime().After(since) {
+		return true
 	}
 	for _, d := range dirs {
 		changed := false

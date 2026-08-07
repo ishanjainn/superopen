@@ -154,7 +154,7 @@ func run(cmd *cobra.Command, vendor, event string) (rerr error) {
 		return nil
 	}
 
-	// Surface allow-listed values from ~/.config/so/config.env (and legacy paths)
+	// Surface allow-listed values from ~/.config/so/config.env
 	// into the process environment BEFORE adapters read them. Per-vendor
 	// adapters call os.Getenv directly (e.g. for the repo allowlist),
 	// so without this step a value set in config.env would be invisible

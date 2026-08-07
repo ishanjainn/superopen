@@ -1,6 +1,9 @@
-# Superopen - commit the portable team harness. Ignore only machine-local
-# telemetry, liveness state, caches, and transient work-in-progress records.
+# Superopen - tracked under .so/: config, guardrails, discovery, AGENT.md.
+# Everything regenerable or machine-local is ignored so feature branches stay clean.
+
+# Local telemetry / sessions / traces
 traces/
+sessions/
 audit/
 run/
 session-state/
@@ -8,15 +11,14 @@ port/
 ui-prefs.json
 finalize-pending
 
-# These are regenerated or describe only a local agent process.
-memory/history/
-memory/harvest-ledger.json
-memory/idle-sweep-at
-memory/last-refresh.json
-memory/pending-harvest.json
-memory/refresh-status.json
-graph/cache/
+# Regenerable graph + viz (agents still query local graph.json)
+graph/
+viz/
 
-# Session transcripts/meta can carry emails, prompts, and file contents -
-# always machine-local, never portable team harness.
-sessions/
+# Memory packs and harvest ledgers (durable guidance goes to AGENTS.md / .agents/)
+memory/
+
+# Eval run history + recommendation pending state (applied changes land in native docs)
+evals/history.json
+recommendations/pending.json
+recommendations/history.json

@@ -24,6 +24,8 @@ type Result struct {
 	Score          float64            `json:"score"`
 	Badge          string             `json:"badge"`
 	EvidenceStatus string             `json:"evidence_status,omitempty"` // sufficient | insufficient
+	// HotAreas are repo-relative dirs that dominated file activity (for nested AGENTS.md recs).
+	HotAreas []string `json:"hot_areas,omitempty"`
 }
 
 type activitySignals struct {
@@ -90,7 +92,77 @@ func containsAny(value string, needles ...string) bool {
 }
 
 func isHarnessReference(value string) bool {
-	return containsAny(value, ".so/", "agents.md", "claude.md", "so graph", "so query", "so knowledge", "so rules", "so guard", "so skill", "/so")
+	return containsAny(value,
+		".so/", "agents.md", "/agents.md", "claude.md",
+		".claude/rules", ".cursor/rules", ".agents/rules", ".codex/rules",
+		".claude/skills", ".cursor/skills", ".agents/skills", ".pi/skills",
+		"so graph", "so query", "so knowledge", "so rules", "so guard", "so skill", "/so",
+	)
+}
+
+// hotAreasFromFiles returns up to 2 concentrated package dirs from touched files.
+func hotAreasFromFiles(files map[string]bool) []string {
+	counts := map[string]int{}
+	for p := range files {
+		area := guidanceArea(p)
+		if area == "" {
+			continue
+		}
+		counts[area]++
+	}
+	type kv struct {
+		k string
+		v int
+	}
+	var ranked []kv
+	for k, v := range counts {
+		ranked = append(ranked, kv{k, v})
+	}
+	for i := 0; i < len(ranked); i++ {
+		for j := i + 1; j < len(ranked); j++ {
+			if ranked[j].v > ranked[i].v {
+				ranked[i], ranked[j] = ranked[j], ranked[i]
+			}
+		}
+	}
+	var out []string
+	total := 0
+	for _, r := range ranked {
+		total += r.v
+	}
+	for i := 0; i < len(ranked) && i < 2; i++ {
+		// Require the area to account for a meaningful share of file touches.
+		if total > 0 && float64(ranked[i].v)/float64(total) < 0.35 && ranked[i].v < 3 {
+			continue
+		}
+		out = append(out, ranked[i].k)
+	}
+	return out
+}
+
+func guidanceArea(path string) string {
+	p := filepath.ToSlash(path)
+	p = strings.TrimPrefix(p, "./")
+	// Drop absolute prefix noise by taking from known roots.
+	for _, root := range []string{"internal/", "cmd/", "web/", "sdk/", "plugins/", "templates/", "docs/"} {
+		if i := strings.Index(p, root); i >= 0 {
+			p = p[i:]
+			break
+		}
+	}
+	parts := strings.Split(p, "/")
+	if len(parts) == 0 || parts[0] == "" || strings.HasPrefix(parts[0], ".") {
+		return ""
+	}
+	switch parts[0] {
+	case "internal", "cmd", "web", "sdk", "plugins":
+		if len(parts) >= 2 && parts[1] != "" && !strings.Contains(parts[1], ".") {
+			return parts[0] + "/" + parts[1]
+		}
+		return parts[0]
+	default:
+		return ""
+	}
 }
 
 func Run(paths harness.Paths, cfg config.Config, sessionID string, spans []tracestore.Span, completer llm.Completer) (Result, error) {
@@ -119,20 +191,26 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, spans []trace
 		return persistResult(paths, res)
 	}
 	res.EvidenceStatus = "sufficient"
+	res.HotAreas = hotAreasFromFiles(signals.files)
 	if signals.searches > 15 {
 		res.Dimensions["wandering"] = 0.8
 		res.Dimensions["exploration"] = 0.4
-		res.Notes = append(res.Notes, "High search volume - consider improving graph/skills")
+		note := fmt.Sprintf("Problem: %d search tools ran with little reuse of existing guidance. Impact: next similar task will re-discover the same paths and burn tokens.", signals.searches)
+		if len(res.HotAreas) > 0 {
+			note += " Hot area: " + strings.Join(res.HotAreas, ", ") + "."
+		}
+		res.Notes = append(res.Notes, note)
 	}
 	if signals.harnessHits > 0 {
 		res.Dimensions["harness_use"] = 0.9
+		res.Notes = append(res.Notes, "Harness guidance was consulted (AGENTS.md / rules / skills / so graph) — good reuse for the next session.")
 	} else if len(spans) > 5 {
 		res.Dimensions["harness_use"] = 0.2
-		res.Notes = append(res.Notes, "Session did not touch harness files - injectors may need strengthening")
+		res.Notes = append(res.Notes, "Problem: session never opened AGENTS.md, project rules/skills, or so graph. Impact: agents rediscover structure instead of following durable guidance.")
 	}
 	if signals.edits > 0 && signals.reads == 0 {
 		res.Dimensions["scope"] = 0.4
-		res.Notes = append(res.Notes, "Edits without reads detected")
+		res.Notes = append(res.Notes, "Problem: edits landed without prior reads. Impact: higher risk of unrelated churn and harder review.")
 	}
 
 	backend := strings.ToLower(strings.TrimSpace(cfg.Evals.Backend))
@@ -144,7 +222,7 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, spans []trace
 		summary := fmt.Sprintf("session=%s reads=%d edits=%d searches=%d tool_calls=%d harness_hits=%d files=%d notes=%v",
 			sessionID, signals.reads, signals.edits, signals.searches, signals.toolCalls, signals.harnessHits, len(signals.files), res.Notes)
 		out, err := completer.Complete(
-			"You score coding-agent sessions. Reply with JSON only: {\"exploration\":0-1,\"scope\":0-1,\"wandering\":0-1,\"verification\":0-1,\"note\":\"...\"}",
+			"You score coding-agent sessions. Reply with JSON only: {\"exploration\":0-1,\"scope\":0-1,\"wandering\":0-1,\"verification\":0-1,\"note\":\"one sentence: problem + how better AGENTS.md/rules/skills would help next session\"}",
 			summary,
 		)
 		if err == nil {
