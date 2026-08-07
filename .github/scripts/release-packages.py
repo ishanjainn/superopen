@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -51,13 +52,15 @@ ALLOWED_COMMANDS = {"git"}
 GITHUB_LOGIN_RE = re.compile(r"^(?!-)[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 GO_VERSION_RE = re.compile(r'(?m)^var Version = "[^"]+"$')
 GO_VERSION_READ_RE = re.compile(r'(?m)^var Version = "([^"]+)"$')
+HOMEBREW_PLATFORMS = ("darwin-arm64", "darwin-amd64", "linux-arm64", "linux-amd64")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class ReleaseError(RuntimeError):
     pass
 
 
-def run(*args: str, cwd: Path | None = None, check: bool = True) -> str:
+def run(*args: str, cwd: Path | None = None, check: bool = True, env: dict[str, str] | None = None) -> str:
     if not args or args[0] not in ALLOWED_COMMANDS:
         raise ReleaseError(f"command is not allowlisted: {args[0] if args else '<empty>'}")
     # Arguments are always passed as an argv list with no shell interpretation.
@@ -68,6 +71,7 @@ def run(*args: str, cwd: Path | None = None, check: bool = True) -> str:
         text=True,
         capture_output=True,
         shell=False,
+        env=env,
     )
     if check and result.returncode:
         raise ReleaseError(
@@ -1041,6 +1045,77 @@ def bump(args: argparse.Namespace) -> None:
     write_output("changed", "true" if changed else "false")
 
 
+def fetch_homebrew_sha256(repository: str, tag: str, platform: str) -> str:
+    url = f"https://github.com/{repository}/releases/download/{tag}/so-{platform}.tar.gz.sha256"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310 (fixed https github.com URL)
+            body = response.read().decode("utf-8").strip()
+    except urllib.error.URLError as exc:
+        raise ReleaseError(f"could not download {url}: {exc}") from exc
+    checksum = body.split()[0]
+    if not SHA256_RE.match(checksum):
+        raise ReleaseError(f"unexpected sha256 file contents at {url}: {body!r}")
+    return checksum
+
+
+def render_homebrew_formula(content: str, version: str, checksums: dict[str, str]) -> str:
+    version_pattern = re.compile(r'(?m)^(\s*version )"[^"]+"')
+    updated, count = version_pattern.subn(rf'\1"{version}"', content, count=1)
+    if count != 1:
+        raise ReleaseError("could not find version stanza in formula")
+
+    for platform, checksum in checksums.items():
+        os_name, arch = platform.split("-", 1)
+        url_fragment = f"so-{platform}.tar.gz"
+        pattern = re.compile(rf'(url "[^"]*{re.escape(url_fragment)}"\n\s*sha256 )"[^"]*"')
+        updated, count = pattern.subn(rf'\1"{checksum}"', updated)
+        if count != 1:
+            raise ReleaseError(
+                f"expected exactly one sha256 stanza for {os_name}/{arch} ({url_fragment}), found {count}"
+            )
+
+    return updated
+
+
+def bump_homebrew_formula(args: argparse.Namespace) -> None:
+    # dawidd6/action-homebrew-bump-formula (brew bump-formula-pr) requires a
+    # single top-level url/sha256 pair; so.rb has four, nested under
+    # on_macos/on_linux + on_arm/on_intel blocks (one per platform). So this
+    # downloads the published *.sha256 release assets and rewrites version +
+    # each platform's sha256 in place instead.
+    checksums = {
+        platform: fetch_homebrew_sha256(args.repository, args.tag, platform) for platform in HOMEBREW_PLATFORMS
+    }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        clone_dir = Path(tmp) / "tap"
+        askpass = Path(tmp) / "askpass.sh"
+        askpass.write_text(f"#!/bin/sh\necho '{args.token}'\n", encoding="utf-8")
+        askpass.chmod(0o700)
+        env = dict(os.environ, GIT_ASKPASS=str(askpass), GIT_TERMINAL_PROMPT="0")
+
+        remote = f"https://x-access-token@github.com/{args.tap}.git"
+        run("git", "clone", "--depth", "1", remote, str(clone_dir), env=env)
+
+        formula_path = clone_dir / args.formula_path
+        original = formula_path.read_text(encoding="utf-8")
+        updated = render_homebrew_formula(original, args.version, checksums)
+
+        if updated == original:
+            print(f"::notice::formula already up to date for {args.tag}")
+            return
+
+        formula_path.write_text(updated, encoding="utf-8")
+
+        run("git", "config", "user.name", "github-actions[bot]", cwd=clone_dir)
+        run("git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com", cwd=clone_dir)
+        run("git", "add", "--", args.formula_path, cwd=clone_dir)
+        run("git", "commit", "-m", f"so {args.version}", cwd=clone_dir)
+        run("git", "push", "origin", "HEAD", cwd=clone_dir, env=env)
+
+    print(f"::notice::updated {args.formula_path} in {args.tap} for {args.tag}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
@@ -1057,6 +1132,14 @@ def main() -> int:
     bump_parser = subparsers.add_parser("bump")
     bump_parser.add_argument("--metadata", required=True)
     bump_parser.set_defaults(func=bump)
+    bump_homebrew_parser = subparsers.add_parser("bump-homebrew-formula")
+    bump_homebrew_parser.add_argument("--repository", required=True)
+    bump_homebrew_parser.add_argument("--tag", required=True)
+    bump_homebrew_parser.add_argument("--version", required=True)
+    bump_homebrew_parser.add_argument("--tap", required=True)
+    bump_homebrew_parser.add_argument("--formula-path", default="Formula/so.rb")
+    bump_homebrew_parser.add_argument("--token", required=True)
+    bump_homebrew_parser.set_defaults(func=bump_homebrew_formula)
     summarize_pr_parser = subparsers.add_parser("summarize-pr")
     summarize_pr_parser.add_argument("--repository", required=True)
     summarize_pr_parser.add_argument("--pr-number", required=True, type=int)
