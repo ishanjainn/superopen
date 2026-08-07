@@ -1,22 +1,23 @@
 <!-- superopen:start -->
 ## Superopen
 
-This project uses Superopen. Prefer AGENTS.md (including nested dir/AGENTS.md), existing vendor rules & skills dirs when present, and `so graph query` before raw exploration.
+This project is managed by Superopen (`.so/`). Prefer `.so/` before raw exploration to save tokens.
 
 Invoke with `/so` (Claude Code, Cursor, Gemini, Copilot, OpenCode, Pi) or `$so` (Codex):
 - `/so` - help
 - `/so init` - bootstrap Superopen if missing
 - `/so graph query "<question>"` - ask the repo knowledge graph
-- `/so graph` - rebuild `.so/graph/` (local, regenerable)
+- `/so graph` - rebuild `.so/graph/` (never leave `graphify-out/` at repo root)
 - `/so doctor` - health check
 
 Rules:
 - For codebase questions, run `so graph query "<question>"` when `.so/graph/graph.json` exists.
-- Read `AGENTS.md` (and nested `*/AGENTS.md`), project rules, and matching skills for the task.
-- When updating guidance: edit existing rule/skill files in the dirs this repo already uses; prune obsolete lines instead of only appending.
+- Read relevant files under `.so/knowledge/` and `.so/rules/`, plus matching skills in `.so/skills/` for the task.
 - Read `.so/memory/active-context.md` when present (session memory pack shared across coding agents).
 - Obey `.so/guardrails/guardrails.yaml`.
 - Do not dump the entire `.so/` directory into context - load only what the task needs.
 - After meaningful Superopen edits by a human, they will run `so sync`.
 <!-- superopen:end -->
+
+
 

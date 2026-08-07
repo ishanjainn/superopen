@@ -19,17 +19,17 @@ The `/so` skill is registered with **`so install`** (after installing the CLI). 
 /so graph                                        # rebuild repository graph into .so/graph/
 /so graph query "<question>"                     # ask the local knowledge graph
 /so query "<question>"                           # alias for graph query
-/so knowledge                                     # show AGENTS.md + discovered rules/skills roots
-/so rules                                        # point at this repo's rules dir (Cursor or .agents)
+/so knowledge                                     # point at .so/knowledge to read for the current task
+/so rules                                        # point at .so/rules for coding guidance
 /so guardrails                                   # show .so/guardrails/guardrails.yaml
-/so skills                                       # list discovered non-/so skills tree
-/so doctor                                       # health check
+/so skills                                       # list .so/skills/
+/so doctor                                       # health check (warns OK; otlp needs `so dev`)
 /so sync                                         # refresh injectors + graph after Superopen edits
 /so install                                      # (re)register this /so skill with coding agents
 /so uninstall                                    # remove skills, hooks, injectors, .so/, CLI
 /so apply-upgrade                                # apply JSON you produced (usually automatic after /so init)
-/so harvest idle                                 # harvest long-idle sessions into memory + native docs
-/so dev                                          # open Sessions UI (+ local receiver for live UI)
+/so harvest idle                                 # harvest long-idle sessions into memory/knowledge
+/so dev                                          # open Sessions UI + OTLP receiver
 /so sessions                                     # list sessions
 /so eval <session-id>                            # score a session
 /so recommend list                               # pending Superopen recommendations
@@ -60,8 +60,8 @@ so init --no-llm
    (Add `--force` / `--code-only` if the user passed those flags.)
 
 3. Read `.so/upgrade-brief.md` (written by init). It contains the system instructions + repo profile.
-4. **Using your own model**, produce the JSON object described in that brief (architecture_md, conventions_md, guardrails, evals, brief). Stay faithful to the profile - invent no secrets or fake paths. Do **not** reuse upgrade JSON from another project.
-5. Apply it with **exactly one** input method (never both — the CLI errors if a path and a heredoc/stdin redirect are combined):
+4. **Using your own model**, produce the JSON object described in that brief (architecture_md, conventions_md, guardrails, evals, brief). Stay faithful to the profile - invent no secrets or fake paths.
+5. Apply it:
 
 ```bash
 so apply-upgrade <<'EOF'
@@ -69,9 +69,9 @@ so apply-upgrade <<'EOF'
 EOF
 ```
 
-   Or write a temp file and `so apply-upgrade /tmp/so-upgrade.json` (no heredoc on that command).
+   Or write a temp file and `so apply-upgrade /tmp/so-upgrade.json`.
 
-6. Tell the user briefly: Superopen at `.so/`, graph node/edge counts, and that **AGENTS.md**, guardrails, and evals were upgraded with the assistant model. Suggest `so doctor` or `so dev` next.
+6. Tell the user briefly: Superopen at `.so/`, graph node/edge counts, and that context/guardrails were upgraded with the assistant model. Suggest `so doctor` or `so dev` next. Doctor may **warn** if OTLP is down (`so dev` starts it); that is not a failed init.
 
 If `.so/` already exists and the user only wanted a refresh of context/guardrails, skip step 2’s full rebuild when possible: read `.so/upgrade-brief.md` (re-run `so init --no-llm` if missing), then steps 4-5.
 
@@ -91,7 +91,7 @@ so graph query "<question>"
 
 Prefer that answer over Grep/Glob when it is useful. You may still open a few specific files the query surfaces.
 
-2. For conventions / review rules, read `AGENTS.md` (and nested `*/AGENTS.md`), the repo's rules dir, and `.so/guardrails/guardrails.yaml` before inventing process. When updating guidance, prune obsolete lines — do not only append.
+2. For conventions / review rules, read `.so/knowledge/conventions.md`, `.so/rules/`, and `.so/guardrails/guardrails.yaml` before inventing process.
 
 ### Commands → shell
 
@@ -101,16 +101,16 @@ Map `/so …` arguments to the `so` CLI on PATH (or `$(go env GOPATH)/bin/so` if
 |---|---|
 | `/so init …` | Follow **`/so init`** section above (not bare `so init` alone) |
 | `/so install …` | `so install …` |
-| `/so apply-upgrade` | `so apply-upgrade` (with JSON you produced — file **or** heredoc, not both) |
+| `/so apply-upgrade` | `so apply-upgrade` (with JSON you produced) |
 | `/so graph` / `/so graph rebuild` | `so graph rebuild` |
 | `/so graph query "…"` / `/so query "…"` | `so graph query "…"` |
 | `/so doctor` | `so doctor` |
 | `/so sync` | `so sync` |
 | `/so dev` | `so dev` (background OK) |
 | `/so guardrails` | `so guard` or read `.so/guardrails/guardrails.yaml` |
-| `/so skills` | list the discovered skills tree (not the reserved `/so` skill) |
-| `/so knowledge` | read `AGENTS.md` (root + nested) relevant to the task |
-| `/so rules` | summarize coding rules in the discovered rules dir |
+| `/so skills` | `so skill list` or list `.so/skills/` |
+| `/so knowledge` | summarize paths under `.so/knowledge/` relevant to the task |
+| `/so rules` | summarize coding rules under `.so/rules/` |
 | `/so sessions` | `so sessions` |
 | `/so eval …` | `so eval …` |
 | `/so recommend …` | `so recommend …` |
