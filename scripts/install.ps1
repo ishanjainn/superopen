@@ -6,18 +6,18 @@
 # the user-scope PATH if it is not already there.
 #
 # Usage:
-#   iwr -useb https://raw.githubusercontent.com/superopen/so/main/scripts/install.ps1 | iex
+#   iwr -useb https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.ps1 | iex
 #
 # Environment overrides:
 #   $env:SUPEROPEN_INSTALL_DIR  Target install directory.
 #                               Default: $env:USERPROFILE\.superopen\bin
 #   $env:SUPEROPEN_VERSION      Release tag WITHOUT the `cli-` prefix,
 #                               e.g. `1.2.0`. Default: `latest`.
-#   $env:SUPEROPEN_REPO         GitHub owner/repo. Default: superopen/so
+#   $env:SUPEROPEN_REPO         GitHub owner/repo. Default: ishanjainn/superopen
 
 $ErrorActionPreference = 'Stop'
 
-$Repo = if ($env:SUPEROPEN_REPO) { $env:SUPEROPEN_REPO } else { 'superopen/so' }
+$Repo = if ($env:SUPEROPEN_REPO) { $env:SUPEROPEN_REPO } else { 'ishanjainn/superopen' }
 $InstallDir = if ($env:SUPEROPEN_INSTALL_DIR) {
     $env:SUPEROPEN_INSTALL_DIR
 } else {

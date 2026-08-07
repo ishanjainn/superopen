@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/tracestore"
 )
 
 // ApplyVCSFromSpans folds commit/PR/branch attrs from spans into meta.

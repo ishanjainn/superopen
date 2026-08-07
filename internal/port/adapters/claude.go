@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/port"
+	"github.com/ishanjainn/superopen/internal/port"
 )
 
 // ClaudeImport reads ~/.claude/projects/<encoded-cwd>/*.jsonl

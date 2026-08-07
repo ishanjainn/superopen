@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/coding/classify"
-	"github.com/superopen/so/internal/coding/detect"
-	"github.com/superopen/so/internal/coding/git"
-	"github.com/superopen/so/internal/coding/normalize"
-	"github.com/superopen/so/internal/coding/pricing"
-	"github.com/superopen/so/internal/coding/sessionstate"
-	"github.com/superopen/so/internal/session/agentlinks"
-	"github.com/superopen/so/sdk/go/semconv"
+	"github.com/ishanjainn/superopen/internal/coding/classify"
+	"github.com/ishanjainn/superopen/internal/coding/detect"
+	"github.com/ishanjainn/superopen/internal/coding/git"
+	"github.com/ishanjainn/superopen/internal/coding/normalize"
+	"github.com/ishanjainn/superopen/internal/coding/pricing"
+	"github.com/ishanjainn/superopen/internal/coding/sessionstate"
+	"github.com/ishanjainn/superopen/internal/session/agentlinks"
+	"github.com/ishanjainn/superopen/sdk/go/semconv"
 )
 
 // codexPayload mirrors the JSON envelope OpenAI Codex sends to a hook

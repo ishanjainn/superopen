@@ -1,4 +1,4 @@
-module github.com/superopen/so/sdk/go
+module github.com/ishanjainn/superopen/sdk/go
 
 go 1.25.0
 

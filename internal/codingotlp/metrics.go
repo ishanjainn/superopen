@@ -25,7 +25,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/superopen/so/sdk/go/semconv"
+	"github.com/ishanjainn/superopen/sdk/go/semconv"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"

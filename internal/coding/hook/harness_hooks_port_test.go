@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/superopen/so/internal/port"
+	"github.com/ishanjainn/superopen/internal/port"
 )
 
 // Port resume must inject even when memory.enabled is false - otherwise

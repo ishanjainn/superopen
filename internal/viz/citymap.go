@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/session"
-	"github.com/superopen/so/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/session"
+	"github.com/ishanjainn/superopen/internal/tracestore"
 )
 
 // Citymap is a simplified spatial layout of the repo.

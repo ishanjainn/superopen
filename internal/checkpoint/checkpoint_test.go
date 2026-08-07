@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/superopen/so/internal/checkpoint"
-	"github.com/superopen/so/internal/harness"
+	"github.com/ishanjainn/superopen/internal/checkpoint"
+	"github.com/ishanjainn/superopen/internal/harness"
 )
 
 func TestCreateRestore(t *testing.T) {

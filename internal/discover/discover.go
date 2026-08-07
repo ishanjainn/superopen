@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/superopen/so/internal/harness"
+	"github.com/ishanjainn/superopen/internal/harness"
 )
 
 // AgentSource is an existing instruction file found in the repo.

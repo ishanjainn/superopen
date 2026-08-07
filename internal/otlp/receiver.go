@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/superopen/so/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/tracestore"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	"google.golang.org/protobuf/proto"

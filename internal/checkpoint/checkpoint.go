@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/redact"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/redact"
 )
 
 // Meta describes one checkpoint.

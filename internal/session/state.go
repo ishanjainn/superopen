@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/superopen/so/internal/harness"
+	"github.com/ishanjainn/superopen/internal/harness"
 )
 
 // Phase is the lifecycle phase of an active coding session.

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/superopen/so/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/tracestore"
 )
 
 func TestLocalJSONLWriteQuery(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/config"
+	"github.com/ishanjainn/superopen/internal/config"
 )
 
 // Client is a minimal chat client (OpenAI-compatible + Anthropic Messages).
@@ -132,7 +132,7 @@ func (c *Client) completeOpenAICompat(system, user string, opts Options) (string
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.Provider == "openrouter" {
-		req.Header.Set("HTTP-Referer", "https://github.com/superopen/so")
+		req.Header.Set("HTTP-Referer", "https://github.com/ishanjainn/superopen")
 		req.Header.Set("X-Title", "Superopen")
 	}
 	httpClient := &http.Client{Timeout: opts.Timeout}

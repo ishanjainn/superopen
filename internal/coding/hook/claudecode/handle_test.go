@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/superopen/so/internal/coding/normalize"
-	"github.com/superopen/so/internal/coding/sessionstate"
+	"github.com/ishanjainn/superopen/internal/coding/normalize"
+	"github.com/ishanjainn/superopen/internal/coding/sessionstate"
 )
 
 // recordingEmitter mirrors the codex package's test emitter. We keep

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/superopen/so/internal/harness"
+	"github.com/ishanjainn/superopen/internal/harness"
 )
 
 func TestRebuildAndSearch(t *testing.T) {

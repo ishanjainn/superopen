@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/superopen/so/internal/userpaths"
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 const (

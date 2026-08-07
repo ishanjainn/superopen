@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/audit"
-	"github.com/superopen/so/internal/config"
-	"github.com/superopen/so/internal/guardrails"
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/harvest"
-	"github.com/superopen/so/internal/memory"
-	"github.com/superopen/so/internal/port"
-	"github.com/superopen/so/internal/retention"
+	"github.com/ishanjainn/superopen/internal/audit"
+	"github.com/ishanjainn/superopen/internal/config"
+	"github.com/ishanjainn/superopen/internal/guardrails"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/harvest"
+	"github.com/ishanjainn/superopen/internal/memory"
+	"github.com/ishanjainn/superopen/internal/port"
+	"github.com/ishanjainn/superopen/internal/retention"
 )
 
 // maybeInjectMemory injects Active Context and any pending Port resume on SessionStart.

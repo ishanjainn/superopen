@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/superopen/so/internal/entitlement"
-	"github.com/superopen/so/internal/otlpremote"
-	"github.com/superopen/so/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/entitlement"
+	"github.com/ishanjainn/superopen/internal/otlpremote"
+	"github.com/ishanjainn/superopen/internal/tracestore"
 )
 
 func TestExporterWritesWhenEntitled(t *testing.T) {

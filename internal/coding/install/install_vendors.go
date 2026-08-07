@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/superopen/so/internal/userpaths"
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 // marketplaceFS holds the embedded Claude Code marketplace tree. The

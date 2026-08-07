@@ -9,8 +9,8 @@ package codex
 import (
 	"context"
 
-	"github.com/superopen/so/internal/coding/normalize"
-	"github.com/superopen/so/sdk/go/semconv"
+	"github.com/ishanjainn/superopen/internal/coding/normalize"
+	"github.com/ishanjainn/superopen/sdk/go/semconv"
 )
 
 // New returns a new Codex adapter.

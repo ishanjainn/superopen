@@ -1,7 +1,7 @@
 package inject
 
 import (
-	"github.com/superopen/so/internal/config"
+	"github.com/ishanjainn/superopen/internal/config"
 	_ "embed"
 	"fmt"
 	"os"

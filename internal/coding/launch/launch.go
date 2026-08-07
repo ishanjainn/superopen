@@ -14,9 +14,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/superopen/so/internal/audit"
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/memory"
+	"github.com/ishanjainn/superopen/internal/audit"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/memory"
 )
 
 // NewCmd returns the `so coding launch` cobra command.

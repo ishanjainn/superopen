@@ -5,11 +5,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/superopen/so/internal/config"
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/harvest"
-	"github.com/superopen/so/internal/axi"
-	"github.com/superopen/so/internal/session"
+	"github.com/ishanjainn/superopen/internal/config"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/harvest"
+	"github.com/ishanjainn/superopen/internal/axi"
+	"github.com/ishanjainn/superopen/internal/session"
 )
 
 func cmdHarvest() *cobra.Command {

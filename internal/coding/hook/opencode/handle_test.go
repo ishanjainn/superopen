@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/superopen/so/internal/coding/normalize"
+	"github.com/ishanjainn/superopen/internal/coding/normalize"
 )
 
 type rec struct {

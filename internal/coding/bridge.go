@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/superopen/so/internal/coding/install"
-	"github.com/superopen/so/internal/userpaths"
+	"github.com/ishanjainn/superopen/internal/coding/install"
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 // Install installs coding-agent observability for the given vendors.

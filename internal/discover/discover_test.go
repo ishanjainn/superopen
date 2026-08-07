@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/superopen/so/internal/discover"
-	"github.com/superopen/so/internal/harness"
+	"github.com/ishanjainn/superopen/internal/discover"
+	"github.com/ishanjainn/superopen/internal/harness"
 )
 
 func TestCollectAgentFilesAndProfile(t *testing.T) {

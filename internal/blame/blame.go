@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/githooks"
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/session"
+	"github.com/ishanjainn/superopen/internal/githooks"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/session"
 )
 
 // LineInfo is one annotated source line.

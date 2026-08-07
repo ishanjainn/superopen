@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/superopen/so/internal/config"
+	"github.com/ishanjainn/superopen/internal/config"
 )
 
 func TestResolveLLMOpenRouter(t *testing.T) {

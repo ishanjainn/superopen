@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/coding/normalize"
-	"github.com/superopen/so/internal/coding/pricing"
-	"github.com/superopen/so/internal/coding/sessionstate"
+	"github.com/ishanjainn/superopen/internal/coding/normalize"
+	"github.com/ishanjainn/superopen/internal/coding/pricing"
+	"github.com/ishanjainn/superopen/internal/coding/sessionstate"
 )
 
 type payload struct {

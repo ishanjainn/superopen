@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/port"
+	"github.com/ishanjainn/superopen/internal/port"
 )
 
 type CodexImport struct{}

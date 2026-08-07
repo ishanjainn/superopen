@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/superopen/so/internal/harness"
+	"github.com/ishanjainn/superopen/internal/harness"
 )
 
 func TestBuildSessionContextAndLesson(t *testing.T) {

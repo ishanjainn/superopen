@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/agentcli"
-	"github.com/superopen/so/internal/config"
+	"github.com/ishanjainn/superopen/internal/agentcli"
+	"github.com/ishanjainn/superopen/internal/config"
 )
 
 // Completer is anything that can answer a system+user prompt (API key or agent CLI).

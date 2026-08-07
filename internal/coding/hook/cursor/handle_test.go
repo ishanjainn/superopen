@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/superopen/so/internal/coding/normalize"
-	"github.com/superopen/so/internal/coding/pricing"
+	"github.com/ishanjainn/superopen/internal/coding/normalize"
+	"github.com/ishanjainn/superopen/internal/coding/pricing"
 )
 
 // recordingEmitter mirrors the same shape used by codex / claudecode

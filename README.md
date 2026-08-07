@@ -10,13 +10,13 @@ Superopen is not another coding agent. It builds the open source harness around 
 
 ```bash
 # Install CLI (macOS / Linux) - release binary when published, else local build
-curl -fsSL https://raw.githubusercontent.com/superopen/so/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.sh | sh
 # Or from a checkout: ./scripts/install.sh
-# Or: brew install superopen/so/so   # Homebrew tap (after first cli-* release)
+# Or: brew install ishanjainn/superopen/so   # Homebrew tap (after first cli-* release)
 # Or: go install ./cmd/so && export PATH="$(go env GOPATH)/bin:$PATH"
 
 # Windows (PowerShell)
-#   iwr -useb https://raw.githubusercontent.com/superopen/so/main/scripts/install.ps1 | iex
+#   iwr -useb https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.ps1 | iex
 
 so install                 # enables /so (or $so) in Cursor, Claude, Codex, Gemini, OpenCode, Copilot, Pi
 

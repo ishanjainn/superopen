@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/githooks"
+	"github.com/ishanjainn/superopen/internal/githooks"
 )
 
 // BackfillFromGitLog scans recent commits for SO-Session trailers matching this session.

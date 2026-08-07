@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/superopen/so/internal/llm"
+	"github.com/ishanjainn/superopen/internal/llm"
 )
 
 // DisplayName returns the best human label for a session.

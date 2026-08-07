@@ -8,7 +8,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/superopen/so/sdk/go/helpers"
+	"github.com/ishanjainn/superopen/sdk/go/helpers"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
