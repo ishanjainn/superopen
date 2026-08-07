@@ -1,6 +1,6 @@
 {
-  "checks": 9,
-  "rules": 12,
+  "checks": 6,
+  "rules": 10,
   "source": "llm",
-  "upgraded_at": "2026-08-07T15:33:55Z"
+  "upgraded_at": "2026-08-07T16:23:11Z"
 }

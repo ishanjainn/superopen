@@ -2,51 +2,43 @@
 # Edit freely; so sync will not overwrite this file.
 rules:
     - id: no-secrets
-      description: Never commit secrets, API keys, tokens, or real .env values
+      description: Never commit or invent API keys, tokens, passwords, or other credentials in code, docs, fixtures, or .so/ files.
       severity: block
       source: llm
-    - id: no-credential-logs
-      description: Never log credentials, tokens, or secrets
+    - id: no-public-security-issues
+      description: Do not report security vulnerabilities in public issues; follow SECURITY.md.
       severity: block
       source: llm
     - id: run-tests
-      description: 'Run focused tests for touched packages before finishing (go test -race -count=1 ./path; web: npm test/typecheck/lint)'
+      description: 'Run focused checks for touched areas before finishing: Go race/vet for CLI; web test/typecheck/lint for UI.'
       severity: warn
       source: llm
     - id: avoid-unrelated
-      description: Keep diffs scoped to the requested task; avoid unrelated refactors
+      description: Keep changes scoped to the request; avoid unrelated formatting, refactors, or drive-by edits.
       severity: warn
       source: llm
     - id: pr-title-convention
-      description: Prefer Conventional Commit PR titles (feat:, fix:, docs:)
+      description: Use Conventional Commit PR titles (feat:, fix:, fix(web):, etc.).
       severity: warn
       source: llm
-    - id: go-race-tests
-      description: Run race-sensitive Go packages with go test -race
+    - id: go-race-vet
+      description: For Go changes, prefer go test -race -count=1 and go vet on affected packages.
       severity: warn
       source: llm
-    - id: goroutine-lifecycle
-      description: Never start a goroutine without a clear shutdown or WaitGroup story
+    - id: npm-ignore-scripts
+      description: When installing npm packages in web/, use --ignore-scripts unless the user explicitly allows scripts.
       severity: warn
       source: llm
-    - id: go-sync-ownership
-      description: Prefer channels for ownership transfer; mutexes for shared mutable state
+    - id: plugin-sync-drift
+      description: After plugin/template marketplace changes, run scripts/sync-plugins.sh and commit resulting drift.
       severity: warn
       source: llm
-    - id: sanitize-html-svg
-      description: Sanitize untrusted HTML/SVG before rendering; prefer safe React text bindings
+    - id: prefer-graph-query
+      description: For codebase structure questions when .so/graph exists, prefer so graph query before broad exploration.
       severity: warn
       source: llm
-    - id: safe-urls
-      description: Build URLs with URL/URLSearchParams, not string concatenation
-      severity: warn
-      source: llm
-    - id: no-fake-paths
-      description: Do not invent secrets or fake paths in examples
-      severity: warn
-      source: llm
-    - id: focused-go-checks
-      description: Prefer package-scoped go test/vet while iterating; broaden only before merge
+    - id: single-guardrails-file
+      description: Keep guardrails in the single file .so/guardrails/guardrails.yaml; do not invent parallel guardrail stores.
       severity: warn
       source: llm
 approval: interactive

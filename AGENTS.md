@@ -4,90 +4,67 @@ Prefer `so graph query` and this file before broad code search.
 
 ## Architecture
 
-Superopen is open-source **Agent Harness Engineering**: a Go CLI (`so`) plus local Sessions UI that builds repository graph, context, rules, skills, guardrails, session evals, and recommendations around Claude Code, Cursor, Codex, Gemini, OpenCode, Copilot CLI, Pi, and similar tools.
+Open-source **agent harness engineering** (not a coding agent). The `so` CLI + local `.so/` harness give coding agents (Claude Code, Cursor, Codex, Gemini, OpenCode, Copilot, Pi) shared graph context, memory, guardrails, session evals, and recommendations so each session wastes fewer tokens.
 
-## Where to look first
+## Layout (look here first)
 
 | Path | Role |
 |---|---|
-| `cmd/so/` | CLI entrypoint and command wiring |
-| `internal/` | Core packages (install, hooks, harness seed, graph, memory, OTLP, eval, recommend) |
-| `web/` | Next.js Sessions UI (localhost:4444 via `so dev`) |
-| `templates/` | Seeded rules/skills/memory/gitignore content |
-| `plugins/`, `sdk/`, `npm/` | Agent plugin packaging and distribution |
-| `docs/` | Schema and product docs |
-| `.so/` | Per-repo harness data (graph, knowledge, guardrails, memory, sessions) |
+| `cmd/so` | Cobra CLI entrypoints (`init`, `graph`, `doctor`, `dev`, `eval`, `recommend`, …) |
+| `internal/` | Core packages: harness seed/upgrade, graph, memory, inject, sessions, OTLP (`codingotlp`/`otlp`), eval, recommend, guardrails, harvest, sync |
+| `web/` | Next.js Sessions UI (local `so dev`, default http://localhost:4444) |
+| `sdk/go` | Go SDK (replace → `./sdk/go`) |
+| `plugins/`, `templates/`, `npm/` | Agent/marketplace plugins, harness templates, npm packaging |
+| `scripts/` | Install, plugin sync, release helpers |
+| `docs/` | Product/docs |
+| `.so/` | Per-repo harness data (graph, guardrails, sessions, memory) — ordinary files agents and UI read/write |
 
-## Package map (`internal/`)
+## How pieces relate
 
-- **Agent integration**: `coding/` (detect/install/hooks), `inject/`, `nativedocs/`, `harness/`, `harnessvalid/`
-- **Bootstrap**: `initcmd/`, `seed/`, `sync/`, `discover/`
-- **Knowledge**: `graph/`, `retrieve/`, `memory/`, `learn/`, `harvest/`
-- **Governance**: `guardrails/`, `config/`, `redact/`, `audit/`
-- **Sessions & evals**: `codingotlp/`, `otlp/`, `tracestore/`, `session/`, `eval/`, `recommend/`, `port/`
-- **Ops**: `doctor/`, `githooks/`, `gitruntime/`, `userpaths/`, `version/`
+1. **`so init` / seed** — build or refresh repo graph (Graphify), seed `.so/`, write upgrade brief; assistant model upgrades AGENTS.md / guardrails / evals via `so apply-upgrade`.
+2. **`so install`** — register `/so` skill into agent discovery paths (does not create `.so/`).
+3. **Session loop** — agent OTLP → `.so/sessions/` → eval → recommendations → approve/apply → better next-session injectors.
+4. **Injectors / sync** — `internal/inject`, `internal/sync` refresh agent context after harness edits.
 
-## Runtime loop
+## Agent navigation tips
 
-1. `so install` registers `/so` (or `$so`) skills and hooks with coding agents.
-2. `/so init` / `so init` builds `.so/graph/` and seeds knowledge, guardrails, evals, memory.
-3. Sessions emit OTLP → materialized under `.so/sessions/` when `so dev` is running.
-4. `so eval` / `so recommend` score sessions and propose harness improvements.
-
-Prefer `so graph query "…"` and `.so/knowledge/` before broad Grep/Glob. Guardrails live in a single file: `.so/guardrails/guardrails.yaml`.
+- Codebase questions: prefer `so graph query "…"` over broad Grep when `.so/graph/graph.json` exists.
+- Conventions: root `AGENTS.md`, `.cursor/rules/`, `.agents/skills/`, `.so/guardrails/guardrails.yaml`.
+- CLI changes → `cmd/so` + matching `internal/<pkg>`; UI → `web/src`; telemetry → `internal/codingotlp` / `internal/otlp`.
 
 ## Conventions
 
 ## Scope and PRs
-
-- Keep diffs scoped to the requested task; no drive-by refactors or unrelated formatting.
-- Prefer Conventional Commit titles: `feat:`, `fix:`, `docs:` (example: `feat: add project prune`).
-- Open or discuss an issue for substantial changes; small docs can go straight to PR.
-- Link the related issue; summarize problem + solution in the PR body.
-- Do not invent secrets or fake paths in examples or docs.
+- Discuss substantial changes in an issue first; small docs can go straight to a PR.
+- Keep PRs focused; no unrelated formatting or refactors.
+- Prefer Conventional Commit titles (`feat: …`, `fix(web): …`).
+- Explain problem + solution; link issues; include tests for behavior changes and update user-facing docs.
 
 ## Go / CLI
-
-- Match neighboring style under `internal/` and `cmd/so/`.
-- While iterating, run package-scoped checks: `go test -race -count=1 ./path` and `go vet ./path`; broaden to `./...` before merge.
-- Prefer channels for ownership transfer; mutexes for shared state.
-- Never start a goroutine without a clear shutdown or WaitGroup story.
-- Always race-test packages that share state across goroutines.
+- Module: `github.com/ishanjainn/superopen` (Go 1.26+).
+- Build: `go build -o bin/so ./cmd/so`.
+- Before finishing Go work: `go test -race -count=1 ./...` and `go vet ./...` (or focused package tests).
+- Prefer existing `internal/` package boundaries; avoid inventing parallel packages for the same concern.
 
 ## Web UI
+- App lives in `web/` (Next.js).
+- Checks: `cd web && npm ci --ignore-scripts` then `npm test`, `npm run typecheck`, `npm run lint`.
+- Honor repo npm safety: prefer `--ignore-scripts` on installs.
 
-- From `web/`: `npm test`, `npm run typecheck`, `npm run lint` for UI changes.
-- Sanitize untrusted HTML/SVG before render; build URLs with `URL` / `URLSearchParams`, not string concat.
+## Plugins and smoke
+- After plugin template changes: `bash scripts/sync-plugins.sh` and commit marketplace drift.
+- Optional local smoke: `make smoke` (writes a local `.so/`).
 
-## Plugins and secrets
+## Security and secrets
+- Never commit API keys, tokens, or credentials; do not invent secrets in docs or fixtures.
+- Report vulnerabilities via SECURITY.md, not public issues.
+- Redaction / sensitive session data: follow existing `internal/redact` and harness patterns.
 
-- After plugin marketplace edits: `bash scripts/sync-plugins.sh` and commit any drift.
-- Never commit secrets, tokens, or real `.env` values; never log credentials.
+## Agent harness edits
+- Prefer `so graph query`, `so sync`, and single-file `.so/guardrails/guardrails.yaml` over ad-hoc duplicate rule files.
+- When updating AGENTS.md / rules / skills, prune obsolete guidance—do not only append.
 
 <!-- superopen:learned:start -->
 ## Superopen learned
 
 <!-- superopen:learned:end -->
-
-<!-- superopen:start -->
-## Superopen
-
-This project is managed by Superopen (`.so/`). Prefer `.so/` before raw exploration to save tokens.
-
-Invoke with `/so` (Claude Code, Cursor, Gemini, Copilot, OpenCode, Pi) or `$so` (Codex):
-- `/so` - help
-- `/so init` - bootstrap Superopen if missing
-- `/so graph query "<question>"` - ask the repo knowledge graph
-- `/so graph` - rebuild `.so/graph/` (never leave `graphify-out/` at repo root)
-- `/so doctor` - health check
-
-Rules:
-- For codebase questions, run `so graph query "<question>"` when `.so/graph/graph.json` exists.
-- Read relevant files under `.so/knowledge/` and `.so/rules/`, plus matching skills in `.so/skills/` for the task.
-- Read `.so/memory/active-context.md` when present (session memory pack shared across coding agents).
-- Obey `.so/guardrails/guardrails.yaml`.
-- Do not dump the entire `.so/` directory into context - load only what the task needs.
-- After meaningful Superopen edits by a human, they will run `so sync`.
-<!-- superopen:end -->
-
-
