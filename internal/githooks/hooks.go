@@ -1,16 +1,14 @@
-// Package githooks installs prepare-commit-msg / post-commit hooks that
-// link commits to Superopen sessions via SO-Session / SO-Attribution trailers.
+// Package githooks previously installed prepare-commit-msg / post-commit /
+// pre-push hooks. Those hooks made commits slow and pushes hang (pre-push
+// tried to FF-push refs/so/sessions/*). Installation is disabled; Install now
+// removes any leftover Superopen-managed hooks.
 package githooks
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
-
-	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 const (
@@ -18,69 +16,49 @@ const (
 	TrailerAttribution = "SO-Attribution"
 )
 
-// Install writes Superopen-managed git hooks under .git/hooks (or core.hooksPath).
-// Scripts use #!/bin/sh (works with Git for Windows' sh) and quote the so binary
-// with forward-slash paths so spaces and Windows drive letters work.
+var managedHooks = []string{
+	"prepare-commit-msg",
+	"post-commit",
+	"post-merge",
+	"post-checkout",
+	"pre-push",
+}
+
+// Install used to write Superopen git hooks. It now only removes them so
+// `so sync` / `so init` cannot put slow/hanging hooks back.
 func Install(repoRoot, soBinary string) error {
+	_ = soBinary
+	return Remove(repoRoot)
+}
+
+// Remove deletes Superopen-managed hooks under .git/hooks (or core.hooksPath).
+// Non-Superopen hooks are left alone. Safe to call repeatedly.
+func Remove(repoRoot string) error {
 	hooksDir, err := hooksDir(repoRoot)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
-		return err
-	}
-	if soBinary == "" {
-		soBinary = "so"
-		if runtime.GOOS == "windows" {
-			if p, err := exec.LookPath("so"); err == nil {
-				soBinary = p
-			} else if p, err := exec.LookPath("so.exe"); err == nil {
-				soBinary = p
-			}
+	for _, name := range managedHooks {
+		path := filepath.Join(hooksDir, name)
+		if !isSuperopenHook(path) {
+			continue
 		}
-	}
-	soSh := userpaths.ShellPath(soBinary)
-
-	hooks := []struct {
-		name string
-		desc string
-		args string
-	}{
-		{"prepare-commit-msg", "appends SO-Session trailer when a session is active", "prepare-commit-msg"},
-		{"post-commit", "finalize session into untracked store + side ref", "post-commit"},
-		{"post-merge", "refresh harness after git pull/merge", "post-merge"},
-		{"post-checkout", "refresh harness after branch checkout", "post-checkout"},
-		{"pre-push", "fast-forward push refs/so/sessions/* (never force)", "pre-push"},
-	}
-	for _, h := range hooks {
-		body := fmt.Sprintf(`#!/bin/sh
-# Superopen %s - %s.
-# Git for Windows runs this via sh.exe; paths use forward slashes.
-exec "%s" githook %s "$@"
-`, h.name, h.desc, soSh, h.args)
-		if err := writeHook(filepath.Join(hooksDir, h.name), body); err != nil {
-			return err
-		}
-		// Companion .cmd helps some Windows hosts that invoke hooks without sh.
-		if runtime.GOOS == "windows" {
-			cmdBody := fmt.Sprintf("@echo off\r\nREM Superopen %s\r\n\"%s\" githook %s %%*\r\n",
-				h.name, soBinary, h.args)
-			_ = os.WriteFile(filepath.Join(hooksDir, h.name+".cmd"), []byte(cmdBody), 0o755)
-		}
+		_ = os.Remove(path)
+		_ = os.Remove(path + ".cmd")
+		_ = os.Remove(path + ".so-backup")
 	}
 	return nil
 }
 
-func writeHook(path, body string) error {
-	// Preserve user hooks by chaining if a non-SO hook exists.
-	if data, err := os.ReadFile(path); err == nil {
-		s := string(data)
-		if !strings.Contains(s, "Superopen") && !strings.Contains(s, "so\" githook") && !strings.Contains(s, "githook ") {
-			backup := path + ".so-backup"
-			_ = os.WriteFile(backup, data, 0o755)
-		}
+func isSuperopenHook(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
 	}
-	return os.WriteFile(path, []byte(body), 0o755)
+	s := string(data)
+	return strings.Contains(s, "Superopen") ||
+		strings.Contains(s, "so\" githook") ||
+		strings.Contains(s, "githook ")
 }
 
 func hooksDir(repoRoot string) (string, error) {

@@ -148,19 +148,25 @@ func Run(repoRoot string) []Check {
 		checks = append(checks, Check{Name: "projects_registry", OK: true, Detail: fmt.Sprintf("%d project(s)", len(projs))})
 	}
 
-	// Git hooks
-	hooksOK := false
+	// Git hooks: Superopen no longer installs commit/push hooks (they slowed
+	// commits and hung pushes while syncing refs/so/sessions). Absence is OK.
+	_ = githooks.TrailerSession
+	hooksDetail := "disabled (no Superopen commit/push hooks)"
 	if out, err := exec.Command("git", "-C", repoRoot, "rev-parse", "--git-path", "hooks").Output(); err == nil {
-		prep := filepath.Join(strings.TrimSpace(string(out)), "prepare-commit-msg")
-		if !filepath.IsAbs(prep) {
-			prep = filepath.Join(repoRoot, prep)
+		dir := strings.TrimSpace(string(out))
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(repoRoot, dir)
 		}
-		if data, err := os.ReadFile(prep); err == nil && strings.Contains(string(data), "githook") {
-			hooksOK = true
+		for _, name := range []string{"pre-push", "post-commit", "prepare-commit-msg"} {
+			p := filepath.Join(dir, name)
+			if data, err := os.ReadFile(p); err == nil && strings.Contains(string(data), "githook") {
+				hooksDetail = "leftover Superopen hook present: " + name + " (run so sync to remove)"
+				checks = append(checks, Check{Name: "git_hooks", OK: false, Warn: true, Detail: hooksDetail})
+				return checks
+			}
 		}
 	}
-	_ = githooks.TrailerSession
-	checks = append(checks, Check{Name: "git_hooks", OK: hooksOK, Detail: "prepare-commit-msg SO-Session"})
+	checks = append(checks, Check{Name: "git_hooks", OK: true, Detail: hooksDetail})
 
 	return checks
 }
