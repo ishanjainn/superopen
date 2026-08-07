@@ -1,18 +1,23 @@
 name: Release / CLI
 
+# Build-only. Called by release-packages.yml, which owns version bumping,
+# tagging, release notes, the GitHub Release, and the Homebrew tap bump.
+# This workflow just cross-compiles the binaries and uploads them as
+# release-assets-* artifacts for the orchestrator to attach.
 on:
-  push:
-    tags:
-      - "cli-*.*.*"
-  workflow_dispatch:
+  workflow_call:
     inputs:
       tag:
-        description: "Tag to release (cli-X.Y.Z)"
+        description: Release tag (cli-X.Y.Z)
         required: true
+        type: string
+      release_sha:
+        description: Commit to build
+        required: true
+        type: string
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 jobs:
   build:
@@ -30,7 +35,9 @@ jobs:
           - { os: windows, arch: arm64, ext: ".exe" }
     steps:
       - uses: actions/checkout@v7
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_sha }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -38,105 +45,51 @@ jobs:
           check-latest: true
       - name: Resolve version
         id: ver
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            VERSION="$(echo '${{ github.event.inputs.tag }}' | sed 's/^cli-//')"
-          else
-            VERSION="${GITHUB_REF#refs/tags/cli-}"
-          fi
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$'; then
-            echo "::error::Could not resolve a semver release version (got '${VERSION}'). Pass a 'tag' input like 'cli-1.2.0' on workflow_dispatch, or push a 'cli-X.Y.Z' tag."
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#cli-}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Could not resolve a semver release version (got '${VERSION}')."
             exit 1
           fi
-          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
       - name: Build
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: 0
+          VERSION: ${{ steps.ver.outputs.VERSION }}
+          EXT: ${{ matrix.ext }}
         run: |
+          set -euo pipefail
           mkdir -p dist
-          VERSION="${{ steps.ver.outputs.VERSION }}"
           COMMIT="$(git rev-parse --short HEAD)"
           PKG="github.com/ishanjainn/superopen/internal/version"
           go build -trimpath -ldflags "-s -w -X ${PKG}.Version=$VERSION -X ${PKG}.Commit=$COMMIT" \
-            -o dist/so-${GOOS}-${GOARCH}${{ matrix.ext }} ./cmd/so
+            -o "dist/so-${GOOS}-${GOARCH}${EXT}" ./cmd/so
       - name: Package
+        env:
+          MATRIX_OS: ${{ matrix.os }}
+          MATRIX_ARCH: ${{ matrix.arch }}
+          EXT: ${{ matrix.ext }}
         run: |
-          NAME="so-${{ matrix.os }}-${{ matrix.arch }}"
-          BIN="dist/${NAME}${{ matrix.ext }}"
+          set -euo pipefail
+          NAME="so-${MATRIX_OS}-${MATRIX_ARCH}"
           cd dist
-          if [ "${{ matrix.os }}" = "windows" ]; then
-            zip "${NAME}.zip" "$(basename "$BIN")"
+          if [ "$MATRIX_OS" = "windows" ]; then
+            zip "${NAME}.zip" "${NAME}${EXT}"
             sha256sum "${NAME}.zip" > "${NAME}.zip.sha256"
           else
-            tar -czf "${NAME}.tar.gz" "$(basename "$BIN")"
+            tar -czf "${NAME}.tar.gz" "${NAME}${EXT}"
             sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
           fi
       - uses: actions/upload-artifact@v7
         with:
-          name: so-${{ matrix.os }}-${{ matrix.arch }}
-          path: dist/*
-
-  release:
-    name: GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with: { fetch-depth: 0 }
-      - name: Resolve version
-        id: ver
-        run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            VERSION="$(echo '${{ github.event.inputs.tag }}' | sed 's/^cli-//')"
-          else
-            VERSION="${GITHUB_REF#refs/tags/cli-}"
-          fi
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$'; then
-            echo "::error::Could not resolve a semver release version (got '${VERSION}')."
-            exit 1
-          fi
-          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-      - uses: actions/download-artifact@v8
-        with: { path: artifacts }
-      - name: Flatten artifacts
-        run: |
-          mkdir -p release
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release/ \;
-          ls -la release
-      - uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
-        with:
-          tag_name: cli-${{ steps.ver.outputs.VERSION }}
-          name: cli-${{ steps.ver.outputs.VERSION }}
-          files: release/*
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  homebrew:
-    name: Update Homebrew tap
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Resolve version
-        id: ver
-        run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            VERSION="$(echo '${{ github.event.inputs.tag }}' | sed 's/^cli-//')"
-          else
-            VERSION="${GITHUB_REF#refs/tags/cli-}"
-          fi
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$'; then
-            echo "::error::Could not resolve a semver release version (got '${VERSION}')."
-            exit 1
-          fi
-          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
-      - name: Update tap formula
-        uses: dawidd6/action-homebrew-bump-formula@a0e064e08103c01870c6d1b05168d1b726aab119 # v8
-        with:
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          tap: ishanjainn/homebrew-superopen
-          formula: so
-          tag: cli-${{ steps.ver.outputs.VERSION }}
+          name: release-assets-so-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
