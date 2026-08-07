@@ -23,14 +23,13 @@ import (
 // We intentionally read it once at sampler construction time so the
 // value is stable for the lifetime of the hook process.
 const sampleEventsEnv = "SUPEROPEN_CODING_SAMPLE_EVENTS"
-const sampleEventsEnvLegacy = "OPENLIT_CODING_SAMPLE_EVENTS"
 
 // defaultSampler returns the sampler the hook should plug into the
 // SDK. Returns nil to mean "let the SDK pick its default
 // (AlwaysSample)" so the beta posture stays unchanged for ops who
 // haven't opted in.
 func defaultSampler() sdktrace.Sampler {
-	mode := strings.ToLower(strings.TrimSpace(firstEnv(sampleEventsEnv, sampleEventsEnvLegacy)))
+	mode := strings.ToLower(strings.TrimSpace(firstEnv(sampleEventsEnv)))
 	switch mode {
 	case "", "all", "always_on":
 		return nil

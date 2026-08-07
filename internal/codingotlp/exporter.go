@@ -133,7 +133,7 @@ func drainCodeCounters(s normalize.Session, vendor string) normalize.Session {
 // will produce a "Username" row in the hub when no email-shaped
 // identity is available.
 func resolveLocalUser() string {
-	for _, env := range []string{"SUPEROPEN_USER", "SO_USER", "OPENLIT_USER", "GIT_AUTHOR_EMAIL", "USER_EMAIL"} {
+	for _, env := range []string{"SUPEROPEN_USER", "SO_USER", "GIT_AUTHOR_EMAIL", "USER_EMAIL"} {
 		if v := strings.TrimSpace(os.Getenv(env)); v != "" {
 			return v
 		}

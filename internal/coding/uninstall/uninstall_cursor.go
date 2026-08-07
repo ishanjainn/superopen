@@ -23,10 +23,7 @@ import (
 )
 
 // Ownership markers must stay in sync with install/install_cursor.go.
-const (
-	cursorOwnedCommandMarker = "so coding hook --vendor=cursor"
-	legacyCursorHookMarker = "openlit coding hook --vendor=cursor"
-)
+const cursorOwnedCommandMarker = "so coding hook --vendor=cursor"
 
 // uninstallCursorHooks performs the two cleanup steps. Returns the
 // absolute paths it removed or rewrote, plus any non-fatal errors.
@@ -154,7 +151,6 @@ func isOurHookEntry(raw json.RawMessage) bool {
 		return false
 	}
 	return entry.Command != "" && (strings.Contains(entry.Command, cursorOwnedCommandMarker) ||
-		strings.Contains(entry.Command, legacyCursorHookMarker) ||
 		strings.Contains(entry.Command, "sessions finalize"))
 }
 

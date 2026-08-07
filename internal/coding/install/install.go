@@ -30,7 +30,7 @@ func NewCmd() *cobra.Command {
 telemetry through 'so coding hook'.
 
 Vendors:
-  claude-code   Plugin under ~/.claude/plugins/superopen/ (legacy: openlit-cc) + 'claude plugin install'
+  claude-code   Plugin under ~/.claude/plugins/superopen/ + 'claude plugin install'
   cursor        Hook entries merged into ~/.cursor/hooks.json (user scope)
   codex         Marketplace + 'codex plugin add superopen@superopen'
   all           shorthand for all three

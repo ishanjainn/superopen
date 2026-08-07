@@ -45,14 +45,12 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 	}
 	codexDir, _ := userpaths.CodexMarketplaceDir()
 	legacySO, _ := userpaths.LegacyDataDirSO()
-	legacyOL, _ := userpaths.LegacyDataDirOpenlit()
 
 	for _, v := range vendors {
 		switch v {
 		case "claude", "claude-code":
 			_, e1 := os.Stat(filepath.Join(home, ".claude", "plugins", "superopen-cc"))
-			_, e2 := os.Stat(filepath.Join(home, ".claude", "plugins", "openlit-cc"))
-			out["claude-code"] = e1 == nil || e2 == nil
+			out["claude-code"] = e1 == nil
 		case "cursor":
 			data, e := os.ReadFile(filepath.Join(home, ".cursor", "hooks.json"))
 			out["cursor"] = e == nil && (strings.Contains(string(data), "so coding hook --vendor=cursor") ||
@@ -62,7 +60,6 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 			for _, p := range []string{
 				codexDir,
 				filepath.Join(legacySO, "codex-marketplace"),
-				filepath.Join(legacyOL, "codex-marketplace"),
 			} {
 				if p == "" {
 					continue
@@ -101,7 +98,7 @@ func writeEndpointConfig(endpoint string) error {
 	path := filepath.Join(dir, "config.env")
 	if prev, err := os.ReadFile(path); err == nil {
 		s := string(prev)
-		if strings.Contains(s, "SUPEROPEN_OTLP_ENDPOINT=") || strings.Contains(s, "OPENLIT_OTLP_ENDPOINT=") {
+		if strings.Contains(s, "SUPEROPEN_OTLP_ENDPOINT=") {
 			return nil
 		}
 	}

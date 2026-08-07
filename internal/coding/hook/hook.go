@@ -120,9 +120,6 @@ func run(cmd *cobra.Command, vendor, event string) (rerr error) {
 	// piped to stdin. Kept here rather than behind a flag because
 	// it has zero cost when the env var is unset.
 	debugDir := strings.TrimSpace(os.Getenv("SUPEROPEN_DEBUG_PAYLOAD_DIR"))
-	if debugDir == "" {
-		debugDir = strings.TrimSpace(os.Getenv("OPENLIT_DEBUG_PAYLOAD_DIR"))
-	}
 	if debugDir != "" {
 		_ = teePayload(debugDir, vendor, event, payload)
 	}
@@ -202,7 +199,7 @@ func run(cmd *cobra.Command, vendor, event string) (rerr error) {
 	// Cache is partitioned by (sessionID, vendor) - see sessionstate
 	// docs for the cross-vendor poisoning case that motivates this.
 	cached := sessionstate.Load(sessionID, vendor)
-	resolvedUser := strings.TrimSpace(firstHookEnv("SUPEROPEN_USER", "SO_USER", "OPENLIT_USER"))
+	resolvedUser := strings.TrimSpace(firstHookEnv("SUPEROPEN_USER", "SO_USER"))
 	if resolvedUser == "" {
 		resolvedUser = probe.User
 	}
@@ -217,7 +214,6 @@ func run(cmd *cobra.Command, vendor, event string) (rerr error) {
 	}
 	if resolvedUser != "" {
 		_ = os.Setenv("SUPEROPEN_USER", resolvedUser)
-		_ = os.Setenv("OPENLIT_USER", resolvedUser) // legacy installs
 		cached.User = resolvedUser
 	}
 
@@ -602,10 +598,10 @@ func isClaudeCodeVendor(vendor string) bool {
 // is NEVER set, because the agent talking to the LLM is Cursor, not
 // Claude Code. Captured env from a real Cursor 3.4.17 masquerade:
 //
-//	CLAUDE_PROJECT_DIR=/Users/.../.claude/plugins/cache/openlit/openlit-cc/0.1.0
-//	CLAUDE_PLUGIN_ROOT=/Users/.../.claude/plugins/cache/openlit/openlit-cc/0.1.0
+//	CLAUDE_PROJECT_DIR=/Users/.../.claude/plugins/cache/superopen/superopen-cc/0.1.0
+//	CLAUDE_PLUGIN_ROOT=/Users/.../.claude/plugins/cache/superopen/superopen-cc/0.1.0
 //	CURSOR_VERSION=3.4.17
-//	CURSOR_PLUGIN_ROOT=/Users/.../.claude/plugins/cache/openlit/openlit-cc/0.1.0
+//	CURSOR_PLUGIN_ROOT=/Users/.../.claude/plugins/cache/superopen/superopen-cc/0.1.0
 //	CURSOR_USER_EMAIL=...
 //	CURSOR_LAYOUT=unifiedAgent
 //	CURSOR_EXTENSION_HOST_ROLE=always-local

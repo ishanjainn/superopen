@@ -9,15 +9,8 @@
 Superopen is not another coding agent. It builds the open source harness around Claude Code, Cursor, Codex, and similar tools so every coding session improves the next - with less token waste and lower cost.
 
 ```bash
-# Install CLI (macOS / Linux) - release binary when published, else local build
-curl -fsSL https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.sh | sh
-# Or from a checkout: ./scripts/install.sh
-# Or: brew install ishanjainn/superopen/so   # Homebrew tap (after first cli-* release)
-# Or: go install ./cmd/so && export PATH="$(go env GOPATH)/bin:$PATH"
-
-# Windows (PowerShell)
-#   iwr -useb https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.ps1 | iex
-
+# macOS / Linux
+brew install ishanjainn/superopen/so
 so install                 # enables /so (or $so) in Cursor, Claude, Codex, Gemini, OpenCode, Copilot, Pi
 
 # Bootstrap (shell or agent):
@@ -27,6 +20,8 @@ so dev                     # light Next.js UI (Turbopack) on :4444 + OTLP
 so dev -d                  # same, detached (background)
 so dev stop                # stop detached / tracked UI
 ```
+
+Other install methods: `curl -fsSL https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.sh | sh`, `go install ./cmd/so`, or on Windows `iwr -useb https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.ps1 | iex`.
 
 The UI reads/writes `.so/` directly (Next App Router). Advanced Memory search, Port, Retrieve, and checkpoint create/restore shell out to the `so` CLI - keep it on PATH (or set `SUPEROPEN_SO_BIN`). Graph view needs Graphify HTML (`so graph` / Graphify); a stub `graph.json` alone is not enough for the Graph page.
 
@@ -95,6 +90,51 @@ After a session ends (`so eval` / finalize), Superopen scores the session and ma
 
 Cursor has no sealed headless CLI for judging; use it for interactive `/so init` upgrades. Backend judging uses Claude Code or Codex.
 
+## Uninstall
+
+**Run `so uninstall` before removing the binary.** Package managers only delete the executable - they know nothing about the skills, hooks, and injectors `so install` / `so init` wrote into your agent config directories. Remove the binary first and those are orphaned, pointing at a CLI that no longer exists.
+
+```bash
+so uninstall --dry-run     # preview everything that would be removed
+so uninstall               # skills + injectors + hooks + .so/ + the binary itself
+```
+
+`so uninstall` removes the `so` binary too. Flags to keep parts of it:
+
+| Flag | Effect |
+|---|---|
+| `--dry-run` | Print the plan, change nothing |
+| `--keep-binary` | Leave the `so` executable in place |
+| `--keep-harness` | Leave this repo's `.so/` directory in place |
+
+If you installed via a package manager, keep the binary and let that manager remove it:
+
+```bash
+so uninstall --keep-binary
+brew uninstall so
+brew untap ishanjainn/superopen     # optional
+```
+
+### Hooks only
+
+To strip coding-agent hooks without touching skills, `.so/`, or the binary:
+
+```bash
+so coding uninstall --vendor=all             # all vendors
+so coding uninstall --vendor=cursor          # one vendor
+so coding uninstall --vendor=all --purge     # also drop ~/.config/superopen + session-state cache
+```
+
+Leave `--purge` off if you plan to reinstall and want to keep your endpoint and API key. Shared files (`~/.cursor/hooks.json`, `~/.codex/config.toml`) are edited surgically - other tools' entries are preserved.
+
+### Already removed the binary?
+
+Rebuild from a checkout and run the uninstaller with it:
+
+```bash
+make build && ./bin/so uninstall
+```
+
 ## Closed loop
 
 Agent session → OTLP traces → post-session materialization (`.so/sessions/<id>/`) → Map replay from telemetry → auto eval → recommendations → soft tier may auto-apply; guardrails/evals need approve (or `require_approval: false`) → harness updates → next session is cheaper.
@@ -149,10 +189,11 @@ Session 3D replay lives in `web/src/map`.
 | Command | Purpose |
 |---|---|
 | `so` | Status snapshot (AXI content-first) |
-| `so uninstall` | Remove skills, hooks, injectors, `.so/`, and the CLI |
+| `so uninstall` | Remove skills, hooks, injectors, `.so/`, and the CLI ([see Uninstall](#uninstall)) |
 | `so install` | Register `/so` skill with coding agents (required after CLI install) |
 | `so init` | Bootstrap harness + install coding-agent o11y hooks |
 | `so coding install --vendor=all` | Install/refresh Claude/Cursor/Codex OTLP hooks |
+| `so coding uninstall --vendor=all` | Strip OTLP hooks only (`--purge` also drops shared config) |
 | `so coding hook` | Hot path invoked by agent hooks (do not run by hand) |
 | `so sync` | Refresh injectors/graph/citymap |
 | `so dev` | Light Next.js UI (:4444, Turbopack); `so dev -d` / `so dev stop` |
@@ -182,7 +223,7 @@ Apache-2.0 - see `LICENSE` and `NOTICE`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Please read [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening issues or PRs.
 
-CI (OpenLIT-style):
+CI:
 
 | Workflow | What it runs |
 |---|---|

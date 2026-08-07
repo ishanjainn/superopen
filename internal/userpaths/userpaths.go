@@ -48,23 +48,6 @@ func DataDir() (string, error) {
 	return filepath.Join(home, ".local", "share", "superopen"), nil
 }
 
-// LegacyDataDirOpenlit is the historical install root (read/uninstall only).
-func LegacyDataDirOpenlit() (string, error) {
-	if x := os.Getenv("XDG_DATA_HOME"); x != "" {
-		return filepath.Join(x, "openlit"), nil
-	}
-	if runtime.GOOS == "windows" {
-		if local := os.Getenv("LOCALAPPDATA"); local != "" {
-			return filepath.Join(local, "openlit"), nil
-		}
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".local", "share", "openlit"), nil
-}
-
 // LegacyDataDirSO is the short "so" data root used by early installs.
 func LegacyDataDirSO() (string, error) {
 	if x := os.Getenv("XDG_DATA_HOME"); x != "" {

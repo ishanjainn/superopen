@@ -68,7 +68,7 @@ import (
 // key - the TraceID stays stable across processes as long as the
 // salt is stable, which is the correlation guarantee we need.
 var traceIDSalt = func() []byte {
-	if v := firstEnv("SUPEROPEN_TRACEID_SALT", "SO_TRACEID_SALT", "OPENLIT_TRACEID_SALT"); v != "" {
+	if v := firstEnv("SUPEROPEN_TRACEID_SALT", "SO_TRACEID_SALT"); v != "" {
 		return []byte(v)
 	}
 	return nil

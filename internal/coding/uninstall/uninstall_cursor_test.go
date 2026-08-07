@@ -16,7 +16,7 @@ func TestStripCursorHooks_RemovesOnlyOurs(t *testing.T) {
 		"hooks": {
 			"sessionStart": [
 				{"command": "other-tool"},
-				{"command": "/Users/me/.openlit/bin/so coding hook --vendor=cursor --event=sessionStart", "timeout": 5000}
+				{"command": "/Users/me/.superopen/bin/so coding hook --vendor=cursor --event=sessionStart", "timeout": 5000}
 			],
 			"customEvent": [{"command": "user-script"}]
 		}

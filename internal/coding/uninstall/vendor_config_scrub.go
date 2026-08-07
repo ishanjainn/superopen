@@ -77,17 +77,17 @@ func stripClaudeMarketplaceJSON(dryRun bool) (string, error) {
 }
 
 // codexOwnedSectionRe matches every TOML section header that Superopen
-// (or legacy marketplace keys) owns. The patterns mirror exactly
-// what `install_patch.go` causes Codex to write.
+// owns. The patterns mirror exactly what `install_patch.go` causes
+// Codex to write.
 //
-//	[marketplaces.superopen] / [marketplaces.openlit]
-//	[plugins."superopen@superopen"] / [plugins."openlit@openlit"]
+//	[marketplaces.superopen]
+//	[plugins."superopen@superopen"]
 //	[hooks.state."…:hooks/hooks.json:*"]
 var codexOwnedSectionRe = regexp.MustCompile(
 	`^\[(?:` +
-		`marketplaces\.(?:superopen|openlit|so)` +
-		`|plugins\."(?:superopen@superopen|openlit@openlit|so@so)"` +
-		`|hooks\.state\."(?:superopen@superopen|openlit@openlit|so@so):[^"]*"` +
+		`marketplaces\.(?:superopen|so)` +
+		`|plugins\."(?:superopen@superopen|so@so)"` +
+		`|hooks\.state\."(?:superopen@superopen|so@so):[^"]*"` +
 		`)\]\s*$`,
 )
 
@@ -96,8 +96,8 @@ var codexOwnedSectionRe = regexp.MustCompile(
 var codexAnySectionRe = regexp.MustCompile(`^\[[^\]]+\]\s*$`)
 
 // stripCodexConfigTOML rewrites `~/.codex/config.toml` so that
-// every legacy-plugin-owned section is removed. Other sections -
-// including `[projects."/Users/.../openlit"]` (which is a user
+// every Superopen-owned section is removed. Other sections -
+// including `[projects."/Users/.../superopen"]` (which is a user
 // trust-level entry, not a Superopen artifact) - are preserved
 // verbatim.
 //
@@ -117,7 +117,7 @@ func stripCodexConfigTOML(dryRun bool) (string, error) {
 		}
 		return "", err
 	}
-	rewritten, changed := stripCodexOpenlitSections(string(raw))
+	rewritten, changed := stripCodexOwnedSections(string(raw))
 	if !changed {
 		return "", nil
 	}
@@ -130,13 +130,13 @@ func stripCodexConfigTOML(dryRun bool) (string, error) {
 	return path, nil
 }
 
-// stripCodexOpenlitSections is the pure string transformation that
+// stripCodexOwnedSections is the pure string transformation that
 // `stripCodexConfigTOML` wraps. Split out for direct table-driven
 // testing without touching the filesystem.
 //
 // Returns (rewritten, changed). `changed` is true iff at least one
 // legacy section was removed.
-func stripCodexOpenlitSections(src string) (string, bool) {
+func stripCodexOwnedSections(src string) (string, bool) {
 	// Preserve the original line-ending style by working on raw
 	// bytes via strings.Split. CRLF inputs come through as
 	// trailing \r on each split element - that's fine; we join

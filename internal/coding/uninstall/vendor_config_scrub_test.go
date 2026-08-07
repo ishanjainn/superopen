@@ -12,7 +12,7 @@ import (
 // ~/.codex/config.toml we observed in the wild. Includes every
 // legacy-plugin section the install path can write AND non-
 // unrelated content that must survive the strip pass - `[features]`,
-// the user-trust `[projects."..."]` entry pointing at the openlit
+// the user-trust `[projects."..."]` entry pointing at the superopen
 // repo (which is NOT a Superopen artifact, just a path that happens
 // to contain the substring), unrelated marketplace + plugin
 // entries, an `[mcp_servers.*]` block and its env sub-table, and
@@ -23,22 +23,22 @@ const codexConfigSample = `model = "gpt-5.4"
 [features]
 multi_agent = true
 
-[projects."/Users/me/private/openlit"]
+[projects."/Users/me/private/superopen"]
 trust_level = "trusted"
 
 [marketplaces.openai-bundled]
 last_updated = "2026-05-28T07:58:35Z"
 source_type = "local"
 
-[marketplaces.openlit]
+[marketplaces.superopen]
 last_updated = "2026-05-28T12:08:27Z"
 source_type = "local"
-source = "/Users/me/.local/share/openlit/codex-marketplace"
+source = "/Users/me/.local/share/superopen/codex-marketplace"
 
 [plugins."documents@openai-primary-runtime"]
 enabled = true
 
-[plugins."openlit@openlit"]
+[plugins."superopen@superopen"]
 enabled = true
 
 [desktop]
@@ -52,25 +52,25 @@ CODEX_HOME = "/Users/me/.codex"
 
 [hooks.state]
 
-[hooks.state."openlit@openlit:hooks/hooks.json:post_tool_use:0:0"]
+[hooks.state."superopen@superopen:hooks/hooks.json:post_tool_use:0:0"]
 trusted_hash = "sha256:abc"
 
-[hooks.state."openlit@openlit:hooks/hooks.json:stop:0:0"]
+[hooks.state."superopen@superopen:hooks/hooks.json:stop:0:0"]
 trusted_hash = "sha256:def"
 `
 
-func TestStripCodexOpenlitSectionsRemovesOnlyOpenlit(t *testing.T) {
-	out, changed := stripCodexOpenlitSections(codexConfigSample)
+func TestStripCodexOwnedSectionsRemovesOnlyOwned(t *testing.T) {
+	out, changed := stripCodexOwnedSections(codexConfigSample)
 	if !changed {
-		t.Fatalf("expected changed=true on a config with openlit sections")
+		t.Fatalf("expected changed=true on a config with Superopen sections")
 	}
 
 	mustNotContain := []string{
-		`[marketplaces.openlit]`,
-		`[plugins."openlit@openlit"]`,
-		`[hooks.state."openlit@openlit:hooks/hooks.json:post_tool_use:0:0"]`,
-		`[hooks.state."openlit@openlit:hooks/hooks.json:stop:0:0"]`,
-		`/Users/me/.local/share/openlit/codex-marketplace`,
+		`[marketplaces.superopen]`,
+		`[plugins."superopen@superopen"]`,
+		`[hooks.state."superopen@superopen:hooks/hooks.json:post_tool_use:0:0"]`,
+		`[hooks.state."superopen@superopen:hooks/hooks.json:stop:0:0"]`,
+		`/Users/me/.local/share/superopen/codex-marketplace`,
 		`enabled = true
 [desktop]`, // proxy: the plugin section's body must not survive
 	}
@@ -90,7 +90,7 @@ func TestStripCodexOpenlitSectionsRemovesOnlyOpenlit(t *testing.T) {
 		// User-trust block must NOT be confused with a legacy
 		// section just because the substring "so" appears
 		// in the path key.
-		`[projects."/Users/me/private/openlit"]`,
+		`[projects."/Users/me/private/superopen"]`,
 		`trust_level = "trusted"`,
 		`[marketplaces.openai-bundled]`,
 		`[plugins."documents@openai-primary-runtime"]`,
@@ -108,12 +108,12 @@ func TestStripCodexOpenlitSectionsRemovesOnlyOpenlit(t *testing.T) {
 	}
 }
 
-func TestStripCodexOpenlitSectionsIdempotent(t *testing.T) {
+func TestStripCodexOwnedSectionsIdempotent(t *testing.T) {
 	// Two passes must yield the same string. Catches a class of
 	// bug where the collapse-blank-lines pass leaves leading or
 	// trailing newlines that the next run would re-collapse.
-	once, _ := stripCodexOpenlitSections(codexConfigSample)
-	twice, changed := stripCodexOpenlitSections(once)
+	once, _ := stripCodexOwnedSections(codexConfigSample)
+	twice, changed := stripCodexOwnedSections(once)
 	if changed {
 		t.Errorf("second pass on already-scrubbed input should report changed=false")
 	}
@@ -122,14 +122,14 @@ func TestStripCodexOpenlitSectionsIdempotent(t *testing.T) {
 	}
 }
 
-func TestStripCodexOpenlitSectionsNoChange(t *testing.T) {
+func TestStripCodexOwnedSectionsNoChange(t *testing.T) {
 	// A config that never had legacy marketplace keys in it must come out byte-
 	// for-byte identical, with changed=false.
 	clean := `model = "gpt-5"
 [features]
 multi_agent = true
 `
-	out, changed := stripCodexOpenlitSections(clean)
+	out, changed := stripCodexOwnedSections(clean)
 	if changed {
 		t.Errorf("expected changed=false on clean input")
 	}
@@ -153,7 +153,7 @@ trusted_hash = "sha256:x"
 [features]
 multi_agent = true
 `
-	out, changed := stripCodexOpenlitSections(sample)
+	out, changed := stripCodexOwnedSections(sample)
 	if !changed {
 		t.Fatal("expected changed")
 	}
@@ -171,7 +171,7 @@ multi_agent = true
 	}
 }
 
-func TestStripClaudeMarketplaceJSONRemovesOpenlit(t *testing.T) {
+func TestStripClaudeMarketplaceJSONRemovesOwned(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 
@@ -192,9 +192,9 @@ func TestStripClaudeMarketplaceJSONRemovesOpenlit(t *testing.T) {
 		"so": map[string]any{
 			"source": map[string]any{
 				"source": "directory",
-				"path":   "/Users/me/.local/share/openlit/claude-marketplace",
+				"path":   "/Users/me/.local/share/superopen/claude-marketplace",
 			},
-			"installLocation": "/Users/me/.local/share/openlit/claude-marketplace",
+			"installLocation": "/Users/me/.local/share/superopen/claude-marketplace",
 			"lastUpdated":     "2026-05-28T09:43:10.432Z",
 		},
 	}
@@ -210,7 +210,7 @@ func TestStripClaudeMarketplaceJSONRemovesOpenlit(t *testing.T) {
 
 	got := mustJSONRead(t, path)
 	if _, ok := got["so"]; ok {
-		t.Errorf("openlit entry should have been removed; got %#v", got)
+		t.Errorf("superopen entry should have been removed; got %#v", got)
 	}
 	if _, ok := got["claude-plugins-official"]; !ok {
 		t.Errorf("claude-plugins-official entry must survive; got %#v", got)
@@ -237,11 +237,11 @@ func TestStripClaudeMarketplaceJSONNoEntry(t *testing.T) {
 		t.Fatalf("strip: %v", err)
 	}
 	if touched != "" {
-		t.Errorf("touched should be empty when no openlit key; got %q", touched)
+		t.Errorf("touched should be empty when no superopen key; got %q", touched)
 	}
 	after, _ := os.ReadFile(path)
 	if string(before) != string(after) {
-		t.Errorf("file content must be unchanged when no openlit key present")
+		t.Errorf("file content must be unchanged when no superopen key present")
 	}
 }
 

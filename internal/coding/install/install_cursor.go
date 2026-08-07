@@ -47,10 +47,6 @@ import (
 // survives whatever absolute path patchManifestBytes inlined.
 const cursorOwnedCommandMarker = "so coding hook --vendor=cursor"
 
-// legacyCursorHookMarker is stripped on install so Cursor does not
-// double-fire duplicate Superopen hooks.
-const legacyCursorHookMarker = "openlit coding hook --vendor=cursor"
-
 // installCursorHooks merges our hook entries into ~/.cursor/hooks.json.
 // Returns the absolute path of the file it touched (or would touch in
 // dry-run) so the install command can print it to the user.
@@ -196,7 +192,6 @@ func isOurHookEntry(raw json.RawMessage) bool {
 		return false
 	}
 	return entry.Command != "" && (strings.Contains(entry.Command, cursorOwnedCommandMarker) ||
-		strings.Contains(entry.Command, legacyCursorHookMarker) ||
 		strings.Contains(entry.Command, "sessions finalize"))
 }
 

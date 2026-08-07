@@ -15,6 +15,20 @@ import (
 var (
 	stripeSkLiveFake = "sk_live_" + strings.Repeat("a", 30)
 	stripeRkLiveFake = "rk_live_" + strings.Repeat("a", 30)
+	awsAccessKeyFake = "AKIA" + strings.Repeat("A", 16)
+	awsSecretKeyFake = `aws_secret_access_key="` + strings.Repeat("a", 40) + `"`
+	ghPatFake        = "ghp_" + strings.Repeat("a", 36)
+	openaiSkFake     = "sk-proj-" + strings.Repeat("a", 10) + "-secrets-living-here-now"
+	anthropicSkFake  = "sk-ant-" + strings.Repeat("a", 6) + "-secrets-456-zzz"
+	googleAPIKeyFake = "AIza" + strings.Repeat("0", 35)
+	slackXoxbFake    = "xoxb-12345678-1234567890123-123456789012-" + strings.Repeat("a", 20)
+	pemHeader        = strings.Join([]string{"-----BEGIN", "RSA", "PRIVATE", "KEY-----"}, " ")
+	pemFooter        = strings.Join([]string{"-----END", "RSA", "PRIVATE", "KEY-----"}, " ")
+	privateKeyFake   = pemHeader + "\nMIIEvQIBADANBgkq\n" + pemFooter
+	azureSasFake     = "?sv=2021-08-06&sig=" + strings.Repeat("A", 20) + "%3D"
+	azureStorageFake = "DefaultEndpointsProtocol=https;AccountName=foo;AccountKey=" + strings.Repeat("A", 20) + "=="
+	hfTokenFake      = "hf_" + strings.Repeat("A", 25)
+	npmTokenFake     = "npm_" + strings.Repeat("a", 33)
 )
 
 // shouldRedactTier1 lists strings that contain a secret tier-1 should
@@ -25,24 +39,24 @@ var shouldRedactTier1 = []struct {
 	name string
 	in   string
 }{
-	{"aws_access_key_id", "AKIAIOSFODNN7EXAMPLE inside a sentence"},
-	{"aws_secret_access_key_assignment", `aws_secret_access_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"`},
-	{"gh_pat", "ghp_abcdefghijklmnopqrstuvwxyz0123456789"},
-	{"openai_sk", "sk-proj-abc123_XYZ-secrets-living-here-now"},
-	{"anthropic_sk", "sk-ant-abc123-secrets-456-zzz"},
-	{"google_api_key", "AIza0123456789abcdefghijklmnopqrstuv-_X"},
-	{"slack_xoxb", "xoxb-12345678-1234567890123-123456789012-abc123def456ghi789jkl"},
+	{"aws_access_key_id", awsAccessKeyFake + " inside a sentence"},
+	{"aws_secret_access_key_assignment", awsSecretKeyFake},
+	{"gh_pat", ghPatFake},
+	{"openai_sk", openaiSkFake},
+	{"anthropic_sk", anthropicSkFake},
+	{"google_api_key", googleAPIKeyFake},
+	{"slack_xoxb", slackXoxbFake},
 	{"stripe_sk_live", stripeSkLiveFake},
 	{"stripe_rk_live", stripeRkLiveFake},
 	{"jwt", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.signature123"},
 	{"bearer_header", "Authorization: Bearer abc123def456ghi789jkl"},
-	{"private_key", "-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkq\n-----END RSA PRIVATE KEY-----"},
-	{"azure_sas_sig", "?sv=2021-08-06&sig=AbCdEf%2BGhIj0123456789xyzPQR%3D"},
-	{"azure_storage_conn", "DefaultEndpointsProtocol=https;AccountName=foo;AccountKey=AbCdEfGh1234567890abcdefghijklmn=="},
-	{"hf_token", "hf_AbCdEfGhIjKlMnOpQrStUvWx12"},
-	{"npm_token", "npm_abcdefghijklmnopqrstuvwxyz012345"},
-	{"postgres_url", "postgres://app:s3cret-Pa55@db.internal:5432/main"},
-	{"mysql_url", "mysql://root:hunter2hunter2@10.0.0.5/orders"},
+	{"private_key", privateKeyFake},
+	{"azure_sas_sig", azureSasFake},
+	{"azure_storage_conn", azureStorageFake},
+	{"hf_token", hfTokenFake},
+	{"npm_token", npmTokenFake},
+	{"postgres_url", "postgres://app:" + strings.Repeat("s", 12) + "@db.internal:5432/main"},
+	{"mysql_url", "mysql://root:" + strings.Repeat("h", 14) + "@10.0.0.5/orders"},
 }
 
 func TestStringTier1RedactsKnownSecrets(t *testing.T) {
