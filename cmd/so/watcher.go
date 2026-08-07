@@ -41,7 +41,10 @@ func startRefreshWatcher(root string) {
 			if pending && time.Since(lastFire) >= 2*time.Second {
 				pending = false
 				lastFire = time.Now()
-				err := sync.Refresh(sync.RefreshOptions{RepoRoot: root})
+				// Never rewrite tracked injectors from the watcher — a HEAD
+				// bump after commit would otherwise dirty AGENTS.md / skills
+				// while `so dev` is running. Explicit `so sync` still injects.
+				err := sync.Refresh(sync.RefreshOptions{RepoRoot: root, SkipInject: true})
 				writeRefreshStatus(statusPath, err)
 			}
 		}

@@ -290,12 +290,13 @@ func writeFileIfChanged(path string, body []byte) error {
 }
 
 func replaceOrAppend(existing, block string) string {
+	block = strings.TrimRight(block, "\n") + "\n"
 	start := strings.Index(existing, startMarker)
 	end := strings.Index(existing, endMarker)
 	if start >= 0 && end > start {
 		end += len(endMarker)
-		// Consume the block's trailing newline so re-inject does not grow EOF blank lines.
-		if end < len(existing) && existing[end] == '\n' {
+		// Drop all trailing blank lines after the marker so re-inject is stable.
+		for end < len(existing) && existing[end] == '\n' {
 			end++
 		}
 		return existing[:start] + block + existing[end:]
@@ -303,10 +304,8 @@ func replaceOrAppend(existing, block string) string {
 	if strings.TrimSpace(existing) == "" {
 		return block
 	}
-	if !strings.HasSuffix(existing, "\n") {
-		existing += "\n"
-	}
-	return existing + "\n" + block
+	existing = strings.TrimRight(existing, "\n") + "\n\n"
+	return existing + block
 }
 
 // Status checks injector presence in a project.
