@@ -309,7 +309,7 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          python3 .github/scripts/update-homebrew-formula.py \
+          python3 .github/scripts/release-packages.py bump-homebrew-formula \
             --repository "$REPOSITORY" \
             --tag "$RELEASE_TAG" \
             --version "$RELEASE_VERSION" \
