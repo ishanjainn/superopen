@@ -324,63 +324,6 @@
       "web_src_lib_utils_cn"
     ],
     "4": [
-      "cmd_so_cmds_extra_cmdcheckpoint",
-      "cmd_so_cmds_extra_cmdgithook",
-      "cmd_so_cmds_extra_cmdimport",
-      "cmd_so_cmds_extra_cmdprojects",
-      "cmd_so_cmds_extra_cmdstatus",
-      "cmd_so_cmds_harvest",
-      "cmd_so_cmds_harvest_cmdharvest",
-      "cmd_so_cmds_memory",
-      "cmd_so_cmds_memory_attachsessionsstart",
-      "cmd_so_cmds_memory_cmdaudit",
-      "cmd_so_cmds_memory_cmdlearn",
-      "cmd_so_cmds_memory_cmdmemory",
-      "cmd_so_cmds_memory_cmdopen",
-      "cmd_so_cmds_memory_cmdretrieve",
-      "cmd_so_cmds_memory_registerguardsubcommands",
-      "cmd_so_main",
-      "cmd_so_main_applytracesdir",
-      "cmd_so_main_cmdapplyupgrade",
-      "cmd_so_main_cmddoctor",
-      "cmd_so_main_cmdeval",
-      "cmd_so_main_cmdgraph",
-      "cmd_so_main_cmdguard",
-      "cmd_so_main_cmdinit",
-      "cmd_so_main_cmdinstall",
-      "cmd_so_main_cmdknowledge",
-      "cmd_so_main_cmdquery",
-      "cmd_so_main_cmdrecommend",
-      "cmd_so_main_cmdrefresh",
-      "cmd_so_main_cmdsessions",
-      "cmd_so_main_cmdskill",
-      "cmd_so_main_cmdsync",
-      "cmd_so_main_cmduninstall",
-      "cmd_so_main_demosession",
-      "cmd_so_main_ensuregraphifyy",
-      "cmd_so_main_finalizelatestsession",
-      "cmd_so_main_finalizesession",
-      "cmd_so_main_go_config",
-      "cmd_so_main_main",
-      "cmd_so_main_out",
-      "cmd_so_main_querycmd",
-      "cmd_so_main_refreshsession",
-      "cmd_so_main_reporoot",
-      "cmd_so_main_runroot",
-      "internal_axi_axi_err",
-      "internal_harness_harness_resolve",
-      "internal_session_backend_newlocalmulti",
-      "internal_session_empty_go_span",
-      "internal_session_empty_spanshaveactivity",
-      "internal_session_state_newstatestore",
-      "internal_session_state_test",
-      "internal_session_state_test_go_t",
-      "internal_session_state_test_teststatestorelifecycle",
-      "internal_tracestore_store_newlocaljsonl",
-      "internal_viz_citymap_buildreplayfromspans",
-      "internal_viz_citymap_go_span"
-    ],
-    "5": [
       "inject_installoptions",
       "inject_installresult",
       "inject_uninstallresult",
@@ -452,7 +395,7 @@
       "session_statestore_save",
       "session_statestore_warnconcurrent"
     ],
-    "6": [
+    "5": [
       "install_cursorhooksfile",
       "install_cursorhooksfile_marshaljson",
       "install_cursorhooksfile_unmarshaljson",
@@ -516,61 +459,64 @@
       "internal_userpaths_userpaths_test_testconfiganddatadirs",
       "internal_userpaths_userpaths_test_testquoteandshellpath"
     ],
-    "7": [
-      "claudecode_recordingemitter",
-      "claudecode_recordingemitter_emiteditdecision",
-      "claudecode_recordingemitter_emitevent",
-      "claudecode_recordingemitter_emitgitcommit",
-      "claudecode_recordingemitter_emitgitpullrequest",
-      "claudecode_recordingemitter_emitllmturn",
-      "claudecode_recordingemitter_emitsession",
-      "claudecode_recordingemitter_emitsubagent",
-      "claudecode_recordingemitter_emittoolcall",
-      "codex_recordingemitter",
-      "codex_recordingemitter_emiteditdecision",
-      "codex_recordingemitter_emitevent",
-      "codex_recordingemitter_emitgitcommit",
-      "codex_recordingemitter_emitgitpullrequest",
-      "codex_recordingemitter_emitllmturn",
-      "codex_recordingemitter_emitsession",
-      "codex_recordingemitter_emitsubagent",
-      "codex_recordingemitter_emittoolcall",
-      "codingotlp_emitter_emitgitpullrequest",
-      "cursor_recordingemitter",
-      "cursor_recordingemitter_emiteditdecision",
-      "cursor_recordingemitter_emitevent",
-      "cursor_recordingemitter_emitgitcommit",
-      "cursor_recordingemitter_emitgitpullrequest",
-      "cursor_recordingemitter_emitllmturn",
-      "cursor_recordingemitter_emitsession",
-      "cursor_recordingemitter_emitsubagent",
-      "cursor_recordingemitter_emittoolcall",
-      "internal_coding_hook_claudecode_handle_test_go_session",
-      "internal_coding_hook_claudecode_handle_test_go_toolcall",
-      "internal_coding_hook_codex_handle_test_go_session",
-      "internal_coding_hook_codex_handle_test_go_toolcall",
-      "internal_coding_hook_cursor_handle_test_go_session",
-      "internal_coding_hook_cursor_handle_test_go_toolcall",
-      "internal_coding_normalize_normalize",
-      "internal_coding_normalize_normalize_go_duration",
-      "internal_coding_normalize_normalize_go_time",
-      "normalize_adapter",
-      "normalize_editdecision",
-      "normalize_emitter",
-      "normalize_eventemission",
-      "normalize_gitcommit",
-      "normalize_gitpullrequest",
-      "normalize_llmturn",
-      "normalize_session",
-      "normalize_subagent",
-      "normalize_toolcall",
-      "opencode_rec_emitgitcommit",
-      "opencode_rec_emitsubagent",
-      "pi_rec_emiteditdecision",
-      "pi_rec_emitevent",
-      "pi_rec_emitsubagent"
+    "6": [
+      "cmd_so_cmds_extra_cmdcheckpoint",
+      "cmd_so_cmds_extra_cmdgithook",
+      "cmd_so_cmds_extra_cmdimport",
+      "cmd_so_cmds_extra_cmdprojects",
+      "cmd_so_cmds_extra_cmdstatus",
+      "cmd_so_cmds_harvest",
+      "cmd_so_cmds_harvest_cmdharvest",
+      "cmd_so_cmds_memory",
+      "cmd_so_cmds_memory_attachsessionsstart",
+      "cmd_so_cmds_memory_cmdaudit",
+      "cmd_so_cmds_memory_cmdlearn",
+      "cmd_so_cmds_memory_cmdmemory",
+      "cmd_so_cmds_memory_cmdopen",
+      "cmd_so_cmds_memory_cmdretrieve",
+      "cmd_so_cmds_memory_registerguardsubcommands",
+      "cmd_so_main",
+      "cmd_so_main_applytracesdir",
+      "cmd_so_main_cmdapplyupgrade",
+      "cmd_so_main_cmddoctor",
+      "cmd_so_main_cmdeval",
+      "cmd_so_main_cmdgraph",
+      "cmd_so_main_cmdguard",
+      "cmd_so_main_cmdinit",
+      "cmd_so_main_cmdinstall",
+      "cmd_so_main_cmdknowledge",
+      "cmd_so_main_cmdquery",
+      "cmd_so_main_cmdrecommend",
+      "cmd_so_main_cmdrefresh",
+      "cmd_so_main_cmdsessions",
+      "cmd_so_main_cmdskill",
+      "cmd_so_main_cmdsync",
+      "cmd_so_main_cmduninstall",
+      "cmd_so_main_demosession",
+      "cmd_so_main_ensuregraphifyy",
+      "cmd_so_main_finalizelatestsession",
+      "cmd_so_main_finalizesession",
+      "cmd_so_main_go_config",
+      "cmd_so_main_main",
+      "cmd_so_main_out",
+      "cmd_so_main_querycmd",
+      "cmd_so_main_refreshsession",
+      "cmd_so_main_reporoot",
+      "cmd_so_main_runroot",
+      "internal_axi_axi_err",
+      "internal_harness_harness_resolve",
+      "internal_session_backend_newlocalmulti",
+      "internal_session_empty_go_span",
+      "internal_session_empty_spanshaveactivity",
+      "internal_session_state_newstatestore",
+      "internal_session_state_test",
+      "internal_session_state_test_go_t",
+      "internal_session_state_test_teststatestorelifecycle",
+      "internal_tracestore_store_newlocaljsonl",
+      "internal_viz_citymap_buildreplayfromspans",
+      "internal_viz_citymap_go_span"
     ],
-    "8": [
+    "7": [
       "entitlement_status",
       "entitlement_status_public",
       "internal_entitlement_entitlement",
@@ -624,6 +570,68 @@
       "tracestore_queryfilter",
       "tracestore_span",
       "tracestore_store"
+    ],
+    "8": [
+      "claudecode_recordingemitter",
+      "claudecode_recordingemitter_emiteditdecision",
+      "claudecode_recordingemitter_emitevent",
+      "claudecode_recordingemitter_emitgitcommit",
+      "claudecode_recordingemitter_emitgitpullrequest",
+      "claudecode_recordingemitter_emitllmturn",
+      "claudecode_recordingemitter_emitsession",
+      "claudecode_recordingemitter_emitsubagent",
+      "claudecode_recordingemitter_emittoolcall",
+      "codex_recordingemitter",
+      "codex_recordingemitter_emiteditdecision",
+      "codex_recordingemitter_emitevent",
+      "codex_recordingemitter_emitgitcommit",
+      "codex_recordingemitter_emitgitpullrequest",
+      "codex_recordingemitter_emitllmturn",
+      "codex_recordingemitter_emitsession",
+      "codex_recordingemitter_emitsubagent",
+      "codex_recordingemitter_emittoolcall",
+      "codingotlp_emitter_emitgitpullrequest",
+      "cursor_recordingemitter",
+      "cursor_recordingemitter_emiteditdecision",
+      "cursor_recordingemitter_emitevent",
+      "cursor_recordingemitter_emitgitcommit",
+      "cursor_recordingemitter_emitgitpullrequest",
+      "cursor_recordingemitter_emitllmturn",
+      "cursor_recordingemitter_emitsession",
+      "cursor_recordingemitter_emitsubagent",
+      "cursor_recordingemitter_emittoolcall",
+      "internal_coding_hook_claudecode_handle_test_go_session",
+      "internal_coding_hook_claudecode_handle_test_go_toolcall",
+      "internal_coding_hook_codex_handle_test_go_session",
+      "internal_coding_hook_codex_handle_test_go_toolcall",
+      "internal_coding_hook_cursor_handle_test_go_session",
+      "internal_coding_hook_cursor_handle_test_go_toolcall",
+      "internal_coding_hook_pi_handle_test_go_session",
+      "internal_coding_hook_pi_handle_test_go_toolcall",
+      "internal_coding_normalize_normalize",
+      "internal_coding_normalize_normalize_go_duration",
+      "internal_coding_normalize_normalize_go_time",
+      "normalize_adapter",
+      "normalize_editdecision",
+      "normalize_emitter",
+      "normalize_eventemission",
+      "normalize_gitcommit",
+      "normalize_gitpullrequest",
+      "normalize_llmturn",
+      "normalize_session",
+      "normalize_subagent",
+      "normalize_toolcall",
+      "opencode_rec_emitgitcommit",
+      "opencode_rec_emitsubagent",
+      "pi_rec",
+      "pi_rec_emiteditdecision",
+      "pi_rec_emitevent",
+      "pi_rec_emitgitcommit",
+      "pi_rec_emitgitpullrequest",
+      "pi_rec_emitllmturn",
+      "pi_rec_emitsession",
+      "pi_rec_emitsubagent",
+      "pi_rec_emittoolcall"
     ],
     "9": [
       "web_src_app_api_memory_route",
@@ -1116,21 +1124,14 @@
       "internal_session_empty_go_listitem",
       "internal_session_empty_go_session_store",
       "internal_session_empty_isemptylistitem",
-      "internal_session_store",
-      "internal_session_store_countcheckpointdirs",
       "internal_session_store_go_client",
       "internal_session_store_go_session_store",
       "internal_session_store_go_span",
       "internal_session_store_go_time",
-      "internal_session_store_humanizepromptpreview",
-      "internal_session_store_isnestedsession",
-      "internal_session_store_previewfrommessages",
-      "internal_session_store_rank",
       "internal_session_store_truncaterunes",
       "internal_session_store_writejson",
       "session_listitem",
       "session_meta",
-      "session_status",
       "session_store_children",
       "session_store_clearfalsenesting",
       "session_store_clearorphansubagent",
@@ -1418,6 +1419,7 @@
       "web_src_components_shell_playground_shell_playgroundshellframe",
       "web_src_components_shell_sidebar_brand",
       "web_src_components_shell_sidebar_brand_sidebarbrand",
+      "web_src_components_shell_sidebar_flatitems",
       "web_src_components_shell_sidebar_layout_context",
       "web_src_components_shell_sidebar_layout_context_loadexpanded",
       "web_src_components_shell_sidebar_layout_context_playgroundtopbarclassname",
@@ -1426,6 +1428,7 @@
       "web_src_components_shell_sidebar_layout_context_sidebarlayoutcontextvalue",
       "web_src_components_shell_sidebar_layout_context_sidebarlayoutprovider",
       "web_src_components_shell_sidebar_layout_context_usesidebarlayout",
+      "web_src_components_shell_sidebar_sidebar",
       "web_src_lib_version",
       "web_src_lib_version_displayversion",
       "web_src_lib_version_test",
@@ -1467,6 +1470,7 @@
       "server"
     ],
     "28": [
+      "internal_session_store_humanizepromptpreview",
       "internal_session_title",
       "internal_session_title_displayname",
       "internal_session_title_ensuretitle",
@@ -1570,9 +1574,45 @@
       "web_src_lib_so_harness_yaml_harnessitemhref"
     ],
     "31": [
+      "adapters_claudeimport",
+      "adapters_claudeimport_detect",
+      "adapters_claudeimport_discover",
+      "adapters_claudeimport_harness",
+      "adapters_claudeimport_parse",
+      "adapters_codexexport",
+      "adapters_codexexport_detect",
+      "adapters_codexexport_harness",
+      "adapters_codexexport_write",
+      "adapters_codeximport",
+      "adapters_codeximport_detect",
+      "adapters_codeximport_discover",
+      "adapters_codeximport_harness",
+      "adapters_codeximport_parse",
+      "adapters_cursorimport_parse",
+      "internal_port_adapters_claude_go_sessionref",
+      "internal_port_adapters_claude_peekclaude",
+      "internal_port_adapters_codex",
+      "internal_port_adapters_codex_codexcallargs",
+      "internal_port_adapters_codex_codexmessagetext",
+      "internal_port_adapters_codex_codexroot",
+      "internal_port_adapters_codex_go_sessionref",
+      "internal_port_adapters_codex_peekcodex",
+      "internal_port_adapters_cursor_go_sessionref",
+      "internal_port_adapters_helpers",
+      "internal_port_adapters_helpers_ensuremeta",
+      "internal_port_adapters_helpers_firstline",
+      "internal_port_adapters_helpers_parsetimems",
+      "internal_port_adapters_helpers_textandtoolsfromcontent",
+      "internal_port_adapters_helpers_textfromcontent",
+      "internal_port_adapters_helpers_writejsonl",
+      "internal_port_adapters_workingstate_firststringfield"
+    ],
+    "32": [
       "claudecode_adapter_handle",
       "claudecode_claudepayload",
       "emitter",
+      "internal_coding_detect_detect_countinlinediff",
+      "internal_coding_detect_detect_splitlines",
       "internal_coding_hook_claudecode_handle",
       "internal_coding_hook_claudecode_handle_bashstdout",
       "internal_coding_hook_claudecode_handle_countmultieditlines",
@@ -1600,7 +1640,7 @@
       "internal_session_agentlinks_agentlinks_sessionsdir",
       "normalize_input"
     ],
-    "32": [
+    "33": [
       "blame_lineinfo",
       "blame_whyresult",
       "internal_blame_blame",
@@ -1632,7 +1672,7 @@
       "internal_session_link_test_go_t",
       "internal_session_link_test_testapplyvcsfromspans"
     ],
-    "33": [
+    "34": [
       "codex_adapter",
       "codex_adapter_handle",
       "codex_adapter_vendor",
@@ -1664,7 +1704,7 @@
       "internal_coding_hook_generic_generic_new",
       "internal_coding_hook_generic_generic_str"
     ],
-    "34": [
+    "35": [
       "cursor_cursorattachment",
       "cursor_cursoredit",
       "cursor_cursorpayload",
@@ -1696,7 +1736,38 @@
       "internal_coding_hook_cursor_handle_totallines",
       "internal_coding_hook_cursor_handle_truncatestr"
     ],
-    "35": [
+    "36": [
+      "checkpoint_meta",
+      "checkpoint_store",
+      "checkpoint_store_create",
+      "checkpoint_store_createfromfootprint",
+      "checkpoint_store_dir",
+      "checkpoint_store_get",
+      "checkpoint_store_list",
+      "checkpoint_store_nextid",
+      "checkpoint_store_restore",
+      "internal_checkpoint_checkpoint",
+      "internal_checkpoint_checkpoint_containsdotdot",
+      "internal_checkpoint_checkpoint_go_time",
+      "internal_checkpoint_checkpoint_newstore",
+      "internal_checkpoint_checkpoint_splitslash",
+      "internal_checkpoint_checkpoint_stringshasdotdot",
+      "internal_checkpoint_checkpoint_test",
+      "internal_checkpoint_checkpoint_test_go_t",
+      "internal_checkpoint_checkpoint_test_testcreaterestore",
+      "internal_port_ledger_newledger",
+      "internal_port_port_test",
+      "internal_port_port_test_go_t",
+      "internal_port_port_test_testclaudeparserecoversworkingstatefromtooluse",
+      "internal_port_port_test_testclauderoundtripviasohub",
+      "internal_port_port_test_testcodexparseexport",
+      "internal_port_port_test_testcodexparserecoversworkingstate",
+      "internal_port_port_test_testcodexparserepeatedcommandkeepslatestexitcode",
+      "internal_port_port_test_testledgeridempotency",
+      "internal_port_port_test_testremapcwd",
+      "internal_port_port_test_testsohubroundtrippreservesworkingstate"
+    ],
+    "37": [
       "internal_recommend_recommend",
       "internal_recommend_recommend_advisoryguardrailbody",
       "internal_recommend_recommend_apply",
@@ -1727,7 +1798,7 @@
       "recommend_decision",
       "recommend_recommendation"
     ],
-    "36": [
+    "38": [
       "ref_dom",
       "ref_dom_iterable",
       "ref_esnext",
@@ -1758,19 +1829,17 @@
       "web_tsconfig_exclude",
       "web_tsconfig_include"
     ],
-    "37": [
+    "39": [
       "web_src_components_shell_feature_page_header",
       "web_src_components_shell_feature_page_header_featurepageheader",
       "web_src_components_shell_feature_page_header_featurepageheaderprops",
       "web_src_components_shell_feature_page_header_iconforpath",
       "web_src_components_shell_feature_page_header_iconfortitle",
       "web_src_components_shell_sidebar",
-      "web_src_components_shell_sidebar_flatitems",
       "web_src_components_shell_sidebar_isactive",
       "web_src_components_shell_sidebar_navigationlink",
       "web_src_components_shell_sidebar_primaryitem",
       "web_src_components_shell_sidebar_sectionpanel",
-      "web_src_components_shell_sidebar_sidebar",
       "web_src_components_ui_button",
       "web_src_components_ui_button_button",
       "web_src_components_ui_button_buttonprops",
@@ -1791,7 +1860,7 @@
       "web_src_types_sidebar_sidebaritemprops",
       "web_src_types_sidebar_sidebarsection"
     ],
-    "38": [
+    "40": [
       "web_src_map_api",
       "web_src_map_api_apiurl",
       "web_src_map_api_describeerror",
@@ -1822,7 +1891,7 @@
       "web_src_map_ui_hud_hudsessionextras",
       "web_src_map_ui_reportpanel_reportpanelprops"
     ],
-    "39": [
+    "41": [
       "codingotlp_scrubfn",
       "internal_codingotlp_attrs",
       "internal_codingotlp_attrs_bodyallowed",
@@ -1852,10 +1921,9 @@
       "semconv_attributebuilder_float64",
       "semconv_attributebuilder_stringslice"
     ],
-    "40": [
+    "42": [
       "detect_patchlinecounts",
       "internal_coding_detect_detect",
-      "internal_coding_detect_detect_countinlinediff",
       "internal_coding_detect_detect_countpatchlines",
       "internal_coding_detect_detect_extractcommitmessage",
       "internal_coding_detect_detect_extractcommitsha",
@@ -1864,7 +1932,6 @@
       "internal_coding_detect_detect_firstgroup",
       "internal_coding_detect_detect_isgitcommit",
       "internal_coding_detect_detect_ispullrequest",
-      "internal_coding_detect_detect_splitlines",
       "internal_coding_detect_detect_stripabprefix",
       "internal_coding_detect_detect_test",
       "internal_coding_detect_detect_test_go_t",
@@ -1884,7 +1951,7 @@
       "internal_coding_sessionstate_sessionstate_bumpprcount",
       "regexp"
     ],
-    "41": [
+    "43": [
       "guardrails_decision",
       "guardrails_engine",
       "guardrails_engine_approval",
@@ -1914,19 +1981,11 @@
       "internal_guardrails_guardrails_wildmatch",
       "seed_llmharnessout"
     ],
-    "42": [
+    "44": [
       "adapters_claudeexport",
       "adapters_claudeexport_detect",
       "adapters_claudeexport_harness",
       "adapters_claudeexport_write",
-      "adapters_claudeimport",
-      "adapters_claudeimport_detect",
-      "adapters_claudeimport_discover",
-      "adapters_claudeimport_harness",
-      "adapters_codexexport",
-      "adapters_codexexport_detect",
-      "adapters_codexexport_harness",
-      "adapters_codexexport_write",
       "adapters_opencodeexport",
       "adapters_opencodeexport_detect",
       "adapters_opencodeexport_harness",
@@ -1936,21 +1995,16 @@
       "adapters_opencodeimport_discover",
       "adapters_opencodeimport_harness",
       "adapters_piexport_write",
-      "adapters_sohubexport_write",
       "internal_port_adapters_claude",
       "internal_port_adapters_claude_encodeclaudeprojectdir",
-      "internal_port_adapters_claude_go_sessionref",
-      "internal_port_adapters_codex_codexroot",
       "internal_port_adapters_helpers_home",
-      "internal_port_adapters_helpers_writejsonl",
       "internal_port_adapters_opencode",
       "internal_port_adapters_opencode_exportopencodesqlitejson",
-      "internal_port_adapters_opencode_go_sessionref",
       "internal_port_adapters_opencode_opencodedatadir",
       "port_exportresult",
       "port_writeoptions"
     ],
-    "43": [
+    "45": [
       "graph_result",
       "graph_stubgraph",
       "internal_graph_graph",
@@ -1979,7 +2033,7 @@
       "internal_graph_graph_truncateout",
       "internal_graph_graph_truncatesnippet"
     ],
-    "44": [
+    "46": [
       "web_src_lib_so_evals",
       "web_src_lib_so_evals_builddailyseries",
       "web_src_lib_so_evals_buildevaluatorstats",
@@ -2008,7 +2062,7 @@
       "web_src_lib_so_evals_storedreport",
       "web_src_lib_so_sessions_sessionmeta"
     ],
-    "45": [
+    "47": [
       "internal_otlpremote_remote_go_listitem",
       "internal_session_attribution",
       "internal_session_attribution_computeattribution",
@@ -2036,7 +2090,7 @@
       "session_projectbinding",
       "session_prref"
     ],
-    "46": [
+    "48": [
       "web_src_app_api_graph_html_route",
       "web_src_app_api_graph_html_route_dynamic",
       "web_src_app_api_graph_html_route_get",
@@ -2064,7 +2118,7 @@
       "web_src_lib_so_graphify_theme_test",
       "web_src_lib_so_nodeio_readjsonfile"
     ],
-    "47": [
+    "49": [
       "codingotlp_sessionidgenerator",
       "codingotlp_sessionidgenerator_newids",
       "codingotlp_sessionidgenerator_newspanid",
@@ -2091,7 +2145,7 @@
       "spanid",
       "traceid"
     ],
-    "48": [
+    "50": [
       "sdk_go_semconv_attributes",
       "sdk_go_semconv_attributes_go_keyvalue",
       "sdk_go_semconv_attributes_go_span",
@@ -2118,7 +2172,7 @@
       "semconv_toolcall",
       "semconv_tooldefinition"
     ],
-    "49": [
+    "51": [
       "axi_error",
       "axi_error_error",
       "axi_flags",
@@ -2144,7 +2198,7 @@
       "internal_axi_axi_notfound",
       "internal_axi_axi_usage"
     ],
-    "50": [
+    "52": [
       "cmd_so_cmds_memory_go_config",
       "cmd_so_cmds_memory_mineonfinalize",
       "internal_learn_learn",
@@ -2170,31 +2224,7 @@
       "llm_completer",
       "recommendation"
     ],
-    "51": [
-      "internal_port_adapter",
-      "internal_port_adapter_newregistry",
-      "internal_port_memory_refresh",
-      "internal_port_memory_refresh_refreshmemoryafterport",
-      "internal_port_orchestrator",
-      "internal_port_orchestrator_go_port_orchestrator",
-      "internal_port_orchestrator_go_sessionref",
-      "port_event",
-      "port_exportadapter",
-      "port_harnessid",
-      "port_importadapter",
-      "port_orchestrator_detect",
-      "port_orchestrator_port",
-      "port_portoptions",
-      "port_portresult",
-      "port_registry",
-      "port_registry_export",
-      "port_registry_import",
-      "port_registry_listexport",
-      "port_registry_listimport",
-      "port_registry_registerexport",
-      "port_registry_registerimport"
-    ],
-    "52": [
+    "53": [
       "web_src_components_session_rail_index",
       "web_src_components_session_rail_sessionrail",
       "web_src_components_session_rail_sessionrail_sessionrail",
@@ -2220,7 +2250,7 @@
       "web_src_map_ui_hud_titlestat",
       "web_src_map_ui_hud_verifyruns"
     ],
-    "53": [
+    "54": [
       "agentcli_claudeenvelope",
       "agentcli_result",
       "agentcli_runner",
@@ -2245,7 +2275,7 @@
       "internal_agentcli_cli_truncaterunes",
       "internal_agentcli_cli_workdir"
     ],
-    "54": [
+    "55": [
       "cmd_so_watcher",
       "cmd_so_watcher_maxsharedmtime",
       "cmd_so_watcher_startrefreshwatcher",
@@ -2270,7 +2300,7 @@
       "sync_refreshmarker",
       "sync_refreshoptions"
     ],
-    "55": [
+    "56": [
       "codex_codexline",
       "codex_codexreasoningitem",
       "codex_codexreasoningsummarypart",
@@ -2295,7 +2325,7 @@
       "internal_coding_hook_codex_transcript_scanrolloutdirforsession",
       "internal_coding_hook_codex_transcript_subtractcodexusage"
     ],
-    "56": [
+    "57": [
       "codingotlp_emitter",
       "codingotlp_emitter_bumpllmcounter",
       "codingotlp_emitter_bumpsubagentcounter",
@@ -2320,7 +2350,7 @@
       "internal_codingotlp_metrics_recordlines",
       "internal_codingotlp_metrics_recordpullrequest"
     ],
-    "57": [
+    "58": [
       "web_src_app_app_recs_id_page",
       "web_src_app_app_recs_id_page_actorlabel",
       "web_src_app_app_recs_id_page_decisiondialogtitle",
@@ -2345,16 +2375,46 @@
       "web_src_lib_recommendation_type_label_test",
       "web_src_lib_utils"
     ],
-    "58": [
+    "59": [
+      "adapters_opencodeimport_parse",
+      "adapters_wscollector",
+      "adapters_wscollector_addcommand",
+      "adapters_wscollector_addfile",
+      "adapters_wscollector_attachexit",
+      "adapters_wscollector_notebranch",
+      "adapters_wscollector_observe",
+      "adapters_wscollector_relpath",
+      "adapters_wscollector_result",
+      "internal_port_adapters_opencode_go_sessionref",
+      "internal_port_adapters_opencode_observeopencodetoolpart",
+      "internal_port_adapters_workingstate",
+      "internal_port_adapters_workingstate_capcommands",
+      "internal_port_adapters_workingstate_capstrings",
+      "internal_port_adapters_workingstate_extractexitcode",
+      "internal_port_adapters_workingstate_matchesany",
+      "internal_port_adapters_workingstate_newwscollector",
+      "internal_port_adapters_workingstate_normalizetoolname",
+      "internal_port_ir",
+      "internal_port_workingstate_render",
+      "internal_port_workingstate_render_joincode",
+      "internal_port_workingstate_render_renderworkingstate",
+      "port_portablesession",
+      "port_portableturn",
+      "port_rancommand",
+      "port_sessionref",
+      "port_workingstate",
+      "port_workingstate_empty"
+    ],
+    "60": [
       "internal_coding_hook_harness_hooks_port_test",
       "internal_coding_hook_harness_hooks_port_test_go_t",
       "internal_coding_hook_harness_hooks_port_test_testmaybeinjectmemory_portresumewithoutmemory",
+      "internal_port_ir_newportablesession",
       "internal_port_resume",
       "internal_port_resume_armresume",
       "internal_port_resume_consumelegacycursorpending",
       "internal_port_resume_consumependingresume",
       "internal_port_resume_consumesoportpending",
-      "internal_port_resume_go_time",
       "internal_port_resume_portrundir",
       "internal_port_resume_test",
       "internal_port_resume_test_go_t",
@@ -2365,13 +2425,9 @@
       "internal_port_resume_test_testarmresumeomitsworkingstatewhenclean",
       "internal_port_resume_test_testconsumependingresumearchivesfulltranscriptwhentrimmed",
       "internal_port_resume_test_testtrimresumebodykeepsrecentturns",
-      "internal_port_resume_trimresumebody",
-      "internal_port_workingstate_render",
-      "internal_port_workingstate_render_joincode",
-      "internal_port_workingstate_render_renderworkingstate",
-      "port_pendingresume"
+      "internal_port_resume_trimresumebody"
     ],
-    "59": [
+    "61": [
       "web_src_components_session_search_bar",
       "web_src_components_session_search_bar_chip",
       "web_src_components_session_search_bar_hintbutton",
@@ -2395,7 +2451,7 @@
       "web_src_lib_so_sessions_applysessionquery",
       "web_src_lib_so_sessions_listsessions"
     ],
-    "60": [
+    "62": [
       "web_src_lib_so_citymap",
       "web_src_lib_so_citymap_applytreemap",
       "web_src_lib_so_citymap_buildtree",
@@ -2419,7 +2475,7 @@
       "web_src_lib_so_citymap_walkfiles",
       "web_src_lib_so_citymap_worstaspect"
     ],
-    "61": [
+    "63": [
       "web_src_map_playback_reducer",
       "web_src_map_playback_reducer_fileplayback",
       "web_src_map_playback_reducer_playbackengine",
@@ -2443,7 +2499,7 @@
       "web_src_map_ui_inspector_inspectorprops",
       "web_src_map_ui_timeline_timelineprops"
     ],
-    "62": [
+    "64": [
       "autoprefixer",
       "eslint",
       "eslint_config_next",
@@ -2466,7 +2522,7 @@
       "web_package_devdependencies_typescript",
       "web_package_devdependencies_vitest"
     ],
-    "63": [
+    "65": [
       "hook_peekedcontext",
       "internal_coding_hook_hook",
       "internal_coding_hook_hook_canonicalvendor",
@@ -2489,210 +2545,30 @@
       "internal_coding_hook_hook_test_testisclaudecodevendor",
       "internal_coding_hook_hook_test_testisrealclaudecodeinvocation"
     ],
-    "64": [
-      "adapters_claudeimport_parse",
-      "adapters_codeximport",
-      "adapters_codeximport_detect",
-      "adapters_codeximport_discover",
-      "adapters_codeximport_harness",
-      "adapters_codeximport_parse",
-      "adapters_cursorimport_parse",
-      "adapters_opencodeimport_parse",
-      "adapters_piimport_parse",
-      "internal_port_adapters_claude_peekclaude",
-      "internal_port_adapters_codex",
-      "internal_port_adapters_codex_codexcallargs",
-      "internal_port_adapters_codex_codexmessagetext",
-      "internal_port_adapters_codex_go_sessionref",
-      "internal_port_adapters_codex_peekcodex",
-      "internal_port_adapters_cursor_loadworkingstatesidecar",
-      "internal_port_adapters_helpers",
-      "internal_port_adapters_helpers_ensuremeta",
-      "internal_port_adapters_helpers_firstline",
-      "internal_port_adapters_helpers_parsetimems",
-      "internal_port_adapters_helpers_textandtoolsfromcontent",
-      "internal_port_adapters_helpers_textfromcontent",
-      "internal_port_adapters_workingstate_newwscollector",
-      "internal_port_ir_newportablesession",
-      "port_portablesession"
-    ],
-    "65": [
-      "adapters_wscollector",
-      "adapters_wscollector_addcommand",
-      "adapters_wscollector_addfile",
-      "adapters_wscollector_attachexit",
-      "adapters_wscollector_notebranch",
-      "adapters_wscollector_observe",
-      "adapters_wscollector_relpath",
-      "adapters_wscollector_result",
-      "internal_port_adapters_opencode_observeopencodetoolpart",
-      "internal_port_adapters_workingstate",
-      "internal_port_adapters_workingstate_capcommands",
-      "internal_port_adapters_workingstate_capstrings",
-      "internal_port_adapters_workingstate_extractexitcode",
-      "internal_port_adapters_workingstate_firststringfield",
-      "internal_port_adapters_workingstate_matchesany",
-      "internal_port_adapters_workingstate_normalizetoolname",
-      "internal_port_ir",
-      "port_portableturn",
-      "port_rancommand",
-      "port_sessionref",
-      "port_workingstate",
-      "port_workingstate_empty"
-    ],
     "66": [
-      "class_variance_authority",
-      "clsx",
-      "lucide_react",
-      "next",
-      "radix_ui_react_tooltip",
-      "react",
-      "react_is",
-      "recharts",
-      "tailwind_merge",
-      "web_package_dependencies",
-      "web_package_dependencies_class_variance_authority",
-      "web_package_dependencies_clsx",
-      "web_package_dependencies_lucide_react",
-      "web_package_dependencies_next",
-      "web_package_dependencies_radix_ui_react_tooltip",
-      "web_package_dependencies_react",
-      "web_package_dependencies_react_is",
-      "web_package_dependencies_recharts",
-      "web_package_dependencies_tailwind_merge"
+      "internal_agentimport_import",
+      "internal_agentimport_import_claudecode",
+      "internal_agentimport_import_codex",
+      "internal_agentimport_import_porttohub",
+      "internal_port_adapter",
+      "internal_port_adapter_newregistry",
+      "internal_port_adapters_register",
+      "internal_port_adapters_register_registerall",
+      "internal_port_ledger_defaultledgerpath",
+      "internal_port_resume_go_time",
+      "port_exportadapter",
+      "port_harnessid",
+      "port_importadapter",
+      "port_pendingresume",
+      "port_registry",
+      "port_registry_export",
+      "port_registry_import",
+      "port_registry_listexport",
+      "port_registry_listimport",
+      "port_registry_registerexport",
+      "port_registry_registerimport"
     ],
     "67": [
-      "internal_coding_hook_codex_handle_markcodexsessionrootemitted",
-      "internal_coding_hook_cursor_handle_accumulatestoptokens",
-      "internal_coding_sessionstate_sessionstate",
-      "internal_coding_sessionstate_sessionstate_addpendingedit",
-      "internal_coding_sessionstate_sessionstate_bumpcodecounters",
-      "internal_coding_sessionstate_sessionstate_drainpendingedits",
-      "internal_coding_sessionstate_sessionstate_gc",
-      "internal_coding_sessionstate_sessionstate_go_duration",
-      "internal_coding_sessionstate_sessionstate_go_time",
-      "internal_coding_sessionstate_sessionstate_load",
-      "internal_coding_sessionstate_sessionstate_maybegc",
-      "internal_coding_sessionstate_sessionstate_path",
-      "internal_coding_sessionstate_sessionstate_save",
-      "internal_coding_sessionstate_sessionstate_takependingedit",
-      "sessionstate_codexsubagentlink",
-      "sessionstate_codextoolrecord",
-      "sessionstate_codexturnfragment",
-      "sessionstate_pendingedit",
-      "sessionstate_state"
-    ],
-    "68": [
-      "checkpoint_meta",
-      "checkpoint_store",
-      "checkpoint_store_create",
-      "checkpoint_store_createfromfootprint",
-      "checkpoint_store_dir",
-      "checkpoint_store_get",
-      "checkpoint_store_list",
-      "checkpoint_store_nextid",
-      "checkpoint_store_restore",
-      "internal_checkpoint_checkpoint",
-      "internal_checkpoint_checkpoint_containsdotdot",
-      "internal_checkpoint_checkpoint_go_time",
-      "internal_checkpoint_checkpoint_newstore",
-      "internal_checkpoint_checkpoint_splitslash",
-      "internal_checkpoint_checkpoint_stringshasdotdot",
-      "internal_checkpoint_checkpoint_test",
-      "internal_checkpoint_checkpoint_test_go_t",
-      "internal_checkpoint_checkpoint_test_testcreaterestore",
-      "internal_port_port_test",
-      "internal_port_port_test_go_t",
-      "internal_port_port_test_testclaudeparserecoversworkingstatefromtooluse",
-      "internal_port_port_test_testclauderoundtripviasohub",
-      "internal_port_port_test_testcodexparseexport",
-      "internal_port_port_test_testcodexparserecoversworkingstate",
-      "internal_port_port_test_testcodexparserepeatedcommandkeepslatestexitcode",
-      "internal_port_port_test_testledgeridempotency",
-      "internal_port_port_test_testremapcwd",
-      "internal_port_port_test_testsohubroundtrippreservesworkingstate"
-    ],
-    "69": [
-      "cmd_so_cmds_dev",
-      "cmd_so_cmds_dev_cmddev",
-      "cmd_so_cmds_dev_logfile",
-      "cmd_so_cmds_dev_maybeopenui",
-      "cmd_so_cmds_dev_pidfile",
-      "cmd_so_cmds_dev_readdevstatus",
-      "cmd_so_cmds_dev_rundev",
-      "cmd_so_cmds_dev_rundevforeground",
-      "cmd_so_cmds_dev_rundir",
-      "cmd_so_cmds_dev_startdevdetached",
-      "cmd_so_cmds_dev_statusdev",
-      "cmd_so_cmds_dev_stopdev",
-      "cmd_so_cmds_memory_openbrowser",
-      "cmd_so_main_findwebdir",
-      "cmd_so_main_go_cmd",
-      "cmd_so_main_startnextui",
-      "so_devstatus",
-      "web_src_components_ui_command_command"
-    ],
-    "70": [
-      "codingotlp_emitter_emitsession",
-      "internal_codingotlp_exporter",
-      "internal_codingotlp_exporter_detecthostfrombinary",
-      "internal_codingotlp_exporter_detecthostfromprocesstree",
-      "internal_codingotlp_exporter_draincodecounters",
-      "internal_codingotlp_exporter_draincounters",
-      "internal_codingotlp_exporter_go_session",
-      "internal_codingotlp_exporter_go_tracer",
-      "internal_codingotlp_exporter_issessionstart",
-      "internal_codingotlp_exporter_newemitter",
-      "internal_codingotlp_exporter_readprocessnameandppid",
-      "internal_codingotlp_exporter_resolvelocaluser",
-      "internal_codingotlp_exporter_resolveterminaltype",
-      "internal_codingotlp_exporter_syncsosessionstate",
-      "internal_codingotlp_host_detect_test",
-      "internal_codingotlp_host_detect_test_go_t",
-      "internal_codingotlp_host_detect_test_testdetecthostfrombinary",
-      "sdk_go_sdk_isinitialized"
-    ],
-    "71": [
-      "eval_activitysignals",
-      "eval_result",
-      "internal_eval_eval",
-      "internal_eval_eval_appendhistory",
-      "internal_eval_eval_collectactivitysignals",
-      "internal_eval_eval_containsany",
-      "internal_eval_eval_extractjson",
-      "internal_eval_eval_go_config",
-      "internal_eval_eval_go_span",
-      "internal_eval_eval_go_time",
-      "internal_eval_eval_isharnessreference",
-      "internal_eval_eval_latestresult",
-      "internal_eval_eval_persistresult",
-      "internal_eval_eval_run",
-      "internal_eval_eval_test",
-      "internal_eval_eval_test_go_t",
-      "internal_eval_eval_test_testrunmarksmissingactivityevidenceunknown",
-      "internal_eval_eval_test_testrunrecognizescodextoolcallsandharnessuse"
-    ],
-    "72": [
-      "filemode",
-      "internal_coding_uninstall_uninstall_cursor_writefileatomic",
-      "internal_coding_uninstall_vendor_config_scrub",
-      "internal_coding_uninstall_vendor_config_scrub_stripclaudemarketplacejson",
-      "internal_coding_uninstall_vendor_config_scrub_stripcodexconfigtoml",
-      "internal_coding_uninstall_vendor_config_scrub_stripcodexownedsections",
-      "internal_coding_uninstall_vendor_config_scrub_test",
-      "internal_coding_uninstall_vendor_config_scrub_test_go_t",
-      "internal_coding_uninstall_vendor_config_scrub_test_mustjsonread",
-      "internal_coding_uninstall_vendor_config_scrub_test_mustjsonwrite",
-      "internal_coding_uninstall_vendor_config_scrub_test_teststripclaudemarketplacejsondryrun",
-      "internal_coding_uninstall_vendor_config_scrub_test_teststripclaudemarketplacejsonmissingfile",
-      "internal_coding_uninstall_vendor_config_scrub_test_teststripclaudemarketplacejsonnoentry",
-      "internal_coding_uninstall_vendor_config_scrub_test_teststripclaudemarketplacejsonremovesowned",
-      "internal_coding_uninstall_vendor_config_scrub_test_teststripcodexownedsectionsidempotent",
-      "internal_coding_uninstall_vendor_config_scrub_test_teststripcodexownedsectionsnochange",
-      "internal_coding_uninstall_vendor_config_scrub_test_teststripcodexownedsectionsremovesonlyowned",
-      "internal_coding_uninstall_vendor_config_scrub_test_teststripcodexsuperopensections"
-    ],
-    "73": [
       "cmd_so_cmds_extra",
       "cmd_so_cmds_extra_cmdblame",
       "cmd_so_cmds_extra_cmdlogin",
@@ -2714,7 +2590,149 @@
       "cmd_so_main_truncate",
       "orchestrator"
     ],
+    "68": [
+      "class_variance_authority",
+      "clsx",
+      "lucide_react",
+      "next",
+      "radix_ui_react_tooltip",
+      "react",
+      "react_is",
+      "recharts",
+      "tailwind_merge",
+      "web_package_dependencies",
+      "web_package_dependencies_class_variance_authority",
+      "web_package_dependencies_clsx",
+      "web_package_dependencies_lucide_react",
+      "web_package_dependencies_next",
+      "web_package_dependencies_radix_ui_react_tooltip",
+      "web_package_dependencies_react",
+      "web_package_dependencies_react_is",
+      "web_package_dependencies_recharts",
+      "web_package_dependencies_tailwind_merge"
+    ],
+    "69": [
+      "internal_coding_hook_codex_handle_markcodexsessionrootemitted",
+      "internal_coding_hook_cursor_handle_accumulatestoptokens",
+      "internal_coding_sessionstate_sessionstate",
+      "internal_coding_sessionstate_sessionstate_addpendingedit",
+      "internal_coding_sessionstate_sessionstate_bumpcodecounters",
+      "internal_coding_sessionstate_sessionstate_drainpendingedits",
+      "internal_coding_sessionstate_sessionstate_gc",
+      "internal_coding_sessionstate_sessionstate_go_duration",
+      "internal_coding_sessionstate_sessionstate_go_time",
+      "internal_coding_sessionstate_sessionstate_load",
+      "internal_coding_sessionstate_sessionstate_maybegc",
+      "internal_coding_sessionstate_sessionstate_path",
+      "internal_coding_sessionstate_sessionstate_save",
+      "internal_coding_sessionstate_sessionstate_takependingedit",
+      "sessionstate_codexsubagentlink",
+      "sessionstate_codextoolrecord",
+      "sessionstate_codexturnfragment",
+      "sessionstate_pendingedit",
+      "sessionstate_state"
+    ],
+    "70": [
+      "cmd_so_cmds_dev",
+      "cmd_so_cmds_dev_cmddev",
+      "cmd_so_cmds_dev_logfile",
+      "cmd_so_cmds_dev_maybeopenui",
+      "cmd_so_cmds_dev_pidfile",
+      "cmd_so_cmds_dev_readdevstatus",
+      "cmd_so_cmds_dev_rundev",
+      "cmd_so_cmds_dev_rundevforeground",
+      "cmd_so_cmds_dev_rundir",
+      "cmd_so_cmds_dev_startdevdetached",
+      "cmd_so_cmds_dev_statusdev",
+      "cmd_so_cmds_dev_stopdev",
+      "cmd_so_cmds_memory_openbrowser",
+      "cmd_so_main_findwebdir",
+      "cmd_so_main_go_cmd",
+      "cmd_so_main_startnextui",
+      "so_devstatus",
+      "web_src_components_ui_command_command"
+    ],
+    "71": [
+      "codingotlp_emitter_emitsession",
+      "internal_codingotlp_exporter",
+      "internal_codingotlp_exporter_detecthostfrombinary",
+      "internal_codingotlp_exporter_detecthostfromprocesstree",
+      "internal_codingotlp_exporter_draincodecounters",
+      "internal_codingotlp_exporter_draincounters",
+      "internal_codingotlp_exporter_go_session",
+      "internal_codingotlp_exporter_go_tracer",
+      "internal_codingotlp_exporter_issessionstart",
+      "internal_codingotlp_exporter_newemitter",
+      "internal_codingotlp_exporter_readprocessnameandppid",
+      "internal_codingotlp_exporter_resolvelocaluser",
+      "internal_codingotlp_exporter_resolveterminaltype",
+      "internal_codingotlp_exporter_syncsosessionstate",
+      "internal_codingotlp_host_detect_test",
+      "internal_codingotlp_host_detect_test_go_t",
+      "internal_codingotlp_host_detect_test_testdetecthostfrombinary",
+      "sdk_go_sdk_isinitialized"
+    ],
+    "72": [
+      "eval_activitysignals",
+      "eval_result",
+      "internal_eval_eval",
+      "internal_eval_eval_appendhistory",
+      "internal_eval_eval_collectactivitysignals",
+      "internal_eval_eval_containsany",
+      "internal_eval_eval_extractjson",
+      "internal_eval_eval_go_config",
+      "internal_eval_eval_go_span",
+      "internal_eval_eval_go_time",
+      "internal_eval_eval_isharnessreference",
+      "internal_eval_eval_latestresult",
+      "internal_eval_eval_persistresult",
+      "internal_eval_eval_run",
+      "internal_eval_eval_test",
+      "internal_eval_eval_test_go_t",
+      "internal_eval_eval_test_testrunmarksmissingactivityevidenceunknown",
+      "internal_eval_eval_test_testrunrecognizescodextoolcallsandharnessuse"
+    ],
+    "73": [
+      "event",
+      "internal_port_memory_refresh",
+      "internal_port_memory_refresh_refreshmemoryafterport",
+      "internal_port_orchestrator",
+      "internal_port_orchestrator_go_port_orchestrator",
+      "internal_port_orchestrator_go_sessionref",
+      "internal_port_verify",
+      "internal_port_verify_go_port_orchestrator",
+      "internal_port_worktree",
+      "internal_port_worktree_remapcwd",
+      "port_event",
+      "port_hubfactory",
+      "port_orchestrator_detect",
+      "port_orchestrator_port",
+      "port_orchestrator_verify",
+      "port_portoptions",
+      "port_portresult",
+      "port_verifyresult"
+    ],
     "74": [
+      "filemode",
+      "internal_coding_uninstall_uninstall_cursor_writefileatomic",
+      "internal_coding_uninstall_vendor_config_scrub",
+      "internal_coding_uninstall_vendor_config_scrub_stripclaudemarketplacejson",
+      "internal_coding_uninstall_vendor_config_scrub_stripcodexconfigtoml",
+      "internal_coding_uninstall_vendor_config_scrub_stripcodexownedsections",
+      "internal_coding_uninstall_vendor_config_scrub_test",
+      "internal_coding_uninstall_vendor_config_scrub_test_go_t",
+      "internal_coding_uninstall_vendor_config_scrub_test_mustjsonread",
+      "internal_coding_uninstall_vendor_config_scrub_test_mustjsonwrite",
+      "internal_coding_uninstall_vendor_config_scrub_test_teststripclaudemarketplacejsondryrun",
+      "internal_coding_uninstall_vendor_config_scrub_test_teststripclaudemarketplacejsonmissingfile",
+      "internal_coding_uninstall_vendor_config_scrub_test_teststripclaudemarketplacejsonnoentry",
+      "internal_coding_uninstall_vendor_config_scrub_test_teststripclaudemarketplacejsonremovesowned",
+      "internal_coding_uninstall_vendor_config_scrub_test_teststripcodexownedsectionsidempotent",
+      "internal_coding_uninstall_vendor_config_scrub_test_teststripcodexownedsectionsnochange",
+      "internal_coding_uninstall_vendor_config_scrub_test_teststripcodexownedsectionsremovesonlyowned",
+      "internal_coding_uninstall_vendor_config_scrub_test_teststripcodexsuperopensections"
+    ],
+    "75": [
       "agentconfig_defaults",
       "agentconfig_flags",
       "agentconfig_resolved",
@@ -2733,7 +2751,7 @@
       "internal_agentconfig_config_sortstrings",
       "internal_agentconfig_config_upgradescheme"
     ],
-    "75": [
+    "76": [
       "internal_coding_hook_pi_handle",
       "internal_coding_hook_pi_handle_accumulate",
       "internal_coding_hook_pi_handle_applyaccumulated",
@@ -2752,7 +2770,7 @@
       "pi_adapter_vendor",
       "pi_payload"
     ],
-    "76": [
+    "77": [
       "internal_coding_pricing_pricing",
       "internal_coding_pricing_pricing_lookup",
       "internal_coding_pricing_pricing_test",
@@ -2771,7 +2789,7 @@
       "pricing_rate",
       "pricing_rate_cost"
     ],
-    "77": [
+    "78": [
       "internal_coding_hook_codex_handle_applypatchbody",
       "internal_coding_hook_codex_handle_patchliteralfromcodemode",
       "internal_coding_hook_codex_handle_test",
@@ -2789,7 +2807,7 @@
       "internal_coding_hook_codex_handle_test_testeffectivetoolnameunwrapscodemode",
       "internal_coding_hook_codex_handle_test_withisolatedcache"
     ],
-    "78": [
+    "79": [
       "internal_coding_identity_base64",
       "internal_coding_identity_base64_base64urldecode",
       "internal_coding_identity_identity",
@@ -2807,7 +2825,7 @@
       "internal_coding_identity_identity_test_testresolveforvendor_missingfilereturnsempty",
       "internal_coding_identity_identity_test_testresolveforvendor_unknownvendorreturnsempty"
     ],
-    "79": [
+    "80": [
       "internal_coding_hook_opencode_handle",
       "internal_coding_hook_opencode_handle_accumulateusage",
       "internal_coding_hook_opencode_handle_applyaccumulated",
@@ -2824,7 +2842,7 @@
       "opencode_adapter_vendor",
       "opencode_payload"
     ],
-    "80": [
+    "81": [
       "internal_coding_uninstall_uninstall",
       "internal_coding_uninstall_uninstall_go_writer",
       "internal_coding_uninstall_uninstall_newcmd",
@@ -2854,7 +2872,7 @@
       "adapters_cursorimport_reporoot",
       "adapters_cursorimport_soroot",
       "internal_port_adapters_cursor",
-      "internal_port_adapters_cursor_go_sessionref",
+      "internal_port_adapters_cursor_loadworkingstatesidecar",
       "internal_port_adapters_cursor_writetranscript"
     ],
     "83": [
@@ -2958,6 +2976,7 @@
       "adapters_sohubexport_detect",
       "adapters_sohubexport_harness",
       "adapters_sohubexport_paths",
+      "adapters_sohubexport_write",
       "adapters_sohubimport",
       "adapters_sohubimport_detect",
       "adapters_sohubimport_discover",
@@ -3035,6 +3054,7 @@
       "adapters_piimport_detect",
       "adapters_piimport_discover",
       "adapters_piimport_harness",
+      "adapters_piimport_parse",
       "internal_port_adapters_pi",
       "internal_port_adapters_pi_go_sessionref",
       "internal_port_adapters_pi_peekpi",
@@ -3137,17 +3157,14 @@
       "internal_guardrails_guardrails_defaultpolicy"
     ],
     "102": [
-      "internal_agentimport_import",
-      "internal_agentimport_import_claudecode",
-      "internal_agentimport_import_codex",
-      "internal_agentimport_import_porttohub",
-      "internal_port_adapters_register",
-      "internal_port_adapters_register_registerall",
+      "internal_coding_hook_pi_handle_test",
+      "internal_coding_hook_pi_handle_test_go_t",
+      "internal_coding_hook_pi_handle_test_testpihostcostpreferred"
+    ],
+    "103": [
       "internal_port_ledger",
-      "internal_port_ledger_defaultledgerpath",
       "internal_port_ledger_go_mutex",
       "internal_port_ledger_go_time",
-      "internal_port_ledger_newledger",
       "port_ledger",
       "port_ledger_key",
       "port_ledger_load",
@@ -3157,7 +3174,7 @@
       "port_ledgerentry",
       "port_ledgerfile"
     ],
-    "103": [
+    "104": [
       "npm_package",
       "npm_package_bin",
       "npm_package_bin_so",
@@ -3170,7 +3187,7 @@
       "npm_package_version",
       "ref_bin"
     ],
-    "104": [
+    "105": [
       "web_src_map_types_action",
       "web_src_map_types_mark",
       "web_src_map_ui_timeline",
@@ -3183,7 +3200,7 @@
       "web_src_map_ui_timeline_strip_actions",
       "web_src_map_ui_timeline_timeline"
     ],
-    "105": [
+    "106": [
       "claudecode_assistantcontentblock",
       "claudecode_assistantmessage",
       "claudecode_assistantusage",
@@ -3195,7 +3212,7 @@
       "internal_coding_hook_claudecode_transcript_mergeassistantgroup",
       "internal_coding_hook_claudecode_transcript_readtranscript"
     ],
-    "106": [
+    "107": [
       "codingotlp_spannamesampler",
       "codingotlp_spannamesampler_description",
       "codingotlp_spannamesampler_shouldsample",
@@ -3207,25 +3224,21 @@
       "samplingparameters",
       "samplingresult"
     ],
-    "107": [
-      "internal_viz_citymap",
-      "internal_viz_citymap_buildcitymap",
-      "internal_viz_citymap_buildreplayfromfootprint",
-      "internal_viz_citymap_go_meta",
-      "viz_citymap",
-      "viz_citymapnode",
-      "viz_replay",
-      "viz_replayevent"
-    ],
     "108": [
       "internal_session_explain",
       "internal_session_explain_explain",
       "internal_session_explain_go_client",
       "internal_session_explain_go_meta",
       "internal_session_explain_shortsha",
+      "internal_session_store",
+      "internal_session_store_countcheckpointdirs",
+      "internal_session_store_isnestedsession",
+      "internal_session_store_previewfrommessages",
+      "internal_session_store_rank",
       "internal_session_store_truncate",
       "session_footprint",
       "session_footprintfile",
+      "session_status",
       "session_store_getfootprint"
     ],
     "109": [
@@ -3251,14 +3264,14 @@
       "web_src_map_scene_textures_labeltexture"
     ],
     "111": [
-      "event",
-      "internal_port_verify",
-      "internal_port_verify_go_port_orchestrator",
-      "internal_port_worktree",
-      "internal_port_worktree_remapcwd",
-      "port_hubfactory",
-      "port_orchestrator_verify",
-      "port_verifyresult"
+      "internal_viz_citymap",
+      "internal_viz_citymap_buildcitymap",
+      "internal_viz_citymap_buildreplayfromfootprint",
+      "internal_viz_citymap_go_meta",
+      "viz_citymap",
+      "viz_citymapnode",
+      "viz_replay",
+      "viz_replayevent"
     ],
     "112": [
       "web_package_scripts",
@@ -3422,154 +3435,141 @@
       "web_package_version"
     ],
     "133": [
-      "internal_coding_hook_pi_handle_test",
-      "internal_coding_hook_pi_handle_test_go_session",
-      "internal_coding_hook_pi_handle_test_go_t",
-      "internal_coding_hook_pi_handle_test_go_toolcall",
-      "internal_coding_hook_pi_handle_test_testpihostcostpreferred",
-      "pi_rec",
-      "pi_rec_emitgitcommit",
-      "pi_rec_emitgitpullrequest",
-      "pi_rec_emitllmturn",
-      "pi_rec_emitsession",
-      "pi_rec_emittoolcall"
-    ],
-    "134": [
       "internal_codingotlp_process_windows",
       "internal_codingotlp_process_windows_queryfullimagename",
       "internal_codingotlp_process_windows_readprocessnameandppidos"
     ],
-    "135": [
+    "134": [
       "internal_harness_harness_test",
       "internal_harness_harness_test_go_t",
       "internal_harness_harness_test_testresolveandensuredirs"
     ],
-    "137": [
+    "135": [
       "internal_tracestore_store_test",
       "internal_tracestore_store_test_go_t",
       "internal_tracestore_store_test_testlocaljsonlwritequery"
     ],
-    "138": [
+    "136": [
       "web_tailwind_config",
       "web_tailwind_config_config",
       "web_tailwind_config_scale"
     ],
-    "139": [
-      "cmdk",
-      "web_package_dependencies_cmdk"
-    ],
-    "140": [
+    "137": [
       "internal_coding_cmd",
       "internal_coding_cmd_newcmd"
     ],
-    "141": [
+    "138": [
       "internal_coding_launch_exec_unix",
       "internal_coding_launch_exec_unix_defaultexecreplace"
     ],
-    "142": [
+    "139": [
       "internal_coding_launch_exec_windows",
       "internal_coding_launch_exec_windows_defaultexecreplace"
     ],
-    "143": [
+    "140": [
       "internal_coding_sessionstate_flock_unix",
       "internal_coding_sessionstate_flock_unix_withfilelock"
     ],
-    "144": [
+    "141": [
       "internal_coding_sessionstate_flock_windows",
       "internal_coding_sessionstate_flock_windows_withfilelock"
     ],
-    "145": [
+    "142": [
       "internal_codingotlp_process_other",
       "internal_codingotlp_process_other_readprocessnameandppidos"
     ],
-    "146": [
+    "143": [
       "internal_codingotlp_process_unix",
       "internal_codingotlp_process_unix_readprocessnameandppidos"
     ],
-    "147": [
+    "144": [
       "internal_llm_agentcli_go_llm_client",
       "llm_client_backend"
     ],
-    "148": [
+    "145": [
+      "cmdk",
+      "web_package_dependencies_cmdk"
+    ],
+    "146": [
       "pkg_github_com_ishanjainn_superopen",
       "pkg_github_com_ishanjainn_superopen_sdk_go"
     ],
-    "149": [
+    "147": [
       "radix_ui_react_dialog",
       "web_package_dependencies_radix_ui_react_dialog"
     ],
-    "150": [
+    "148": [
       "radix_ui_react_slot",
       "web_package_dependencies_radix_ui_react_slot"
     ],
-    "151": [
+    "149": [
       "react_dom",
       "web_package_dependencies_react_dom"
     ],
-    "152": [
+    "150": [
       "scripts_sync_plugins",
       "scripts_sync_plugins_sh__entry"
     ],
-    "153": [
+    "151": [
       "three",
       "web_package_dependencies_three"
     ],
-    "154": [
+    "152": [
       "types_react",
       "web_package_devdependencies_types_react"
     ],
-    "155": [
+    "153": [
       "web_eslint_config",
       "web_eslint_config_eslintconfig"
     ],
-    "156": [
+    "154": [
       "web_next_config",
       "web_next_config_nextconfig"
     ],
-    "157": [
+    "155": [
       "web_next_env_d",
       "web_next_env_d_rationale_6"
     ],
-    "158": [
+    "156": [
       "web_postcss_config",
       "web_postcss_config_config"
     ],
-    "159": [
+    "157": [
       "web_src_app_app_context_page",
       "web_src_app_app_context_page_contextredirect"
     ],
-    "160": [
+    "158": [
       "web_src_app_app_docs_page",
       "web_src_app_app_docs_page_docsredirect"
     ],
-    "161": [
+    "159": [
       "web_src_app_app_evals_page",
       "web_src_app_app_evals_page_evalsredirectpage"
     ],
-    "162": [
+    "160": [
       "web_src_app_app_page",
       "web_src_app_app_page_homepage"
     ],
-    "163": [
+    "161": [
       "web_vitest_config",
       "web_vitest_config_root"
     ],
-    "164": [
+    "162": [
       "internal_memory_hybrid"
     ],
-    "165": [
+    "163": [
       "sdk_go_semconv_coding_agent"
     ],
-    "166": [
+    "164": [
       "sdk_go_semconv_genai"
     ],
-    "167": [
+    "165": [
       "sdk_go_version"
     ],
-    "168": [
+    "166": [
       "web_src_lib_so_evals_dashboard_test"
     ],
-    "169": [
+    "167": [
       "web_src_lib_so_misc_projects_test"
     ]
   },
@@ -3578,11 +3578,11 @@
     "1": 0.06413730803974707,
     "2": 0.05368421052631579,
     "3": 0.05191146881287726,
-    "4": 0.12255892255892256,
-    "5": 0.06459627329192547,
-    "6": 0.06557377049180328,
-    "7": 0.07390648567119155,
-    "8": 0.06313497822931785,
+    "4": 0.06459627329192547,
+    "5": 0.06557377049180328,
+    "6": 0.12255892255892256,
+    "7": 0.06313497822931785,
+    "8": 0.06384180790960452,
     "9": 0.10633484162895927,
     "10": 0.09276018099547512,
     "11": 0.08897959183673469,
@@ -3593,68 +3593,69 @@
     "16": 0.10409745293466224,
     "17": 0.07897793263646923,
     "18": 0.13902439024390245,
-    "19": 0.1184939091915836,
+    "19": 0.14126984126984127,
     "20": 0.12307692307692308,
     "21": 0.08076923076923077,
     "22": 0.06666666666666667,
     "23": 0.11875843454790823,
     "24": 0.12698412698412698,
     "25": 0.146218487394958,
-    "26": 0.11363636363636363,
+    "26": 0.10588235294117647,
     "27": 0.10984848484848485,
-    "28": 0.12258064516129032,
+    "28": 0.12096774193548387,
     "29": 0.11553030303030302,
     "30": 0.07765151515151515,
-    "31": 0.1625615763546798,
-    "32": 0.08735632183908046,
-    "33": 0.09425287356321839,
-    "34": 0.15862068965517243,
-    "35": 0.19950738916256158,
-    "36": 0.06896551724137931,
-    "37": 0.11397849462365592,
-    "38": 0.1477832512315271,
-    "39": 0.1931216931216931,
-    "40": 0.15402298850574714,
-    "41": 0.15343915343915343,
-    "42": 0.0962566844919786,
-    "43": 0.16809116809116809,
-    "44": 0.15384615384615385,
-    "45": 0.12923076923076923,
-    "46": 0.16307692307692306,
-    "47": 0.19,
-    "48": 0.16666666666666666,
-    "49": 0.14855072463768115,
-    "50": 0.15579710144927536,
-    "51": 0.1645021645021645,
-    "52": 0.10869565217391304,
-    "53": 0.16600790513833993,
-    "54": 0.16996047430830039,
-    "55": 0.2015810276679842,
-    "56": 0.1541501976284585,
-    "57": 0.14624505928853754,
-    "58": 0.16666666666666666,
-    "59": 0.20346320346320346,
-    "60": 0.14285714285714285,
-    "61": 0.16883116883116883,
-    "62": 0.09523809523809523,
-    "63": 0.18095238095238095,
-    "64": 0.17666666666666667,
-    "65": 0.15151515151515152,
-    "66": 0.10526315789473684,
-    "67": 0.24561403508771928,
-    "68": 0.1349206349206349,
-    "69": 0.24183006535947713,
-    "70": 0.19607843137254902,
-    "71": 0.20915032679738563,
-    "72": 0.2549019607843137,
-    "73": 0.15263157894736842,
-    "74": 0.22794117647058823,
-    "75": 0.19117647058823528,
-    "76": 0.22794117647058823,
-    "77": 0.26666666666666666,
-    "78": 0.225,
-    "79": 0.20952380952380953,
-    "80": 0.26666666666666666,
+    "31": 0.11290322580645161,
+    "32": 0.14838709677419354,
+    "33": 0.08735632183908046,
+    "34": 0.09425287356321839,
+    "35": 0.15862068965517243,
+    "36": 0.13054187192118227,
+    "37": 0.19950738916256158,
+    "38": 0.06896551724137931,
+    "39": 0.12315270935960591,
+    "40": 0.1477832512315271,
+    "41": 0.1931216931216931,
+    "42": 0.16666666666666666,
+    "43": 0.15343915343915343,
+    "44": 0.1619047619047619,
+    "45": 0.16809116809116809,
+    "46": 0.15384615384615385,
+    "47": 0.12923076923076923,
+    "48": 0.16307692307692306,
+    "49": 0.19,
+    "50": 0.16666666666666666,
+    "51": 0.14855072463768115,
+    "52": 0.15579710144927536,
+    "53": 0.10869565217391304,
+    "54": 0.16600790513833993,
+    "55": 0.16996047430830039,
+    "56": 0.2015810276679842,
+    "57": 0.1541501976284585,
+    "58": 0.14624505928853754,
+    "59": 0.11904761904761904,
+    "60": 0.24210526315789474,
+    "61": 0.20346320346320346,
+    "62": 0.14285714285714285,
+    "63": 0.16883116883116883,
+    "64": 0.09523809523809523,
+    "65": 0.18095238095238095,
+    "66": 0.16666666666666666,
+    "67": 0.15263157894736842,
+    "68": 0.10526315789473684,
+    "69": 0.24561403508771928,
+    "70": 0.24183006535947713,
+    "71": 0.19607843137254902,
+    "72": 0.20915032679738563,
+    "73": 0.1437908496732026,
+    "74": 0.2549019607843137,
+    "75": 0.22794117647058823,
+    "76": 0.19117647058823528,
+    "77": 0.22794117647058823,
+    "78": 0.26666666666666666,
+    "79": 0.225,
+    "80": 0.20952380952380953,
+    "81": 0.26666666666666666,
     "82": 0.23076923076923078,
     "83": 0.25274725274725274,
     "84": 0.2857142857142857,
@@ -3662,12 +3663,12 @@
     "86": 0.25274725274725274,
     "87": 0.25274725274725274,
     "88": 0.2857142857142857,
-    "89": 0.24242424242424243,
+    "89": 0.23076923076923078,
     "90": 0.2564102564102564,
     "91": 0.28205128205128205,
     "92": 0.23076923076923078,
     "93": 0.21794871794871795,
-    "94": 0.24242424242424243,
+    "94": 0.2564102564102564,
     "95": 0.2878787878787879,
     "96": 0.19696969696969696,
     "97": 0.2878787878787879,
@@ -3675,16 +3676,16 @@
     "99": 0.2909090909090909,
     "100": 0.5818181818181818,
     "101": 0.43636363636363634,
-    "102": 0.1871345029239766,
-    "103": 0.18181818181818182,
-    "104": 0.2545454545454545,
-    "105": 0.4222222222222222,
-    "106": 0.2,
-    "107": 0.32142857142857145,
-    "108": 0.25,
+    "102": 0.6666666666666666,
+    "103": 0.36363636363636365,
+    "104": 0.18181818181818182,
+    "105": 0.2545454545454545,
+    "106": 0.4222222222222222,
+    "107": 0.2,
+    "108": 0.1619047619047619,
     "109": 0.3333333333333333,
     "110": 0.25,
-    "111": 0.2857142857142857,
+    "111": 0.32142857142857145,
     "112": 0.25,
     "113": 0.7619047619047619,
     "114": 0.5714285714285714,
@@ -3706,11 +3707,12 @@
     "130": 0.8333333333333334,
     "131": 0.5,
     "132": 0.5,
-    "133": 0.2,
-    "134": 1.0,
+    "133": 1.0,
+    "134": 0.6666666666666666,
     "135": 0.6666666666666666,
-    "137": 0.6666666666666666,
-    "138": 0.6666666666666666,
+    "136": 0.6666666666666666,
+    "137": 1.0,
+    "138": 1.0,
     "139": 1.0,
     "140": 1.0,
     "141": 1.0,
@@ -3739,9 +3741,7 @@
     "164": 1.0,
     "165": 1.0,
     "166": 1.0,
-    "167": 1.0,
-    "168": 1.0,
-    "169": 1.0
+    "167": 1.0
   },
   "gods": [
     {
@@ -3855,17 +3855,17 @@
   "questions": [
     {
       "type": "bridge_node",
-      "question": "Why does `Command` connect `cmds_dev.go` to `cmds_extra.go`, `launch.go`, `Resolve`, `shell/sidebar.tsx`?",
+      "question": "Why does `Command` connect `cmds_dev.go` to `launch.go`, `cmds_extra.go`, `Resolve`, `shell/sidebar.tsx`?",
       "why": "High betweenness centrality (0.395) - this node is a cross-community bridge."
     },
     {
       "type": "bridge_node",
-      "question": "Why does `Resolve()` connect `Resolve` to `Run`, `TestResolveAndEnsureDirs`, `Paths`, `recommend.go`, `guardrails.go`, `graph.go`, `backend.go`, `MineTranscript`, `HarnessID`, `Refresh`, `.Create`, `cmds_dev.go`, `NewEmitter`, `Run`, `cmds_extra.go`, `.Write`, `harness_hooks.go`, `Rebuild`, `NewStore`, `.paths`, `Default`, `Prune`, `launch.go`, `harness.go`?",
+      "question": "Why does `Resolve()` connect `Resolve` to `Run`, `TestResolveAndEnsureDirs`, `Paths`, `.Create`, `recommend.go`, `guardrails.go`, `graph.go`, `backend.go`, `MineTranscript`, `Refresh`, `cmds_extra.go`, `cmds_dev.go`, `NewEmitter`, `Run`, `.Port`, `.Write`, `harness_hooks.go`, `Rebuild`, `NewStore`, `.paths`, `Default`, `Prune`, `launch.go`, `harness.go`?",
       "why": "High betweenness centrality (0.198) - this node is a cross-community bridge."
     },
     {
       "type": "bridge_node",
-      "question": "Why does `cn()` connect `cn` to `shell/sidebar.tsx`, `memory.ts`, `harness-yaml.ts`, `sessions/[id]/page.tsx`, `session-timeline.tsx`, `utils.ts`, `playground-shell.tsx`, `session-search-bar.tsx`, `file-content-view.tsx`?",
+      "question": "Why does `cn()` connect `cn` to `playground-shell.tsx`, `shell/sidebar.tsx`, `memory.ts`, `harness-yaml.ts`, `sessions/[id]/page.tsx`, `session-timeline.tsx`, `utils.ts`, `session-search-bar.tsx`, `file-content-view.tsx`?",
       "why": "High betweenness centrality (0.198) - this node is a cross-community bridge."
     },
     {

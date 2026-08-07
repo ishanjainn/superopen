@@ -33,14 +33,12 @@ The `/so` skill is registered with **`so install`** (after installing the CLI). 
 /so sessions                                     # list sessions
 /so eval <session-id>                            # score a session
 /so recommend list                               # pending Superopen recommendations
-/so recommend apply <id> --reason "…"          # resolve with an agent explanation
-/so recommend dismiss <id> --reason "…"        # dismiss with durable feedback
 ```
 
 Codex users: prefer `$so …` instead of `/so …`.
 Gemini / Copilot / OpenCode / Pi: use `/so …` (or the vendor’s skill invoke if `/so` is not bound).
 
-CLI flags for agents: `so --json …`, `so --full …` (or `SO_JSON=1` / `SO_FULL=1`). Prefer `--json` when parsing. Applying, dismissing, or reverting a recommendation requires `--reason`; explain what changed or why the recommendation is wrong. Empty results print `0 <kind>`. Guardrails are a **single** file: `.so/guardrails/guardrails.yaml`.
+CLI flags for agents: `so --json …`, `so --full …` (or `SO_JSON=1` / `SO_FULL=1`). Prefer `--json` when parsing. Empty results print `0 <kind>`. Guardrails are a **single** file: `.so/guardrails/guardrails.yaml`.
 
 ## What You Must Do When Invoked
 
