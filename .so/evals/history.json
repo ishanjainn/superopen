@@ -51,5 +51,23 @@
     ],
     "score": 0.24,
     "badge": "poor"
+  },
+  {
+    "session_id": "019fdaad-5fe8-7ec3-a538-85d66ac7152e",
+    "at": "2026-08-07T06:08:02.553862Z",
+    "dimensions": {
+      "exploration": 0.5,
+      "harness_use": 0.9,
+      "scope": 0.5,
+      "verification": 0.3,
+      "wandering": 0.5
+    },
+    "notes": [
+      "model:agent_cli:claude",
+      "No transcript content provided beyond aggregate tool-call counts; scores are rough estimates based on ratios (high edit-to-read ratio and moderate search count suggest reasonable exploration but limited visible verification steps like test runs)."
+    ],
+    "score": 0.54,
+    "badge": "ok",
+    "evidence_status": "sufficient"
   }
 ]
