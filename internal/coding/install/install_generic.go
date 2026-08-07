@@ -49,7 +49,7 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
 	case "opencode":
 		// OpenCode auto-loads ~/.config/opencode/plugins/*.ts
 		// https://opencode.ai/docs/plugins/
-		// Host event model follows grafana/agento11y plugins/opencode.
+		// Host event model: OpenCode plugin events (session.*, message.*, tool.*).
 		path = filepath.Join(home, ".config", "opencode", "plugins", "superopen.ts")
 		raw, readErr := marketplaceFS.ReadFile("marketplace/plugins/opencode/superopen.ts")
 		if readErr != nil {
@@ -60,7 +60,7 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
 	case "pi":
 		// Pi auto-loads ~/.pi/agent/extensions/*/index.ts
 		// https://pi.dev/docs/latest/extensions
-		// Host event model follows grafana/agento11y plugins/pi (incl. turn_end).
+		// Host event model: Pi extension events (incl. turn_end).
 		path = filepath.Join(home, ".pi", "agent", "extensions", "superopen", "index.ts")
 		raw, readErr := marketplaceFS.ReadFile("marketplace/plugins/pi/index.ts")
 		if readErr != nil {
@@ -69,7 +69,7 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
 		body = patchPluginSoBin(string(raw), soBin)
 
 	case "copilot-cli":
-		// Copilot CLI loads ~/.copilot/hooks/*.json (agento11y pattern),
+		// Copilot CLI loads ~/.copilot/hooks/*.json,
 		// not ~/.github/hooks (cloud-agent style).
 		path = filepath.Join(home, ".copilot", "hooks", "superopen.json")
 		body = fmt.Sprintf(`{

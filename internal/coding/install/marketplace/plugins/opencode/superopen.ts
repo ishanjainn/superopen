@@ -1,6 +1,5 @@
-// Superopen OpenCode plugin — host integration aligned with
-// https://github.com/grafana/agento11y/tree/main/plugins/opencode
-// Telemetry stays Superopen conventions (so coding hook → coding_agent.* / gen_ai.*).
+// Superopen OpenCode plugin.
+// Telemetry uses Superopen conventions (so coding hook → coding_agent.* / gen_ai.*).
 import type { Plugin } from "@opencode-ai/plugin";
 import { spawn, spawnSync } from "node:child_process";
 
@@ -175,7 +174,7 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
         return;
       }
 
-      // Assistant turn boundary (agento11y): terminal message.updated + hydrate parts.
+      // Assistant turn boundary: terminal message.updated + hydrate parts.
       if (type === "message.updated") {
         if (!isTerminalMessage(info)) return;
         const sessionID = rememberSid(info.sessionID, sid);
@@ -256,7 +255,7 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
       }
     },
 
-    // User prompt buffer (agento11y): parts text, not message.content.
+    // User prompt buffer: parts text, not message.content.
     "chat.message": async (input, output) => {
       const sid = rememberSid((input as { sessionID?: string })?.sessionID);
       const parts = (output as { parts?: unknown[] })?.parts;

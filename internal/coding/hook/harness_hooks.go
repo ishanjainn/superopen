@@ -146,7 +146,7 @@ func maybeHarvestOnSessionEnd(vendor, event, sessionID, cwd string) {
 		_ = harvest.MarkFinalizePending(paths, sessionID)
 		_, _ = harvest.IdleSweep(paths, cfg)
 		// Detached post-session pipeline: eval → recommend → auto-apply.
-		// Must not block the agent SessionEnd hook (Entire-style fire-and-forget).
+		// Must not block the agent SessionEnd hook (fire-and-forget).
 		scheduleFinalize(root, sessionID)
 		return
 	}

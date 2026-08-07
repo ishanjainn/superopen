@@ -1,6 +1,5 @@
-// Superopen Pi extension — host integration aligned with
-// https://github.com/grafana/agento11y/tree/main/plugins/pi
-// Telemetry stays Superopen conventions (so coding hook → coding_agent.* / gen_ai.*).
+// Superopen Pi extension.
+// Telemetry uses Superopen conventions (so coding hook → coding_agent.* / gen_ai.*).
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn, spawnSync } from "node:child_process";
 
@@ -236,7 +235,7 @@ export default function (pi: ExtensionAPI) {
     });
   });
 
-  // Primary turn export (agento11y): assistant content blocks + toolResults.
+  // Primary turn export: assistant content blocks + toolResults.
   pi.on("turn_end", async (event, ctx) => {
     const message = (event as { message?: Record<string, unknown> }).message || {};
     const toolResults = (event as { toolResults?: unknown[] }).toolResults || [];
