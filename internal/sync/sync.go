@@ -4,17 +4,17 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/superopen/so/internal/coding"
-	"github.com/superopen/so/internal/config"
-	"github.com/superopen/so/internal/githooks"
-	"github.com/superopen/so/internal/guardrails"
-	"github.com/superopen/so/internal/graph"
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/inject"
-	"github.com/superopen/so/internal/memory"
-	"github.com/superopen/so/internal/projects"
-	"github.com/superopen/so/internal/retrieve"
-	"github.com/superopen/so/internal/viz"
+	"github.com/ishanjainn/superopen/internal/coding"
+	"github.com/ishanjainn/superopen/internal/config"
+	"github.com/ishanjainn/superopen/internal/githooks"
+	"github.com/ishanjainn/superopen/internal/guardrails"
+	"github.com/ishanjainn/superopen/internal/graph"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/inject"
+	"github.com/ishanjainn/superopen/internal/memory"
+	"github.com/ishanjainn/superopen/internal/projects"
+	"github.com/ishanjainn/superopen/internal/retrieve"
+	"github.com/ishanjainn/superopen/internal/viz"
 )
 
 type Options struct {

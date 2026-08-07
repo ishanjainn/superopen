@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/superopen/so/internal/llm"
+	"github.com/ishanjainn/superopen/internal/llm"
 )
 
 // Explain builds a human-readable explanation of a session.

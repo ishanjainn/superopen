@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/audit"
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/harnessvalid"
-	"github.com/superopen/so/internal/llm"
+	"github.com/ishanjainn/superopen/internal/audit"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/harnessvalid"
+	"github.com/ishanjainn/superopen/internal/llm"
 )
 
 // Mode controls read/write of durable memory for a session.

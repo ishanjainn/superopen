@@ -1,7 +1,7 @@
 .PHONY: build test test-web install smoke lint
 
 VERSION ?= $(shell tr -d '[:space:]' < VERSION 2>/dev/null || echo 0.1.0)
-PKG_VERSION := github.com/superopen/so/internal/version
+PKG_VERSION := github.com/ishanjainn/superopen/internal/version
 
 build:
 	go build -ldflags "-X $(PKG_VERSION).Version=$(VERSION)" -o bin/so ./cmd/so

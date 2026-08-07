@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/superopen/so/internal/githooks"
+	"github.com/ishanjainn/superopen/internal/githooks"
 )
 
 func TestAppendAndParseTrailers(t *testing.T) {

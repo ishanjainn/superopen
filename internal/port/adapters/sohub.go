@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/port"
-	"github.com/superopen/so/internal/session"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/port"
+	"github.com/ishanjainn/superopen/internal/session"
 )
 
 // SOHubImport reads .so/sessions as a portable hub.

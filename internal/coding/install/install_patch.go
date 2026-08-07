@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/superopen/so/internal/userpaths"
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 // patchManifestBytes rewrites hook manifests so they do not depend on the

@@ -7,14 +7,14 @@
 # not already on $PATH.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/superopen/so/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.sh | sh
 #
 # Environment overrides:
 #   SUPEROPEN_INSTALL_DIR  Target install directory.
 #                          Default: $HOME/.superopen/bin
 #   SUPEROPEN_VERSION      Release tag WITHOUT the `cli-` prefix, e.g.
 #                          `1.2.0`. Default: `latest`.
-#   SUPEROPEN_REPO         GitHub owner/repo. Default: superopen/so
+#   SUPEROPEN_REPO         GitHub owner/repo. Default: ishanjainn/superopen
 #
 # Exit codes:
 #   0  Installed (or already present).
@@ -22,7 +22,7 @@
 
 set -eu
 
-SUPEROPEN_REPO=${SUPEROPEN_REPO:-superopen/so}
+SUPEROPEN_REPO=${SUPEROPEN_REPO:-ishanjainn/superopen}
 SUPEROPEN_INSTALL_DIR=${SUPEROPEN_INSTALL_DIR:-"$HOME/.superopen/bin"}
 SUPEROPEN_VERSION=${SUPEROPEN_VERSION:-latest}
 
@@ -144,4 +144,4 @@ info "Next (use absolute path if PATH is not updated yet):"
 info "  $target install"
 info "  $target init     # in a repo"
 info ""
-info "Or: brew install superopen/so/so   # when the Homebrew tap is published"
+info "Or: brew install ishanjainn/superopen/so   # when the Homebrew tap is published"

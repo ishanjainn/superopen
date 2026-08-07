@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/port"
-	"github.com/superopen/so/internal/port/adapters"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/port"
+	"github.com/ishanjainn/superopen/internal/port/adapters"
 )
 
 // ClaudeCode imports Claude Code sessions into the .so hub via the port orchestrator.

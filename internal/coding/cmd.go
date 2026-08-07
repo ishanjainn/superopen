@@ -14,10 +14,10 @@
 package coding
 
 import (
-	"github.com/superopen/so/internal/coding/hook"
-	"github.com/superopen/so/internal/coding/install"
-	"github.com/superopen/so/internal/coding/launch"
-	"github.com/superopen/so/internal/coding/uninstall"
+	"github.com/ishanjainn/superopen/internal/coding/hook"
+	"github.com/ishanjainn/superopen/internal/coding/install"
+	"github.com/ishanjainn/superopen/internal/coding/launch"
+	"github.com/ishanjainn/superopen/internal/coding/uninstall"
 	"github.com/spf13/cobra"
 )
 

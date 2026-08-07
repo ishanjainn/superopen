@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/superopen/so/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/tracestore"
 )
 
 // SpansHaveActivity reports whether spans include a real user turn or tool work.

@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/eval"
-	"github.com/superopen/so/internal/guardrails"
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/harnessvalid"
-	"github.com/superopen/so/internal/memory"
+	"github.com/ishanjainn/superopen/internal/eval"
+	"github.com/ishanjainn/superopen/internal/guardrails"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/harnessvalid"
+	"github.com/ishanjainn/superopen/internal/memory"
 	"gopkg.in/yaml.v3"
 )
 

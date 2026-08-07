@@ -1,5 +1,5 @@
 > [!IMPORTANT]
-> 1. Prefer an issue-first approach for non-trivial changes - open an [issue](https://github.com/superopen/so/issues) when practical.
+> 1. Prefer an issue-first approach for non-trivial changes - open an [issue](https://github.com/ishanjainn/superopen/issues) when practical.
 > 2. PR title should follow Conventional Commit form, for example `feat: ...` or `fix(web): ...`.
 
 **Issue number**:

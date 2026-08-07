@@ -42,8 +42,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/superopen/so/internal/coding/normalize"
-	"github.com/superopen/so/sdk/go/semconv"
+	"github.com/ishanjainn/superopen/internal/coding/normalize"
+	"github.com/ishanjainn/superopen/sdk/go/semconv"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"

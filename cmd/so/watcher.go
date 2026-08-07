@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/sync"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/sync"
 )
 
 // startRefreshWatcher polls git HEAD + shared .so dirs and runs sync.Refresh on change.

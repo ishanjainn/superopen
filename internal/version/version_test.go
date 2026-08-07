@@ -3,7 +3,7 @@ package version_test
 import (
 	"testing"
 
-	"github.com/superopen/so/internal/version"
+	"github.com/ishanjainn/superopen/internal/version"
 )
 
 func TestDisplaySemver(t *testing.T) {

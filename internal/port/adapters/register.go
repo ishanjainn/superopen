@@ -1,6 +1,6 @@
 package adapters
 
-import "github.com/superopen/so/internal/port"
+import "github.com/ishanjainn/superopen/internal/port"
 
 // RegisterAll registers Claude, Codex, OpenCode, Cursor, Pi, and .so hub adapters.
 func RegisterAll(reg *port.Registry, repoRoot string) {

@@ -37,7 +37,7 @@ Vendors:
 
 The 'so' binary itself must be on PATH. Install via Homebrew, the
 prebuilt binaries on GitHub Releases, the curl|sh installer, or
-'go install github.com/superopen/so/cmd/so@latest'.`,
+'go install github.com/ishanjainn/superopen/cmd/so@latest'.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {

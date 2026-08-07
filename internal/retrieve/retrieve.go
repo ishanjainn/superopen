@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/superopen/so/internal/harness"
+	"github.com/ishanjainn/superopen/internal/harness"
 )
 
 type Hit struct {

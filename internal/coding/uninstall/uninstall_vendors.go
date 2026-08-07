@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/superopen/so/internal/userpaths"
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 // uninstallVendor removes the host plugin manifest set for one vendor

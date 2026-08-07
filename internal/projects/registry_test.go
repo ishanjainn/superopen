@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/superopen/so/internal/projects"
+	"github.com/ishanjainn/superopen/internal/projects"
 )
 
 func TestRegisterListUse(t *testing.T) {

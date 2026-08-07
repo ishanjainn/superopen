@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/coding/normalize"
+	"github.com/ishanjainn/superopen/internal/coding/normalize"
 )
 
 // Adapter implements normalize.Adapter for a named vendor.

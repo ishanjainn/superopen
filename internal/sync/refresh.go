@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/config"
-	"github.com/superopen/so/internal/guardrails"
-	"github.com/superopen/so/internal/graph"
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/inject"
-	"github.com/superopen/so/internal/memory"
-	"github.com/superopen/so/internal/recommend"
-	"github.com/superopen/so/internal/retrieve"
+	"github.com/ishanjainn/superopen/internal/config"
+	"github.com/ishanjainn/superopen/internal/guardrails"
+	"github.com/ishanjainn/superopen/internal/graph"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/inject"
+	"github.com/ishanjainn/superopen/internal/memory"
+	"github.com/ishanjainn/superopen/internal/recommend"
+	"github.com/ishanjainn/superopen/internal/retrieve"
 )
 
 // RefreshOptions controls the cheap post-pull refresh path.

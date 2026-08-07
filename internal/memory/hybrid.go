@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/retrieve"
+	"github.com/ishanjainn/superopen/internal/retrieve"
 )
 
 // HybridSearch merges memory hits with harness corpus retrieve hits.

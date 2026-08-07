@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/config"
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/llm"
-	"github.com/superopen/so/internal/session"
-	"github.com/superopen/so/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/config"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/llm"
+	"github.com/ishanjainn/superopen/internal/session"
+	"github.com/ishanjainn/superopen/internal/tracestore"
 )
 
 // Result mirrors process dimensions + optional task notes.

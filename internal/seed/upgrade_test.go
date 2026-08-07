@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/superopen/so/internal/discover"
-	"github.com/superopen/so/internal/seed"
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/llm"
+	"github.com/ishanjainn/superopen/internal/discover"
+	"github.com/ishanjainn/superopen/internal/seed"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/llm"
 )
 
 func TestExtractJSONAndApplyUpgrade(t *testing.T) {

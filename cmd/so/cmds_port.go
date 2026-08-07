@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/axi"
-	"github.com/superopen/so/internal/port"
-	"github.com/superopen/so/internal/port/adapters"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/axi"
+	"github.com/ishanjainn/superopen/internal/port"
+	"github.com/ishanjainn/superopen/internal/port/adapters"
 )
 
 func newPortOrchestrator() *port.Orchestrator {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/superopen/so/internal/port"
-	"github.com/superopen/so/internal/port/adapters"
+	"github.com/ishanjainn/superopen/internal/port"
+	"github.com/ishanjainn/superopen/internal/port/adapters"
 )
 
 func TestClaudeRoundTripViaSOHub(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/superopen/so/internal/userpaths"
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 func TestConfigAndDataDirs(t *testing.T) {

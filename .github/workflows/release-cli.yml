@@ -58,7 +58,7 @@ jobs:
           mkdir -p dist
           VERSION="${{ steps.ver.outputs.VERSION }}"
           COMMIT="$(git rev-parse --short HEAD)"
-          PKG="github.com/superopen/so/internal/version"
+          PKG="github.com/ishanjainn/superopen/internal/version"
           go build -trimpath -ldflags "-s -w -X ${PKG}.Version=$VERSION -X ${PKG}.Commit=$COMMIT" \
             -o dist/so-${GOOS}-${GOARCH}${{ matrix.ext }} ./cmd/so
       - name: Package
@@ -137,7 +137,6 @@ jobs:
         uses: dawidd6/action-homebrew-bump-formula@a0e064e08103c01870c6d1b05168d1b726aab119 # v8
         with:
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          tap: superopen/homebrew-so
+          tap: ishanjainn/homebrew-superopen
           formula: so
           tag: cli-${{ steps.ver.outputs.VERSION }}
-        continue-on-error: true

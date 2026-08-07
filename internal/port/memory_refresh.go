@@ -1,8 +1,8 @@
 package port
 
 import (
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/memory"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/memory"
 )
 
 // RefreshMemoryAfterPort updates episodic memory and active-context.md after a successful port.

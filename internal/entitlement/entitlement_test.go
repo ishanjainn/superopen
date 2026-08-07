@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/superopen/so/internal/entitlement"
+	"github.com/ishanjainn/superopen/internal/entitlement"
 )
 
 func TestLoginPaidGate(t *testing.T) {

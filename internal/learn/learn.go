@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/llm"
-	"github.com/superopen/so/internal/memory"
-	"github.com/superopen/so/internal/recommend"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/llm"
+	"github.com/ishanjainn/superopen/internal/memory"
+	"github.com/ishanjainn/superopen/internal/recommend"
 )
 
 var correctionRes = []*regexp.Regexp{

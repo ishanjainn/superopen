@@ -61,7 +61,7 @@ make smoke
 
 ## Issues and questions
 
-Search existing [issues](https://github.com/superopen/so/issues) before opening
+Search existing [issues](https://github.com/ishanjainn/superopen/issues) before opening
 a new one. Bug reports should include reproducible steps, expected and actual
 behavior, and relevant non-sensitive logs.
 

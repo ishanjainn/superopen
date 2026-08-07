@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/discover"
-	"github.com/superopen/so/internal/guardrails"
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/llm"
+	"github.com/ishanjainn/superopen/internal/discover"
+	"github.com/ishanjainn/superopen/internal/guardrails"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/llm"
 	"gopkg.in/yaml.v3"
 )
 

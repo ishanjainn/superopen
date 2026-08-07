@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/superopen/so/internal/port"
+	"github.com/ishanjainn/superopen/internal/port"
 )
 
 func home() string {

@@ -11,7 +11,7 @@ import (
 // Version is the CLI's semver string without a leading "v" (e.g. "0.1.0").
 // Overridden at release build time via:
 //
-//	-ldflags "-X github.com/superopen/so/internal/version.Version=1.2.3"
+//	-ldflags "-X github.com/ishanjainn/superopen/internal/version.Version=1.2.3"
 //
 // Keep the default in sync with /VERSION at the repo root.
 var Version = "0.1.0"

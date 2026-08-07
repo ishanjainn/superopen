@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/superopen/so/internal/guardrails"
+	"github.com/ishanjainn/superopen/internal/guardrails"
 	"gopkg.in/yaml.v3"
 )
 

@@ -12,15 +12,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/superopen/so/internal/audit"
-	"github.com/superopen/so/internal/config"
-	"github.com/superopen/so/internal/guardrails"
-	"github.com/superopen/so/internal/harness"
-	"github.com/superopen/so/internal/axi"
-	"github.com/superopen/so/internal/learn"
-	"github.com/superopen/so/internal/llm"
-	"github.com/superopen/so/internal/memory"
-	"github.com/superopen/so/internal/retrieve"
+	"github.com/ishanjainn/superopen/internal/audit"
+	"github.com/ishanjainn/superopen/internal/config"
+	"github.com/ishanjainn/superopen/internal/guardrails"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/axi"
+	"github.com/ishanjainn/superopen/internal/learn"
+	"github.com/ishanjainn/superopen/internal/llm"
+	"github.com/ishanjainn/superopen/internal/memory"
+	"github.com/ishanjainn/superopen/internal/retrieve"
 )
 
 func cmdMemory() *cobra.Command {

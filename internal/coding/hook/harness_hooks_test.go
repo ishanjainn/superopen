@@ -3,7 +3,7 @@ package hook
 import (
 	"testing"
 
-	"github.com/superopen/so/internal/guardrails"
+	"github.com/ishanjainn/superopen/internal/guardrails"
 )
 
 func TestDecideGuardrailAllowsEmptyTargets(t *testing.T) {

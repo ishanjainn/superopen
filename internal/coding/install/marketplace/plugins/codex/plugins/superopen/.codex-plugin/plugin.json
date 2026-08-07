@@ -5,10 +5,10 @@
   "description": "Superopen telemetry for Codex: sessions, tool calls, LLM turns with token usage, and cost rollups.",
   "author": {
     "name": "Superopen",
-    "url": "https://github.com/superopen/so"
+    "url": "https://github.com/ishanjainn/superopen"
   },
-  "repository": "https://github.com/superopen/so",
-  "homepage": "https://github.com/superopen/so",
+  "repository": "https://github.com/ishanjainn/superopen",
+  "homepage": "https://github.com/ishanjainn/superopen",
   "license": "Apache-2.0",
   "keywords": ["telemetry", "observability", "superopen", "codex"],
   "hooks": "./hooks/hooks.json",
