@@ -1,0 +1,34 @@
+{
+  "files": [
+    {
+      "path": "/Users/ishanjain/work/superopen/docs/so-schema.md",
+      "state": "edited",
+      "count": 1
+    },
+    {
+      "path": "/Users/ishanjain/work/superopen/internal/eval/eval.go",
+      "state": "edited",
+      "count": 4
+    },
+    {
+      "path": "/Users/ishanjain/work/superopen/internal/eval/eval_test.go",
+      "state": "edited",
+      "count": 1
+    },
+    {
+      "path": "/Users/ishanjain/work/superopen/internal/recommend/recommend.go",
+      "state": "edited",
+      "count": 5
+    },
+    {
+      "path": "/Users/ishanjain/work/superopen/internal/recommend/recommend_test.go",
+      "state": "edited",
+      "count": 1
+    },
+    {
+      "path": "/Users/ishanjain/work/superopen/web/src/components/harness-files-page.tsx",
+      "state": "edited",
+      "count": 2
+    }
+  ]
+}

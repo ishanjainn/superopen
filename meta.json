@@ -1,0 +1,24 @@
+{
+  "id": "938ca7c7-a669-4eaf-bec7-d5c06999a6fd",
+  "vendor": "",
+  "model": "cursor-grok-4.5-high",
+  "prompt_preview": "so init ran",
+  "status": "ended",
+  "started_at": "2026-08-07T15:34:13.907274Z",
+  "ended_at": "2026-08-07T15:50:39.989111Z",
+  "duration_ms": 986081,
+  "tokens": 1849070,
+  "cost_usd": 0.9904559999999999,
+  "eval_badge": "ok",
+  "project_id": "2a249b6e996bf384",
+  "repo_root": "/Users/ishanjain/work/superopen",
+  "branch": "ui-fixes",
+  "head_sha": "c29c27a5bd79fa32cd92e238865c8c0cfd6dd5a0",
+  "commits": [
+    {
+      "sha": "c29c27a5bd79fa32cd92e238865c8c0cfd6dd5a0",
+      "message": "Move guidance to native vendor docs and fix skills UI selection.",
+      "at": "2026-08-07T15:50:40.055504Z"
+    }
+  ]
+}
