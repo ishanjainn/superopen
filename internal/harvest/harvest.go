@@ -84,8 +84,19 @@ type Delta struct {
 	RecsWhy         string              `json:"recs_why,omitempty"`
 }
 
+// RunOpts controls harvest side effects.
+type RunOpts struct {
+	// SkipNativeDocs writes only untracked memory (lessons/prefs); leaves
+	// AGENTS.md / rules / skills untouched so git hooks stay clean.
+	SkipNativeDocs bool
+}
+
 // Run harvests one session: local summary → budgeted agent CLI → apply deltas.
-func Run(paths harness.Paths, cfg config.Config, sessionID string, trigger Trigger) (Result, error) {
+func Run(paths harness.Paths, cfg config.Config, sessionID string, trigger Trigger, opts ...RunOpts) (Result, error) {
+	var o RunOpts
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	res := Result{SessionID: sessionID, Trigger: trigger}
 	if !cfg.MemoryEnabled() && trigger != TriggerFinalize {
 		res.Skipped = true
@@ -139,7 +150,7 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, trigger Trigg
 		return res, nil
 	}
 
-	applied := applyDelta(paths, delta, vendor)
+	applied := applyDelta(paths, delta, vendor, o.SkipNativeDocs)
 	_, _ = memory.NewStore(paths).Consolidate(summary, llm.NewMemoryCompleter(cfg))
 	applied++
 
@@ -435,7 +446,7 @@ func parseDelta(text string) (Delta, error) {
 	return d, nil
 }
 
-func applyDelta(paths harness.Paths, d Delta, vendor string) int {
+func applyDelta(paths harness.Paths, d Delta, vendor string, skipNativeDocs bool) int {
 	n := 0
 	wopts := nativedocs.WriteOpts{Vendor: vendor}
 	store := memory.NewStore(paths)
@@ -465,6 +476,11 @@ func applyDelta(paths harness.Paths, d Delta, vendor string) int {
 			_ = os.WriteFile(p, []byte(updated), 0o644)
 			n++
 		}
+	}
+	if skipNativeDocs {
+		_ = d.Guardrails
+		_ = d.EvalsNote
+		return n
 	}
 	for rel, body := range d.Knowledge {
 		agentsPath, err := nativedocs.AgentsFile(paths.RepoRoot, rel)

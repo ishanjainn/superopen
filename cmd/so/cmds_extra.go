@@ -351,7 +351,7 @@ func cmdGitHook() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
 			paths := harness.Resolve(root)
-			_ = finalizeLatestSession(root)
+			_ = finalizeSession(root, "", finalizeOpts{SkipTrackedMutations: true})
 			// Attribution + trailer already on message; refresh meta from HEAD.
 			shaOut, _ := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
 			sha := strings.TrimSpace(string(shaOut))
@@ -398,7 +398,7 @@ func cmdGitHook() *cobra.Command {
 	refreshHook := func(cmd *cobra.Command, args []string) error {
 		// After any SHA-changing checkout/merge: rebuild untracked graph/context only.
 		root := repoRoot()
-		return syncpkg.Refresh(syncpkg.RefreshOptions{RepoRoot: root})
+		return syncpkg.Refresh(syncpkg.RefreshOptions{RepoRoot: root, SkipInject: true})
 	}
 	c.AddCommand(&cobra.Command{Use: "post-merge", RunE: refreshHook})
 	c.AddCommand(&cobra.Command{Use: "post-checkout", RunE: refreshHook})

@@ -21,9 +21,10 @@ import (
 
 // RefreshOptions controls the cheap post-pull refresh path.
 type RefreshOptions struct {
-	RepoRoot  string
-	SkipGraph bool
-	Force     bool
+	RepoRoot   string
+	SkipGraph  bool
+	SkipInject bool // git hooks: never rewrite tracked AGENTS.md / skills
+	Force      bool
 }
 
 type refreshMarker struct {
@@ -37,8 +38,8 @@ func refreshMarkerPath(paths harness.Paths) string {
 }
 
 // Refresh is a lite sync for post-merge / post-checkout / so refresh after HEAD moves.
-// Rebuilds untracked runtime (graph, memory packs, retrieve). Injectors are
-// byte-idempotent so tracked docs are not rewritten when unchanged.
+// Rebuilds untracked runtime (graph, memory packs, retrieve). Git hooks should set
+// SkipInject so a stale or newer `so` binary cannot dirty tracked injectors.
 func Refresh(opts RefreshOptions) error {
 	root := opts.RepoRoot
 	paths := harness.Resolve(root)
@@ -63,7 +64,9 @@ func Refresh(opts RefreshOptions) error {
 	_ = guardrails.EnsureDefaults(paths)
 	_ = memory.NewStore(paths).Ensure()
 	_, _ = memory.NewStore(paths).RefreshActive("")
-	_ = inject.Apply(root)
+	if !opts.SkipInject {
+		_ = inject.Apply(root)
+	}
 	if _, err := retrieve.Rebuild(root, paths); err != nil {
 		return fmt.Errorf("retrieve index: %w", err)
 	}

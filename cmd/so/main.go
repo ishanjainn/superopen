@@ -812,7 +812,18 @@ func cmdKnowledge() *cobra.Command {
 	return c
 }
 
-func finalizeSession(root, sessionID string) error {
+type finalizeOpts struct {
+	// SkipTrackedMutations keeps the working tree clean after git hooks:
+	// generate evals/recs and memory only — no auto-apply, inject sync, or
+	// harvest writes into AGENTS.md / rules / skills.
+	SkipTrackedMutations bool
+}
+
+func finalizeSession(root, sessionID string, opts ...finalizeOpts) error {
+	var o finalizeOpts
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	paths := harness.Resolve(root)
 	_, _ = projects.Register(root, paths.Root, "")
 	cfg, _ := config.Load(paths.Config)
@@ -905,26 +916,30 @@ func finalizeSession(root, sessionID string) error {
 		}
 		if cfg.Recommendations.Auto {
 			recs, _ := recommend.Generate(paths, latestID, ev, client)
-			appliedAny := false
-			for _, r := range recs {
-				tier := harnessvalid.Tier(r.Type)
-				if !cfg.AllowsAutoApplyTier(tier) {
-					continue
+			if !o.SkipTrackedMutations {
+				appliedAny := false
+				for _, r := range recs {
+					tier := harnessvalid.Tier(r.Type)
+					if !cfg.AllowsAutoApplyTier(tier) {
+						continue
+					}
+					if err := recommend.Apply(paths, r.ID, recommend.Decision{
+						Reason: "Automatically applied because its recommendation tier is enabled in auto_apply_tiers.",
+						Actor:  "system",
+					}); err == nil {
+						appliedAny = true
+					}
 				}
-				if err := recommend.Apply(paths, r.ID, recommend.Decision{
-					Reason: "Automatically applied because its recommendation tier is enabled in auto_apply_tiers.",
-					Actor:  "system",
-				}); err == nil {
-					appliedAny = true
+				if appliedAny {
+					_ = sync.Run(sync.Options{RepoRoot: root, SkipGraph: true, SkipInject: true})
 				}
-			}
-			if appliedAny {
-				_ = sync.Run(sync.Options{RepoRoot: root, SkipGraph: true})
 			}
 		}
 	}
 	mineOnFinalize(paths, latestID, cfg)
-	_, _ = harvest.Run(paths, cfg, latestID, harvest.TriggerFinalize)
+	_, _ = harvest.Run(paths, cfg, latestID, harvest.TriggerFinalize, harvest.RunOpts{
+		SkipNativeDocs: o.SkipTrackedMutations,
+	})
 	_, _ = gitruntime.SnapshotSessionDir(root, paths.SessionDir(latestID), latestID)
 	fmt.Printf("Finalized session %s (%s)\n", meta.ID, meta.EvalBadge)
 	return nil
