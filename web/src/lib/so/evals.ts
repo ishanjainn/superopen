@@ -20,6 +20,9 @@ export type EvalRun = {
   vendor?: string;
   tokens?: number;
   cost_usd?: number;
+  evidence_status?: "sufficient" | "insufficient";
+  session_status?: string;
+  scope: "complete" | "snapshot";
   /** Timeline / evidence points where things went wrong */
   failure_points: EvalFailurePoint[];
 };
@@ -35,9 +38,11 @@ export type EvalFailurePoint = {
 export type EvalsDashboard = {
   summary: {
     total: number;
+    executions: number;
     good: number;
     ok: number;
     poor: number;
+    unknown: number;
     with_failures: number;
     avg_score: number | null;
     pass_rate: number | null;
@@ -55,10 +60,20 @@ export type EvalsDashboard = {
     good: number;
     ok: number;
     poor: number;
-    pass_rate: number;
+    unknown: number;
+    pass_rate: number | null;
     tokens: number;
     cost_usd: number;
   }[];
+  /** Daily count of actual evaluation executions, including reruns. */
+  execution_series: { date: string; runs: number }[];
+  evaluation_target: {
+    session_id: string;
+    title: string;
+    status: string;
+    whole_chat_evaluated: boolean;
+    last_eval_at?: string;
+  } | null;
   /** Per configured check / dimension performance */
   evaluators: {
     id: string;
@@ -78,6 +93,7 @@ type StoredEval = {
   badge?: string;
   notes?: string[];
   dimensions?: Record<string, number>;
+  evidence_status?: "sufficient" | "insufficient";
 };
 
 type StoredReport = {
@@ -126,7 +142,36 @@ function sessionTitle(meta: SessionMeta | null, fallback: string): string {
   );
 }
 
-function normalizeBadge(badge: string | undefined, score?: number): EvalBadge {
+function evaluationScope(
+  meta: SessionMeta | null,
+  evaluatedAt: string
+): "complete" | "snapshot" {
+  if (meta?.status !== "ended" || !meta.ended_at || !evaluatedAt) return "snapshot";
+  const ended = new Date(meta.ended_at).getTime();
+  const evaluated = new Date(evaluatedAt).getTime();
+  return Number.isFinite(ended) && Number.isFinite(evaluated) && evaluated >= ended
+    ? "complete"
+    : "snapshot";
+}
+
+function evidenceStatus(
+  explicit: StoredEval["evidence_status"],
+  notes: string[]
+): "sufficient" | "insufficient" {
+  if (explicit) return explicit;
+  return notes.some((note) =>
+    /no (session |tool )?activity recorded|insufficient (activity telemetry|signal)/i.test(note)
+  )
+    ? "insufficient"
+    : "sufficient";
+}
+
+function normalizeBadge(
+  badge: string | undefined,
+  score?: number,
+  evidence: "sufficient" | "insufficient" = "sufficient"
+): EvalBadge {
+  if (evidence === "insufficient") return "unknown";
   const b = String(badge || "").toLowerCase();
   if (b === "good" || b === "ok" || b === "poor") return b;
   if (b === "problem" || b === "failed") return "poor";
@@ -141,8 +186,15 @@ function normalizeBadge(badge: string | undefined, score?: number): EvalBadge {
 
 function failurePointsFromEval(
   notes: string[],
-  dimensions?: Record<string, number>
+  dimensions?: Record<string, number>,
+  evidence: "sufficient" | "insufficient" = "sufficient"
 ): EvalFailurePoint[] {
+  if (evidence === "insufficient") {
+    return [{
+      label: "Insufficient activity telemetry to evaluate this session.",
+      severity: "info",
+    }];
+  }
   const out: EvalFailurePoint[] = [];
   for (const n of notes) {
     const t = String(n || "").trim();
@@ -242,12 +294,14 @@ function loadHistoryRuns(): EvalRun[] {
       const sid = String(r.session_id);
       const meta = readMeta(sid);
       const notes = Array.isArray(r.notes) ? r.notes.map(String) : [];
+      const evidence = evidenceStatus(r.evidence_status, notes);
+      const at = String(r.at || "");
       return {
         id: `history:${sid}:${r.at || i}`,
         session_id: sid,
-        at: String(r.at || ""),
+        at,
         score: typeof r.score === "number" ? r.score : undefined,
-        badge: normalizeBadge(r.badge, r.score),
+        badge: normalizeBadge(r.badge, r.score, evidence),
         notes,
         dimensions: r.dimensions,
         source: "history" as const,
@@ -255,7 +309,10 @@ function loadHistoryRuns(): EvalRun[] {
         vendor: meta?.vendor,
         tokens: Number(meta?.tokens || 0) || undefined,
         cost_usd: Number(meta?.cost_usd || 0) || undefined,
-        failure_points: failurePointsFromEval(notes, r.dimensions),
+        evidence_status: evidence,
+        session_status: meta?.status,
+        scope: evaluationScope(meta, at),
+        failure_points: failurePointsFromEval(notes, r.dimensions, evidence),
       };
     });
 }
@@ -280,14 +337,17 @@ function loadSessionArtifactRuns(): EvalRun[] {
       const r = readJSON<StoredEval>(evalPath);
       if (r) {
         const notes = Array.isArray(r.notes) ? r.notes.map(String) : [];
+        const evidence = evidenceStatus(r.evidence_status, notes);
+        const at = String(r.at || "");
         out.push({
           id: `eval:${sid}`,
           session_id: sid,
-          at: String(r.at || ""),
+          at,
           score: typeof r.score === "number" ? r.score : undefined,
           badge: normalizeBadge(
             r.badge || (meta?.eval_badge ? String(meta.eval_badge) : undefined),
-            r.score
+            r.score,
+            evidence
           ),
           notes,
           dimensions: r.dimensions,
@@ -296,7 +356,10 @@ function loadSessionArtifactRuns(): EvalRun[] {
           vendor: meta?.vendor,
           tokens: Number(meta?.tokens || 0) || undefined,
           cost_usd: Number(meta?.cost_usd || 0) || undefined,
-          failure_points: failurePointsFromEval(notes, r.dimensions),
+          evidence_status: evidence,
+          session_status: meta?.status,
+          scope: evaluationScope(meta, at),
+          failure_points: failurePointsFromEval(notes, r.dimensions, evidence),
         });
       }
     }
@@ -317,6 +380,9 @@ function loadSessionArtifactRuns(): EvalRun[] {
             report.judge?.cli ? `judge:${report.judge.cli}` : "",
           ].filter(Boolean) as string[],
           source: "report.json",
+          evidence_status: "sufficient",
+          session_status: meta?.status,
+          scope: evaluationScope(meta, String(report.judge?.generatedAt || "")),
           title: sessionTitle(meta, sid),
           vendor: meta?.vendor,
           tokens: Number(meta?.tokens || 0) || undefined,
@@ -329,13 +395,15 @@ function loadSessionArtifactRuns(): EvalRun[] {
   return out;
 }
 
-/** Prefer newest artifact per session (report > eval.json > history). */
+/** Keep every execution while also deriving the latest result per session. */
 export function listEvalsDashboard(): EvalsDashboard {
+  const historyRuns = loadHistoryRuns();
+  const artifactRuns = loadSessionArtifactRuns();
   const bySession = new Map<string, EvalRun>();
   const rank = (s: EvalRun["source"]) =>
     s === "report.json" ? 3 : s === "eval.json" ? 2 : 1;
 
-  for (const run of [...loadHistoryRuns(), ...loadSessionArtifactRuns()]) {
+  for (const run of [...historyRuns, ...artifactRuns]) {
     const prev = bySession.get(run.session_id);
     if (!prev) {
       bySession.set(run.session_id, run);
@@ -348,15 +416,28 @@ export function listEvalsDashboard(): EvalsDashboard {
     if (newer) bySession.set(run.session_id, run);
   }
 
-  const runs = Array.from(bySession.values()).sort((a, b) =>
+  const currentRuns = Array.from(bySession.values()).sort((a, b) =>
     String(b.at || "").localeCompare(String(a.at || ""))
   );
 
+  // eval.json mirrors the latest history entry, so do not count that artifact
+  // twice. Reports are separate judge executions and remain distinct.
+  const executions = [...historyRuns];
+  for (const artifact of artifactRuns) {
+    const duplicatedHistory = artifact.source === "eval.json" && historyRuns.some(
+      (run) => run.session_id === artifact.session_id && run.at === artifact.at
+    );
+    if (!duplicatedHistory) executions.push(artifact);
+  }
+  executions.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+
   const summary = {
-    total: runs.length,
+    total: currentRuns.length,
+    executions: executions.length,
     good: 0,
     ok: 0,
     poor: 0,
+    unknown: 0,
     with_failures: 0,
     avg_score: null as number | null,
     pass_rate: null as number | null,
@@ -369,11 +450,12 @@ export function listEvalsDashboard(): EvalsDashboard {
   let scoreSum = 0;
   let scoreN = 0;
   let tokenN = 0;
-  for (const r of runs) {
+  for (const r of currentRuns) {
     if (r.badge === "good") summary.good++;
     else if (r.badge === "ok") summary.ok++;
+    else if (r.badge === "unknown") summary.unknown++;
     else summary.poor++;
-    if (typeof r.score === "number") {
+    if (r.evidence_status !== "insufficient" && typeof r.score === "number") {
       scoreSum += r.score;
       scoreN++;
     }
@@ -384,15 +466,17 @@ export function listEvalsDashboard(): EvalsDashboard {
     if (typeof r.cost_usd === "number" && r.cost_usd > 0) {
       summary.total_cost_usd += r.cost_usd;
     }
-    if (r.failure_points.length) {
+    const failures = r.failure_points.filter((fp) => fp.severity !== "info");
+    if (failures.length) {
       summary.with_failures++;
-      for (const fp of r.failure_points) {
+      for (const fp of failures) {
         reasonCount.set(fp.label, (reasonCount.get(fp.label) || 0) + 1);
       }
     }
   }
   if (scoreN) summary.avg_score = scoreSum / scoreN;
-  if (summary.total) summary.pass_rate = summary.good / summary.total;
+  const scored = summary.good + summary.ok + summary.poor;
+  if (scored) summary.pass_rate = summary.good / scored;
   if (tokenN) summary.avg_tokens = Math.round(summary.total_tokens / tokenN);
   summary.total_cost_usd = Math.round(summary.total_cost_usd * 10000) / 10000;
 
@@ -401,11 +485,49 @@ export function listEvalsDashboard(): EvalsDashboard {
     .sort((a, b) => b.count - a.count)
     .slice(0, 12);
 
-  const series = buildDailySeries(runs);
-  const evaluators = buildEvaluatorStats(runs);
+  const series = buildDailySeries(currentRuns);
+  const execution_series = buildDailySeries(executions).map(({ date, runs }) => ({ date, runs }));
+  const evaluators = buildEvaluatorStats(executions);
   summary.evaluator_count = evaluators.length;
 
-  return { summary, failure_reasons, series, evaluators, runs };
+  const evaluation_target = latestEvaluationTarget(currentRuns);
+
+  return {
+    summary,
+    failure_reasons,
+    series,
+    execution_series,
+    evaluation_target,
+    evaluators,
+    runs: executions,
+  };
+}
+
+function latestEvaluationTarget(currentRuns: EvalRun[]): EvalsDashboard["evaluation_target"] {
+  const dir = soPath("sessions");
+  if (!fileExists(dir)) return null;
+  let latest: SessionMeta | null = null;
+  for (const name of readdirSync(dir)) {
+    if (name.startsWith(".") || name.endsWith(".json")) continue;
+    const meta = readJSON<SessionMeta>(join(dir, name, "meta.json"));
+    if (!meta) continue;
+    if (!latest) {
+      latest = meta;
+      continue;
+    }
+    const candidateAt = String(meta.ended_at || meta.started_at || "");
+    const latestAt = String(latest.ended_at || latest.started_at || "");
+    if (candidateAt > latestAt) latest = meta;
+  }
+  if (!latest) return null;
+  const latestRun = currentRuns.find((run) => run.session_id === latest?.id);
+  return {
+    session_id: latest.id,
+    title: sessionTitle(latest, latest.id),
+    status: String(latest.status || "active"),
+    whole_chat_evaluated: latestRun?.scope === "complete",
+    last_eval_at: latestRun?.at || undefined,
+  };
 }
 
 function dayKey(iso: string): string {
@@ -415,7 +537,7 @@ function dayKey(iso: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-function buildDailySeries(runs: EvalRun[]) {
+export function buildDailySeries(runs: EvalRun[]) {
   const map = new Map<
     string,
     {
@@ -423,6 +545,7 @@ function buildDailySeries(runs: EvalRun[]) {
       good: number;
       ok: number;
       poor: number;
+      unknown: number;
       tokens: number;
       cost_usd: number;
     }
@@ -434,27 +557,59 @@ function buildDailySeries(runs: EvalRun[]) {
       good: 0,
       ok: 0,
       poor: 0,
+      unknown: 0,
       tokens: 0,
       cost_usd: 0,
     };
     cur.runs++;
     if (r.badge === "good") cur.good++;
-    else if (r.badge === "ok") cur.ok++;
+    else if (r.badge === "unknown") cur.unknown++;
     else cur.poor++;
     cur.tokens += r.tokens || 0;
     cur.cost_usd += r.cost_usd || 0;
     map.set(k, cur);
   }
-  return Array.from(map.entries())
+  const populated = Array.from(map.entries())
     .filter(([d]) => d !== "unknown")
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(-30)
-    .map(([date, v]) => ({
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (!populated.length) return [];
+
+  // Preserve calendar spacing as the dashboard accumulates history. Returning
+  // only days that have runs makes a week-long gap look like adjacent points.
+  // Fill the last 30 calendar days between the first and latest observed run;
+  // pass rate stays null on idle days so the line shows a truthful gap.
+  const latest = new Date(`${populated[populated.length - 1][0]}T00:00:00Z`);
+  const earliestObserved = new Date(`${populated[0][0]}T00:00:00Z`);
+  const windowStart = new Date(latest);
+  windowStart.setUTCDate(windowStart.getUTCDate() - 29);
+  const start = earliestObserved > windowStart ? earliestObserved : windowStart;
+  const byDate = new Map(populated);
+  const dense: EvalsDashboard["series"] = [];
+  for (const cursor = new Date(start); cursor <= latest; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    const date = cursor.toISOString().slice(0, 10);
+    const v = byDate.get(date);
+    if (!v) {
+      dense.push({
+        date,
+        runs: 0,
+        good: 0,
+        ok: 0,
+        poor: 0,
+        unknown: 0,
+        pass_rate: null,
+        tokens: 0,
+        cost_usd: 0,
+      });
+      continue;
+    }
+    dense.push({
       date,
       ...v,
       cost_usd: Math.round(v.cost_usd * 10000) / 10000,
-      pass_rate: v.runs ? v.good / v.runs : 0,
-    }));
+      pass_rate: v.good + v.ok + v.poor ? v.good / (v.good + v.ok + v.poor) : null,
+    });
+  }
+  return dense;
 }
 
 function buildEvaluatorStats(runs: EvalRun[]) {
@@ -529,6 +684,7 @@ function buildEvaluatorStats(runs: EvalRun[]) {
   }
 
   for (const r of [...runs].reverse()) {
+    if (r.evidence_status === "insufficient") continue;
     if (r.dimensions) {
       for (const [name, v] of Object.entries(r.dimensions)) {
         const passed = name === "wandering" ? v < 0.7 : v > 0.35;
@@ -543,12 +699,12 @@ function buildEvaluatorStats(runs: EvalRun[]) {
       const failed = r.failure_points.some((fp) =>
         fp.label.toLowerCase().includes(check.toLowerCase())
       );
-      if (hit || failed || r.source === "eval.json") {
+      if (hit || failed) {
         bump(
           `check:${check}`,
           check,
           "check",
-          !failed && r.badge !== "poor",
+          !failed,
           r.at
         );
       }

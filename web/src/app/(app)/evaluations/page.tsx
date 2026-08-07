@@ -94,6 +94,8 @@ function EvalsDashboardView({
   const [error, setError] = useState("");
   const [tableTab, setTableTab] = useState<TableTab>("evaluators");
   const [logFilter, setLogFilter] = useState<LogFilter>("all");
+  const [evaluating, setEvaluating] = useState(false);
+  const [runStatus, setRunStatus] = useState("");
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!opts?.quiet) setLoading(true);
@@ -122,10 +124,50 @@ function EvalsDashboardView({
     10000
   );
 
+  const runLatestEvaluation = useCallback(async () => {
+    setEvaluating(true);
+    setRunStatus("");
+    setError("");
+    try {
+      const params = new URLSearchParams();
+      if (projectId && projectId !== "all") params.set("project", projectId);
+      const r = await fetch(`/api/evals?${params.toString()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const payload = (await r.json()) as {
+        result?: { badge?: string; evidence_status?: string };
+        reused?: boolean;
+        scope?: "complete" | "snapshot";
+      };
+      const badge = payload.result?.badge || "complete";
+      setRunStatus(
+        payload.reused
+          ? "The complete chat was already evaluated; no duplicate run was created."
+          : payload.result?.evidence_status === "insufficient"
+          ? "Evaluation finished, but the session had insufficient telemetry."
+          : payload.scope === "snapshot"
+            ? `Current chat snapshot evaluated: ${badge}. The chat is still active.`
+            : `Complete chat evaluated: ${badge}.`
+      );
+      await load({ quiet: true });
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setEvaluating(false);
+    }
+  }, [load, projectId]);
+
   const logs = useMemo(() => {
     const list = data?.runs || [];
     if (logFilter === "failing") {
-      return list.filter((r) => r.badge === "poor" || r.failure_points.length > 0);
+      return list.filter(
+        (r) =>
+          r.badge === "poor" ||
+          r.failure_points.some((point) => point.severity !== "info")
+      );
     }
     if (logFilter === "good") return list.filter((r) => r.badge === "good");
     if (logFilter === "ok") return list.filter((r) => r.badge === "ok");
@@ -153,9 +195,11 @@ function EvalsDashboardView({
 
   const s = data?.summary || {
     total: 0,
+    executions: 0,
     good: 0,
     ok: 0,
     poor: 0,
+    unknown: 0,
     with_failures: 0,
     avg_score: null,
     pass_rate: null,
@@ -166,27 +210,67 @@ function EvalsDashboardView({
   };
 
   if (s.total === 0 && s.evaluator_count === 0) {
-    return <EmptyDashboard onOpenEvaluators={onOpenEvaluators} />;
+    return (
+      <EmptyDashboard
+        onOpenEvaluators={onOpenEvaluators}
+        onEvaluate={() => void runLatestEvaluation()}
+        evaluating={evaluating}
+      />
+    );
   }
 
   const evaluators = data?.evaluators || [];
   const series = data?.series || [];
+  const executionSeries = data?.execution_series || [];
+  const evaluationTarget = data?.evaluation_target;
+  const wholeChatEvaluated = Boolean(
+    evaluationTarget?.status === "ended" && evaluationTarget.whole_chat_evaluated
+  );
 
   return (
     <div className="min-h-0 flex-1 overflow-auto">
       <div className="border-b border-neutral-100 px-4 py-3">
         <div className="space-y-2">
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Runs" value={s.total} />
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
+            <div>
+              <p className="text-xs font-medium text-neutral-800">Evaluation history</p>
+              <p className="text-[11px] text-neutral-500">
+                {evaluationTarget?.status === "active"
+                  ? "Latest chat is active. Evaluations are snapshots until the chat is closed."
+                  : wholeChatEvaluated
+                    ? "The latest closed chat has a complete evaluation."
+                    : "Executions include reruns; sessions count each captured session once."}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={evaluating || wholeChatEvaluated}
+              onClick={() => void runLatestEvaluation()}
+              className="rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            >
+              {evaluating
+                ? "Evaluating…"
+                : wholeChatEvaluated
+                  ? "Whole chat evaluated"
+                  : evaluationTarget?.status === "active"
+                    ? "Evaluate current snapshot"
+                    : "Evaluate latest session"}
+            </button>
+          </div>
+          {runStatus && <p className="text-xs text-neutral-500">{runStatus}</p>}
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+            <StatCard label="Executions" value={s.executions ?? s.total} />
+            <StatCard label="Sessions" value={s.total} />
             <StatCard
               label="Pass rate"
-              value={`${Math.round((s.pass_rate ?? 0) * 100)}%`}
+              value={s.pass_rate == null ? "—" : `${Math.round(s.pass_rate * 100)}%`}
               tone="good"
             />
             <StatCard label="Failures" value={s.with_failures} tone="poor" />
+            <StatCard label="Unknown" value={s.unknown ?? 0} tone="ok" />
             <StatCard
               label="Avg score"
-              value={`${Math.round((s.avg_score ?? 0) * 100)}%`}
+              value={s.avg_score == null ? "—" : `${Math.round(s.avg_score * 100)}%`}
             />
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -199,7 +283,11 @@ function EvalsDashboardView({
       <div className="space-y-6 p-4">
         <div className="grid gap-4 lg:grid-cols-2">
           <ChartCard title="Executions" subtitle="Runs per day">
-            <BarSeries data={series.map((d) => ({ label: d.date, value: d.runs }))} />
+            <BarSeries
+              data={executionSeries.map((d) => ({ label: d.date, value: d.runs }))}
+              name="Runs"
+              color="#525252"
+            />
           </ChartCard>
           <ChartCard title="Pass rate" subtitle="Good / total by day">
             <PassRateChart
@@ -209,7 +297,9 @@ function EvalsDashboardView({
           <ChartCard title="Token usage" subtitle="Tokens on scored sessions per day">
             <BarSeries
               data={series.map((d) => ({ label: d.date, value: d.tokens }))}
-              barClassName="bg-sky-800"
+              name="Tokens"
+              color="#0284c7"
+              valueFormatter={fmtTokens}
               empty="No token data yet"
             />
           </ChartCard>
@@ -219,7 +309,10 @@ function EvalsDashboardView({
                 label: d.date,
                 value: Math.round(d.cost_usd * 10000) / 10000,
               }))}
-              barClassName="bg-violet-800"
+              name="Cost"
+              color="#7c3aed"
+              valueFormatter={fmtCost}
+              allowDecimals
               empty="No cost data yet"
             />
           </ChartCard>
@@ -314,6 +407,7 @@ function EvalsDashboardView({
                   visibilityColumns={{
                     status: true,
                     session: true,
+                    scope: true,
                     score: true,
                     tokens: true,
                     cost: true,
@@ -393,19 +487,24 @@ const EVAL_COLS: Columns<"label" | "kind" | "executions" | "pass_rate" | "trend"
     width: "6.5rem",
     cell: ({ row }) => (
       <span className="tabular-nums text-sm">
-        {`${Math.round((row.pass_rate ?? 0) * 100)}%`}
+        {row.pass_rate == null ? "—" : `${Math.round(row.pass_rate * 100)}%`}
       </span>
     ),
   },
   trend: {
     header: () => "Trend",
     width: "5.5rem",
-    cell: ({ row }) => <Sparkline values={row.trend?.length ? row.trend : [0]} />,
+    cell: ({ row }) =>
+      row.trend?.length ? (
+        <Sparkline values={row.trend} />
+      ) : (
+        <span className="text-neutral-400">—</span>
+      ),
   },
 };
 
 const LOG_COLS: Columns<
-  "status" | "session" | "score" | "tokens" | "cost" | "at" | "failures",
+  "status" | "session" | "scope" | "score" | "tokens" | "cost" | "at" | "failures",
   EvalRun
 > = {
   status: {
@@ -431,12 +530,23 @@ const LOG_COLS: Columns<
       </span>
     ),
   },
+  scope: {
+    header: () => "Coverage",
+    width: "6.5rem",
+    cell: ({ row }) => (
+      <span className="text-[11px] text-neutral-600">
+        {row.scope === "complete" ? "Whole chat" : "Snapshot"}
+      </span>
+    ),
+  },
   score: {
     header: () => "Score",
     width: "4.5rem",
     cell: ({ row }) => (
       <span className="tabular-nums text-sm">
-        {`${Math.round((typeof row.score === "number" ? row.score : 0) * 100)}%`}
+        {row.evidence_status === "insufficient" || typeof row.score !== "number"
+          ? "—"
+          : `${Math.round(row.score * 100)}%`}
       </span>
     ),
   },
@@ -533,6 +643,7 @@ function StatCard({
 function badgeClass(badge: string) {
   if (badge === "good") return "bg-emerald-50 text-emerald-800 border-emerald-200";
   if (badge === "ok") return "bg-amber-50 text-amber-900 border-amber-200";
+  if (badge === "unknown") return "bg-neutral-100 text-neutral-600 border-neutral-200";
   return "bg-red-50 text-red-800 border-red-200";
 }
 
@@ -549,7 +660,15 @@ function fmtCost(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-function EmptyDashboard({ onOpenEvaluators }: { onOpenEvaluators: () => void }) {
+function EmptyDashboard({
+  onOpenEvaluators,
+  onEvaluate,
+  evaluating,
+}: {
+  onOpenEvaluators: () => void;
+  onEvaluate: () => void;
+  evaluating: boolean;
+}) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
       <h2 className="text-base font-semibold text-neutral-900">No eval runs yet</h2>
@@ -563,13 +682,23 @@ function EmptyDashboard({ onOpenEvaluators }: { onOpenEvaluators: () => void }) 
           <li>so eval &lt;session-id&gt;</li>
           <li>Sessions → Map → Evaluate</li>
         </ol>
-        <button
-          type="button"
-          onClick={onOpenEvaluators}
-          className="mt-3 rounded-md bg-neutral-900 px-2.5 py-1 text-[11px] text-white"
-        >
-          Open Evaluators
-        </button>
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            disabled={evaluating}
+            onClick={onEvaluate}
+            className="rounded-md bg-neutral-900 px-2.5 py-1 text-[11px] text-white disabled:opacity-50"
+          >
+            {evaluating ? "Evaluating…" : "Evaluate latest session"}
+          </button>
+          <button
+            type="button"
+            onClick={onOpenEvaluators}
+            className="rounded-md border border-neutral-300 bg-white px-2.5 py-1 text-[11px] text-neutral-700"
+          >
+            Open Evaluators
+          </button>
+        </div>
       </div>
     </div>
   );

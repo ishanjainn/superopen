@@ -297,6 +297,10 @@ export type Recommendation = {
   related_sessions?: string[];
   evidence?: string[];
   created_at?: string;
+  applied_at?: string;
+  decision_reason?: string;
+  decision_actor?: "human" | "agent" | "system" | string;
+  decision_at?: string;
   [key: string]: unknown;
 };
 

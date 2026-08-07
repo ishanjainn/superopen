@@ -17,10 +17,18 @@ export async function POST(
     if (action !== "dismiss" && action !== "apply" && action !== "revert") {
       return NextResponse.json({ error: "unknown action" }, { status: 400 });
     }
-    const res = await soJSON(["recommend", action, id], {
-      cwd: repoCwd(),
-      timeoutMs: 120_000,
-    });
+    const body = (await req.json().catch(() => null)) as { reason?: unknown } | null;
+    const reason = typeof body?.reason === "string" ? body.reason.trim() : "";
+    if (!reason) {
+      return NextResponse.json({ error: "reason is required" }, { status: 400 });
+    }
+    const res = await soJSON(
+      ["recommend", action, id, "--reason", reason, "--actor", "human"],
+      {
+        cwd: repoCwd(),
+        timeoutMs: 120_000,
+      }
+    );
     if (res.ok === false) {
       return NextResponse.json(
         { error: res.error || `${action} failed` },

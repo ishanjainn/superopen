@@ -3,6 +3,7 @@ package coding
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -49,8 +50,9 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 	for _, v := range vendors {
 		switch v {
 		case "claude", "claude-code":
-			_, e1 := os.Stat(filepath.Join(home, ".claude", "plugins", "superopen-cc"))
-			out["claude-code"] = e1 == nil
+			manifest := filepath.Join(home, ".claude", "plugins", "superopen-cc", "hooks", "hooks.json")
+			data, e := os.ReadFile(manifest)
+			out["claude-code"] = e == nil && hookBinaryAvailable(string(data), "cc")
 		case "cursor":
 			data, e := os.ReadFile(filepath.Join(home, ".cursor", "hooks.json"))
 			out["cursor"] = e == nil && (strings.Contains(string(data), "so coding hook --vendor=cursor") ||
@@ -64,7 +66,8 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 				if p == "" {
 					continue
 				}
-				if _, e := os.Stat(p); e == nil {
+				manifest := filepath.Join(p, "plugins", "superopen", "hooks", "hooks.json")
+				if data, e := os.ReadFile(manifest); e == nil && hookBinaryAvailable(string(data), "codex") {
 					ok = true
 					break
 				}
@@ -85,6 +88,26 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 		}
 	}
 	return out
+}
+
+func hookBinaryAvailable(manifest, vendor string) bool {
+	marker := " coding hook --vendor=" + vendor
+	idx := strings.Index(manifest, marker)
+	if idx < 0 {
+		return false
+	}
+	lineStart := strings.LastIndex(manifest[:idx], "\"")
+	if lineStart < 0 {
+		return false
+	}
+	bin := strings.TrimSpace(manifest[lineStart+1 : idx])
+	bin = strings.Trim(bin, "'\"")
+	if bin == "so" {
+		_, err := exec.LookPath(bin)
+		return err == nil
+	}
+	info, err := os.Stat(bin)
+	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
 }
 
 func writeEndpointConfig(endpoint string) error {

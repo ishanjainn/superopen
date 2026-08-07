@@ -1,9 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import Sidebar from "@/components/shell/sidebar";
 import SidebarBrand from "@/components/shell/sidebar-brand";
-import { HeaderContextRow } from "@/components/shell/header";
+import { HeaderContextRow, pageTitle } from "@/components/shell/header";
 import { BreadcrumbProvider } from "@/components/shell/breadcrumb-context";
 import { ProjectProvider } from "@/components/shell/project-context";
 import {
@@ -11,6 +12,20 @@ import {
   useSidebarLayout,
 } from "@/components/shell/sidebar-layout-context";
 import { cn } from "@/lib/utils";
+
+function BrowserTitle() {
+  const pathname = usePathname();
+
+  useEffect(() => {
+    const section = pageTitle(pathname || "/");
+    document.title =
+      section === "Superopen"
+        ? "Superopen | Agent Harness Engineering"
+        : `${section} | Superopen`;
+  }, [pathname]);
+
+  return null;
+}
 
 function PlaygroundShellFrame({ children }: { children: ReactNode }) {
   const { sidebarWidthClass } = useSidebarLayout();
@@ -52,6 +67,7 @@ export default function PlaygroundShell({ children }: { children: ReactNode }) {
     <SidebarLayoutProvider>
       <ProjectProvider>
         <BreadcrumbProvider>
+          <BrowserTitle />
           <PlaygroundShellFrame>{children}</PlaygroundShellFrame>
         </BreadcrumbProvider>
       </ProjectProvider>

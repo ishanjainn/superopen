@@ -166,7 +166,28 @@ func (c CursorImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 		sess.Turns = append(sess.Turns, port.PortableTurn{Role: role, Text: text})
 	}
 	ensureMeta(&sess)
+	loadWorkingStateSidecar(&sess, ref.SourcePath)
 	return sess, nil
+}
+
+// loadWorkingStateSidecar restores working state written by SOHubExport, since
+// transcript.jsonl's role/text rows have no field for it.
+func loadWorkingStateSidecar(sess *port.PortableSession, sourceDir string) {
+	raw, err := os.ReadFile(filepath.Join(sourceDir, "working-state.json"))
+	if err != nil {
+		return
+	}
+	var decoded struct {
+		WorkingState port.WorkingState `json:"working_state"`
+		DroppedTurns int               `json:"dropped_turns"`
+	}
+	if json.Unmarshal(raw, &decoded) != nil {
+		return
+	}
+	sess.WorkingState = decoded.WorkingState
+	if decoded.DroppedTurns > sess.DroppedTurns {
+		sess.DroppedTurns = decoded.DroppedTurns
+	}
 }
 
 // CursorExport writes a resumable Cursor session pack under .cursor/so-port/

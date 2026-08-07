@@ -2,6 +2,18 @@
  * Restyle Graphify’s dark HTML chrome to Superopen’s light shell:
  * white stage + subtle grid (like the session map), light sidebar, richer NODE panel.
  */
+export function applyGraphPerformanceTuning(html: string): string {
+  return html
+    .replace(
+      "stabilization: { iterations: 200, fit: true },",
+      "stabilization: { iterations: RAW_NODES.length > 2500 ? 50 : RAW_NODES.length > 1200 ? 100 : 200, fit: true },"
+    )
+    .replace(
+      "edges: { smooth: { type: 'continuous', roundness: 0.2 }, selectionWidth: 3 },",
+      "edges: { smooth: RAW_EDGES.length > 5000 ? false : { type: 'continuous', roundness: 0.2 }, selectionWidth: 3 },"
+    );
+}
+
 export function applyLightTheme(html: string): string {
   let out = html;
 
@@ -351,7 +363,7 @@ export function applyLightTheme(html: string): string {
     out = override + out;
   }
 
-  return out;
+  return applyGraphPerformanceTuning(out);
 }
 
 /**
@@ -482,5 +494,5 @@ export function applyDarkTheme(html: string): string {
     out = override + out;
   }
 
-  return out;
+  return applyGraphPerformanceTuning(out);
 }

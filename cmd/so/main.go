@@ -462,7 +462,7 @@ func queryCmd() *cobra.Command {
 
 func cmdSessions() *cobra.Command {
 	c := &cobra.Command{Use: "sessions", Short: "List and manage sessions"}
-	c.AddCommand(&cobra.Command{
+	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List sessions",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -489,7 +489,8 @@ func cmdSessions() *cobra.Command {
 			o.Rows("sessions", []string{"id", "vendor", "commits", "title"}, rows)
 			return nil
 		},
-	})
+	}
+	c.AddCommand(listCmd)
 	attachSessionsStart(c)
 	// rest of sessions cmds added below / via extendSessionsCmd
 	c.AddCommand(&cobra.Command{
@@ -520,6 +521,18 @@ func cmdSessions() *cobra.Command {
 		},
 	})
 	c.AddCommand(&cobra.Command{
+		Use:   "refresh [session-id]",
+		Short: "Materialize current traces while keeping the session active",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := ""
+			if len(args) > 0 {
+				id = strings.TrimSpace(args[0])
+			}
+			return refreshSession(repoRoot(), id)
+		},
+	})
+	c.AddCommand(&cobra.Command{
 		Use:   "demo",
 		Short: "Write a demo session from synthetic telemetry (for UI smoke)",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -527,12 +540,13 @@ func cmdSessions() *cobra.Command {
 		},
 	})
 	extendSessionsCmd(c)
-	c.RunE = c.Commands()[0].RunE // default to list
+	c.RunE = listCmd.RunE // default to list; Commands() is alphabetically sorted.
 	return c
 }
 
 func cmdEval() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	c := &cobra.Command{
 		Use:   "eval [session-id]",
 		Short: "Run evaluations for a session",
 		Args:  cobra.MaximumNArgs(1),
@@ -551,6 +565,20 @@ func cmdEval() *cobra.Command {
 				}
 				id = list[0].ID
 			}
+			meta, _ := session.NewStore(paths).Get(id)
+			scope := "snapshot"
+			if meta.Status == session.StatusEnded {
+				scope = "complete"
+				if !force && meta.EndedAt != nil {
+					if prior, ok := eval.LatestResult(paths, id); ok && !prior.At.Before(*meta.EndedAt) {
+						return out().HumanOrJSON("evaluation", func() {
+							fmt.Printf("Session %s already has a final whole-chat evaluation from %s\n", id, prior.At.Format(time.RFC3339))
+						}, map[string]any{
+							"result": prior, "reused": true, "scope": scope,
+						})
+					}
+				}
+			}
 			store := tracestore.NewLocalJSONL(paths.TracesDir)
 			spans, _ := store.Query(tracestore.QueryFilter{SessionID: id})
 			client := llm.NewBestCompleter(cfg)
@@ -558,17 +586,27 @@ func cmdEval() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Session %s score=%.2f badge=%s\n", id, res.Score, res.Badge)
+			backend := "heuristics"
 			if client != nil && client.Available() {
-				fmt.Printf("Model backend: %s\n", client.Backend())
+				backend = client.Backend()
 			}
+			generated := 0
 			if cfg.Recommendations.Auto {
 				recs, _ := recommend.Generate(paths, id, res, client)
-				fmt.Printf("Generated %d recommendations\n", len(recs))
+				generated = len(recs)
 			}
-			return nil
+			return out().HumanOrJSON("evaluation", func() {
+				fmt.Printf("Session %s score=%.2f badge=%s\n", id, res.Score, res.Badge)
+				fmt.Printf("Model backend: %s\n", backend)
+				fmt.Printf("Generated %d recommendations\n", generated)
+			}, map[string]any{
+				"result": res, "backend": backend, "recommendations_generated": generated,
+				"reused": false, "scope": scope,
+			})
 		},
 	}
+	c.Flags().BoolVar(&force, "force", false, "Re-run even when a closed chat already has a final evaluation")
+	return c
 }
 
 func cmdRecommend() *cobra.Command {
@@ -587,12 +625,13 @@ func cmdRecommend() *cobra.Command {
 			}, recs)
 		},
 	})
-	c.AddCommand(&cobra.Command{
+	var applyReason, applyActor string
+	applyCmd := &cobra.Command{
 		Use:  "apply [id]",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			paths := harness.Resolve(repoRoot())
-			if err := recommend.Apply(paths, args[0]); err != nil {
+			if err := recommend.Apply(paths, args[0], recommend.Decision{Reason: applyReason, Actor: applyActor}); err != nil {
 				return err
 			}
 			if err := sync.Run(sync.Options{RepoRoot: repoRoot(), SkipGraph: true}); err != nil {
@@ -600,35 +639,51 @@ func cmdRecommend() *cobra.Command {
 			}
 			return out().HumanOrJSON("result", func() {
 				fmt.Println("Applied.")
-			}, map[string]any{"ok": true, "id": args[0], "status": "applied"})
+			}, map[string]any{"ok": true, "id": args[0], "status": "applied", "decision_reason": strings.TrimSpace(applyReason), "decision_actor": strings.ToLower(strings.TrimSpace(applyActor))})
 		},
-	})
-	c.AddCommand(&cobra.Command{
+	}
+	applyCmd.Flags().StringVar(&applyReason, "reason", "", "why this recommendation resolves the issue")
+	applyCmd.Flags().StringVar(&applyActor, "actor", "agent", "decision actor: human, agent, or system")
+	_ = applyCmd.MarkFlagRequired("reason")
+	c.AddCommand(applyCmd)
+
+	var dismissReason, dismissActor string
+	dismissCmd := &cobra.Command{
 		Use:  "dismiss [id]",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := recommend.Dismiss(harness.Resolve(repoRoot()), args[0]); err != nil {
+			if err := recommend.Dismiss(harness.Resolve(repoRoot()), args[0], recommend.Decision{Reason: dismissReason, Actor: dismissActor}); err != nil {
 				return err
 			}
 			return out().HumanOrJSON("result", func() {
 				fmt.Println("Dismissed.")
-			}, map[string]any{"ok": true, "id": args[0], "status": "dismissed"})
+			}, map[string]any{"ok": true, "id": args[0], "status": "dismissed", "decision_reason": strings.TrimSpace(dismissReason), "decision_actor": strings.ToLower(strings.TrimSpace(dismissActor))})
 		},
-	})
-	c.AddCommand(&cobra.Command{
+	}
+	dismissCmd.Flags().StringVar(&dismissReason, "reason", "", "why this recommendation is being dismissed")
+	dismissCmd.Flags().StringVar(&dismissActor, "actor", "agent", "decision actor: human, agent, or system")
+	_ = dismissCmd.MarkFlagRequired("reason")
+	c.AddCommand(dismissCmd)
+
+	var revertReason, revertActor string
+	revertCmd := &cobra.Command{
 		Use:  "revert [id]",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			paths := harness.Resolve(repoRoot())
-			if err := recommend.Revert(paths, args[0]); err != nil {
+			if err := recommend.Revert(paths, args[0], recommend.Decision{Reason: revertReason, Actor: revertActor}); err != nil {
 				return err
 			}
 			_ = sync.Run(sync.Options{RepoRoot: repoRoot(), SkipGraph: true})
 			return out().HumanOrJSON("result", func() {
 				fmt.Println("Reverted.")
-			}, map[string]any{"ok": true, "id": args[0], "status": "reverted"})
+			}, map[string]any{"ok": true, "id": args[0], "status": "reverted", "decision_reason": strings.TrimSpace(revertReason), "decision_actor": strings.ToLower(strings.TrimSpace(revertActor))})
 		},
-	})
+	}
+	revertCmd.Flags().StringVar(&revertReason, "reason", "", "why the applied recommendation is being reverted")
+	revertCmd.Flags().StringVar(&revertActor, "actor", "agent", "decision actor: human, agent, or system")
+	_ = revertCmd.MarkFlagRequired("reason")
+	c.AddCommand(revertCmd)
 	c.RunE = c.Commands()[0].RunE
 	return c
 }
@@ -776,6 +831,22 @@ func finalizeSession(root, sessionID string) error {
 		return fmt.Errorf("no spans for session %s", latestID)
 	}
 	sess := session.NewStore(paths)
+	if existing, existingErr := sess.Get(latestID); existingErr == nil && existing.Status == session.StatusEnded && existing.EndedAt != nil {
+		latestSpan := time.Time{}
+		for _, sp := range ss {
+			at := time.Unix(0, sp.EndTimeUnixN).UTC()
+			if sp.EndTimeUnixN == 0 {
+				at = time.Unix(0, sp.StartTimeUnixN).UTC()
+			}
+			if at.After(latestSpan) {
+				latestSpan = at
+			}
+		}
+		if !latestSpan.After(*existing.EndedAt) {
+			fmt.Printf("Session %s is already finalized; no new evaluation was created\n", latestID)
+			return nil
+		}
+	}
 	if !session.SpansHaveActivity(ss) {
 		_ = sess.Delete(latestID)
 		fmt.Printf("Skipped empty session %s (no turns/work)\n", latestID)
@@ -813,7 +884,10 @@ func finalizeSession(root, sessionID string) error {
 				if !cfg.AllowsAutoApplyTier(tier) {
 					continue
 				}
-				if err := recommend.Apply(paths, r.ID); err == nil {
+				if err := recommend.Apply(paths, r.ID, recommend.Decision{
+					Reason: "Automatically applied because its recommendation tier is enabled in auto_apply_tiers.",
+					Actor:  "system",
+				}); err == nil {
 					appliedAny = true
 				}
 			}
@@ -825,6 +899,77 @@ func finalizeSession(root, sessionID string) error {
 	mineOnFinalize(paths, latestID, cfg)
 	_, _ = harvest.Run(paths, cfg, latestID, harvest.TriggerFinalize)
 	fmt.Printf("Finalized session %s (%s)\n", meta.ID, meta.EvalBadge)
+	return nil
+}
+
+// refreshSession materializes the latest trace snapshot without declaring the
+// chat complete. Codex Stop means "assistant turn ended", not "chat closed",
+// so its hook uses this path and reserves finalizeSession for an explicit close.
+func refreshSession(root, sessionID string) error {
+	paths := harness.Resolve(root)
+	_, _ = projects.Register(root, paths.Root, "")
+	cfg, _ := config.Load(paths.Config)
+	applyTracesDir(root, &paths, cfg)
+	store := tracestore.NewLocalJSONL(paths.TracesDir)
+	spans, err := store.Query(tracestore.QueryFilter{Limit: 5000})
+	if err != nil {
+		return err
+	}
+	bySession := map[string][]tracestore.Span{}
+	for _, sp := range spans {
+		sid := otlp.ResolveSessionID(sp.Attributes, "")
+		if sid == "" {
+			sid = sp.SessionID
+		}
+		if sid == "" {
+			sid = sp.TraceID
+		}
+		bySession[sid] = append(bySession[sid], sp)
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		var latest int64
+		for candidate, candidateSpans := range bySession {
+			for _, sp := range candidateSpans {
+				if sp.StartTimeUnixN > latest {
+					latest = sp.StartTimeUnixN
+					id = candidate
+				}
+			}
+		}
+	}
+	ss := bySession[id]
+	if len(ss) == 0 {
+		return fmt.Errorf("no spans for session %s", id)
+	}
+	if !session.SpansHaveActivity(ss) {
+		return nil
+	}
+	sess := session.NewStore(paths)
+	_ = sess.Start(session.Meta{ID: id, Vendor: ss[0].Attributes["coding_agent.vendor"], StartedAt: time.Unix(0, ss[0].StartTimeUnixN).UTC()})
+	tokens, cost, _ := store.SessionCost(id)
+	meta, err := sess.MaterializeFromSpans(id, ss, tokens, cost)
+	if err != nil {
+		return err
+	}
+	meta.Status = session.StatusActive
+	meta.EndedAt = nil
+	meta.DurationMs = time.Since(meta.StartedAt).Milliseconds()
+	meta.RepoRoot = root
+	if p, projectErr := projects.Get(root); projectErr == nil {
+		meta.ProjectID = p.ID
+	}
+	if err := sess.UpdateMeta(meta); err != nil {
+		return err
+	}
+	_ = session.NewStateStore(paths).Save(session.State{
+		SessionID: id,
+		Vendor:    meta.Vendor,
+		Phase:     session.PhaseActive,
+		RepoRoot:  root,
+	})
+	_, _ = viz.BuildReplayFromSpans(paths, id, ss)
+	fmt.Printf("Refreshed active session %s\n", id)
 	return nil
 }
 
@@ -911,8 +1056,10 @@ func startNextUI(repoRoot string, uiPort int) (*exec.Cmd, string, error) {
 	// Light local path: Next.js Turbopack dev via `npm run dev` (package.json).
 	cmd := exec.Command("npm", "run", "dev", "--", "-p", fmt.Sprintf("%d", uiPort), "-H", "127.0.0.1")
 	cmd.Dir = webDir
+	soBin, _ := os.Executable()
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("SUPEROPEN_ROOT=%s", repoRoot),
+		fmt.Sprintf("SUPEROPEN_SO_BIN=%s", soBin),
 		"NODE_ENV=development",
 	)
 	cmd.Stdout = os.Stdout

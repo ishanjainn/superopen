@@ -205,7 +205,8 @@ function GuardrailsDashboardView({
             <p className="mb-2 text-[11px] text-neutral-400">Denies + hard stops per day</p>
             <BarSeries
               data={series.map((d) => ({ label: d.date, value: d.triggers }))}
-              barClassName="bg-amber-700"
+              name="Triggers"
+              color="#b45309"
               empty="No triggers recorded yet"
             />
           </div>
@@ -214,7 +215,8 @@ function GuardrailsDashboardView({
             <p className="mb-2 text-[11px] text-neutral-400">Hard policy denies per day</p>
             <BarSeries
               data={series.map((d) => ({ label: d.date, value: d.denials }))}
-              barClassName="bg-red-700"
+              name="Denials"
+              color="#b91c1c"
               empty="No denials recorded yet"
             />
           </div>

@@ -3,5 +3,4 @@ bin/
 dist/
 *.exe
 .DS_Store
-.so/
 graphify-out/

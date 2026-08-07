@@ -245,6 +245,14 @@ function RecRowContent({ row }: { row: Recommendation }) {
             <span className="line-clamp-1 max-w-md">{row.rationale}</span>
           </>
         )}
+        {row.status !== "pending" && row.decision_reason && (
+          <>
+            <span>·</span>
+            <span className="line-clamp-1 max-w-md">
+              {row.status === "dismissed" ? "Dismissed" : "Resolved"}: {row.decision_reason}
+            </span>
+          </>
+        )}
       </div>
     </div>
   );

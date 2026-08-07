@@ -117,6 +117,7 @@ func (OpenCodeImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 			}
 		}
 	}
+	ws := newWSCollector(sess.CWD)
 	msgs, _ := doc["messages"].([]any)
 	for _, m := range msgs {
 		mm, ok := m.(map[string]any)
@@ -142,7 +143,10 @@ func (OpenCodeImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 				if t, ok := pm["text"].(string); ok {
 					text.WriteString(t)
 				}
-			case "reasoning", "tool", "step-start", "step-finish":
+			case "tool":
+				dropped = true
+				observeOpenCodeToolPart(ws, pm)
+			case "reasoning", "step-start", "step-finish":
 				dropped = true
 			}
 		}
@@ -163,7 +167,27 @@ func (OpenCodeImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 		sess.Turns = append(sess.Turns, port.PortableTurn{Role: role, Text: text.String(), Timestamp: ts})
 	}
 	ensureMeta(&sess)
+	sess.WorkingState = ws.result()
 	return sess, nil
+}
+
+// observeOpenCodeToolPart best-effort extracts a tool name and input from an
+// OpenCode "tool" part. The nested shape (state.input vs top-level input, etc.)
+// has shifted across OpenCode versions, so this probes several plausible
+// layouts and simply recovers nothing if none match, rather than guessing wrong.
+func observeOpenCodeToolPart(ws *wsCollector, part map[string]any) {
+	name := firstStringField(part, "tool", "toolName", "tool_name", "name")
+	input, _ := part["input"].(map[string]any)
+	if input == nil {
+		if state, ok := part["state"].(map[string]any); ok {
+			input, _ = state["input"].(map[string]any)
+			if exit, ok := extractExitCode(state["output"]); ok {
+				ws.observe(name, input, &exit)
+				return
+			}
+		}
+	}
+	ws.observe(name, input, nil)
 }
 
 type OpenCodeExport struct{}

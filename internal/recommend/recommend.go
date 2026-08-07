@@ -36,6 +36,29 @@ type Recommendation struct {
 	AppliedAt       time.Time `json:"applied_at,omitempty"`
 	AppliedPaths    []string  `json:"applied_paths,omitempty"`
 	LessonText      string    `json:"lesson_text,omitempty"`
+	DecisionReason  string    `json:"decision_reason,omitempty"`
+	DecisionActor   string    `json:"decision_actor,omitempty"` // human | agent | system
+	DecisionAt      time.Time `json:"decision_at,omitempty"`
+}
+
+type Decision struct {
+	Reason string
+	Actor  string
+}
+
+func normalizeDecision(d Decision) (Decision, error) {
+	d.Reason = strings.TrimSpace(d.Reason)
+	d.Actor = strings.ToLower(strings.TrimSpace(d.Actor))
+	if d.Reason == "" {
+		return d, fmt.Errorf("decision reason is required")
+	}
+	if d.Actor == "" {
+		d.Actor = "agent"
+	}
+	if d.Actor != "human" && d.Actor != "agent" && d.Actor != "system" {
+		return d, fmt.Errorf("decision actor must be human, agent, or system")
+	}
+	return d, nil
 }
 
 // FingerprintKey builds a stable id across sessions for dedupe.
@@ -60,6 +83,9 @@ func FingerprintKey(recType, proposedPath, kind string) string {
 }
 
 func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ interface{}) ([]Recommendation, error) {
+	if evalRes.EvidenceStatus == "insufficient" {
+		return nil, nil
+	}
 	var draft []Recommendation
 	now := time.Now().UTC()
 
@@ -240,7 +266,11 @@ func mergeSessions(a, b []string) []string {
 	return out
 }
 
-func Apply(paths harness.Paths, id string) error {
+func Apply(paths harness.Paths, id string, decision Decision) error {
+	decision, err := normalizeDecision(decision)
+	if err != nil {
+		return err
+	}
 	pending, err := LoadPending(paths)
 	if err != nil {
 		return err
@@ -303,7 +333,7 @@ func Apply(paths harness.Paths, id string) error {
 		}
 	}
 
-	lesson := applied.Title + " - " + applied.Rationale
+	lesson := applied.Title + " - " + applied.Rationale + " Resolution: " + decision.Reason
 	store := memory.NewStore(paths)
 	_ = store.AddLesson(memory.Lesson{
 		Text: lesson, Scope: "workspace", Confidence: 0.9, SourceSession: applied.SessionID,
@@ -314,6 +344,9 @@ func Apply(paths harness.Paths, id string) error {
 	applied.PreviousBody = string(prevBody)
 	applied.PreviousExisted = prevExisted
 	applied.LessonText = lesson
+	applied.DecisionReason = decision.Reason
+	applied.DecisionActor = decision.Actor
+	applied.DecisionAt = applied.AppliedAt
 	if applied.ProposedPath != "" {
 		applied.AppliedPaths = []string{applied.ProposedPath}
 	}
@@ -384,7 +417,11 @@ func containsStr(ss []string, v string) bool {
 	return false
 }
 
-func Dismiss(paths harness.Paths, id string) error {
+func Dismiss(paths harness.Paths, id string, decision Decision) error {
+	decision, err := normalizeDecision(decision)
+	if err != nil {
+		return err
+	}
 	pending, err := LoadPending(paths)
 	if err != nil {
 		return err
@@ -395,6 +432,9 @@ func Dismiss(paths harness.Paths, id string) error {
 		if pending[i].ID == id {
 			r := pending[i]
 			r.Status = "dismissed"
+			r.DecisionReason = decision.Reason
+			r.DecisionActor = decision.Actor
+			r.DecisionAt = time.Now().UTC()
 			dismissed = &r
 			continue
 		}
@@ -410,11 +450,23 @@ func Dismiss(paths harness.Paths, id string) error {
 	hist = append(hist, *dismissed)
 	hdata, _ := json.MarshalIndent(hist, "", "  ")
 	_ = os.WriteFile(paths.RecsHistory, hdata, 0o644)
+	// A dismissal is durable product feedback. Preserve it as workspace memory so
+	// future recommendation generation can avoid repeating the same bad advice.
+	_ = memory.NewStore(paths).AddLesson(memory.Lesson{
+		Text:          "Recommendation dismissed: " + dismissed.Title + " - " + decision.Reason,
+		Scope:         "workspace",
+		Confidence:    0.9,
+		SourceSession: dismissed.SessionID,
+	}, memory.ModePersistent)
 	return SavePending(paths, kept)
 }
 
 // Revert restores the pre-apply snapshot for an applied recommendation.
-func Revert(paths harness.Paths, id string) error {
+func Revert(paths harness.Paths, id string, decision Decision) error {
+	decision, err := normalizeDecision(decision)
+	if err != nil {
+		return err
+	}
 	hist, err := LoadHistory(paths)
 	if err != nil {
 		return err
@@ -442,6 +494,9 @@ func Revert(paths harness.Paths, id string) error {
 		_ = os.WriteFile(p, []byte(r.PreviousBody), 0o644)
 	}
 	hist[found].Status = "reverted"
+	hist[found].DecisionReason = decision.Reason
+	hist[found].DecisionActor = decision.Actor
+	hist[found].DecisionAt = time.Now().UTC()
 	hdata, _ := json.MarshalIndent(hist, "", "  ")
 	return os.WriteFile(paths.RecsHistory, hdata, 0o644)
 }

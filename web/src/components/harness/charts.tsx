@@ -1,6 +1,17 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 /** Minimal sparkline (pass=high). */
 export function Sparkline({
@@ -47,16 +58,59 @@ export function Sparkline({
 
 type SeriesPoint = { label: string; value: number };
 
+const gridColor = "rgb(var(--color-neutral-200))";
+const axisColor = "rgb(var(--color-neutral-500))";
+const tooltipSurface = "rgb(var(--color-neutral-50))";
+const tooltipText = "rgb(var(--color-neutral-900))";
+
+export function chartDateLabel(value: string): string {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+export function chartFullDate(value: string): string {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+export function compactChartNumber(value: number): string {
+  const compact = Math.abs(value) >= 1_000;
+  return new Intl.NumberFormat(undefined, {
+    notation: compact ? "compact" : "standard",
+    maximumFractionDigits: compact ? 1 : Math.abs(value) >= 100 ? 0 : 2,
+  }).format(value);
+}
+
+const tooltipStyle = {
+  backgroundColor: tooltipSurface,
+  border: `1px solid ${gridColor}`,
+  borderRadius: "8px",
+  color: tooltipText,
+  fontSize: "12px",
+};
+
 /** Vertical bar chart for executions / denials over time. */
 export function BarSeries({
   data,
   className,
-  barClassName = "bg-neutral-900",
+  color = "#525252",
+  name = "Value",
+  valueFormatter = compactChartNumber,
+  allowDecimals = false,
   empty = "No data in range",
 }: {
   data: SeriesPoint[];
   className?: string;
-  barClassName?: string;
+  color?: string;
+  name?: string;
+  valueFormatter?: (value: number) => string;
+  allowDecimals?: boolean;
   empty?: string;
 }) {
   if (!data.length || data.every((d) => !d.value)) {
@@ -71,45 +125,48 @@ export function BarSeries({
       </div>
     );
   }
-  const max = Math.max(...data.map((d) => d.value), 1);
   return (
-    <div className={cn("flex h-40 flex-col", className)}>
-      <div className="flex min-h-0 flex-1 items-end gap-1 px-1">
-        {data.map((d) => (
-          <div
-            key={d.label}
-            className="flex min-w-0 flex-1 flex-col items-center justify-end"
-            title={`${d.label}: ${d.value}`}
-          >
-            <div
-              className={cn("w-full max-w-[1.25rem] rounded-t-sm", barClassName)}
-              style={{ height: `${Math.max((d.value / max) * 100, d.value ? 4 : 0)}%` }}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="mt-1 flex gap-1 border-t border-neutral-100 pt-1">
-        {data.map((d, i) => (
-          <div
-            key={d.label}
-            className="min-w-0 flex-1 truncate text-center text-[9px] text-neutral-400"
-          >
-            {i === 0 || i === data.length - 1 || i === Math.floor(data.length / 2)
-              ? d.label.slice(5)
-              : ""}
-          </div>
-        ))}
-      </div>
+    <div className={cn("h-48 w-full", className)}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid vertical={false} stroke={gridColor} strokeDasharray="3 3" />
+          <XAxis
+            dataKey="label"
+            tickFormatter={chartDateLabel}
+            tick={{ fill: axisColor, fontSize: 10 }}
+            axisLine={{ stroke: gridColor }}
+            tickLine={false}
+            minTickGap={24}
+          />
+          <YAxis
+            tickFormatter={valueFormatter}
+            tick={{ fill: axisColor, fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            width={48}
+            domain={[0, "auto"]}
+            allowDecimals={allowDecimals}
+          />
+          <Tooltip
+            cursor={{ fill: "rgb(var(--color-neutral-100))" }}
+            contentStyle={tooltipStyle}
+            labelStyle={{ color: tooltipText, fontWeight: 600 }}
+            labelFormatter={(label) => chartFullDate(String(label))}
+            formatter={(value) => [valueFormatter(Number(value)), name]}
+          />
+          <Bar dataKey="value" name={name} fill={color} radius={[3, 3, 0, 0]} maxBarSize={28} />
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }
 
-/** Area-ish pass-rate line using SVG. */
+/** Pass-rate trend over time. */
 export function PassRateChart({
   data,
   className,
 }: {
-  data: { label: string; value: number }[];
+  data: { label: string; value: number | null }[];
   className?: string;
 }) {
   if (!data.length) {
@@ -124,30 +181,50 @@ export function PassRateChart({
       </div>
     );
   }
-  const w = 320;
-  const h = 120;
-  const pad = 8;
-  const pts = data.map((d, i) => {
-    const x =
-      pad +
-      (data.length === 1 ? (w - pad * 2) / 2 : (i / (data.length - 1)) * (w - pad * 2));
-    const y = pad + (1 - Math.min(Math.max(d.value, 0), 1)) * (h - pad * 2);
-    return [x, y] as const;
-  });
-  const line = pts.map(([x, y]) => `${x},${y}`).join(" ");
-  const area = `${pad},${h - pad} ${line} ${w - pad},${h - pad}`;
   return (
-    <div className={cn("h-40 w-full", className)}>
-      <svg viewBox={`0 0 ${w} ${h}`} className="h-full w-full" preserveAspectRatio="none">
-        <polygon fill="#f5f5f5" points={area} />
-        <polyline
-          fill="none"
-          stroke="#171717"
-          strokeWidth="2"
-          strokeLinejoin="round"
-          points={line}
-        />
-      </svg>
+    <div className={cn("h-48 w-full", className)}>
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+          <CartesianGrid vertical={false} stroke={gridColor} strokeDasharray="3 3" />
+          <XAxis
+            dataKey="label"
+            tickFormatter={chartDateLabel}
+            tick={{ fill: axisColor, fontSize: 10 }}
+            axisLine={{ stroke: gridColor }}
+            tickLine={false}
+            minTickGap={24}
+          />
+          <YAxis
+            domain={[0, 1]}
+            ticks={[0, 0.25, 0.5, 0.75, 1]}
+            tickFormatter={(value) => `${Math.round(Number(value) * 100)}%`}
+            tick={{ fill: axisColor, fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            width={42}
+          />
+          <Tooltip
+            cursor={{ stroke: axisColor, strokeDasharray: "3 3" }}
+            contentStyle={tooltipStyle}
+            labelStyle={{ color: tooltipText, fontWeight: 600 }}
+            labelFormatter={(label) => chartFullDate(String(label))}
+            formatter={(value) => [
+              `${Math.round(Number(value) * 100)}%`,
+              "Pass rate",
+            ]}
+          />
+          <Line
+            type="monotone"
+            dataKey="value"
+            name="Pass rate"
+            stroke="#059669"
+            strokeWidth={2}
+            connectNulls={false}
+            dot={data.length <= 12 ? { r: 3, fill: "#059669" } : false}
+            activeDot={{ r: 5 }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   );
 }

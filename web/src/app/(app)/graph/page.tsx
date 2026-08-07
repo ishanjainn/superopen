@@ -12,7 +12,7 @@ export default function GraphPage() {
   const { resolved } = useTheme();
   const graphSrc = useMemo(() => {
     // bump v when theme/serve rules change so iframes refresh
-    const params = new URLSearchParams({ theme: resolved, v: "7" });
+    const params = new URLSearchParams({ theme: resolved, v: "8" });
     if (projectId && projectId !== "all") params.set("project", projectId);
     return `/api/graph/html?${params.toString()}`;
   }, [projectId, resolved]);
@@ -80,7 +80,7 @@ export default function GraphPage() {
         </div>
       ) : htmlOk ? (
         <div className="relative min-h-0 flex-1 bg-white">
-          <GraphifyFrame src={graphSrc} />
+          <GraphifyFrame key={graphSrc} src={graphSrc} />
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center">

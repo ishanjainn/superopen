@@ -1,170 +1,141 @@
-# Superopen
+<h1 align="center">Superopen</h1>
 
 <p align="center">
   <img src="web/public/brand-wordmark.png" alt="SUPEROPEN" width="420" />
 </p>
 
-**Open source Agent Harness Engineering**
+<h3 align="center">Open-source Agent Harness Engineering</h3>
 
-Superopen is not another coding agent. It builds the open source harness around Claude Code, Cursor, Codex, and similar tools so every coding session improves the next - with less token waste and lower cost.
+Superopen is not another coding agent. Type `/so init` in Claude Code, Cursor, Codex, or a similar agent to build an open-source harness for shared memory and governance and make every coding session improve the next one with less token waste and lower cost.
+
+## Get started in 30 seconds
+
+### Install with Homebrew
+
+```bash
+brew install ishanjainn/superopen/so
+```
+
+### Other install methods
 
 ```bash
 # macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.sh | sh
+
+# Windows PowerShell
+iwr -useb https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.ps1 | iex
+```
+
+### Register with your coding agents
+
+```bash
+so install
+```
+
+This registers the `/so` skill with your installed coding agents.
+
+### Initialize a repository
+
+```bash
+# In your coding agent, with your target repository open
+/so init
+```
+
+Now ask a real question about the repository instead of making the next session rediscover it:
+
+```text
+/so graph query "how does auth work?"
+/so memory write "Prefer the existing auth middleware pattern"
+/so doctor
+```
+
+Run `so dev` from your terminal when you want the local session UI at `http://localhost:4444`.
+
+## What it does
+
+| Capability | What you get |
+| --- | --- |
+| Agent skills | A single `/so` skill across Claude, Cursor, Codex, Gemini, OpenCode, Copilot, Pi, and Agent Skills-compatible tools |
+| Repository understanding | A graph built before the harness is seeded, so context starts from the codebase’s real structure |
+| Shared memory | Preferences, lessons, and project context injected at session start across supported agents in the same repo |
+| Session replay | OTLP telemetry materialized into sessions and replayable as a city map in the local UI |
+| Evals and recommendations | Post-session scoring that proposes targeted improvements; sensitive changes can require approval |
+| Local-first workflow | `.so/` is ordinary repository data that both the CLI and UI read and write directly |
+| Agent-first CLI | Compact output, JSON envelopes, clear empty states, and useful next-step hints |
+
+## See the loop
+
+```text
+agent session
+    ↓ OTLP traces
+.so/sessions/<id>/
+    ↓ evaluate
+recommendations
+    ↓ approve or auto-apply safe changes
+harness updates
+    ↓
+next agent session starts with better context
+```
+
+Superopen can enrich evaluations with a signed-in Claude Code or Codex CLI, an API key or gateway, or offline heuristics. It falls back to heuristics when no model backend is available.
+
+---
+
+## Install
+
+Install the CLI, then run `so install`. The binary alone is not enough: agents need the `/so` skill file in a discovery location.
+
+```bash
 brew install ishanjainn/superopen/so
-so install                 # enables /so (or $so) in Cursor, Claude, Codex, Gemini, OpenCode, Copilot, Pi
-
-# Bootstrap (shell or agent):
-so init                    # or /so init
-so sync
-so dev                     # light Next.js UI (Turbopack) on :4444 + OTLP
-so dev -d                  # same, detached (background)
-so dev stop                # stop detached / tracked UI
+so install
 ```
 
-Other install methods: `curl -fsSL https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.sh | sh`, `go install ./cmd/so`, or on Windows `iwr -useb https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.ps1 | iex`.
+`so install` registers the skill in the supported global and project discovery paths:
 
-The UI reads/writes `.so/` directly (Next App Router). Advanced Memory search, Port, Retrieve, and checkpoint create/restore shell out to the `so` CLI - keep it on PATH (or set `SUPEROPEN_SO_BIN`). Graph view needs Graphify HTML (`so graph` / Graphify); a stub `graph.json` alone is not enough for the Graph page.
+| Agent | Invocation |
+| --- | --- |
+| Claude Code | `/so` |
+| Cursor | `/so` |
+| Codex | `$so` |
+| Gemini, OpenCode, Copilot CLI, Pi | `/so` |
+| Generic Agent Skills | `/so` |
 
-## What `so install` does
+It writes skills only; it does not create a `.so/` harness. Run `/so init` (or `$so init` in Codex) in a repository to bootstrap one.
 
-Same idea as Graphify’s `graphify install`: the CLI binary alone is not enough - agents need a skill/command file.
-
-`so install` writes the `/so` skill into every supported agent’s discovery path:
-
-- `~/.agents/skills/so/` + project `.agents/skills/so/` (shared Agent Skills)
-- `~/.cursor/skills/so/` + project `.cursor/skills/so/` (Cursor - this is `/so`; do not also add `.cursor/commands/so.md`)
-- `~/.claude/skills/so/` + project `.claude/skills/so/` (skills only - no duplicate `.claude/commands/so.md`)
-- `~/.codex/skills/so/` + project `.codex/skills/so/` (use `$so` in Codex)
-- `~/.gemini/skills/so/` + project `.gemini/skills/so/`
-- `~/.config/opencode/skills/so/` + project `.opencode/skills/so/`
-- `~/.copilot/skills/so/` + project `.github/skills/so/` (Copilot CLI)
-- `~/.pi/agent/skills/so/` + project `.pi/skills/so/`
-
-No `.so/` harness is created by install (skills only). After `so install`, any of those agents can run **`/so init`** (or `$so init` in Codex) to bootstrap `.so/` + graph.
-
-## What `so init` does
-
-1. Creates `.so/` harness directories + config
-2. **Builds the repository graph first** (understand structure before seeding)
-3. **Reads existing agent instruction files** (`AGENTS.md`, `CLAUDE.md`, `.cursor/rules/*.mdc`, …)
-4. Seeds context/skills/rules/guardrails/evals **heuristically** (works offline, no API key)
-5. Writes `.so/upgrade-brief.md` for **assistant-driven upgrade** (Graphify-style - no API key). Headless `so init --llm` is optional for CI.
-6. Builds a citymap for session Map replay
-7. Enables OTLP observability hooks for configured vendors (Claude Code, Cursor, Codex, Gemini, OpenCode, Copilot CLI, Pi)
-8. Injects always-on instructions into `AGENTS.md`, `CLAUDE.md`, `.cursor/rules/superopen.mdc`
+## Initialize a project
 
 ```bash
-# In any supported coding agent (preferred - uses the assistant model):
-/so init                         # so init --no-llm → agent upgrades via .so/upgrade-brief.md → so apply-upgrade
-# Codex: $so init
+# In a coding agent—the preferred path, using that agent’s model
+/so init
 
-# Shell / CI:
-so init --no-llm                 # heuristic seed + upgrade-brief only
-so init --llm                    # headless API-key upgrade (fails without a key/gateway)
-so init --force                  # also overwrite existing context/guardrails/evals templates
-so init --code-only              # skip Graphify semantic/docs pass
-```
+# Codex
+$so init
 
-### Headless LLM (CI / automation only)
+# Shell or CI: heuristic seed and an assistant-ready upgrade brief
+so init --no-llm
 
-Coding agents should **not** ask for API keys - `/so init` upgrades with the assistant model.
-For scripts without an assistant:
-
-```bash
-export OPENAI_API_KEY=sk-...     # or ANTHROPIC_API_KEY / OPENROUTER_API_KEY / OPENAI_BASE_URL
+# Headless API-key upgrade, intended for CI/automation
 so init --llm
 ```
 
-You can also set `llm.provider`, `llm.model`, and `llm.base_url` in `.so/config.yaml`.
+Initialization:
 
-### Backend evals & recommendations
+1. Creates `.so/` and its configuration.
+2. Builds the repository graph first.
+3. Reads existing instruction files such as `AGENTS.md`, `CLAUDE.md`, and Cursor rules.
+4. Seeds context, skills, rules, guardrails, and evals heuristically—offline and without an API key.
+5. Writes `.so/upgrade-brief.md` for an assistant-driven improvement pass.
+6. Builds the city map, enables configured OTLP hooks, and injects always-on project instructions.
 
-After a session ends (`so eval` / finalize), Superopen scores the session and may propose harness updates. Model enrichment reuses **coding-agent CLIs** when available (sealed `claude -p` / `codex exec` - your logged-in subscription, no extra API key):
+For unattended automation, configure `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `OPENAI_BASE_URL`, then run `so init --llm`. You can also set `llm.provider`, `llm.model`, and `llm.base_url` in `.so/config.yaml`.
 
-| `evals.backend` | Behavior |
-|---|---|
-| `auto` (default) | Prefer Claude/Codex CLI on PATH → else API key → else heuristics |
-| `agent_cli` | Claude Code / Codex only (`evals.agent_cli`: `auto` \| `claude` \| `codex`) |
-| `llm_api` | API key / gateway only |
-| `heuristics` | Offline scores only |
+---
 
-Cursor has no sealed headless CLI for judging; use it for interactive `/so init` upgrades. Backend judging uses Claude Code or Codex.
+## How agents use it
 
-## Uninstall
+After `so install`, use the skill directly:
 
-**Run `so uninstall` before removing the binary.** Package managers only delete the executable - they know nothing about the skills, hooks, and injectors `so install` / `so init` wrote into your agent config directories. Remove the binary first and those are orphaned, pointing at a CLI that no longer exists.
-
-```bash
-so uninstall --dry-run     # preview everything that would be removed
-so uninstall               # skills + injectors + hooks + .so/ + the binary itself
-```
-
-`so uninstall` removes the `so` binary too. Flags to keep parts of it:
-
-| Flag | Effect |
-|---|---|
-| `--dry-run` | Print the plan, change nothing |
-| `--keep-binary` | Leave the `so` executable in place |
-| `--keep-harness` | Leave this repo's `.so/` directory in place |
-
-If you installed via a package manager, keep the binary and let that manager remove it:
-
-```bash
-so uninstall --keep-binary
-brew uninstall so
-brew untap ishanjainn/superopen     # optional
-```
-
-### Hooks only
-
-To strip coding-agent hooks without touching skills, `.so/`, or the binary:
-
-```bash
-so coding uninstall --vendor=all             # all vendors
-so coding uninstall --vendor=cursor          # one vendor
-so coding uninstall --vendor=all --purge     # also drop ~/.config/superopen + session-state cache
-```
-
-Leave `--purge` off if you plan to reinstall and want to keep your endpoint and API key. Shared files (`~/.cursor/hooks.json`, `~/.codex/config.toml`) are edited surgically - other tools' entries are preserved.
-
-### Already removed the binary?
-
-Rebuild from a checkout and run the uninstaller with it:
-
-```bash
-make build && ./bin/so uninstall
-```
-
-## Closed loop
-
-Agent session → OTLP traces → post-session materialization (`.so/sessions/<id>/`) → Map replay from telemetry → auto eval → recommendations → soft tier may auto-apply; guardrails/evals need approve (or `require_approval: false`) → harness updates → next session is cheaper.
-
-Backend enrichment uses sealed Claude Code / Codex CLI on PATH (models: `evals.models.claude` / `evals.models.codex`, defaults `claude-sonnet-5` / `gpt-5.6-luna`) even when the coding session was Cursor, OpenCode, Pi, or Gemini. Heuristics run if no CLI/API key.
-
-After `git pull`, Superopen refreshes via `post-merge` / `post-checkout` hooks or `so refresh` (also while `so dev` watches). Full rebuild remains `so sync`.
-
-Shared **memory** (`.so/memory/`) injects on every vendor SessionStart and via `so sessions start --vendor=…`, so Claude / Cursor / Codex (and other installed vendors) continue from the same prefs, lessons, and project context **within one repo**. Each clone has its own `.so/`; the projects registry lets one UI browse sessions across local clones. Consolidation prefers your coding-agent CLI login; API keys are optional.
-
-CLI ↔ UI parity: both surfaces read/write `.so/` (see `docs/so-schema.md`). Recommendations Approve in the UI runs `so recommend apply` (writes proposed body, adds a lesson, `so sync --skip-graph`).
-
-## AXI (Agent eXperience Interface)
-
-CLI output is built for agents first:
-
-- **Compact text** by default (rows + `count:` + `next:` hints)
-- **`--json`** / `SO_JSON=1` - structured envelopes (`ok`, `kind`, `items`/`data`, `next`)
-- **`--full`** / `SO_FULL=1` - disable field truncation
-- **Definitive empty states** - `0 sessions` (never silent)
-- **Exit codes** - `0` ok · `1` fail · `2` usage · `3` not found
-- **Content-first root** - bare `so` shows a harness status snapshot (`so --help` for the full command list)
-
-Guardrails live in **one file**: `.so/guardrails/guardrails.yaml` (advisory rules + denied commands / sensitive paths).
-
-## Agent slash command (`/so`)
-
-After **`so install`** (not only after `so init`):
-
-```
+```text
 /so
 /so init
 /so graph query "how does auth work?"
@@ -172,61 +143,96 @@ After **`so install`** (not only after `so init`):
 /so doctor
 ```
 
-## Layout
+The CLI is designed for agents as well as humans:
 
-| Path | Role |
-|---|---|
-| `cmd/so/` | CLI entrypoint (`so`) |
-| `web/` | Local Next.js UI (`so dev` → :4444) |
-| `internal/` | Shared Go libraries (harness, OTLP, evals, coding hooks, …) |
-| `templates/` | Seed content for `.so/knowledge`, skills, rules, guardrails |
-| `plugins/` + `sdk/` | Coding-agent hooks + OTLP bootstrap for those hooks (not a general LLM SDK) |
+- Compact text output by default, with counts and next-step hints.
+- `--json` / `SO_JSON=1` for structured `ok`, `kind`, `items`, and `data` envelopes.
+- `--full` / `SO_FULL=1` to disable field truncation.
+- Exit codes: `0` success, `1` failure, `2` usage, `3` not found.
 
-Session 3D replay lives in `web/src/map`.
+Guardrails live in one inspectable file: `.so/guardrails/guardrails.yaml`.
+
+## Evals and recommendations
+
+When a session ends (`so eval` or finalization), Superopen scores it and may propose harness updates.
+
+| `evals.backend` | Behavior |
+| --- | --- |
+| `auto` (default) | Claude/Codex CLI on `PATH`, then API key, then heuristics |
+| `agent_cli` | Claude Code or Codex only (`evals.agent_cli`: `auto`, `claude`, or `codex`) |
+| `llm_api` | API key or gateway only |
+| `heuristics` | Offline scoring only |
+
+The coding-agent CLI login is reused when available, so a normal interactive setup does not require a separate API key. Cursor has no sealed headless judging CLI; use it for interactive `/so init` upgrades and Claude Code or Codex for backend judging.
+
+---
 
 ## CLI
 
 | Command | Purpose |
-|---|---|
-| `so` | Status snapshot (AXI content-first) |
-| `so uninstall` | Remove skills, hooks, injectors, `.so/`, and the CLI ([see Uninstall](#uninstall)) |
-| `so install` | Register `/so` skill with coding agents (required after CLI install) |
-| `so init` | Bootstrap harness + install coding-agent o11y hooks |
-| `so coding install --vendor=all` | Install/refresh Claude/Cursor/Codex OTLP hooks |
-| `so coding uninstall --vendor=all` | Strip OTLP hooks only (`--purge` also drops shared config) |
-| `so coding hook` | Hot path invoked by agent hooks (do not run by hand) |
-| `so sync` | Refresh injectors/graph/citymap |
-| `so dev` | Light Next.js UI (:4444, Turbopack); `so dev -d` / `so dev stop` |
-| `so graph query` | Query repository graph |
-| `so sessions` | List/finalize/demo sessions |
-| `so sessions port` | Port chats across Claude/Codex/OpenCode/Cursor/.so |
-| `so sessions detect` / `verify` | Detect vendor stores / sample IR integrity |
+| --- | --- |
+| `so` | Harness status snapshot |
+| `so install` | Register `/so` with coding agents |
+| `so init` | Bootstrap the harness and install observability hooks |
+| `so sync` | Refresh injectors, graph, and city map |
+| `so dev` | Run the lightweight Next.js UI on `:4444` (`-d` to detach, `stop` to stop) |
+| `so graph query` | Query the repository graph |
+| `so sessions` | List, finalize, and demo sessions |
+| `so sessions port` | Port chats across Claude, Codex, OpenCode, Cursor, and `.so` |
 | `so eval` | Score a session |
-| `so recommend` | List/apply/dismiss recommendations |
-| `so memory` | Workspace memory: Write→Store→Inject (`active-context.md` on SessionStart) |
-| `so learn` | Capture corrections as lessons |
-| `so sessions start` | Start a coding agent from shared `.so/memory` |
-| `so retrieve` | Search harness corpus index |
-| `so guard show/check` | Guardrails policy inspect / deny check |
-| `so audit` | SEL-style audit trail |
-| `so open` | Open UI deep-link when `so dev` is running |
-| `so knowledge` | Knowledge helpers (`.so/knowledge`) |
-| `so doctor` | Health checks |
+| `so recommend` | List, apply, or dismiss recommendations |
+| `so memory` | Write, store, search, and inject workspace memory |
+| `so retrieve` | Search the harness corpus index |
+| `so guard show/check` | Inspect or check guardrail policy |
+| `so audit` | View the SEL-style audit trail |
+| `so open` | Open a UI deep link when `so dev` is running |
+| `so doctor` | Run health checks |
 
-## Attribution
+For the full data model and CLI/UI parity, see [the `.so/` schema](docs/so-schema.md).
 
-Repository graphs powered by [Graphify](https://github.com/Graphify-Labs/graphify).
+## Uninstall
 
-Apache-2.0 - see `LICENSE` and `NOTICE`.
+Run `so uninstall` before removing the binary. Package managers remove the executable but do not know about the skills, hooks, and injected instructions that Superopen registered.
 
-## Contributing
+```bash
+so uninstall --dry-run     # preview changes
+so uninstall               # remove skills, injectors, hooks, .so/, and the binary
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Please read [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening issues or PRs.
+# If Homebrew installed the binary
+so uninstall --keep-binary
+brew uninstall so
+```
 
-CI:
+| Flag | Effect |
+| --- | --- |
+| `--dry-run` | Print the plan without changing anything |
+| `--keep-binary` | Leave the `so` executable installed |
+| `--keep-harness` | Leave the current repository’s `.so/` directory |
+
+To remove hooks only: `so coding uninstall --vendor=all`. Add `--purge` to also remove shared Superopen configuration and the session-state cache. Shared agent configuration is edited surgically, so other tools’ entries are preserved.
+
+If the binary is already gone, rebuild from a checkout and run `make build && ./bin/so uninstall`.
+
+## Project layout
+
+| Path | Role |
+| --- | --- |
+| `cmd/so/` | CLI entrypoint |
+| `web/` | Local Next.js UI |
+| `internal/` | Harness, OTLP, evals, coding hooks, and shared Go packages |
+| `templates/` | Seed content for project knowledge, skills, rules, guardrails, and evals |
+| `plugins/` + `sdk/` | Coding-agent hooks and their OTLP bootstrap—not a general LLM SDK |
+
+Session 3D replay lives in `web/src/map`.
+
+## Attribution, contributing, and security
+
+Repository graphs are powered by [Graphify](https://github.com/Graphify-Labs/graphify).
+
+Superopen is Apache-2.0 licensed; see [LICENSE](LICENSE) and [NOTICE](NOTICE). Contributions are welcome—start with [CONTRIBUTING.md](CONTRIBUTING.md), then read [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening an issue or pull request.
 
 | Workflow | What it runs |
-|---|---|
-| `ci-cli.yml` | `go vet` · `go test -race` · cross-compile · plugin sync drift |
-| `ci-web.yml` | `tsc` · `eslint` · Vitest · `next build` |
+| --- | --- |
+| `ci-cli.yml` | `go vet`, `go test -race`, cross-compile, plugin-sync drift checks |
+| `ci-web.yml` | TypeScript, ESLint, Vitest, Next build |
 | `release-cli.yml` | Tagged `cli-X.Y.Z` binary release |

@@ -122,14 +122,8 @@ Prefer .so/ before raw exploration.
 	return nil
 }
 
-func seedSOGitignore(paths harness.Paths, templateRoot string) error {
-	dst := filepath.Join(paths.Root, ".gitignore")
-	if _, err := os.Stat(dst); err == nil {
-		return nil
-	}
-	data, err := os.ReadFile(filepath.Join(templateRoot, "so.gitignore"))
-	if err != nil {
-		data = []byte(`*
+const initialSOGitignore = `# Superopen - commit team-useful harness docs; ignore local runtime state.
+*
 !.gitignore
 !knowledge/
 !knowledge/**
@@ -143,11 +137,74 @@ func seedSOGitignore(paths harness.Paths, templateRoot string) error {
 !evals/**
 !AGENT.md
 !config.yaml
-`)
+`
+
+const fallbackSOGitignore = `# Superopen - commit the portable team harness. Ignore only machine-local
+# telemetry, liveness state, caches, and transient work-in-progress records.
+traces/
+audit/
+run/
+session-state/
+port/
+ui-prefs.json
+finalize-pending
+
+# These are regenerated or describe only a local agent process.
+memory/history/
+memory/harvest-ledger.json
+memory/idle-sweep-at
+memory/last-refresh.json
+memory/pending-harvest.json
+memory/refresh-status.json
+graph/cache/
+
+# Session transcripts/meta can carry emails, prompts, and file contents -
+# always machine-local, never portable team harness.
+sessions/
+`
+
+// previousSOGitignore is the default written before session data (which can
+// carry the user's email, prompts, and file contents) was fully ignored -
+// only sessions/pending-spawns.json was excluded. Recognized below so
+// existing installs get upgraded automatically, not just brand-new ones.
+const previousSOGitignore = `# Superopen - commit the portable team harness. Ignore only machine-local
+# telemetry, liveness state, caches, and transient work-in-progress records.
+traces/
+audit/
+run/
+session-state/
+port/
+ui-prefs.json
+finalize-pending
+
+# These are regenerated or describe only a local agent process.
+memory/history/
+memory/harvest-ledger.json
+memory/idle-sweep-at
+memory/last-refresh.json
+memory/pending-harvest.json
+memory/refresh-status.json
+sessions/pending-spawns.json
+graph/cache/
+`
+
+func seedSOGitignore(paths harness.Paths, templateRoot string) error {
+	dst := filepath.Join(paths.Root, ".gitignore")
+	if existing, err := os.ReadFile(dst); err == nil {
+		trimmed := strings.TrimSpace(string(existing))
+		// Upgrade only an exact generated default - a project-owned policy wins.
+		isGeneratedDefault := trimmed == strings.TrimSpace(initialSOGitignore) ||
+			trimmed == strings.TrimSpace(previousSOGitignore)
+		if !isGeneratedDefault {
+			return nil
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(templateRoot, "so.gitignore"))
+	if err != nil {
+		data = []byte(fallbackSOGitignore)
 	}
 	return os.WriteFile(dst, data, 0o644)
 }
-
 
 func seedGuardrails(paths harness.Paths, p discover.Profile, templateRoot string, force bool) error {
 	if !force {

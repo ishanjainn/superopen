@@ -41,6 +41,20 @@ Session port (`so sessions port`) moves chat text between agents; after a succes
 | `recommendations/pending.json` | Pending harness updates |
 | `recommendations/history.json` | Applied / dismissed / reverted recommendations |
 
+## Version-control policy
+
+`.so/` is a portable team harness and should normally be committed. This keeps
+the project graph, durable memory, materialized sessions, recommendations, and
+agent guidance available to every contributor.
+
+The generated `.so/.gitignore` excludes only local operational data: raw OTLP
+`traces/`, audit logs, active-process state (`run/`, `session-state/`, and
+`port/`), graph caches, local UI preferences, and transient memory/session
+markers. Session records under `sessions/` are intentionally shared so a
+teammate can inspect a session after it has been materialized. Do not commit
+session content, memory, or configuration that contains secrets or information
+your team is not authorized to share.
+
 ## AXI output (`so … --json` / `--full`)
 
 Agent eXperience Interface: compact text by default, machine JSON on demand.

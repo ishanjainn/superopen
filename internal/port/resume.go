@@ -12,6 +12,29 @@ import (
 const pendingFileName = "PENDING.json"
 const pendingConvName = "pending-conversation.md"
 
+// maxResumeInject bounds the SessionStart inject. Overflow is trimmed from the
+// FRONT so the most recent turns survive, which is what resuming work needs.
+const maxResumeInject = 8000
+
+// trimResumeBody caps the inject at maxResumeInject bytes, keeping the tail and
+// prepending a note pointing at the full transcript. Trimming aligns to a turn
+// heading where possible so the inject never starts mid-sentence.
+func trimResumeBody(body []byte, fullPath string) string {
+	if len(body) <= maxResumeInject {
+		return string(body)
+	}
+	tail := body[len(body)-maxResumeInject:]
+	// Prefer starting at the first turn heading inside the kept window.
+	if i := strings.Index(string(tail), "\n## "); i >= 0 {
+		tail = tail[i+1:]
+	}
+	note := "> Earlier turns omitted to fit the context budget.\n"
+	if fullPath != "" {
+		note += "> Full ported conversation: " + fullPath + "\n"
+	}
+	return note + "\n" + string(tail)
+}
+
 // PendingResume is the one-shot SessionStart inject armed after Port.
 type PendingResume struct {
 	To              HarnessID `json:"to"`
@@ -45,6 +68,7 @@ func ArmResume(repoRoot string, to HarnessID, destID string, sess PortableSessio
 	if sess.Title != "" {
 		b.WriteString(fmt.Sprintf("Title: %s\n\n", sess.Title))
 	}
+	b.WriteString(RenderWorkingState(sess))
 	for _, t := range sess.Turns {
 		role := strings.TrimSpace(t.Role)
 		if role == "" {
@@ -117,14 +141,18 @@ func consumeSOPortPending(repoRoot string) string {
 	if err != nil {
 		return ""
 	}
+	archivePath := ""
+	if len(body) > maxResumeInject {
+		// Keep the untrimmed transcript around a beat longer than the one-shot
+		// pending file, since the inject below will reference it as "full".
+		archivePath = filepath.Join(portRunDir(repoRoot), "last-conversation.md")
+		_ = os.WriteFile(archivePath, body, 0o644)
+	}
 	_ = os.Remove(metaPath)
 	_ = os.Remove(convPath)
 	// Clear legacy Cursor marker if present.
 	_ = os.Remove(filepath.Join(repoRoot, ".cursor", "so-port", "PENDING"))
-	if len(body) > 8000 {
-		body = body[:8000]
-	}
-	return string(body)
+	return trimResumeBody(body, archivePath)
 }
 
 func consumeLegacyCursorPending(repoRoot string) string {
@@ -143,8 +171,5 @@ func consumeLegacyCursorPending(repoRoot string) string {
 		return ""
 	}
 	_ = os.Remove(pending)
-	if len(body) > 8000 {
-		body = body[:8000]
-	}
-	return string(body)
+	return trimResumeBody(body, conv)
 }

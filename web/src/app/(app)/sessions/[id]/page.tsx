@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, type ReactNode, Suspense } from "reac
 import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { Map as MapIcon } from "lucide-react";
+import { Map as MapIcon, RefreshCw } from "lucide-react";
 import SessionTimeline, {
   type SessionMeta,
   type Span,
@@ -81,11 +81,9 @@ function SessionDetailInner() {
   const [footprint, setFootprint] = useState<any>(null);
   const [checkpoints, setCheckpoints] = useState<RestoreCheckpoint[]>([]);
   const [subagents, setSubagents] = useState<NestedSession[]>([]);
-  const [evalResult, setEvalResult] = useState<Record<string, unknown> | null>(
-    null
-  );
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     const fromUrl = projectFromURL();
@@ -110,9 +108,6 @@ function SessionDetailInner() {
       setFootprint(data.footprint || null);
       setCheckpoints(Array.isArray(data.checkpoints) ? data.checkpoints : []);
       setSubagents(Array.isArray(data.subagents) ? data.subagents : []);
-      setEvalResult(
-        data.eval && typeof data.eval === "object" ? data.eval : null
-      );
       setError("");
     } catch (e: any) {
       setError(String(e.message || e));
@@ -120,6 +115,15 @@ function SessionDetailInner() {
       if (!opts?.quiet) setLoading(false);
     }
   }, [id, project]);
+
+  const refreshDetail = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadDetail({ quiet: true });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadDetail]);
 
   useEffect(() => {
     void loadDetail();
@@ -140,36 +144,32 @@ function SessionDetailInner() {
           <FeatureBackLink href="/sessions" label="Back to sessions" />
         }
         actions={
-          <div className="flex items-center gap-0.5 rounded-md bg-neutral-100 p-0.5">
-            <TabButton active={tab === "chat"} onClick={() => setTab("chat")}>
-              Chat
-            </TabButton>
-            <TabButton active={tab === "map"} onClick={() => setTab("map")}>
-              <MapIcon className="mr-1 inline size-3" />
-              Map
-            </TabButton>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void refreshDetail()}
+              disabled={refreshing}
+              aria-label="Refresh session"
+              title="Refresh session"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-wait disabled:opacity-60"
+            >
+              <RefreshCw
+                className={cn("size-3.5", refreshing && "animate-spin")}
+              />
+              Refresh
+            </button>
+            <div className="flex items-center gap-0.5 rounded-md bg-neutral-100 p-0.5">
+              <TabButton active={tab === "chat"} onClick={() => setTab("chat")}>
+                Chat
+              </TabButton>
+              <TabButton active={tab === "map"} onClick={() => setTab("map")}>
+                <MapIcon className="mr-1 inline size-3" />
+                Map
+              </TabButton>
+            </div>
           </div>
         }
       />
-
-      {tab === "chat" && !loading && !error && evalResult && (
-        <div className="shrink-0 border-b border-neutral-100 bg-neutral-50/80 px-4 py-2 text-xs text-neutral-600">
-          Eval{" "}
-          <span className="font-medium text-neutral-900">
-            {String(
-              (evalResult as { badge?: string }).badge ||
-                (evalResult as { score?: number }).score ||
-                "scored"
-            )}
-          </span>
-          {" · "}
-          <Link href="/evaluations" className="underline underline-offset-2">
-            Evaluations
-          </Link>
-          {" · replay via Map / "}
-          <span className="font-mono">so sessions</span>
-        </div>
-      )}
 
       {loading && tab === "chat" && (
         <p className="p-6 text-sm text-neutral-500">Loading session…</p>

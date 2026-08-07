@@ -356,15 +356,69 @@ function loadTranscriptSpans(sessionPath: string): TraceSpan[] {
   return out;
 }
 
+export function mergeTraceSpans(...groups: TraceSpan[][]): TraceSpan[] {
+  const merged = new Map<string, TraceSpan>();
+  for (const spans of groups) {
+    for (const span of spans) {
+      const traceID = String(span.trace_id || "");
+      const spanID = String(span.span_id || "");
+      const key =
+        traceID || spanID
+          ? `${traceID}:${spanID}`
+          : [
+              span.session_id,
+              span.name,
+              span.start_time_unix_nano,
+              span.role,
+              span.timestamp,
+              span.text,
+            ]
+              .map((value) => String(value || ""))
+              .join(":");
+      merged.set(key, span);
+    }
+  }
+  return Array.from(merged.values()).sort(
+    (a, b) =>
+      Number(a.start_time_unix_nano || a.timestamp || 0) -
+      Number(b.start_time_unix_nano || b.timestamp || 0)
+  );
+}
+
+function codexRolloutUpdatedAt(sessionId: string): number {
+  const base = join(homedir(), ".codex", "sessions");
+  const now = new Date();
+  for (const offset of [0, -1]) {
+    const day = new Date(now);
+    day.setUTCDate(day.getUTCDate() + offset);
+    const dir = join(
+      base,
+      String(day.getUTCFullYear()),
+      String(day.getUTCMonth() + 1).padStart(2, "0"),
+      String(day.getUTCDate()).padStart(2, "0")
+    );
+    if (!fileExists(dir)) continue;
+    try {
+      const name = readdirSync(dir).find(
+        (entry) => entry.includes(sessionId) && entry.endsWith(".jsonl")
+      );
+      if (name) return statSync(join(dir, name)).mtimeMs;
+    } catch {
+      // Best-effort diagnostic only.
+    }
+  }
+  return 0;
+}
+
 function enrichSessionStats(
   soDir: string,
   sessionPath: string,
   meta: SessionMeta
 ): { turns: number; checkpoints: number } {
-  let spans = loadTranscriptSpans(sessionPath);
-  if (spans.length === 0) {
-    spans = loadLiveTraces(soDir, String(meta.id || ""));
-  }
+  const spans = mergeTraceSpans(
+    loadTranscriptSpans(sessionPath),
+    loadLiveTraces(soDir, String(meta.id || ""))
+  );
   return {
     turns: countTurnsFromSpans(spans),
     checkpoints: countCheckpointDirs(sessionPath),
@@ -563,11 +617,10 @@ function loadSessionSpans(item: ListItem): TraceSpan[] {
   const so = item.so_root;
   if (!so || !item.id) return [];
   const sessionPath = join(so, "sessions", item.id);
-  let spans = loadTranscriptSpans(sessionPath);
-  if (spans.length === 0) {
-    spans = loadLiveTraces(so, item.id);
-  }
-  return spans;
+  return mergeTraceSpans(
+    loadTranscriptSpans(sessionPath),
+    loadLiveTraces(so, item.id)
+  );
 }
 
 /**
@@ -787,25 +840,29 @@ export function getSessionDetail(id: string, projectFilter = "") {
     }
 
     const footprint = readJSON(join(sessionPath, "footprint.json"));
-    const transcriptPath = join(sessionPath, "transcript.jsonl");
-    const transcript: unknown[] = [];
-    if (fileExists(transcriptPath)) {
-      const lines = readText(transcriptPath).split("\n");
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          transcript.push(JSON.parse(line));
-        } catch {
-          /* skip */
-        }
+    // Materialized transcripts can lag behind live OTLP during an active chat.
+    // Merge both sources so an existing stale transcript never hides new turns.
+    const transcript = mergeTraceSpans(
+      loadTranscriptSpans(sessionPath),
+      loadLiveTraces(so, id)
+    );
+    const rolloutUpdatedAt = codexRolloutUpdatedAt(id);
+    const recordedEnd = meta.ended_at ? new Date(meta.ended_at).getTime() : 0;
+    if (
+      meta.status === "ended" &&
+      rolloutUpdatedAt > recordedEnd + 15_000
+    ) {
+      // Older Codex hooks treated every assistant Stop as chat closure. A
+      // rollout that keeps advancing proves the chat is active; repair the
+      // stale materialized status so evaluations are labeled snapshots.
+      meta.status = "active";
+      meta.ended_at = undefined;
+      try {
+        writeFileSync(join(sessionPath, "meta.json"), JSON.stringify(meta, null, 2));
+      } catch {
+        // The response can still report the corrected in-memory status.
       }
     }
-    // Active Cursor sessions often have OTLP spans in .so/traces before finalize
-    // writes transcript.jsonl - fall back so Chat UI is not empty mid-session.
-    if (transcript.length === 0) {
-      transcript.push(...loadLiveTraces(so, id));
-    }
-
     const subagents: SessionMeta[] = [];
     const sessionsDir = join(so, "sessions");
     const links = loadAgentLinks(sessionsDir);

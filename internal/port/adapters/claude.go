@@ -100,6 +100,7 @@ func peekClaude(path string) (title, cwd string, updated int64) {
 
 func (ClaudeImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 	sess := port.NewPortableSession(port.HarnessClaude, ref.SourceSessionID, ref.SourcePath, ref.CWD, ref.Title)
+	ws := newWSCollector(ref.CWD)
 	f, err := os.Open(ref.SourcePath)
 	if err != nil {
 		return sess, err
@@ -114,6 +115,12 @@ func (ClaudeImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 		}
 		if c, ok := row["cwd"].(string); ok && sess.CWD == "" {
 			sess.CWD = c
+			if ws.cwd == "" {
+				ws.cwd = c
+			}
+		}
+		if gb, ok := row["gitBranch"].(string); ok && gb != "" {
+			ws.branch = gb
 		}
 		if ts, ok := row["timestamp"].(string); ok {
 			if ms := parseTimeMs(ts); ms > 0 {
@@ -137,7 +144,11 @@ func (ClaudeImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 		if role != "user" && role != "assistant" {
 			continue
 		}
-		text, dropped := textFromContent(msg["content"])
+		text, dropped, tools := textAndToolsFromContent(msg["content"])
+		for _, t := range tools {
+			input, _ := t["input"].(map[string]any)
+			ws.observe(firstStringField(t, "name"), input, nil)
+		}
 		if dropped && strings.TrimSpace(text) == "" {
 			sess.DroppedTurns++
 			continue
@@ -157,6 +168,7 @@ func (ClaudeImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 		}
 	}
 	ensureMeta(&sess)
+	sess.WorkingState = ws.result()
 	sess.SourceMetadata["soSource"] = map[string]any{
 		"harness": "claude", "sessionId": ref.SourceSessionID,
 	}

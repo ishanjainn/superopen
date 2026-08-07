@@ -1,0 +1,46 @@
+[
+  {
+    "id": "rec_1786073889170529000_skill",
+    "fingerprint": "skill|skills/reduce-exploration.md|reduce-exploration",
+    "session_id": "019fda2f-a371-7f00-9d70-03b028b2db0a",
+    "type": "skill",
+    "title": "Add skill for recurring exploration pattern",
+    "rationale": "Harness underused - agent skipped .so skills/context.",
+    "why": "A focused skill that points at graph query + context before Grep/Glob reduces token waste on the next similar task.",
+    "related_sessions": [
+      "019fda2f-a371-7f00-9d70-03b028b2db0a"
+    ],
+    "evidence": [
+      "harness_use score 0.20"
+    ],
+    "proposed_path": "/Users/ishanjain/work/superopen/.so/skills/reduce-exploration.md",
+    "proposed_body": "# Reduce exploration\n\n1. Run `so graph query` before Grep/Glob.\n2. Read `.so/knowledge/architecture.md` for service boundaries.\n3. Prefer skills over broad searches.\n",
+    "status": "applied",
+    "created_at": "2026-08-07T03:38:09.170529Z",
+    "applied_at": "2026-08-07T03:38:09.173389Z",
+    "applied_paths": [
+      "/Users/ishanjain/work/superopen/.so/skills/reduce-exploration.md"
+    ],
+    "lesson_text": "Add skill for recurring exploration pattern - Harness underused - agent skipped .so skills/context."
+  },
+  {
+    "id": "rec_1786073556031770000_guard",
+    "fingerprint": "guardrail|guardrails/guardrails.yaml|avoid-unrelated",
+    "session_id": "019fda2f-a371-7f00-9d70-03b028b2db0a",
+    "type": "guardrail",
+    "title": "Tighten unrelated-change guardrail",
+    "rationale": "Low scope score - edits drifted outside the task.",
+    "why": "Reinforcing the avoid-unrelated guardrail keeps the next session's diffs smaller and reviewable.",
+    "related_sessions": [
+      "019fda2f-a371-7f00-9d70-03b028b2db0a"
+    ],
+    "evidence": [
+      "scope score 0.00"
+    ],
+    "proposed_path": "/Users/ishanjain/work/superopen/.so/guardrails/guardrails.yaml",
+    "proposed_body": "rules:\n    - id: avoid-unrelated-drift\n      description: Keep edits scoped to the requested task; avoid unrelated drive-by refactors.\n      severity: warn\n      source: recommend\napproval: \"\"\ndenied_commands: []\nsensitive_paths: []\nredact_output: false\n",
+    "status": "dismissed",
+    "created_at": "2026-08-07T03:32:36.03177Z",
+    "applied_at": "0001-01-01T00:00:00Z"
+  }
+]

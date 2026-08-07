@@ -105,6 +105,13 @@ func attachSessionsPort(sessions *cobra.Command) {
 					return
 				}
 				fmt.Printf("ported=%d skipped=%d failed=%d\n", res.Ported, res.Skipped, res.Failed)
+				if res.DroppedTurns > 0 {
+					fmt.Printf("dropped %d non-text turns (tool calls, results, reasoning)", res.DroppedTurns)
+					if res.WorkingStateSessions > 0 {
+						fmt.Printf(" — recovered working state for %d/%d sessions", res.WorkingStateSessions, res.Ported)
+					}
+					fmt.Println()
+				}
 				if res.ResumeArmed && res.ResumeID != "" {
 					fmt.Printf("resume armed: next %s SessionStart injects %s\n", to, res.ResumeID)
 				}

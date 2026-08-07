@@ -61,9 +61,16 @@ func writeJSONL(path string, rows []any) error {
 }
 
 func textFromContent(v any) (text string, dropped bool) {
+	text, dropped, _ = textAndToolsFromContent(v)
+	return text, dropped
+}
+
+// textAndToolsFromContent extracts display text and also returns the tool_use
+// blocks, so callers can recover working state from calls the IR cannot carry.
+func textAndToolsFromContent(v any) (text string, dropped bool, tools []map[string]any) {
 	switch c := v.(type) {
 	case string:
-		return c, false
+		return c, false, nil
 	case []any:
 		var b strings.Builder
 		for _, part := range c {
@@ -77,13 +84,16 @@ func textFromContent(v any) (text string, dropped bool) {
 				if t, ok := m["text"].(string); ok {
 					b.WriteString(t)
 				}
-			case "tool_use", "tool_result", "thinking":
+			case "tool_use":
+				dropped = true
+				tools = append(tools, m)
+			case "tool_result", "thinking":
 				dropped = true
 			}
 		}
-		return b.String(), dropped
+		return b.String(), dropped, tools
 	default:
-		return "", false
+		return "", false, nil
 	}
 }
 

@@ -25,7 +25,7 @@ const TITLES: Record<string, string> = {
   "/settings": "Settings",
 };
 
-function pageTitle(pathname: string) {
+export function pageTitle(pathname: string) {
   if (pathname.startsWith("/sessions/")) return "Sessions";
   for (const [prefix, title] of Object.entries(TITLES)) {
     if (pathname === prefix || pathname.startsWith(prefix + "/")) return title;

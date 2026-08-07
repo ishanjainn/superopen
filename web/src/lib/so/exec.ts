@@ -1,4 +1,7 @@
 import { spawn } from "child_process";
+import { homedir } from "os";
+import { join } from "path";
+import { fileExists } from "./nodeio";
 import { repoRoot, soRoot } from "./root";
 
 export type SoJSON<T> = {
@@ -19,7 +22,7 @@ export async function soJSON<T = unknown>(
   opts?: { cwd?: string; timeoutMs?: number }
 ): Promise<SoJSON<T>> {
   const cwd = opts?.cwd ?? repoCwd();
-  const bin = process.env.SUPEROPEN_SO_BIN?.trim() || "so";
+  const bin = soBinary();
   const child = spawn(bin, [...args, "--json"], {
     cwd,
     env: {
@@ -57,6 +60,17 @@ export async function soJSON<T = unknown>(
   } catch {
     return { schema: 1, ok: false, error: `invalid JSON from so: ${raw.slice(0, 200)}` };
   }
+}
+
+export function soBinary(): string {
+  const configured = process.env.SUPEROPEN_SO_BIN?.trim();
+  if (configured) return configured;
+  const candidates = [
+    join(homedir(), "go", "bin", process.platform === "win32" ? "so.exe" : "so"),
+    "/opt/homebrew/bin/so",
+    "/usr/local/bin/so",
+  ];
+  return candidates.find(fileExists) || "so";
 }
 
 export function repoCwd(): string {
