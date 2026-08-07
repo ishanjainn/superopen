@@ -40,7 +40,7 @@ Vendors:
   codex         ~/.local/share/so/codex-marketplace/ + 'codex plugin remove'
   all           shorthand for all three
 
-Use --purge to also remove the shared legacy config (~/.config/openlit)
+Use --purge to also remove the shared config (~/.config/superopen)
 and the session-state cache. Leave it off if you plan to re-install
 later and want to keep your API key + endpoint.
 
@@ -55,7 +55,7 @@ installer, or 'go install').`,
 	}
 
 	cmd.Flags().StringVar(&vendor, "vendor", "", "Vendor (claude-code | cursor | codex | all)")
-	cmd.Flags().BoolVar(&purge, "purge", false, "Also remove ~/.config/openlit and the session-state cache")
+	cmd.Flags().BoolVar(&purge, "purge", false, "Also remove ~/.config/superopen and the session-state cache")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would be removed without modifying any files")
 	_ = cmd.MarkFlagRequired("vendor")
 
@@ -153,7 +153,7 @@ func run(cmd *cobra.Command, vendor string, purge, dryRun bool) error {
 		fmt.Fprintln(out, "")
 		fmt.Fprintln(out, "Hooks will stop firing on the agent's next session.")
 		if !purge {
-			fmt.Fprintln(out, "Tip: pass --purge to also drop ~/.config/openlit and the session-state cache.")
+			fmt.Fprintln(out, "Tip: pass --purge to also drop ~/.config/superopen and the session-state cache.")
 		}
 	}
 	return nil

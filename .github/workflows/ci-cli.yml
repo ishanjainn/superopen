@@ -1,7 +1,7 @@
 name: CI / CLI
 
 # Go tests + cross-compile smoke + plugin-tree drift check.
-# Mirrors OpenLIT's ci-cli pattern so PRs get the same signal as release.
+# PRs get the same signal as release.
 
 on:
   workflow_call:

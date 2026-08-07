@@ -106,7 +106,7 @@ func TestIsRealClaudeCodeInvocation(t *testing.T) {
 			env: map[string]string{
 				"CLAUDECODE":         "1",
 				"CLAUDE_PROJECT_DIR": "/Users/me/repo",
-				"CLAUDE_PLUGIN_ROOT": "/Users/me/.claude/plugins/cache/openlit/openlit-cc/0.1.0",
+				"CLAUDE_PLUGIN_ROOT": "/Users/me/.claude/plugins/cache/superopen/superopen-cc/0.1.0",
 				"CLAUDE_SESSION_ID":  "8f3a...",
 			},
 			want: true,
@@ -132,9 +132,9 @@ func TestIsRealClaudeCodeInvocation(t *testing.T) {
 				// absence of CLAUDECODE=1 - that's the single
 				// signal we anchor on.
 				"CLAUDE_PROJECT_DIR":         "/Users/me/repo",
-				"CLAUDE_PLUGIN_ROOT":         "/Users/me/.claude/plugins/cache/openlit/openlit-cc/0.1.0",
+				"CLAUDE_PLUGIN_ROOT":         "/Users/me/.claude/plugins/cache/superopen/superopen-cc/0.1.0",
 				"CURSOR_VERSION":             "3.4.17",
-				"CURSOR_PLUGIN_ROOT":         "/Users/me/.claude/plugins/cache/openlit/openlit-cc/0.1.0",
+				"CURSOR_PLUGIN_ROOT":         "/Users/me/.claude/plugins/cache/superopen/superopen-cc/0.1.0",
 				"CURSOR_USER_EMAIL":          "user@example.com",
 				"CURSOR_LAYOUT":              "unifiedAgent",
 				"CURSOR_EXTENSION_HOST_ROLE": "always-local",

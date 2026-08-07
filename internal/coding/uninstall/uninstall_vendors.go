@@ -50,17 +50,17 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 	switch vendor {
 	case "claude-code":
 		// Four side effects beyond the manifest directory:
-		//   1. ~/.local/share/openlit/claude-marketplace/ - written
+		//   1. ~/.local/share/superopen/claude-marketplace/ - written
 		//      by materializeClaudeMarketplace so `claude plugin
 		//      marketplace add` had a stable path. Removing the
 		//      tree here means a future re-install rebuilds it
 		//      from the embedded FS, which is cheap.
-		//   2. ~/.claude/plugins/cache/openlit/openlit-cc/ - Claude
+		//   2. ~/.claude/plugins/cache/superopen/superopen-cc/ - Claude
 		//      Code's own per-version download cache. Without this
 		//      sweep, a re-install + version bump leaves the
 		//      previous version's binary on disk forever (Claude
 		//      Code does not GC stale plugin payloads).
-		//   3. `claude plugin uninstall openlit-cc@openlit` + the
+		//   3. `claude plugin uninstall superopen-cc@superopen` + the
 		//      marketplace-remove counterpart - best-effort. If
 		//      the user already removed it from inside the Claude
 		//      TUI we'll get an "already uninstalled" style error
@@ -108,9 +108,9 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 		// also removes the marketplace tree. We still need to:
 		//   1. Tell Codex to forget about it via the CLI so its
 		//      `codex plugin marketplace list` state matches reality.
-		//   2. TOML-level fallback: strip [marketplaces.openlit],
-		//      [plugins."openlit@openlit"], and every
-		//      [hooks.state."openlit@openlit:*"] section from
+		//   2. TOML-level fallback: strip [marketplaces.superopen],
+		//      [plugins."superopen@superopen"], and every
+		//      [hooks.state."superopen@superopen:*"] section from
 		//      ~/.codex/config.toml. Codex's own `plugin remove`
 		//      and `plugin marketplace remove` subcommands have
 		//      been observed to leave these sections in place
@@ -140,7 +140,7 @@ func purgeShared(dryRun bool) (removed []string, errs []string) {
 		return nil, []string{err.Error()}
 	}
 
-	// 1. ~/.config/openlit/ - `openlit configure` output. We
+	// 1. ~/.config/superopen/ - `so configure` output. We
 	//    intentionally remove the whole directory rather than just
 	//    config.env so any future managed-config side files
 	//    (audit logs, key cache, …) are swept up by the same flag.
@@ -152,7 +152,7 @@ func purgeShared(dryRun bool) (removed []string, errs []string) {
 		}
 	}
 
-	// 2. <UserCacheDir>/openlit/ - session-state cache. Path
+	// 2. <UserCacheDir>/superopen/ - session-state cache. Path
 	//    resolution matches the sessionstate package so we don't
 	//    drift if XDG_CACHE_HOME is set.
 	if cacheRoot, err := os.UserCacheDir(); err == nil && cacheRoot != "" {
@@ -180,7 +180,7 @@ func vendorDestRoot(vendor string) (string, error) {
 	}
 	switch vendor {
 	case "claude-code":
-		// Prefer current plugin id; uninstall also sweeps legacy openlit-cc.
+		// Current plugin id written by the install path.
 		return filepath.Join(home, ".claude", "plugins", "superopen-cc"), nil
 	case "codex":
 		return userpaths.CodexMarketplaceDir()
@@ -212,13 +212,13 @@ func claudeMarketplaceRoot() (string, error) {
 // this on uninstall, a user who reinstalls with a new version will
 // leave the old payload (and the matching CLAUDE_PLUGIN_ROOT-shaped
 // directory) on disk indefinitely. The marketplace key matches the
-// `id` field of `~/.local/share/openlit/claude-marketplace/.claude-plugin/marketplace.json`.
+// `id` field of `~/.local/share/superopen/claude-marketplace/.claude-plugin/marketplace.json`.
 func claudePluginCacheRoot() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".claude", "plugins", "cache", "so", "openlit-cc"), nil
+	return filepath.Join(home, ".claude", "plugins", "cache", "superopen", "superopen-cc"), nil
 }
 
 // removePath removes a file or directory tree at p. Returns the path
@@ -244,7 +244,7 @@ func removePath(p string, dryRun bool) (string, error) {
 	return p, nil
 }
 
-// disableClaudeCodePlugin asks the `claude` CLI to drop the openlit-cc
+// disableClaudeCodePlugin asks the `claude` CLI to drop the superopen-cc
 // plugin AND the legacy marketplace registration. Both are
 // best-effort: a missing CLI or a "nothing to do" outcome is
 // collapsed to nil so we don't block the directory cleanup that
@@ -257,10 +257,10 @@ func disableClaudeCodePlugin() error {
 		return nil
 	}
 	// 1) Plugin uninstall. Arg shape mirrors the install side
-	//    (`plugin install openlit-cc@openlit --scope user`),
+	//    (`plugin install superopen-cc@superopen --scope user`),
 	//    inverted. If Claude renames the subcommand we swallow
 	//    the error rather than fail the directory cleanup.
-	rm := exec.Command(claudeBin, "plugin", "uninstall", "openlit-cc@openlit", "--scope", "user") //nolint:gosec
+	rm := exec.Command(claudeBin, "plugin", "uninstall", "superopen-cc@superopen", "--scope", "user") //nolint:gosec
 	if out, err := rm.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
 		lower := strings.ToLower(msg)
@@ -283,7 +283,7 @@ func disableClaudeCodePlugin() error {
 			!strings.Contains(lower, "not registered") &&
 			!strings.Contains(lower, "not found") &&
 			!strings.Contains(lower, "no such marketplace") {
-			return fmt.Errorf("claude plugin marketplace remove openlit: %s", msg)
+			return fmt.Errorf("claude plugin marketplace remove superopen: %s", msg)
 		}
 	}
 	return nil
@@ -298,7 +298,7 @@ func disableCodexPlugin() error {
 		return nil
 	}
 
-	for _, slug := range []string{"superopen@superopen", "openlit@openlit", "so@so"} {
+	for _, slug := range []string{"superopen@superopen", "so@so"} {
 		rm := exec.Command(codexBin, "plugin", "remove", slug) //nolint:gosec
 		if out, err := rm.CombinedOutput(); err != nil {
 			msg := strings.TrimSpace(string(out))
@@ -312,7 +312,7 @@ func disableCodexPlugin() error {
 		}
 	}
 
-	for _, mpName := range []string{"superopen", "openlit", "so"} {
+	for _, mpName := range []string{"superopen", "so"} {
 		mp := exec.Command(codexBin, "plugin", "marketplace", "remove", mpName) //nolint:gosec
 		if out, err := mp.CombinedOutput(); err != nil {
 			msg := strings.TrimSpace(string(out))

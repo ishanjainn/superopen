@@ -118,7 +118,7 @@ func TestIsOurHookEntry(t *testing.T) {
 		want bool
 	}{
 		{`{"command": "so coding hook --vendor=cursor --event=sessionStart"}`, true},
-		{`{"command": "/Users/me/.openlit/bin/so coding hook --vendor=cursor --event=sessionEnd", "timeout": 5000}`, true},
+		{`{"command": "/Users/me/.superopen/bin/so coding hook --vendor=cursor --event=sessionEnd", "timeout": 5000}`, true},
 		{`{"command": "/usr/local/bin/so coding hook --vendor=claude-code --event=sessionStart"}`, false},
 		{`{"command": "other-tool"}`, false},
 		{`{}`, false},

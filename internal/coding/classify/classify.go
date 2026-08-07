@@ -60,7 +60,7 @@ type Inputs struct {
 	RepoURL string
 
 	// RepoAllowlist is the user's local override for "what counts as
-	// my work repo". Read from SUPEROPEN_CODING_REPO_ALLOWLIST (legacy: OPENLIT_CODING_REPO_ALLOWLIST) as a
+	// my work repo". Read from SUPEROPEN_CODING_REPO_ALLOWLIST as a
 	// comma-separated list of substring patterns. Authoritative
 	// allowlists live server-side; this is just a hint the CLI
 	// stamps so the dashboard can pre-classify before the server
@@ -122,7 +122,7 @@ func Classify(in Inputs) Classification {
 	// Repo IS on allowlist and the API-key allowlist is unknown - this
 	// is the common v1 case (no API-key allowlist infrastructure yet).
 	// The repo signal is strong on its own: the user has explicitly
-	// declared this remote as a work repo via SUPEROPEN_CODING_REPO_ALLOWLIST (legacy: OPENLIT_CODING_REPO_ALLOWLIST).
+	// declared this remote as a work repo via SUPEROPEN_CODING_REPO_ALLOWLIST.
 	if repoMatch && !keyKnown {
 		return Classification{Value: "work", Reason: "repo_origin_match"}
 	}
@@ -167,9 +167,9 @@ func matchAllowlist(url string, patterns []string) bool {
 
 
 // EnvAllowlist returns SplitAllowlist of SUPEROPEN_CODING_REPO_ALLOWLIST,
-// falling back to SO_ / legacy OPENLIT_ names.
+// falling back to the SO_ alias.
 func EnvAllowlist() []string {
-	for _, k := range []string{"SUPEROPEN_CODING_REPO_ALLOWLIST", "SO_CODING_REPO_ALLOWLIST", "OPENLIT_CODING_REPO_ALLOWLIST"} {
+	for _, k := range []string{"SUPEROPEN_CODING_REPO_ALLOWLIST", "SO_CODING_REPO_ALLOWLIST"} {
 		if v := strings.TrimSpace(os.Getenv(k)); v != "" {
 			return SplitAllowlist(v)
 		}
@@ -177,7 +177,7 @@ func EnvAllowlist() []string {
 	return nil
 }
 
-// SplitAllowlist parses the comma-separated form of SUPEROPEN_CODING_REPO_ALLOWLIST (legacy: OPENLIT_CODING_REPO_ALLOWLIST).
+// SplitAllowlist parses the comma-separated form of SUPEROPEN_CODING_REPO_ALLOWLIST.
 func SplitAllowlist(s string) []string {
 	if s == "" {
 		return nil

@@ -19,9 +19,6 @@ import (
 // don't find the CLI" failures.
 func patchManifestBytes(_ string, body []byte, soBin string) []byte {
 	s := string(body)
-	if strings.Contains(s, "__OPENLIT_BIN__") {
-		s = strings.ReplaceAll(s, "__OPENLIT_BIN__", soBin)
-	}
 	if strings.Contains(s, "__SO_BIN__") {
 		s = strings.ReplaceAll(s, "__SO_BIN__", soBin)
 	}

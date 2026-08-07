@@ -9,15 +9,8 @@
 Superopen is not another coding agent. It builds the open source harness around Claude Code, Cursor, Codex, and similar tools so every coding session improves the next - with less token waste and lower cost.
 
 ```bash
-# Install CLI (macOS / Linux) - release binary when published, else local build
-curl -fsSL https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.sh | sh
-# Or from a checkout: ./scripts/install.sh
-# Or: brew install ishanjainn/superopen/so   # Homebrew tap (after first cli-* release)
-# Or: go install ./cmd/so && export PATH="$(go env GOPATH)/bin:$PATH"
-
-# Windows (PowerShell)
-#   iwr -useb https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.ps1 | iex
-
+# macOS / Linux
+brew install ishanjainn/superopen/so
 so install                 # enables /so (or $so) in Cursor, Claude, Codex, Gemini, OpenCode, Copilot, Pi
 
 # Bootstrap (shell or agent):
@@ -27,6 +20,8 @@ so dev                     # light Next.js UI (Turbopack) on :4444 + OTLP
 so dev -d                  # same, detached (background)
 so dev stop                # stop detached / tracked UI
 ```
+
+Other install methods: `curl -fsSL https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.sh | sh`, `go install ./cmd/so`, or on Windows `iwr -useb https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.ps1 | iex`.
 
 The UI reads/writes `.so/` directly (Next App Router). Advanced Memory search, Port, Retrieve, and checkpoint create/restore shell out to the `so` CLI - keep it on PATH (or set `SUPEROPEN_SO_BIN`). Graph view needs Graphify HTML (`so graph` / Graphify); a stub `graph.json` alone is not enough for the Graph page.
 
@@ -182,7 +177,7 @@ Apache-2.0 - see `LICENSE` and `NOTICE`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Please read [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening issues or PRs.
 
-CI (OpenLIT-style):
+CI:
 
 | Workflow | What it runs |
 |---|---|

@@ -105,16 +105,9 @@ var allowedFileKeys = map[string]struct{}{
 	"SUPEROPEN_APPLICATION_NAME":       {},
 	"SUPEROPEN_CODING_CONTENT_CAPTURE": {},
 	"SUPEROPEN_CODING_REPO_ALLOWLIST":  {},
-	"OTEL_EXPORTER_OTLP_ENDPOINT":       {},
-	"OTEL_EXPORTER_OTLP_HEADERS":        {},
+	"OTEL_EXPORTER_OTLP_ENDPOINT":      {},
+	"OTEL_EXPORTER_OTLP_HEADERS":       {},
 	"OTEL_RESOURCE_ATTRIBUTES":         {},
-	// Older local installs may still use these key names in config.env.
-	"OPENLIT_OTLP_ENDPOINT":            {},
-	"OPENLIT_API_KEY":                  {},
-	"OPENLIT_ENVIRONMENT":              {},
-	"OPENLIT_APPLICATION_NAME":         {},
-	"OPENLIT_CODING_CONTENT_CAPTURE":   {},
-	"OPENLIT_CODING_REPO_ALLOWLIST":    {},
 }
 
 // PromoteFileToEnv re-exports the config-file values that downstream
@@ -146,33 +139,8 @@ func PromoteFileToEnv() error {
 		if _, exists := os.LookupEnv(k); !exists {
 			_ = os.Setenv(k, v)
 		}
-		// Prefer Superopen names when a legacy key is the only source.
-		if modern := modernEnvKey(k); modern != "" && modern != k {
-			if _, exists := os.LookupEnv(modern); !exists {
-				_ = os.Setenv(modern, v)
-			}
-		}
 	}
 	return nil
-}
-
-func modernEnvKey(k string) string {
-	switch k {
-	case "OPENLIT_OTLP_ENDPOINT":
-		return "SUPEROPEN_OTLP_ENDPOINT"
-	case "OPENLIT_API_KEY":
-		return "SUPEROPEN_API_KEY"
-	case "OPENLIT_ENVIRONMENT":
-		return "SUPEROPEN_ENVIRONMENT"
-	case "OPENLIT_APPLICATION_NAME":
-		return "SUPEROPEN_APPLICATION_NAME"
-	case "OPENLIT_CODING_CONTENT_CAPTURE":
-		return "SUPEROPEN_CODING_CONTENT_CAPTURE"
-	case "OPENLIT_CODING_REPO_ALLOWLIST":
-		return "SUPEROPEN_CODING_REPO_ALLOWLIST"
-	default:
-		return ""
-	}
 }
 
 // isSecretKey reports whether a config key carries secret material
@@ -181,11 +149,7 @@ func modernEnvKey(k string) string {
 // entry here AND a comment on the consuming side explaining that it
 // stays on the Resolved struct).
 func isSecretKey(k string) bool {
-	switch k {
-	case "SUPEROPEN_API_KEY", "OPENLIT_API_KEY":
-		return true
-	}
-	return false
+	return k == "SUPEROPEN_API_KEY"
 }
 
 // Load resolves config across all sources.
@@ -209,19 +173,19 @@ func Load(flags *Flags) (*Resolved, error) {
 			return
 		}
 		switch key {
-		case "SUPEROPEN_OTLP_ENDPOINT", "OPENLIT_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT":
+		case "SUPEROPEN_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT":
 			res.OTLPEndpoint = val
 			res.Source["otlp_endpoint"] = src
-		case "SUPEROPEN_API_KEY", "OPENLIT_API_KEY":
+		case "SUPEROPEN_API_KEY":
 			res.APIKey = val
 			res.Source["api_key"] = src
-		case "SUPEROPEN_ENVIRONMENT", "OPENLIT_ENVIRONMENT":
+		case "SUPEROPEN_ENVIRONMENT":
 			res.Environment = val
 			res.Source["environment"] = src
-		case "SUPEROPEN_APPLICATION_NAME", "OPENLIT_APPLICATION_NAME":
+		case "SUPEROPEN_APPLICATION_NAME":
 			res.ApplicationName = val
 			res.Source["application_name"] = src
-		case "SUPEROPEN_CODING_CONTENT_CAPTURE", "OPENLIT_CODING_CONTENT_CAPTURE":
+		case "SUPEROPEN_CODING_CONTENT_CAPTURE":
 			res.CodingContentCapture = val
 			res.Source["coding_content_capture"] = src
 		case "OTEL_EXPORTER_OTLP_HEADERS":
@@ -376,22 +340,6 @@ func isLocalHost(host string) bool {
 // Path returns the absolute path to the config file, even if it doesn't
 // yet exist. Used by `so configure` for write-side and by Load for
 // read-side.
-func legacyConfigPath() (string, error) {
-	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
-		return filepath.Join(x, "openlit", "config.env"), nil
-	}
-	if runtime.GOOS == "windows" {
-		if cfg, err := os.UserConfigDir(); err == nil && cfg != "" {
-			return filepath.Join(cfg, "openlit", "config.env"), nil
-		}
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "openlit", "config.env"), nil
-}
-
 func Path() (string, error) {
 	dir, err := configDir()
 	if err != nil {
@@ -401,7 +349,7 @@ func Path() (string, error) {
 }
 
 // configDir returns the directory that holds config.env. Honors
-// XDG_CONFIG_HOME, falling back to $HOME/.config/openlit/. We do not
+// XDG_CONFIG_HOME, falling back to $HOME/.config/superopen/. We do not
 // path-traverse the value - env that contains ".." or absolute paths is
 // taken at face value here; the consumer (Load/Save) only reads/writes
 // the explicit "config.env" leaf which can't escape via traversal.
@@ -438,14 +386,7 @@ func readConfigFile() (map[string]string, error) {
 	}
 	f, err := os.Open(path) //nolint:gosec // path is constructed from $HOME, not user input
 	if os.IsNotExist(err) {
-		if legacy, lerr := legacyConfigPath(); lerr == nil {
-			f, err = os.Open(legacy) //nolint:gosec
-			if os.IsNotExist(err) {
-				return map[string]string{}, nil
-			}
-		} else {
-			return map[string]string{}, nil
-		}
+		return map[string]string{}, nil
 	}
 	if err != nil {
 		return nil, err

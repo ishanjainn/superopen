@@ -155,7 +155,7 @@ func handle(ctx context.Context, in normalize.Input) error {
 	// v1: the CLI has no path to the org's API-key allowlist, so we
 	// flag the API-key signal as unknown (APIKeyAllowlistKnown=false)
 	// and let the classifier lean on the repo signal. The earlier
-	// "OPENLIT_API_KEY != \"\"" heuristic was actively wrong - having
+	// "SUPEROPEN_API_KEY != \"\"" heuristic was actively wrong - having
 	// the env var set says nothing about whether the key is recognised
 	// by the org and was producing spurious `personal` labels.
 	cls := classify.Classify(classify.Inputs{

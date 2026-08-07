@@ -4,8 +4,8 @@
   "description": "Superopen telemetry for Claude Code: sessions, tool calls, edit decisions, and cost rollups.",
   "author": {
     "name": "Superopen",
-    "url": "https://openlit.io"
+    "url": "https://github.com/ishanjainn/superopen"
   },
-  "repository": "https://github.com/openlit/openlit",
-  "homepage": "https://openlit.io"
+  "repository": "https://github.com/ishanjainn/superopen",
+  "homepage": "https://github.com/ishanjainn/superopen"
 }

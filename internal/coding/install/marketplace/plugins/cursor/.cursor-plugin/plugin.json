@@ -1,12 +1,12 @@
 {
-  "name": "openlit",
-  "displayName": "OpenLit",
+  "name": "superopen",
+  "displayName": "Superopen",
   "version": "0.1.0",
-  "description": "OpenLit telemetry for Cursor: sessions, tool calls, edit decisions, and cost rollups.",
+  "description": "Superopen telemetry for Cursor: sessions, tool calls, edit decisions, and cost rollups.",
   "author": {
-    "name": "OpenLit",
-    "url": "https://openlit.io"
+    "name": "Superopen",
+    "url": "https://github.com/ishanjainn/superopen"
   },
-  "repository": "https://github.com/openlit/openlit",
-  "homepage": "https://openlit.io"
+  "repository": "https://github.com/ishanjainn/superopen",
+  "homepage": "https://github.com/ishanjainn/superopen"
 }
