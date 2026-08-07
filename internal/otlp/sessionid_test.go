@@ -5,7 +5,7 @@ import "testing"
 func TestResolveSessionIDPrefersConversation(t *testing.T) {
 	attrs := map[string]string{
 		"coding_agent.session.id": "ephemeral-session",
-		"coding_agent.session_id": "legacy",
+		"coding_agent.session_id": "sess-a",
 		"gen_ai.conversation.id":  "stable-chat",
 	}
 	if got := ResolveSessionID(attrs, "trace"); got != "stable-chat" {
@@ -18,6 +18,14 @@ func TestResolveSessionIDPrefersConversation(t *testing.T) {
 	}
 	if got := ResolveSessionID(map[string]string{}, "trace"); got != "trace" {
 		t.Fatalf("fallback got %q", got)
+	}
+	if got := ResolveSessionID(map[string]string{
+		"coding_agent.session.id": "unknown",
+	}, "trace"); got != "trace" {
+		t.Fatalf("placeholder session id must fall through, got %q", got)
+	}
+	if !IsPlaceholderSessionID("unknown") {
+		t.Fatal("expected unknown placeholder")
 	}
 }
 

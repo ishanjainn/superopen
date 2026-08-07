@@ -1,4 +1,5 @@
-// Superopen Pi extension - forwards lifecycle events to `so coding hook`.
+// Superopen Pi extension.
+// Telemetry uses Superopen conventions (so coding hook → coding_agent.* / gen_ai.*).
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn, spawnSync } from "node:child_process";
 
@@ -15,7 +16,7 @@ function fire(event: string, payload: Record<string, unknown>, sync = false): st
       const r = spawnSync(bin, args, {
         input,
         encoding: "utf8",
-        timeout: 8000,
+        timeout: 12000,
         stdio: ["pipe", "pipe", "ignore"],
       });
       return typeof r.stdout === "string" ? r.stdout : "";
@@ -68,8 +69,8 @@ function parseDeny(stdout: string): string | null {
 
 function runFinalize() {
   try {
-    spawnSync(soBin(), ["sessions", "finalize"], {
-      timeout: 30000,
+    spawnSync(soBin(), ["sessions", "finalize", "--detach"], {
+      timeout: 5000,
       stdio: "ignore",
     });
   } catch {
@@ -77,10 +78,55 @@ function runFinalize() {
   }
 }
 
+function textFromContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const out: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as Record<string, unknown>;
+    if (b.type === "text" && typeof b.text === "string") out.push(b.text);
+    if (b.type === "thinking" && typeof b.thinking === "string") out.push(b.thinking);
+    if (typeof b.text === "string" && !b.type) out.push(b.text);
+  }
+  return out.join("\n").trim();
+}
+
+function thinkingFromContent(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  const out: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as Record<string, unknown>;
+    if (b.type === "thinking") {
+      if (typeof b.thinking === "string") out.push(b.thinking);
+      else if (typeof b.text === "string") out.push(b.text);
+    }
+  }
+  return out.join("\n").trim();
+}
+
 export default function (pi: ExtensionAPI) {
   let lastSessionId: string | undefined;
   let lastCwd: string | undefined;
   let lastSessionFile: string | undefined;
+  let pendingInject: string | null = null;
+
+  function sid(ctx: {
+    sessionManager: {
+      getSessionId?: () => string | undefined;
+      getSessionFile?: () => string | undefined;
+    };
+    cwd?: string;
+  }): string | undefined {
+    try {
+      const v = ctx.sessionManager.getSessionId?.() || lastSessionId;
+      if (v) lastSessionId = v;
+    } catch {
+      /* ignore */
+    }
+    return lastSessionId;
+  }
 
   pi.on("session_start", async (_event, ctx) => {
     lastCwd = ctx.cwd;
@@ -94,32 +140,28 @@ export default function (pi: ExtensionAPI) {
         session_file: lastSessionFile,
         session_id: lastSessionId,
       },
-      true,
+      true
     );
-    const inj = parseInject(out);
-    if (inj) {
-      (pi as any).__soInject = inj;
-    }
+    pendingInject = parseInject(out);
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
     lastCwd = ctx.cwd;
     lastSessionFile = ctx.sessionManager.getSessionFile();
-    lastSessionId = ctx.sessionManager.getSessionId?.() || lastSessionId;
     const out = fire(
       "before_agent_start",
       {
         type: "before_agent_start",
         cwd: ctx.cwd,
         session_file: lastSessionFile,
-        session_id: lastSessionId,
+        session_id: sid(ctx),
         prompt: (event as { prompt?: string }).prompt,
       },
-      true,
+      true
     );
-    const inj = parseInject(out) || (pi as any).__soInject;
+    const inj = parseInject(out) || pendingInject;
+    pendingInject = null;
     if (inj) {
-      (pi as any).__soInject = null;
       return {
         message: {
           customType: "superopen-context",
@@ -132,64 +174,115 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("message_end", async (event, ctx) => {
     const message = (event as { message?: Record<string, unknown> }).message || {};
-    lastSessionId = ctx.sessionManager.getSessionId?.() || lastSessionId;
+    const role = typeof message.role === "string" ? message.role : "";
     fire("message_end", {
       type: "message_end",
       cwd: ctx.cwd,
       session_file: ctx.sessionManager.getSessionFile(),
-      session_id: lastSessionId,
-      role: message.role,
-      text: typeof message.content === "string" ? message.content : undefined,
+      session_id: sid(ctx),
+      role,
+      text: textFromContent(message.content),
+      thinking: thinkingFromContent(message.content),
+      content: message.content,
       model: message.model,
       usage: message.usage,
     });
   });
 
   pi.on("tool_execution_start", async (event, ctx) => {
-    const args = (event as { args?: Record<string, unknown>; input?: Record<string, unknown> }).args
-      || (event as { input?: Record<string, unknown> }).input
-      || {};
+    const args =
+      (event as { args?: Record<string, unknown>; input?: Record<string, unknown> }).args ||
+      (event as { input?: Record<string, unknown> }).input ||
+      {};
     const out = fire(
       "tool.execute.before",
       {
         type: "tool.execute.before",
         cwd: ctx.cwd,
         session_file: ctx.sessionManager.getSessionFile(),
-        session_id: ctx.sessionManager.getSessionId?.() || lastSessionId,
+        session_id: sid(ctx),
         tool_name: (event as { toolName?: string }).toolName,
         toolName: (event as { toolName?: string }).toolName,
+        toolCallId: (event as { toolCallId?: string }).toolCallId,
         command: args.command || args.cmd,
         path: args.path || args.file_path,
+        args,
+        input: args,
       },
-      true,
+      true
     );
     const deny = parseDeny(out);
     if (deny) throw new Error(deny);
   });
 
   pi.on("tool_execution_end", async (event, ctx) => {
+    const args =
+      (event as { args?: Record<string, unknown>; input?: Record<string, unknown> }).args ||
+      (event as { input?: Record<string, unknown> }).input ||
+      {};
     fire("tool_execution_end", {
       type: "tool_execution_end",
       cwd: ctx.cwd,
       session_file: ctx.sessionManager.getSessionFile(),
+      session_id: sid(ctx),
       toolName: (event as { toolName?: string }).toolName,
+      tool_name: (event as { toolName?: string }).toolName,
       toolCallId: (event as { toolCallId?: string }).toolCallId,
       isError: (event as { isError?: boolean }).isError,
       result: (event as { result?: string }).result,
+      args,
+      input: args,
     });
   });
 
+  // Primary turn export: assistant content blocks + toolResults.
+  pi.on("turn_end", async (event, ctx) => {
+    const message = (event as { message?: Record<string, unknown> }).message || {};
+    const toolResults = (event as { toolResults?: unknown[] }).toolResults || [];
+    const sessionId = sid(ctx);
+    fire(
+      "turn_end",
+      {
+        type: "turn_end",
+        cwd: ctx.cwd,
+        session_file: ctx.sessionManager.getSessionFile(),
+        session_id: sessionId,
+        role: "assistant",
+        text: textFromContent(message.content),
+        thinking: thinkingFromContent(message.content),
+        content: message.content,
+        model: message.model || (message as { modelId?: string }).modelId,
+        usage: message.usage,
+        toolResults,
+      },
+      true
+    );
+    for (const tr of toolResults) {
+      if (!tr || typeof tr !== "object") continue;
+      const t = tr as Record<string, unknown>;
+      fire("tool_execution_end", {
+        type: "tool_execution_end",
+        cwd: ctx.cwd,
+        session_id: sessionId,
+        toolName: t.toolName,
+        tool_name: t.toolName,
+        toolCallId: t.toolCallId,
+        isError: t.isError,
+        result: textFromContent(t.content) || (typeof t.result === "string" ? t.result : undefined),
+      });
+    }
+  });
+
   pi.on("agent_end", async (_event, ctx) => {
-    lastSessionId = ctx.sessionManager.getSessionId?.() || lastSessionId;
     fire(
       "agent_end",
       {
         type: "agent_end",
         cwd: ctx.cwd,
         session_file: ctx.sessionManager.getSessionFile(),
-        session_id: lastSessionId,
+        session_id: sid(ctx),
       },
-      true,
+      true
     );
     runFinalize();
   });
@@ -203,7 +296,7 @@ export default function (pi: ExtensionAPI) {
         session_file: lastSessionFile,
         session_id: lastSessionId,
       },
-      true,
+      true
     );
     runFinalize();
   });

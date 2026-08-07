@@ -1,4 +1,4 @@
-# Superopen `.so/` schema (CLI ↔ UI parity)
+# Superopen schema (CLI ↔ UI parity)
 
 <p align="center">
   <img src="../web/public/brand-mark.png" alt="SO shield" width="72" />
@@ -6,40 +6,65 @@
 </p>
 
 
-Canonical state lives under `.so/`. Both the Go CLI (`so`) and the TypeScript UI
+Guidance lives in native developer paths. Regenerable / machine-local runtime
+lives under `.so/` and is gitignored. Both the Go CLI (`so`) and the TypeScript UI
 (Next.js App Router) read/write these paths. Heavy algorithms use `so … --json`.
 
-## Memory model
+## Native guidance (tracked on the feature branch)
+
+| Path | Role |
+|------|------|
+| `AGENTS.md` | Knowledge / agent instructions (root + nested `dir/AGENTS.md`). Wandering evals with a hot package propose creating that package’s `AGENTS.md`; otherwise they amend root. Rec `why` always states problem → change → next-session benefit. |
+| Rules | **Index/UI:** all vendor trees. **Writes:** update-in-place across every existing stem copy (keep in sync); if none, create under the session vendor’s rules dir; else preferred fallback. |
+| Skills | **Index/UI:** all vendor trees. **Writes:** same sync/create policy as rules. `/so` skill is reserved. |
+| Retrieve | Session-vendor weighted: matching vendor rules/skills boosted; other vendors down-weighted; `AGENTS.md` always shared/high. |
+| `CLAUDE.md` | Brief inject only (Superopen markers) |
+
+## Runtime under `.so/` (mostly untracked)
 
 **Write** lessons/prefs → **Store** under `.so/memory/` → **Inject** as `active-context.md` on every SessionStart.
 
 Session port (`so sessions port`) moves chat text between agents; after a successful port Superopen refreshes the same ACTIVE pack so the destination agent gets prefs/lessons plus continuity. Port is not a second memory system.
 
-| Path | Role |
-|------|------|
-| `config.yaml` | Harness config (`memory.backend`, `evals.models`, `recommendations.auto_apply_tiers`, observability) |
-| `traces/` | Local OTLP export (`observability.exporters: [{type: local_jsonl, path: .so/traces}]` only) |
-| `memory/preferences.md` | Standing prefs (`# Preferences` + bullets) |
-| `memory/projects.md` | Project context (`# Projects` + Current focus / Active areas / Do not touch / Notes) |
-| `memory/history/YYYY-MM-DD.md` | Decaying daily history |
-| `memory/lessons.jsonl` | Structured lessons (source of truth) |
-| `memory/lessons.md` | Human export of lessons |
-| `memory/semantic.jsonl` | Semantic key/value entries |
-| `memory/episodic.jsonl` | Episodic fragments (incl. port breadcrumbs) |
-| `memory/active-context.md` | Budget-capped pack injected at SessionStart (Inject) |
-| `memory/last-refresh.json` | Last `so refresh` / post-merge marker |
-| `memory/refresh-status.json` | Latest `so dev` watcher refresh status |
-| `context/` | Feedforward docs (architecture, conventions) |
-| `rules/` | Coding rules |
-| `skills/` | Named skills (markdown) |
-| `guardrails/guardrails.yaml` | Advisory rules + enforcement (denied commands, sensitive paths) |
-| `audit/events.jsonl` | Append-only SEL audit trail |
-| `graph/graph.json` | Structural graph |
-| `graph/retrieve_index.json` | Harness corpus keyword index |
-| `sessions/` | Materialized sessions |
-| `port/ledger.json` | Session port idempotency ledger |
-| `recommendations/pending.json` | Pending harness updates |
-| `recommendations/history.json` | Applied / dismissed / reverted recommendations |
+| Path | Role | Tracked? |
+|------|------|----------|
+| `config.yaml` | Harness config | yes |
+| `discovery.json` | Init profile snapshot | yes (rarely changes) |
+| `AGENT.md` | Short agent brief | yes |
+| `guardrails/guardrails.yaml` | Enforcement + advisory | yes |
+| `evals/configs.yaml` | Eval check config | yes |
+| `evals/history.json` | Eval run history | no |
+| `sessions/` | Local working cache of materialized sessions | no (also mirrored to `refs/so/sessions/<id>`) |
+| `traces/` | Local OTLP export | no |
+| `memory/**` | Packs, lessons, harvest ledgers | no |
+| `graph/**` | Structural graph (local rebuild) | no |
+| `viz/**` | Citymap / HTML viz | no |
+| `recommendations/pending.json` | Pending harness updates | no |
+| `recommendations/history.json` | Applied / dismissed / reverted | no |
+| `audit/events.jsonl` | Append-only SEL audit trail | no |
+| `port/ledger.json` | Session port idempotency ledger | no |
+
+## Version-control policy
+
+Commit **native docs** (`AGENTS.md`, discovered rules/skills trees) and stable
+`.so/` config (config, guardrails, evals configs, discovery, AGENT.md).
+
+Do **not** commit regenerable Superopen runtime: graph, memory packs, sessions,
+traces, eval history, or recommendation pending/history. Agents still use
+`so graph query` against a local `.so/graph/graph.json` rebuilt by `so sync` /
+hooks after HEAD moves.
+
+The generated `.so/.gitignore` excludes that runtime so feature branches stay
+clean after commit. Harvest that learns durable guidance writes native docs
+(intentional `git status` dirt until the user commits).
+
+Hooks (`post-commit`, `post-merge`, `post-checkout`) finalize sessions and rebuild
+**untracked** runtime only; injectors are byte-idempotent. Session blobs are also
+written to git side refs `refs/so/sessions/<id>` (no checkout). Live session state
+lives under `.git/so-sessions/`. `pre-push` fast-forwards those refs (never force).
+`SO-Session:` trailers on user commits link work to the active session.
+
+Do not commit secrets or information your team is not authorized to share.
 
 ## AXI output (`so … --json` / `--full`)
 
@@ -72,7 +97,9 @@ Bare `so` prints a content-first status snapshot (not only help).
 | Active Context inject | SessionStart when `memory.enabled` | Memory → Active Context |
 | Learn lesson | `so learn add` | Memory → Lessons |
 | Retrieve corpus | `so retrieve` / `so graph query` | Graph search + `/api/retrieve` |
-| Knowledge | `so knowledge` / `.so/knowledge/` | `/knowledge` |
+| Knowledge | `so knowledge` / `AGENTS.md` | `/knowledge` |
+| Rules | Discovered vendor rules dir | `/rules` |
+| Skills | Discovered vendor skills `<name>/SKILL.md` | `/skills` |
 | Guardrails | `so guard` / `so guard show\|check` | `/guardrails` |
 | Audit | `so audit list` | Settings → Audit Trail |
 | Session harvest | `so harvest run\|idle` | (automatic on session end) |

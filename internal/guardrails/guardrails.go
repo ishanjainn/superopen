@@ -101,17 +101,15 @@ func Load(paths harness.Paths) (Engine, error) {
 	return eng, nil
 }
 
-// EnsureDefaults ensures a single guardrails.yaml exists. Legacy split files
-// (defaults.yaml / policy.yaml / profile.yaml) are merged once then removed.
+// EnsureDefaults ensures guardrails.yaml exists with baseline policy fields.
 func EnsureDefaults(paths harness.Paths) error {
 	if err := os.MkdirAll(paths.GuardrailsDir, 0o755); err != nil {
 		return err
 	}
 	dst := Path(paths)
-	legacyDefaults := filepath.Join(paths.GuardrailsDir, "defaults.yaml")
-	legacyPolicy := filepath.Join(paths.GuardrailsDir, "policy.yaml")
-	legacyProfile := filepath.Join(paths.GuardrailsDir, "profile.yaml")
-
+	if _, err := os.Stat(dst); err == nil {
+		return nil
+	}
 	def := DefaultPolicy()
 	f := File{
 		Approval:       def.Approval,
@@ -119,66 +117,12 @@ func EnsureDefaults(paths harness.Paths) error {
 		DeniedCommands: def.DeniedCommands,
 		SensitivePaths: def.SensitivePaths,
 	}
-	had := false
-	if data, err := os.ReadFile(dst); err == nil {
-		had = true
-		_ = yaml.Unmarshal(data, &f)
+	data, err := yaml.Marshal(f)
+	if err != nil {
+		return err
 	}
-	changed := !had
-
-	if data, err := os.ReadFile(legacyDefaults); err == nil {
-		var wrap struct {
-			Rules []Rule `yaml:"rules"`
-		}
-		if yaml.Unmarshal(data, &wrap) == nil && len(wrap.Rules) > 0 && len(f.Rules) == 0 {
-			f.Rules = wrap.Rules
-			changed = true
-		}
-	}
-	if data, err := os.ReadFile(legacyPolicy); err == nil {
-		var p Policy
-		if yaml.Unmarshal(data, &p) == nil {
-			// Prefer legacy enforcement when the canonical file was just created
-			// from defaults, or when the existing file has empty deny lists.
-			if !had || len(f.DeniedCommands) == 0 {
-				if len(p.DeniedCommands) > 0 {
-					f.DeniedCommands = p.DeniedCommands
-					changed = true
-				}
-			}
-			if !had || len(f.SensitivePaths) == 0 {
-				if len(p.SensitivePaths) > 0 {
-					f.SensitivePaths = p.SensitivePaths
-					changed = true
-				}
-			}
-			if p.Approval != "" && (!had || f.Approval == "" || f.Approval == def.Approval) {
-				if p.Approval != f.Approval {
-					f.Approval = p.Approval
-					changed = true
-				}
-			}
-			if !had {
-				f.RedactOutput = p.RedactOutput
-				changed = true
-			}
-		}
-	}
-
-	if changed {
-		data, err := yaml.Marshal(f)
-		if err != nil {
-			return err
-		}
-		header := "# Superopen guardrails (advisory rules + enforcement)\n# Edit freely; so sync will not overwrite.\n\n"
-		if err := os.WriteFile(dst, append([]byte(header), data...), 0o644); err != nil {
-			return err
-		}
-	}
-	_ = os.Remove(legacyDefaults)
-	_ = os.Remove(legacyPolicy)
-	_ = os.Remove(legacyProfile)
-	return nil
+	header := "# Superopen guardrails (advisory rules + enforcement)\n# Edit freely; so sync will not overwrite.\n\n"
+	return os.WriteFile(dst, append([]byte(header), data...), 0o644)
 }
 
 func (e Engine) deniedCommands() []string {
@@ -304,7 +248,6 @@ func matchPath(pattern, path string) bool {
 	}
 	return false
 }
-
 
 func wildMatch(pattern, s string) bool {
 	parts := strings.Split(pattern, "*")

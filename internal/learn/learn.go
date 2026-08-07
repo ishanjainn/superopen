@@ -68,7 +68,7 @@ func MineTranscript(paths harness.Paths, sessionID string, transcriptLines []str
 			}
 		}
 		slug := slugify(l.Text)
-		path := filepath.Join(paths.SkillsDir, slug+".md")
+		path := paths.SkillSKILL(slug)
 		recs = append(recs, recommend.Recommendation{
 			ID:           fmt.Sprintf("rec_learn_%d_%s", now.UnixNano(), slug),
 			Fingerprint:  recommend.FingerprintKey("skill", path, slug),

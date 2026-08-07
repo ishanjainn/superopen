@@ -10,7 +10,7 @@ import (
 
 // codexConfigSample is a verbatim slice of a real
 // ~/.codex/config.toml we observed in the wild. Includes every
-// legacy-plugin section the install path can write AND non-
+// residual-plugin section the install path can write AND non-
 // unrelated content that must survive the strip pass - `[features]`,
 // the user-trust `[projects."..."]` entry pointing at the superopen
 // repo (which is NOT a Superopen artifact, just a path that happens
@@ -87,7 +87,7 @@ func TestStripCodexOwnedSectionsRemovesOnlyOwned(t *testing.T) {
 		`model = "gpt-5.4"`,
 		`[features]`,
 		`multi_agent = true`,
-		// User-trust block must NOT be confused with a legacy
+		// User-trust block must NOT be confused with a residual
 		// section just because the substring "so" appears
 		// in the path key.
 		`[projects."/Users/me/private/superopen"]`,
@@ -98,7 +98,7 @@ func TestStripCodexOwnedSectionsRemovesOnlyOwned(t *testing.T) {
 		`[mcp_servers.node_repl.env]`,
 		`CODEX_HOME = "/Users/me/.codex"`,
 		// `[hooks.state]` itself (the parent) is preserved; only
-		// the legacy-keyed children are dropped.
+		// the residual-keyed children are dropped.
 		`[hooks.state]`,
 	}
 	for _, needle := range mustContain {
@@ -123,7 +123,7 @@ func TestStripCodexOwnedSectionsIdempotent(t *testing.T) {
 }
 
 func TestStripCodexOwnedSectionsNoChange(t *testing.T) {
-	// A config that never had legacy marketplace keys in it must come out byte-
+	// A config that never had residual marketplace keys in it must come out byte-
 	// for-byte identical, with changed=false.
 	clean := `model = "gpt-5"
 [features]
@@ -218,7 +218,7 @@ func TestStripClaudeMarketplaceJSONRemovesOwned(t *testing.T) {
 }
 
 func TestStripClaudeMarketplaceJSONNoEntry(t *testing.T) {
-	// File present, no legacy key - must NOT rewrite the file
+	// File present, no residual key - must NOT rewrite the file
 	// (and therefore must report touched="").
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)

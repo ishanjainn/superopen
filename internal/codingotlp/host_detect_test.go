@@ -35,7 +35,7 @@ func TestDetectHostFromBinary(t *testing.T) {
 		{"windows-terminal", `C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_1.18\WindowsTerminal.exe`, "windows-terminal"},
 		{"windows-terminal-wt", `C:\Users\me\AppData\Local\Microsoft\WindowsApps\wt.exe`, "windows-terminal"},
 		{"powershell-pwsh", `C:\Program Files\PowerShell\7\pwsh.exe`, "powershell"},
-		{"powershell-legacy", `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`, "powershell"},
+		{"powershell-classic", `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`, "powershell"},
 		{"cmd", `C:\Windows\System32\cmd.exe`, "cmd"},
 
 		// JetBrains across platforms.

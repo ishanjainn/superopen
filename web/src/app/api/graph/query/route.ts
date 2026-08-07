@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawn } from "child_process";
 import { projectIdFromRequest, runWithProjectAsync } from "@/lib/so/workspace";
-import { repoCwd } from "@/lib/so/exec";
+import { repoCwd, soBinary } from "@/lib/so/exec";
 import { repoRoot } from "@/lib/so/root";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function runGraphQuery(question: string): Promise<{ ok: boolean; answer: string; error?: string }> {
-  const bin = process.env.SUPEROPEN_SO_BIN?.trim() || "so";
+  const bin = soBinary();
   const child = spawn(bin, ["graph", "query", question], {
     cwd: repoCwd(),
     env: { ...process.env, SUPEROPEN_ROOT: repoRoot() },

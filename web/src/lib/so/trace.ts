@@ -1,6 +1,7 @@
 import { readdirSync, statSync } from "fs";
 import { fileExists, readText } from "./nodeio";
 import { join, relative } from "path";
+import { homedir } from "os";
 import type { CityMap } from "./citymap";
 import { sessionKey } from "./citymap";
 import { repoRoot, soPath } from "./root";
@@ -182,6 +183,173 @@ function footprintEvents(
 }
 
 type ParsedSpans = { events: TraceEvent[]; marks: TraceMark[] };
+
+function decodedStringLiteral(code: string, prefix: RegExp): string {
+  const match = code.match(prefix);
+  if (!match?.[1]) return "";
+  try {
+    return String(JSON.parse(match[1]));
+  } catch {
+    return "";
+  }
+}
+
+function patchTargets(patch: string, cwd: string): TraceTarget[] {
+  const seen = new Set<string>();
+  const targets: TraceTarget[] = [];
+  for (const line of patch.split("\n")) {
+    const match = line.match(/^\*\*\* (?:Add|Update|Delete) File:\s+(.+)$/);
+    if (!match?.[1]) continue;
+    const path = relToRepo(cwd, match[1].trim());
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    targets.push({ path, touch: "edit" });
+  }
+  return targets;
+}
+
+function nestedCodexCommand(code: string): string {
+  return decodedStringLiteral(
+    code,
+    /\bcmd\s*:\s*("(?:\\.|[^"\\])*")/
+  );
+}
+
+function nestedCodexPatch(code: string): string {
+  return decodedStringLiteral(
+    code,
+    /\b(?:const|let|var)\s+patch\s*=\s*("(?:\\.|[^"\\])*")/
+  );
+}
+
+/** Parse Codex's authoritative rollout JSONL into Map playback events. */
+export function parseCodexRolloutLines(lines: string[], cwd: string): ParsedSpans {
+  const events: TraceEvent[] = [];
+  const marks: TraceMark[] = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let record: {
+      timestamp?: string;
+      type?: string;
+      payload?: Record<string, unknown>;
+    };
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const payload = record.payload || {};
+    const payloadType = String(payload.type || "");
+    if (
+      (record.type === "response_item" && payloadType === "message" && payload.role === "user") ||
+      (record.type === "event_msg" && payloadType === "user_message")
+    ) {
+      marks.push({ seq: Math.max(0, events.length - 1), type: "user-message" });
+      continue;
+    }
+    if (record.type !== "response_item") continue;
+    if (!/^(custom_tool_call|function_call|local_shell_call)$/.test(payloadType)) continue;
+
+    const rawTool = String(payload.name || (payloadType === "local_shell_call" ? "Bash" : ""));
+    const input = String(payload.input || payload.arguments || payload.command || "");
+    let tool = rawTool || "Tool";
+    let action: Action = "other";
+    let command = "";
+    let targets: TraceTarget[] = [];
+
+    if (/^apply_patch$/i.test(rawTool)) {
+      tool = "apply_patch";
+      action = "edit";
+      targets = patchTargets(input, cwd);
+    } else if (/^(exec|code|bash)$/i.test(rawTool) && /tools\.apply_patch/.test(input)) {
+      tool = "apply_patch";
+      action = "edit";
+      targets = patchTargets(nestedCodexPatch(input), cwd);
+    } else if (/^(exec|code)$/i.test(rawTool) && /tools\.(?:exec_command|write_stdin)/.test(input)) {
+      tool = "Bash";
+      action = "exec";
+      command = nestedCodexCommand(input);
+    } else if (payloadType === "local_shell_call" || /bash|shell/i.test(rawTool)) {
+      tool = "Bash";
+      action = "exec";
+      command = input;
+    } else if (/update_plan/i.test(input)) {
+      tool = "Update plan";
+    } else if (/view_image/i.test(input)) {
+      tool = "View image";
+    }
+
+    events.push({
+      seq: events.length,
+      ts: record.timestamp,
+      tool,
+      action,
+      targets,
+      resultBytes: 0,
+      isError: String(payload.status || "").toLowerCase() === "failed",
+      summary:
+        targets.length > 0
+          ? targets.map((target) => target.path).join(", ")
+          : command.replace(/\s+/g, " ").slice(0, 140) || tool,
+    });
+  }
+  return { events, marks };
+}
+
+function codexRolloutEvents(session: MapSessionMeta, cwd: string): ParsedSpans {
+  if (session.harness.toLowerCase() !== "codex") return { events: [], marks: [] };
+  const started = new Date(session.startedAt || Date.now());
+  if (Number.isNaN(started.getTime())) return { events: [], marks: [] };
+  const root = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "sessions");
+  for (const delta of [-1, 0, 1]) {
+    const date = new Date(started.getTime() + delta * 86400000);
+    const dir = join(
+      root,
+      String(date.getUTCFullYear()),
+      String(date.getUTCMonth() + 1).padStart(2, "0"),
+      String(date.getUTCDate()).padStart(2, "0")
+    );
+    if (!fileExists(dir)) continue;
+    try {
+      const name = readdirSync(dir).find(
+        (candidate) => candidate.endsWith(".jsonl") && candidate.includes(session.id)
+      );
+      if (name) return parseCodexRolloutLines(readText(join(dir, name)).split("\n"), cwd);
+    } catch {
+      /* fall through to hook-derived traces */
+    }
+  }
+  return { events: [], marks: [] };
+}
+
+function mergeParsedSpans(...sources: ParsedSpans[]): ParsedSpans {
+  const events: TraceEvent[] = [];
+  const marks: TraceMark[] = [];
+  const eventKeys = new Set<string>();
+  const markKeys = new Set<string>();
+  for (const source of sources) {
+    for (const event of source.events) {
+      const key = JSON.stringify([
+        event.ts,
+        event.tool,
+        event.action,
+        event.summary,
+        event.targets.map((target) => [target.path, target.touch]),
+      ]);
+      if (eventKeys.has(key)) continue;
+      eventKeys.add(key);
+      events.push(event);
+    }
+    for (const mark of source.marks) {
+      const key = JSON.stringify([mark.seq, mark.type, mark.note]);
+      if (markKeys.has(key)) continue;
+      markKeys.add(key);
+      marks.push(mark);
+    }
+  }
+  events.sort((a, b) => String(a.ts || "").localeCompare(String(b.ts || "")));
+  return { events, marks };
+}
 
 function parseTranscriptEvents(sessionDir: string, cwd: string): ParsedSpans {
   const tPath = join(sessionDir, "transcript.jsonl");
@@ -579,10 +747,13 @@ function subagentMarksFromChildren(parentId: string, eventCount: number): TraceM
 /** Build map Trace from a Superopen session directory. */
 export function buildTrace(session: MapSessionMeta, city: CityMap): Trace {
   const cwd = session.cwd || repoRoot();
-  let parsed = parseTranscriptEvents(session.path, cwd);
-  if (parsed.events.length === 0) {
-    parsed = parseLiveTraceEvents(session.id, cwd);
-  }
+  const rollout = codexRolloutEvents(session, cwd);
+  let parsed = rollout.events.length > 0
+    ? rollout
+    : mergeParsedSpans(
+        parseTranscriptEvents(session.path, cwd),
+        parseLiveTraceEvents(session.id, cwd)
+      );
   if (parsed.events.length === 0) {
     parsed = {
       events: footprintEvents(session.path, cwd, session.startedAt),

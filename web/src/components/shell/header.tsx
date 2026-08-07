@@ -14,18 +14,15 @@ const TITLES: Record<string, string> = {
   "/memory": "Memory",
   "/graph": "Graph",
   "/knowledge": "Knowledge",
-  "/docs": "Knowledge",
-  "/context": "Knowledge",
   "/rules": "Rules",
   "/skills": "Skills",
   "/guardrails": "Guardrails",
   "/evaluations": "Evaluations",
-  "/evals": "Evaluations",
   "/recs": "Recommendations",
   "/settings": "Settings",
 };
 
-function pageTitle(pathname: string) {
+export function pageTitle(pathname: string) {
   if (pathname.startsWith("/sessions/")) return "Sessions";
   for (const [prefix, title] of Object.entries(TITLES)) {
     if (pathname === prefix || pathname.startsWith(prefix + "/")) return title;
@@ -38,10 +35,10 @@ function sectionRoot(pathname: string): string {
   if (pathname.startsWith("/sessions")) return "/sessions";
   if (pathname.startsWith("/recs")) return "/recs";
   if (pathname.startsWith("/guardrails")) return "/guardrails";
-  if (pathname.startsWith("/evaluations") || pathname.startsWith("/evals")) {
+  if (pathname.startsWith("/evaluations")) {
     return "/evaluations";
   }
-  if (pathname.startsWith("/knowledge") || pathname.startsWith("/docs") || pathname.startsWith("/context")) {
+  if (pathname.startsWith("/knowledge")) {
     return "/knowledge";
   }
   for (const prefix of Object.keys(TITLES)) {

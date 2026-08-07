@@ -151,6 +151,7 @@ type TimelineItem =
       text: string;
       model?: string;
       asThought?: boolean;
+      thoughtUnavailable?: boolean;
     }
   | { kind: "tools"; id: string; at: number; tools: ToolEntry[] }
   | { kind: "turn"; id: string; at: number; label: string }
@@ -330,6 +331,9 @@ function buildTimeline(spans: Span[]): TimelineItem[] {
           : rawPrompt) ||
         "";
       const thought = attrs["coding_agent.llm.thought.text"] || "";
+      const reasoningSummaryUnavailable =
+        attrs["coding_agent.llm.reasoning.summary.available"] === "false";
+      const reasoningTokens = attrs["coding_agent.llm.reasoning.tokens"] || "";
       const response =
         attrs["gen_ai.content.completion"] ||
         attrs["gen_ai.completion"] ||
@@ -372,6 +376,20 @@ function buildTimeline(spans: Span[]): TimelineItem[] {
           text: thought,
           model,
           asThought: true,
+        });
+      }
+      if (reasoningSummaryUnavailable && !thought) {
+        const tokenDetail = reasoningTokens
+          ? ` (${Number(reasoningTokens).toLocaleString()} reasoning tokens)`
+          : "";
+        items.push({
+          kind: "response",
+          id: `thought-unavailable-${i++}`,
+          at: (sp.end_time_unix_nano || at) + 2,
+          text: `Codex used reasoning for this turn${tokenDetail}, but did not expose a public reasoning summary.`,
+          model,
+          asThought: true,
+          thoughtUnavailable: true,
         });
       }
       continue;
@@ -520,7 +538,10 @@ function mergeSubagentsIntoTimeline(
   return out.sort((a, b) => a.at - b.at);
 }
 
-function vendorFromMeta(meta: SessionMeta, spans: Span[]): "cursor" | "claude" | "codex" | "other" {
+function vendorFromMeta(
+  meta: SessionMeta,
+  spans: Span[]
+): "cursor" | "claude" | "codex" | "opencode" | "pi" | "other" {
   const raw = (
     meta.vendor ||
     spans.map((s) => s.attributes?.["coding_agent.client"] || s.attributes?.["coding_agent.vendor"]).find(Boolean) ||
@@ -529,6 +550,8 @@ function vendorFromMeta(meta: SessionMeta, spans: Span[]): "cursor" | "claude" |
   if (raw.includes("cursor")) return "cursor";
   if (raw.includes("claude")) return "claude";
   if (raw.includes("codex")) return "codex";
+  if (raw.includes("opencode")) return "opencode";
+  if (raw === "pi") return "pi";
   return "other";
 }
 
@@ -573,30 +596,24 @@ export default function SessionTimeline({
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [filters, setFilters] = useState<Record<FilterKey, boolean>>(() =>
-    decodeFiltersParam(searchParams.get("filters"))
+  const filters = useMemo(
+    () => decodeFiltersParam(searchParams.get("filters")),
+    [searchParams]
   );
   const [toolsOpen, setToolsOpen] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    setFilters(decodeFiltersParam(searchParams.get("filters")));
-  }, [searchParams]);
-
   const updateFilters = useCallback(
     (patch: Partial<Record<FilterKey, boolean>>) => {
-      setFilters((prev) => {
-        const next = { ...prev, ...patch };
-        const params = new URLSearchParams(searchParams.toString());
-        const encoded = encodeFiltersParam(next);
-        if (encoded) params.set("filters", encoded);
-        else params.delete("filters");
-        const qs = params.toString().replace(/=(?=&|$)/g, "");
-        const href = qs ? `${pathname}?${qs}` : pathname;
-        router.replace(href, { scroll: false });
-        return next;
-      });
+      const next = { ...filters, ...patch };
+      const params = new URLSearchParams(searchParams.toString());
+      const encoded = encodeFiltersParam(next);
+      if (encoded) params.set("filters", encoded);
+      else params.delete("filters");
+      const qs = params.toString().replace(/=(?=&|$)/g, "");
+      const href = qs ? `${pathname}?${qs}` : pathname;
+      router.replace(href, { scroll: false });
     },
-    [pathname, router, searchParams]
+    [filters, pathname, router, searchParams]
   );
   const counts = useMemo(() => {
     const c = {
@@ -712,7 +729,9 @@ export default function SessionTimeline({
             <div className="mx-auto max-w-2xl">
               {visible.length === 0 && (
                 <p className="text-sm text-neutral-500">
-                  Nothing matches the current filters.
+                  {items.length === 0
+                    ? "Session data is still arriving. Use Refresh to check for new turns."
+                    : "Nothing matches the current filters."}
                 </p>
               )}
               {visible.map((it, index) => {
@@ -759,10 +778,17 @@ export default function SessionTimeline({
                       >
                         {it.asThought && (
                           <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-amber-800/80 dark:text-amber-300/90">
-                            Thought
+                            {it.thoughtUnavailable ? "Reasoning" : "Thought"}
                           </p>
                         )}
-                        <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-neutral-800">
+                        <p
+                          className={cn(
+                            "whitespace-pre-wrap text-[15px] leading-relaxed",
+                            it.thoughtUnavailable
+                              ? "text-neutral-500"
+                              : "text-neutral-800"
+                          )}
+                        >
                           {it.text}
                         </p>
                       </div>
@@ -1053,12 +1079,6 @@ export default function SessionTimeline({
                     checked={filters.tools}
                     onChange={(v) => updateFilters({ tools: v })}
                   />
-                  <FilterRow
-                    label="Subagents"
-                    count={counts.subagents}
-                    checked={filters.subagents}
-                    onChange={(v) => updateFilters({ subagents: v })}
-                  />
                   <div className="tb-filter-nest">
                     <FilterRow
                       label="Edits"
@@ -1073,6 +1093,12 @@ export default function SessionTimeline({
                       onChange={(v) => updateFilters({ bash: v })}
                     />
                   </div>
+                  <FilterRow
+                    label="Subagents"
+                    count={counts.subagents}
+                    checked={filters.subagents}
+                    onChange={(v) => updateFilters({ subagents: v })}
+                  />
                 </div>
               </div>
             </div>
@@ -1326,7 +1352,11 @@ function UserAvatar({ initials }: { initials: string }) {
   );
 }
 
-function VendorAvatar({ vendor }: { vendor: "cursor" | "claude" | "codex" | "other" }) {
+function VendorAvatar({
+  vendor,
+}: {
+  vendor: "cursor" | "claude" | "codex" | "opencode" | "pi" | "other";
+}) {
   const src =
     vendor === "claude"
       ? "/vendors/claude.png"
@@ -1334,16 +1364,39 @@ function VendorAvatar({ vendor }: { vendor: "cursor" | "claude" | "codex" | "oth
         ? "/vendors/codex.png"
         : vendor === "cursor"
           ? "/vendors/cursor.png"
-          : null;
+          : vendor === "opencode"
+            ? "/vendors/opencode.svg"
+            : vendor === "pi"
+              ? "/vendors/pi.png"
+              : null;
+
+  const title =
+    vendor === "claude"
+      ? "Claude"
+      : vendor === "codex"
+        ? "Codex"
+        : vendor === "cursor"
+          ? "Cursor"
+          : vendor === "opencode"
+            ? "OpenCode"
+            : vendor === "pi"
+              ? "Pi"
+              : "AI";
 
   if (src) {
     return (
       <div
         className={cn(
           "flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full",
-          vendor === "claude" ? "bg-neutral-950" : vendor === "codex" ? "bg-white" : "bg-neutral-900"
+          vendor === "claude"
+            ? "bg-neutral-950"
+            : vendor === "codex"
+              ? "bg-white"
+              : vendor === "opencode"
+                ? "bg-neutral-100 dark:bg-neutral-900"
+                : "bg-neutral-900"
         )}
-        title={vendor === "claude" ? "Claude" : vendor === "codex" ? "Codex" : "Cursor"}
+        title={title}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -1351,7 +1404,8 @@ function VendorAvatar({ vendor }: { vendor: "cursor" | "claude" | "codex" | "oth
           alt=""
           className={cn(
             "object-contain",
-            vendor === "claude" ? "size-7" : "size-8"
+            vendor === "claude" ? "size-7" : "size-8",
+            vendor === "opencode" && "p-1.5 dark:invert"
           )}
         />
       </div>
@@ -1561,7 +1615,11 @@ function NestedSubagentFeed({
                     : "text-neutral-400"
                 )}
               >
-                {it.asThought ? "Thought" : vendor}
+                {it.asThought
+                  ? it.thoughtUnavailable
+                    ? "Reasoning"
+                    : "Thought"
+                  : vendor}
               </div>
               <p className="whitespace-pre-wrap">{it.text}</p>
             </div>

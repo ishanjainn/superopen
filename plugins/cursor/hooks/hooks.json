@@ -13,8 +13,8 @@
         "timeout": 5000
       },
       {
-        "command": "so sessions finalize",
-        "timeout": 30000
+        "command": "so sessions finalize --detach",
+        "timeout": 5000
       }
     ],
     "beforeSubmitPrompt": [

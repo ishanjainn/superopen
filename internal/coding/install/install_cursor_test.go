@@ -65,7 +65,7 @@ func TestMergeCursorHooks_PreservesUnrelatedEntries(t *testing.T) {
 
 // TestMergeCursorHooks_Idempotent: running install twice should NOT
 // double-register our hooks. The marker-based strip in mergeCursorHooks
-// drops the prior Superopen/legacy entry before re-appending.
+// drops the prior Superopen/residual entry before re-appending.
 func TestMergeCursorHooks_Idempotent(t *testing.T) {
 	template := mustParseHooks(t, `{
 		"version": 1,

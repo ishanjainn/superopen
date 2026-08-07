@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,14 +22,17 @@ import (
 	"github.com/ishanjainn/superopen/internal/discover"
 	"github.com/ishanjainn/superopen/internal/doctor"
 	"github.com/ishanjainn/superopen/internal/eval"
-	"github.com/ishanjainn/superopen/internal/guardrails"
+	"github.com/ishanjainn/superopen/internal/execx"
+	"github.com/ishanjainn/superopen/internal/gitruntime"
 	"github.com/ishanjainn/superopen/internal/graph"
+	"github.com/ishanjainn/superopen/internal/guardrails"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/harnessvalid"
 	"github.com/ishanjainn/superopen/internal/harvest"
 	initcmd "github.com/ishanjainn/superopen/internal/initcmd"
 	"github.com/ishanjainn/superopen/internal/inject"
 	"github.com/ishanjainn/superopen/internal/llm"
+	"github.com/ishanjainn/superopen/internal/nativedocs"
 	"github.com/ishanjainn/superopen/internal/otlp"
 	"github.com/ishanjainn/superopen/internal/projects"
 	"github.com/ishanjainn/superopen/internal/recommend"
@@ -66,7 +70,7 @@ func main() {
 		cmdEval(), cmdRecommend(), cmdDoctor(), cmdSkill(), cmdGuard(), cmdKnowledge(), cmdHarvest(),
 		cmdQuery(), coding.NewCmd(),
 		cmdProjects(), cmdStatus(), cmdCheckpoint(), cmdBlame(), cmdWhy(),
-		cmdGitHook(), cmdLogin(), cmdLogout(), cmdImport(),
+		cmdGitHook(), cmdLogin(), cmdLogout(),
 		cmdMemory(), cmdLearn(), cmdAudit(), cmdOpen(), cmdRetrieve(),
 		version.NewCmd(),
 	)
@@ -75,7 +79,6 @@ func main() {
 		os.Exit(axi.ExitCode(err))
 	}
 }
-
 
 func runRoot(cmd *cobra.Command, args []string) error {
 	o := out()
@@ -116,7 +119,6 @@ func repoRoot() string {
 	}
 	return root
 }
-
 
 func applyTracesDir(root string, paths *harness.Paths, cfg config.Config) {
 	if paths == nil {
@@ -263,7 +265,6 @@ Use so coding uninstall if you only want to strip hooks.`,
 	return c
 }
 
-
 func ensureGraphifyy() {
 	if err := graph.EnsureTool(); err != nil {
 		fmt.Printf("graphify: %v\n", err)
@@ -323,8 +324,8 @@ func cmdInit() *cobra.Command {
 func cmdApplyUpgrade() *cobra.Command {
 	return &cobra.Command{
 		Use:   "apply-upgrade [file|-]",
-		Short: "Apply assistant-produced harness JSON into .so/ (Graphify-style)",
-		Long:  "Reads upgrade JSON (from an AI assistant) and writes .so/knowledge, guardrails, and evals. Use after `so init --no-llm` when running inside Cursor/Claude.",
+		Short: "Apply assistant-produced harness JSON to AGENTS.md, guardrails, and evals",
+		Long:  "Reads upgrade JSON (from an AI assistant) and writes AGENTS.md plus .so/guardrails and .so/evals. Pass a file path OR stdin — never both (a path with a heredoc would ignore the heredoc). Use after `so init --no-llm` when running inside Cursor/Claude.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
@@ -332,15 +333,22 @@ func cmdApplyUpgrade() *cobra.Command {
 			if !paths.Exists() {
 				return fmt.Errorf("run so init first")
 			}
+			useFile := len(args) == 1 && args[0] != "-"
+			if useFile && stdinRedirected() {
+				return fmt.Errorf("apply-upgrade: pass a file OR stdin/heredoc, not both (got %q with redirected stdin)", args[0])
+			}
 			var raw []byte
 			var err error
-			if len(args) == 0 || args[0] == "-" {
+			if !useFile {
 				raw, err = io.ReadAll(os.Stdin)
 			} else {
 				raw, err = os.ReadFile(args[0])
 			}
 			if err != nil {
 				return err
+			}
+			if len(bytes.TrimSpace(raw)) == 0 {
+				return fmt.Errorf("apply-upgrade: empty JSON (write a file and pass its path, or pipe/heredoc JSON on stdin)")
 			}
 			data, err := os.ReadFile(filepath.Join(paths.Root, "discovery.json"))
 			if err != nil {
@@ -353,10 +361,18 @@ func cmdApplyUpgrade() *cobra.Command {
 			if err := seed.ApplyUpgradeJSON(paths, profile, string(raw)); err != nil {
 				return err
 			}
-			fmt.Println("Applied harness upgrade into .so/")
+			fmt.Println("Applied harness upgrade → AGENTS.md, .so/guardrails/, .so/evals/")
 			return nil
 		},
 	}
+}
+
+func stdinRedirected() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice == 0
 }
 
 func cmdSync() *cobra.Command {
@@ -462,7 +478,7 @@ func queryCmd() *cobra.Command {
 
 func cmdSessions() *cobra.Command {
 	c := &cobra.Command{Use: "sessions", Short: "List and manage sessions"}
-	c.AddCommand(&cobra.Command{
+	listCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List sessions",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -489,7 +505,8 @@ func cmdSessions() *cobra.Command {
 			o.Rows("sessions", []string{"id", "vendor", "commits", "title"}, rows)
 			return nil
 		},
-	})
+	}
+	c.AddCommand(listCmd)
 	attachSessionsStart(c)
 	// rest of sessions cmds added below / via extendSessionsCmd
 	c.AddCommand(&cobra.Command{
@@ -507,16 +524,48 @@ func cmdSessions() *cobra.Command {
 			return enc.Encode(m)
 		},
 	})
-	c.AddCommand(&cobra.Command{
+	finalizeCmd := &cobra.Command{
 		Use:   "finalize [session-id]",
 		Short: "Materialize traces into a session (post-session pipeline)",
+		Long: `Runs eval → recommendations → optional auto-apply → harvest for a session.
+
+Prefer agent SessionEnd / the coding hook to invoke this. Pass --detach so the
+caller (agent hooks) returns immediately while work continues in the background.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := ""
+			if len(args) > 0 {
+				id = strings.TrimSpace(args[0])
+			}
+			detach, _ := cmd.Flags().GetBool("detach")
+			if detach {
+				root := repoRoot()
+				if id == "" {
+					execx.SpawnSO(root, "sessions", "finalize")
+				} else {
+					execx.SpawnSO(root, "sessions", "finalize", id)
+				}
+				return nil
+			}
+			// Fail-soft for agent companions: never fail the hook hard.
+			if err := finalizeSession(repoRoot(), id); err != nil {
+				fmt.Fprintf(os.Stderr, "finalize: %v\n", err)
+			}
+			return nil
+		},
+	}
+	finalizeCmd.Flags().Bool("detach", false, "Return immediately; run finalize in a background process")
+	c.AddCommand(finalizeCmd)
+	c.AddCommand(&cobra.Command{
+		Use:   "refresh [session-id]",
+		Short: "Materialize current traces while keeping the session active",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := ""
 			if len(args) > 0 {
 				id = strings.TrimSpace(args[0])
 			}
-			return finalizeSession(repoRoot(), id)
+			return refreshSession(repoRoot(), id)
 		},
 	})
 	c.AddCommand(&cobra.Command{
@@ -527,12 +576,13 @@ func cmdSessions() *cobra.Command {
 		},
 	})
 	extendSessionsCmd(c)
-	c.RunE = c.Commands()[0].RunE // default to list
+	c.RunE = listCmd.RunE // default to list; Commands() is alphabetically sorted.
 	return c
 }
 
 func cmdEval() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	c := &cobra.Command{
 		Use:   "eval [session-id]",
 		Short: "Run evaluations for a session",
 		Args:  cobra.MaximumNArgs(1),
@@ -551,6 +601,22 @@ func cmdEval() *cobra.Command {
 				}
 				id = list[0].ID
 			}
+			meta, _ := session.NewStore(paths).Get(id)
+			scope := "snapshot"
+			if meta.Status == session.StatusEnded {
+				scope = "complete"
+			}
+			if decision := eval.DecideSkip(paths, cfg, meta, force); decision.Skip {
+				if decision.Scope != "" {
+					scope = decision.Scope
+				}
+				return out().HumanOrJSON("evaluation", func() {
+					fmt.Println(eval.SkipMessage(id, decision))
+				}, map[string]any{
+					"result": decision.Prior, "reused": true, "scope": scope,
+					"skip_reason": decision.Reason,
+				})
+			}
 			store := tracestore.NewLocalJSONL(paths.TracesDir)
 			spans, _ := store.Query(tracestore.QueryFilter{SessionID: id})
 			client := llm.NewBestCompleter(cfg)
@@ -558,17 +624,27 @@ func cmdEval() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Session %s score=%.2f badge=%s\n", id, res.Score, res.Badge)
+			backend := "heuristics"
 			if client != nil && client.Available() {
-				fmt.Printf("Model backend: %s\n", client.Backend())
+				backend = client.Backend()
 			}
+			generated := 0
 			if cfg.Recommendations.Auto {
 				recs, _ := recommend.Generate(paths, id, res, client)
-				fmt.Printf("Generated %d recommendations\n", len(recs))
+				generated = len(recs)
 			}
-			return nil
+			return out().HumanOrJSON("evaluation", func() {
+				fmt.Printf("Session %s score=%.2f badge=%s\n", id, res.Score, res.Badge)
+				fmt.Printf("Model backend: %s\n", backend)
+				fmt.Printf("Generated %d recommendations\n", generated)
+			}, map[string]any{
+				"result": res, "backend": backend, "recommendations_generated": generated,
+				"reused": false, "scope": scope,
+			})
 		},
 	}
+	c.Flags().BoolVar(&force, "force", false, "Re-run even when a closed chat already has a final evaluation, or an open chat is still inside the active cooldown")
+	return c
 }
 
 func cmdRecommend() *cobra.Command {
@@ -587,12 +663,13 @@ func cmdRecommend() *cobra.Command {
 			}, recs)
 		},
 	})
-	c.AddCommand(&cobra.Command{
+	var applyReason, applyActor string
+	applyCmd := &cobra.Command{
 		Use:  "apply [id]",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			paths := harness.Resolve(repoRoot())
-			if err := recommend.Apply(paths, args[0]); err != nil {
+			if err := recommend.Apply(paths, args[0], recommend.Decision{Reason: applyReason, Actor: applyActor}); err != nil {
 				return err
 			}
 			if err := sync.Run(sync.Options{RepoRoot: repoRoot(), SkipGraph: true}); err != nil {
@@ -600,35 +677,51 @@ func cmdRecommend() *cobra.Command {
 			}
 			return out().HumanOrJSON("result", func() {
 				fmt.Println("Applied.")
-			}, map[string]any{"ok": true, "id": args[0], "status": "applied"})
+			}, map[string]any{"ok": true, "id": args[0], "status": "applied", "decision_reason": strings.TrimSpace(applyReason), "decision_actor": strings.ToLower(strings.TrimSpace(applyActor))})
 		},
-	})
-	c.AddCommand(&cobra.Command{
+	}
+	applyCmd.Flags().StringVar(&applyReason, "reason", "", "why this recommendation resolves the issue")
+	applyCmd.Flags().StringVar(&applyActor, "actor", "agent", "decision actor: human, agent, or system")
+	_ = applyCmd.MarkFlagRequired("reason")
+	c.AddCommand(applyCmd)
+
+	var dismissReason, dismissActor string
+	dismissCmd := &cobra.Command{
 		Use:  "dismiss [id]",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := recommend.Dismiss(harness.Resolve(repoRoot()), args[0]); err != nil {
+			if err := recommend.Dismiss(harness.Resolve(repoRoot()), args[0], recommend.Decision{Reason: dismissReason, Actor: dismissActor}); err != nil {
 				return err
 			}
 			return out().HumanOrJSON("result", func() {
 				fmt.Println("Dismissed.")
-			}, map[string]any{"ok": true, "id": args[0], "status": "dismissed"})
+			}, map[string]any{"ok": true, "id": args[0], "status": "dismissed", "decision_reason": strings.TrimSpace(dismissReason), "decision_actor": strings.ToLower(strings.TrimSpace(dismissActor))})
 		},
-	})
-	c.AddCommand(&cobra.Command{
+	}
+	dismissCmd.Flags().StringVar(&dismissReason, "reason", "", "why this recommendation is being dismissed")
+	dismissCmd.Flags().StringVar(&dismissActor, "actor", "agent", "decision actor: human, agent, or system")
+	_ = dismissCmd.MarkFlagRequired("reason")
+	c.AddCommand(dismissCmd)
+
+	var revertReason, revertActor string
+	revertCmd := &cobra.Command{
 		Use:  "revert [id]",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			paths := harness.Resolve(repoRoot())
-			if err := recommend.Revert(paths, args[0]); err != nil {
+			if err := recommend.Revert(paths, args[0], recommend.Decision{Reason: revertReason, Actor: revertActor}); err != nil {
 				return err
 			}
 			_ = sync.Run(sync.Options{RepoRoot: repoRoot(), SkipGraph: true})
 			return out().HumanOrJSON("result", func() {
 				fmt.Println("Reverted.")
-			}, map[string]any{"ok": true, "id": args[0], "status": "reverted"})
+			}, map[string]any{"ok": true, "id": args[0], "status": "reverted", "decision_reason": strings.TrimSpace(revertReason), "decision_actor": strings.ToLower(strings.TrimSpace(revertActor))})
 		},
-	})
+	}
+	revertCmd.Flags().StringVar(&revertReason, "reason", "", "why the applied recommendation is being reverted")
+	revertCmd.Flags().StringVar(&revertActor, "actor", "agent", "decision actor: human, agent, or system")
+	_ = revertCmd.MarkFlagRequired("reason")
+	c.AddCommand(revertCmd)
 	c.RunE = c.Commands()[0].RunE
 	return c
 }
@@ -636,7 +729,7 @@ func cmdRecommend() *cobra.Command {
 func cmdDoctor() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
-		Short: "Check harness, hooks, injectors, OTLP, graph, LLM",
+		Short: "Check harness, hooks, injectors, graph, and local health",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o := out()
 			checks := doctor.Run(repoRoot())
@@ -668,9 +761,11 @@ func cmdSkill() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			paths := harness.Resolve(repoRoot())
-			path := filepath.Join(paths.SkillsDir, args[0]+".md")
 			body := fmt.Sprintf("# %s\n\nDescribe the workflow steps here.\n", args[0])
-			return os.WriteFile(path, []byte(body), 0o644)
+			if err := os.MkdirAll(filepath.Join(paths.SkillsDir, args[0]), 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(paths.SkillSKILL(args[0]), []byte(body), 0o644)
 		},
 	})
 	return c
@@ -711,26 +806,47 @@ func cmdGuard() *cobra.Command {
 }
 
 func cmdKnowledge() *cobra.Command {
-	c := &cobra.Command{Use: "knowledge", Short: "Harness knowledge helpers (.so/knowledge)"}
+	c := &cobra.Command{Use: "knowledge", Short: "Show native knowledge roots (AGENTS.md)"}
 	c.AddCommand(&cobra.Command{
 		Use:   "generate",
-		Short: "Seed architecture.md from the graph report when missing (non-destructive)",
+		Short: "Append graph report into AGENTS.md learned section when useful",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			paths := harness.Resolve(repoRoot())
-			report, _ := os.ReadFile(paths.GraphReport)
-			arch := filepath.Join(paths.KnowledgeDir, "architecture.md")
-			existing, _ := os.ReadFile(arch)
-			if len(existing) == 0 {
-				return os.WriteFile(arch, append([]byte("# Architecture\n\n"), report...), 0o644)
+			report, err := os.ReadFile(paths.GraphReport)
+			if err != nil || len(report) == 0 {
+				return fmt.Errorf("no graph report - run so graph first")
 			}
-			fmt.Println("architecture.md exists - edit manually or delete to regenerate")
-			return nil
+			return nativedocs.AppendLearned(paths, "## Graph snapshot\n\n"+string(report))
 		},
 	})
+	c.RunE = func(cmd *cobra.Command, args []string) error {
+		paths := harness.Resolve(repoRoot())
+		roots := nativedocs.DiscoverRoots(paths.RepoRoot)
+		fmt.Println("AGENTS.md:", paths.AgentsMD)
+		for _, p := range paths.AgentsPaths() {
+			if p != paths.AgentsMD {
+				fmt.Println("AGENTS.md (nested):", p)
+			}
+		}
+		fmt.Printf("Rules (%s): %s\n", roots.RulesKind, paths.RulesDir)
+		fmt.Printf("Skills (%s): %s\n", roots.SkillsKind, paths.SkillsDir)
+		return nil
+	}
 	return c
 }
 
-func finalizeSession(root, sessionID string) error {
+type finalizeOpts struct {
+	// SkipTrackedMutations keeps the working tree clean after git hooks:
+	// generate evals/recs and memory only — no auto-apply, inject sync, or
+	// harvest writes into AGENTS.md / rules / skills.
+	SkipTrackedMutations bool
+}
+
+func finalizeSession(root, sessionID string, opts ...finalizeOpts) error {
+	var o finalizeOpts
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 	paths := harness.Resolve(root)
 	_, _ = projects.Register(root, paths.Root, "")
 	cfg, _ := config.Load(paths.Config)
@@ -776,12 +892,28 @@ func finalizeSession(root, sessionID string) error {
 		return fmt.Errorf("no spans for session %s", latestID)
 	}
 	sess := session.NewStore(paths)
+	if existing, existingErr := sess.Get(latestID); existingErr == nil && existing.Status == session.StatusEnded && existing.EndedAt != nil {
+		latestSpan := time.Time{}
+		for _, sp := range ss {
+			at := time.Unix(0, sp.EndTimeUnixN).UTC()
+			if sp.EndTimeUnixN == 0 {
+				at = time.Unix(0, sp.StartTimeUnixN).UTC()
+			}
+			if at.After(latestSpan) {
+				latestSpan = at
+			}
+		}
+		if !latestSpan.After(*existing.EndedAt) {
+			fmt.Printf("Session %s is already finalized; no new evaluation was created\n", latestID)
+			return nil
+		}
+	}
 	if !session.SpansHaveActivity(ss) {
 		_ = sess.Delete(latestID)
 		fmt.Printf("Skipped empty session %s (no turns/work)\n", latestID)
 		return nil
 	}
-	_ = sess.Start(session.Meta{ID: latestID, Vendor: ss[0].Attributes["coding_agent.vendor"], StartedAt: time.Unix(0, ss[0].StartTimeUnixN).UTC()})
+	_ = sess.Start(session.Meta{ID: latestID, Vendor: session.VendorFromSpans(ss), StartedAt: time.Unix(0, ss[0].StartTimeUnixN).UTC()})
 	tokens, cost, _ := store.SessionCost(latestID)
 	meta, err := sess.MaterializeFromSpans(latestID, ss, tokens, cost)
 	if err != nil {
@@ -807,24 +939,103 @@ func finalizeSession(root, sessionID string) error {
 		}
 		if cfg.Recommendations.Auto {
 			recs, _ := recommend.Generate(paths, latestID, ev, client)
-			appliedAny := false
-			for _, r := range recs {
-				tier := harnessvalid.Tier(r.Type)
-				if !cfg.AllowsAutoApplyTier(tier) {
-					continue
+			if !o.SkipTrackedMutations {
+				appliedAny := false
+				for _, r := range recs {
+					tier := harnessvalid.Tier(r.Type)
+					if !cfg.AllowsAutoApplyTier(tier) {
+						continue
+					}
+					if err := recommend.Apply(paths, r.ID, recommend.Decision{
+						Reason: "Automatically applied because its recommendation tier is enabled in auto_apply_tiers.",
+						Actor:  "system",
+					}); err == nil {
+						appliedAny = true
+					}
 				}
-				if err := recommend.Apply(paths, r.ID); err == nil {
-					appliedAny = true
+				if appliedAny {
+					_ = sync.Run(sync.Options{RepoRoot: root, SkipGraph: true, SkipInject: true})
 				}
-			}
-			if appliedAny {
-				_ = sync.Run(sync.Options{RepoRoot: root, SkipGraph: true})
 			}
 		}
 	}
 	mineOnFinalize(paths, latestID, cfg)
-	_, _ = harvest.Run(paths, cfg, latestID, harvest.TriggerFinalize)
+	_, _ = harvest.Run(paths, cfg, latestID, harvest.TriggerFinalize, harvest.RunOpts{
+		SkipNativeDocs: o.SkipTrackedMutations,
+	})
+	_, _ = gitruntime.SnapshotSessionDir(root, paths.SessionDir(latestID), latestID)
 	fmt.Printf("Finalized session %s (%s)\n", meta.ID, meta.EvalBadge)
+	return nil
+}
+
+// refreshSession materializes the latest trace snapshot without declaring the
+// chat complete. Codex Stop means "assistant turn ended", not "chat closed",
+// so its hook uses this path and reserves finalizeSession for an explicit close.
+func refreshSession(root, sessionID string) error {
+	paths := harness.Resolve(root)
+	_, _ = projects.Register(root, paths.Root, "")
+	cfg, _ := config.Load(paths.Config)
+	applyTracesDir(root, &paths, cfg)
+	store := tracestore.NewLocalJSONL(paths.TracesDir)
+	spans, err := store.Query(tracestore.QueryFilter{Limit: 5000})
+	if err != nil {
+		return err
+	}
+	bySession := map[string][]tracestore.Span{}
+	for _, sp := range spans {
+		sid := otlp.ResolveSessionID(sp.Attributes, "")
+		if sid == "" {
+			sid = sp.SessionID
+		}
+		if sid == "" {
+			sid = sp.TraceID
+		}
+		bySession[sid] = append(bySession[sid], sp)
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		var latest int64
+		for candidate, candidateSpans := range bySession {
+			for _, sp := range candidateSpans {
+				if sp.StartTimeUnixN > latest {
+					latest = sp.StartTimeUnixN
+					id = candidate
+				}
+			}
+		}
+	}
+	ss := bySession[id]
+	if len(ss) == 0 {
+		return fmt.Errorf("no spans for session %s", id)
+	}
+	if !session.SpansHaveActivity(ss) {
+		return nil
+	}
+	sess := session.NewStore(paths)
+	_ = sess.Start(session.Meta{ID: id, Vendor: session.VendorFromSpans(ss), StartedAt: time.Unix(0, ss[0].StartTimeUnixN).UTC()})
+	tokens, cost, _ := store.SessionCost(id)
+	meta, err := sess.MaterializeFromSpans(id, ss, tokens, cost)
+	if err != nil {
+		return err
+	}
+	meta.Status = session.StatusActive
+	meta.EndedAt = nil
+	meta.DurationMs = time.Since(meta.StartedAt).Milliseconds()
+	meta.RepoRoot = root
+	if p, projectErr := projects.Get(root); projectErr == nil {
+		meta.ProjectID = p.ID
+	}
+	if err := sess.UpdateMeta(meta); err != nil {
+		return err
+	}
+	_ = session.NewStateStore(paths).Save(session.State{
+		SessionID: id,
+		Vendor:    meta.Vendor,
+		Phase:     session.PhaseActive,
+		RepoRoot:  root,
+	})
+	_, _ = viz.BuildReplayFromSpans(paths, id, ss)
+	fmt.Printf("Refreshed active session %s\n", id)
 	return nil
 }
 
@@ -911,8 +1122,10 @@ func startNextUI(repoRoot string, uiPort int) (*exec.Cmd, string, error) {
 	// Light local path: Next.js Turbopack dev via `npm run dev` (package.json).
 	cmd := exec.Command("npm", "run", "dev", "--", "-p", fmt.Sprintf("%d", uiPort), "-H", "127.0.0.1")
 	cmd.Dir = webDir
+	soBin, _ := os.Executable()
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("SUPEROPEN_ROOT=%s", repoRoot),
+		fmt.Sprintf("SUPEROPEN_SO_BIN=%s", soBin),
 		"NODE_ENV=development",
 	)
 	cmd.Stdout = os.Stdout

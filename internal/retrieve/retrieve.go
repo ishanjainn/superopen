@@ -1,4 +1,3 @@
-// Package retrieve indexes harness corpus files for offline keyword search.
 package retrieve
 
 import (
@@ -28,8 +27,12 @@ func indexPath(paths harness.Paths) string {
 }
 
 // Rebuild walks harness corpus into a simple keyword index.
+// Indexes every AGENTS.md plus all vendor rules/skills trees (not only the
+// preferred write target), so UI search, evals, and recommendations see the
+// full guidance surface.
 func Rebuild(repoRoot string, paths harness.Paths) (int, error) {
 	var docs []IndexDoc
+	seen := map[string]bool{}
 	addFile := func(path, kind string) {
 		data, err := os.ReadFile(path)
 		if err != nil || len(data) == 0 {
@@ -39,13 +42,70 @@ func Rebuild(repoRoot string, paths harness.Paths) (int, error) {
 		if rel == "" || strings.HasPrefix(rel, "..") {
 			rel = path
 		}
+		rel = filepath.ToSlash(rel)
+		if seen[rel] {
+			return
+		}
+		seen[rel] = true
 		text := string(data)
 		if len(text) > 100_000 {
 			text = text[:100_000]
 		}
 		docs = append(docs, IndexDoc{Path: rel, Kind: kind, Content: text})
 	}
-	walk := func(dir, kind string) {
+	walkRules := func(dir string) {
+		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			name := d.Name()
+			if name == "superopen.mdc" || name == "superopen.md" {
+				return nil
+			}
+			if !isIndexableRule(name) {
+				return nil
+			}
+			addFile(path, "rules")
+			return nil
+		})
+	}
+	walkSkills := func(dir string) {
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range ents {
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if name == "so" || name == "superopen" {
+				continue
+			}
+			addFile(filepath.Join(dir, name, "SKILL.md"), "skills")
+		}
+	}
+
+	for _, dir := range harness.RulesCandidates(repoRoot) {
+		walkRules(dir)
+	}
+	// Also index the preferred write target even if empty-of-user at rebuild time
+	// (seeded coding.md may land there between scans).
+	if paths.RulesDir != "" {
+		walkRules(paths.RulesDir)
+	}
+
+	for _, dir := range harness.SkillsCandidates(repoRoot) {
+		walkSkills(dir)
+	}
+	if paths.SkillsDir != "" {
+		walkSkills(paths.SkillsDir)
+	}
+
+	for _, agents := range paths.AgentsPaths() {
+		addFile(agents, "knowledge")
+	}
+	walkDir := func(dir, kind string) {
 		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return nil
@@ -58,11 +118,8 @@ func Rebuild(repoRoot string, paths harness.Paths) (int, error) {
 			return nil
 		})
 	}
-	walk(paths.KnowledgeDir, "knowledge")
-	walk(paths.RulesDir, "rules")
-	walk(paths.SkillsDir, "skills")
-	walk(paths.GuardrailsDir, "guardrails")
-	walk(paths.MemoryDir, "memory")
+	walkDir(paths.GuardrailsDir, "guardrails")
+	walkDir(paths.MemoryDir, "memory")
 	if data, err := os.ReadFile(paths.GraphJSON); err == nil {
 		docs = append(docs, IndexDoc{Path: ".so/graph/graph.json", Kind: "graph", Content: string(data)})
 	}
@@ -92,11 +149,30 @@ func Rebuild(repoRoot string, paths harness.Paths) (int, error) {
 	return len(docs), nil
 }
 
+func isIndexableRule(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".mdc") ||
+		strings.HasSuffix(lower, ".md") ||
+		strings.HasSuffix(lower, ".instructions.md")
+}
+
 func Search(paths harness.Paths, q string, limit int) ([]Hit, error) {
+	return SearchWith(paths, q, SearchOptions{Limit: limit})
+}
+
+// SearchOptions tunes corpus ranking for a coding session.
+type SearchOptions struct {
+	Limit  int
+	Vendor string // session meta.Vendor — boosts matching vendor trees; AGENTS.md stays shared/high
+}
+
+// SearchWith ranks harness corpus hits, optionally weighting by session vendor.
+func SearchWith(paths harness.Paths, q string, opts SearchOptions) ([]Hit, error) {
 	q = strings.TrimSpace(strings.ToLower(q))
 	if q == "" {
 		return nil, nil
 	}
+	limit := opts.Limit
 	if limit <= 0 {
 		limit = 20
 	}
@@ -127,6 +203,7 @@ func Search(paths harness.Paths, q string, limit int) ([]Hit, error) {
 		if score <= 0 {
 			continue
 		}
+		score *= harness.VendorWeight(d.Path, opts.Vendor)
 		snippet := snippetAround(d.Content, q, 200)
 		hits = append(hits, Hit{Path: d.Path, Kind: d.Kind, Snippet: snippet, Score: score})
 	}

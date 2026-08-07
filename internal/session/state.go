@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/gitruntime"
 	"github.com/ishanjainn/superopen/internal/harness"
 )
 
@@ -20,7 +21,7 @@ const (
 )
 
 // State tracks live session machine state (branch, worktree, base SHA).
-// Persisted under .so/session-state/<id>.json (not the transcript store).
+// Persisted under .git/so-sessions/<id>.json (not on the feature branch).
 type State struct {
 	SessionID  string    `json:"session_id"`
 	Vendor     string    `json:"vendor"`
@@ -39,7 +40,7 @@ type StateStore struct {
 }
 
 func NewStateStore(paths harness.Paths) *StateStore {
-	return &StateStore{Dir: filepath.Join(paths.Root, "session-state")}
+	return &StateStore{Dir: gitruntime.StateDir(paths.RepoRoot)}
 }
 
 func (s *StateStore) path(id string) string {

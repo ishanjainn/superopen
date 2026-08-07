@@ -13,7 +13,7 @@ import (
 // AgentSource is an existing instruction file found in the repo.
 type AgentSource struct {
 	Path     string   `json:"path"`
-	Kind     string   `json:"kind"` // agents | claude | cursor-rule | gemini | contributing | other
+	Kind     string   `json:"kind"` // agents | claude | contributing | <vendor>-rule | <vendor>-skill | …
 	Headings []string `json:"headings,omitempty"`
 	Rules    []string `json:"rules,omitempty"`
 	Excerpt  string   `json:"excerpt,omitempty"`
@@ -45,7 +45,7 @@ var (
 	themeCueRe = regexp.MustCompile(`(?i)\b(concurren|race|secret|security|sql|rate.?limit|test|lint|format|pr title|github|credential|mutex|goroutine|migration)\b`)
 )
 
-// CollectAgentFiles reads AGENTS.md, CLAUDE.md, Cursor rules, etc.
+// CollectAgentFiles reads AGENTS.md, CLAUDE.md, vendor rules/skills, etc.
 func CollectAgentFiles(repoRoot string) []AgentSource {
 	var out []AgentSource
 	candidates := []struct {
@@ -57,29 +57,46 @@ func CollectAgentFiles(repoRoot string) []AgentSource {
 		{"GEMINI.md", "gemini"},
 		{"CONTRIBUTING.md", "contributing"},
 		{".cursorrules", "cursor-rule"},
+		{".github/copilot-instructions.md", "copilot"},
 	}
 	for _, c := range candidates {
-		path := filepath.Join(repoRoot, c.rel)
+		path := filepath.Join(repoRoot, filepath.FromSlash(c.rel))
 		if src, ok := readAgentFile(path, c.kind); ok {
 			out = append(out, src)
 		}
 	}
-	rulesDir := filepath.Join(repoRoot, ".cursor", "rules")
-	entries, err := os.ReadDir(rulesDir)
-	if err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
+	for _, dir := range harness.RulesCandidates(repoRoot) {
+		kind := harness.KindForRulesDir(dir) + "-rule"
+		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			name := d.Name()
+			if name == "superopen.mdc" || name == "superopen.md" {
+				return nil
+			}
+			lower := strings.ToLower(name)
+			if !strings.HasSuffix(lower, ".mdc") && !strings.HasSuffix(lower, ".md") {
+				return nil
+			}
+			if src, ok := readAgentFile(path, kind); ok {
+				out = append(out, src)
+			}
+			return nil
+		})
+	}
+	for _, dir := range harness.SkillsCandidates(repoRoot) {
+		kind := harness.KindForSkillsDir(dir) + "-skill"
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range ents {
+			if !e.IsDir() || e.Name() == "so" || e.Name() == "superopen" {
 				continue
 			}
-			name := e.Name()
-			if !strings.HasSuffix(name, ".mdc") && !strings.HasSuffix(name, ".md") {
-				continue
-			}
-			if name == "superopen.mdc" {
-				continue // skip our own injector
-			}
-			path := filepath.Join(rulesDir, name)
-			if src, ok := readAgentFile(path, "cursor-rule"); ok {
+			path := filepath.Join(dir, e.Name(), "SKILL.md")
+			if src, ok := readAgentFile(path, kind); ok {
 				out = append(out, src)
 			}
 		}

@@ -47,8 +47,17 @@ type codexLine struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
+type codexReasoningSummaryPart struct {
+	Text string `json:"text"`
+}
+
+type codexReasoningItem struct {
+	Type    string                      `json:"type"`
+	Summary []codexReasoningSummaryPart `json:"summary"`
+}
+
 // sessionMeta captures the subset of fields Codex's `session_meta`
-// record exposes about subagent linkage. We collapse the legacy
+// record exposes about subagent linkage. We collapse the alternate
 // `parent_thread_id` / `Source.Subagent.ThreadSpawn.*` fallbacks
 // into the same struct so both old and new transcript versions are
 // handled.
@@ -94,6 +103,99 @@ type codexTokenSnapshot struct {
 	LastUsage          codexTokenUsage
 	TotalUsage         codexTokenUsage
 	ModelContextWindow int64
+	ReasoningSummary   string
+	ReasoningObserved  bool
+}
+
+// readReasoningSummaryForTurn returns the public reasoning summary Codex
+// persisted for one turn. Codex rollout records may also contain
+// `encrypted_content`; that is private, opaque model state used for
+// resumability and is intentionally never read or exported here.
+//
+// The boolean reports that at least one reasoning item was present, even when
+// Codex emitted an empty summary. Callers use that distinction to avoid
+// presenting "no reasoning" when the accurate state is "reasoning summary
+// unavailable".
+func readReasoningSummaryForTurn(path, turnID string) (string, bool) {
+	if path == "" || turnID == "" {
+		return "", false
+	}
+
+	var (
+		activeTurnID string
+		started      bool
+		observed     bool
+		parts        []string
+		seen         = map[string]struct{}{}
+	)
+	err := scanCodexLines(path, func(raw []byte) (bool, error) {
+		var l codexLine
+		if err := json.Unmarshal(raw, &l); err != nil {
+			return false, nil
+		}
+		switch l.Type {
+		case "turn_context":
+			nextTurnID := parseCodexTurnID(l.Payload)
+			if started && nextTurnID != "" && nextTurnID != turnID {
+				return true, nil
+			}
+			activeTurnID = nextTurnID
+			started = nextTurnID == turnID
+		case "response_item":
+			if !started || activeTurnID != turnID {
+				return false, nil
+			}
+			summaries, isReasoning := parseReasoningSummary(l.Payload)
+			if !isReasoning {
+				return false, nil
+			}
+			observed = true
+			for _, summary := range summaries {
+				summary = strings.TrimSpace(summary)
+				if summary == "" {
+					continue
+				}
+				if _, duplicate := seen[summary]; duplicate {
+					continue
+				}
+				seen[summary] = struct{}{}
+				parts = append(parts, summary)
+			}
+		}
+		return false, nil
+	})
+	if err != nil {
+		return "", false
+	}
+	return strings.Join(parts, "\n\n"), observed
+}
+
+// parseReasoningSummary accepts both rollout shapes Codex has shipped:
+// the response item directly in payload and wrapped as {"item": {...}}.
+// Only public summary text is returned. In particular, content and
+// encrypted_content are not part of this wire contract.
+func parseReasoningSummary(raw json.RawMessage) ([]string, bool) {
+	var direct codexReasoningItem
+	if err := json.Unmarshal(raw, &direct); err == nil && direct.Type == "reasoning" {
+		return reasoningSummaryTexts(direct.Summary), true
+	}
+	var wrapped struct {
+		Item codexReasoningItem `json:"item"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err == nil && wrapped.Item.Type == "reasoning" {
+		return reasoningSummaryTexts(wrapped.Item.Summary), true
+	}
+	return nil, false
+}
+
+func reasoningSummaryTexts(parts []codexReasoningSummaryPart) []string {
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if text := strings.TrimSpace(part.Text); text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
 }
 
 // readSessionMeta scans the head of a transcript for the first
@@ -146,6 +248,9 @@ func readTokenUsageForTurn(path, turnID string) (codexTokenSnapshot, bool) {
 		lastTotal         codexTokenUsage
 		haveFinal         bool
 		finalInfo         codexTokenUsageInfo
+		reasoningObserved bool
+		reasoningParts    []string
+		seenReasoning     = map[string]struct{}{}
 	)
 
 	err := scanCodexLines(path, func(raw []byte) (bool, error) {
@@ -175,6 +280,16 @@ func readTokenUsageForTurn(path, turnID string) (codexTokenSnapshot, bool) {
 		case "response_item":
 			if activeTurnID != turnID || !targetStarted {
 				return false, nil
+			}
+			if summaries, isReasoning := parseReasoningSummary(l.Payload); isReasoning {
+				reasoningObserved = true
+				for _, summary := range summaries {
+					if _, duplicate := seenReasoning[summary]; duplicate {
+						continue
+					}
+					seenReasoning[summary] = struct{}{}
+					reasoningParts = append(reasoningParts, summary)
+				}
 			}
 			if isModelActivity(l.Payload) {
 				targetModelActive = true
@@ -221,6 +336,8 @@ func readTokenUsageForTurn(path, turnID string) (codexTokenSnapshot, bool) {
 		LastUsage:          finalInfo.LastTokenUsage,
 		TotalUsage:         finalInfo.TotalTokenUsage,
 		ModelContextWindow: finalInfo.ModelContextWindow,
+		ReasoningSummary:   strings.Join(reasoningParts, "\n\n"),
+		ReasoningObserved:  reasoningObserved,
 	}, true
 }
 

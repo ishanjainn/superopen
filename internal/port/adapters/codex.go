@@ -124,8 +124,33 @@ func codexMessageText(payload map[string]any) string {
 	return b.String()
 }
 
+// codexCallArgs decodes a function_call's arguments, which Codex stores as a
+// JSON-encoded string rather than a nested object.
+func codexCallArgs(payload map[string]any) map[string]any {
+	if m, ok := payload["arguments"].(map[string]any); ok {
+		return m
+	}
+	if m, ok := payload["input"].(map[string]any); ok {
+		return m
+	}
+	raw := firstStringField(payload, "arguments", "input")
+	if raw == "" {
+		return nil
+	}
+	var out map[string]any
+	if json.Unmarshal([]byte(raw), &out) != nil {
+		return nil
+	}
+	return out
+}
+
 func (CodexImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 	sess := port.NewPortableSession(port.HarnessCodex, ref.SourceSessionID, ref.SourcePath, ref.CWD, ref.Title)
+	ws := newWSCollector(ref.CWD)
+	// call_id → command index in wsCollector, so a later function_call_output
+	// attaches its exit code to the matching command even when another shell
+	// call was observed in between (parallel / out-of-order outputs).
+	pendingCmdIdx := map[string]int{}
 	f, err := os.Open(ref.SourcePath)
 	if err != nil {
 		return sess, err
@@ -159,6 +184,7 @@ func (CodexImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 		case "session_meta":
 			if c, ok := payload["cwd"].(string); ok {
 				sess.CWD = c
+				ws.cwd = c
 			}
 			if id, ok := payload["session_id"].(string); ok {
 				sess.SourceSessionID = id
@@ -185,7 +211,25 @@ func (CodexImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 				if sess.Title == "" && role == "user" {
 					sess.Title = firstLine(text, 80)
 				}
-			case "reasoning", "custom_tool_call", "custom_tool_call_output", "function_call", "function_call_output":
+			case "function_call", "custom_tool_call":
+				sess.DroppedTurns++
+				name := firstStringField(payload, "name", "tool_name")
+				args := codexCallArgs(payload)
+				idx := ws.observe(name, args, nil)
+				if id := firstStringField(payload, "call_id", "id"); id != "" && idx >= 0 {
+					pendingCmdIdx[id] = idx
+				}
+			case "function_call_output", "custom_tool_call_output":
+				sess.DroppedTurns++
+				// Outputs carry the exit status; attach by call_id, not "last command".
+				id := firstStringField(payload, "call_id", "id")
+				if idx, ok := pendingCmdIdx[id]; ok {
+					if exit, ok := extractExitCode(payload["output"]); ok {
+						ws.attachExitAt(idx, exit)
+					}
+				}
+				delete(pendingCmdIdx, id)
+			case "reasoning":
 				sess.DroppedTurns++
 			}
 		case "event_msg":
@@ -208,6 +252,7 @@ func (CodexImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 		}
 	}
 	ensureMeta(&sess)
+	sess.WorkingState = ws.result()
 	return sess, nil
 }
 

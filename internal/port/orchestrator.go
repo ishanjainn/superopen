@@ -32,8 +32,15 @@ type PortResult struct {
 	// DestSessionIDs are hub/resume ids written this run (last is armed for SessionStart inject).
 	DestSessionIDs []string `json:"dest_session_ids,omitempty"`
 	// ResumeArmed is true when a one-shot SessionStart inject was written for the destination.
-	ResumeArmed bool   `json:"resume_armed,omitempty"`
+	ResumeArmed bool `json:"resume_armed,omitempty"`
 	ResumeID    string `json:"resume_id,omitempty"`
+	// DroppedTurns is the total non-text turns (tool calls, results, reasoning)
+	// discarded across all ported sessions this run. Non-zero means the
+	// destination transcript is prose-only for those turns.
+	DroppedTurns int `json:"dropped_turns,omitempty"`
+	// WorkingStateSessions counts ported sessions where working state (files
+	// touched, commands run) was recovered from the dropped tool calls.
+	WorkingStateSessions int `json:"working_state_sessions,omitempty"`
 }
 
 // Orchestrator runs detect → import → export with ledger idempotency.
@@ -163,6 +170,10 @@ func (o *Orchestrator) Port(opts PortOptions) (PortResult, error) {
 			PortedAt:        time.Now().UTC(),
 		})
 		res.Ported++
+		res.DroppedTurns += sess.DroppedTurns
+		if !sess.WorkingState.Empty() {
+			res.WorkingStateSessions++
+		}
 		res.DestSessionIDs = append(res.DestSessionIDs, out.DestSessionID)
 		emit(Event{Type: "export", Harness: string(opts.To), ID: out.DestSessionID, Detail: "ok"})
 		lastTitle = sess.Title
@@ -175,15 +186,19 @@ func (o *Orchestrator) Port(opts PortOptions) (PortResult, error) {
 			}
 		}
 	}
+	base := fmt.Sprintf("ported=%d skipped=%d failed=%d", res.Ported, res.Skipped, res.Failed)
+	if res.DroppedTurns > 0 {
+		base += fmt.Sprintf(" dropped_turns=%d", res.DroppedTurns)
+	}
 	if res.Ported > 0 && o.RepoRoot != "" {
 		RefreshMemoryAfterPort(o.RepoRoot, string(opts.From), string(opts.To), lastSourceID, lastTitle)
-		detail := fmt.Sprintf("ported=%d skipped=%d failed=%d memory_refreshed=1", res.Ported, res.Skipped, res.Failed)
+		detail := base + " memory_refreshed=1"
 		if res.ResumeArmed {
 			detail += fmt.Sprintf(" resume_armed=%s→%s", opts.To, res.ResumeID)
 		}
 		emit(Event{Type: "done", Detail: detail})
 	} else {
-		emit(Event{Type: "done", Detail: fmt.Sprintf("ported=%d skipped=%d failed=%d", res.Ported, res.Skipped, res.Failed)})
+		emit(Event{Type: "done", Detail: base})
 	}
 	return res, nil
 }

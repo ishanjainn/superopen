@@ -18,9 +18,10 @@ import (
 )
 
 type Options struct {
-	RepoRoot  string
-	Semantic  bool
-	SkipGraph bool
+	RepoRoot   string
+	Semantic   bool
+	SkipGraph  bool
+	SkipInject bool // set by git hooks so commits never rewrite tracked injectors
 }
 
 func Run(opts Options) error {
@@ -34,10 +35,12 @@ func Run(opts Options) error {
 		cfg = config.Default()
 	}
 
-	if err := inject.Apply(root); err != nil {
-		return fmt.Errorf("inject: %w", err)
+	if !opts.SkipInject {
+		if err := inject.Apply(root); err != nil {
+			return fmt.Errorf("inject: %w", err)
+		}
 	}
-	if err := coding.Install(root, cfg.Observability.Listen, cfg.Observability.Vendors, "plugins"); err != nil {
+	if err := coding.Install(root, cfg.Observability.Listen, cfg.Observability.Vendors); err != nil {
 		return fmt.Errorf("coding hooks: %w", err)
 	}
 	soBin, _ := os.Executable()

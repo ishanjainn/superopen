@@ -2,6 +2,11 @@ import { existsSync, readFileSync } from "fs";
 import { NextRequest, NextResponse } from "next/server";
 import { applyDarkTheme, applyLightTheme } from "@/lib/so/graphify-theme";
 import { inspectGraphHtml, type GraphHtmlStatus } from "@/lib/so/graph-html";
+import {
+  applyCachedPositions,
+  POSITION_REPORT_SCRIPT,
+  readCachedPositions,
+} from "@/lib/so/graph-positions";
 import { soPath } from "@/lib/so/root";
 import { projectIdFromRequest, runWithProject } from "@/lib/so/workspace";
 
@@ -28,7 +33,16 @@ function loadGraphHtml(theme: "light" | "dark"): {
   if (!status.ok) {
     return { body: null, status };
   }
-  const html = theme === "dark" ? applyDarkTheme(raw) : applyLightTheme(raw);
+  let html = theme === "dark" ? applyDarkTheme(raw) : applyLightTheme(raw);
+
+  // Skip vis-network's ~200-iteration stabilization on every visit: bake in
+  // positions from the last real stabilization when they still match this
+  // graph.html, otherwise let it stabilize once and report the result back.
+  const cached = readCachedPositions();
+  html = cached
+    ? applyCachedPositions(html, cached)
+    : html.replace("</body>", `${POSITION_REPORT_SCRIPT}</body>`);
+
   return { body: Buffer.from(html, "utf8"), status };
 }
 

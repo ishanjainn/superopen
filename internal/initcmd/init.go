@@ -27,7 +27,6 @@ type Options struct {
 	UseLLM       bool // force LLM upgrade (error if no key)
 	NoLLM        bool // skip LLM even if key present
 	TemplateRoot string
-	PluginRoot   string
 	SkipHooks    bool
 	SkipInject   bool
 }
@@ -152,11 +151,7 @@ func Run(opts Options) (Report, error) {
 	}
 
 	if !opts.SkipHooks {
-		pluginRoot := opts.PluginRoot
-		if pluginRoot == "" {
-			pluginRoot = findPlugins()
-		}
-		if err := coding.Install(root, cfg.Observability.Listen, cfg.Observability.Vendors, pluginRoot); err != nil {
+		if err := coding.Install(root, cfg.Observability.Listen, cfg.Observability.Vendors); err != nil {
 			return Report{}, fmt.Errorf("coding hooks: %w", err)
 		}
 		soBin, _ := os.Executable()
@@ -243,28 +238,8 @@ func findTemplates() string {
 			abs, _ := filepath.Abs(c)
 			return abs
 		}
-		// Legacy template layout
-		if info, err := os.Stat(filepath.Join(c, "docs")); err == nil && info.IsDir() {
-			abs, _ := filepath.Abs(c)
-			return abs
-		}
 	}
 	return "templates"
-}
-
-func findPlugins() string {
-	wd, _ := os.Getwd()
-	candidates := []string{
-		filepath.Join(wd, "plugins"),
-		filepath.Join(wd, "superopen", "plugins"),
-	}
-	for _, c := range candidates {
-		if info, err := os.Stat(c); err == nil && info.IsDir() {
-			abs, _ := filepath.Abs(c)
-			return abs
-		}
-	}
-	return "plugins"
 }
 
 func orEmpty(a, b string) string {

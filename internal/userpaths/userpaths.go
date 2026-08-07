@@ -48,23 +48,6 @@ func DataDir() (string, error) {
 	return filepath.Join(home, ".local", "share", "superopen"), nil
 }
 
-// LegacyDataDirSO is the short "so" data root used by early installs.
-func LegacyDataDirSO() (string, error) {
-	if x := os.Getenv("XDG_DATA_HOME"); x != "" {
-		return filepath.Join(x, "so"), nil
-	}
-	if runtime.GOOS == "windows" {
-		if local := os.Getenv("LOCALAPPDATA"); local != "" {
-			return filepath.Join(local, "so"), nil
-		}
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".local", "share", "so"), nil
-}
-
 // CodexMarketplaceDir is where we materialize the Codex plugin marketplace.
 func CodexMarketplaceDir() (string, error) {
 	base, err := DataDir()

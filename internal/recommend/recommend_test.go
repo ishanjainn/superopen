@@ -3,9 +3,12 @@ package recommend
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/ishanjainn/superopen/internal/eval"
 	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/memory"
 )
 
 func TestFingerprintDedupeAcrossSessions(t *testing.T) {
@@ -15,7 +18,7 @@ func TestFingerprintDedupeAcrossSessions(t *testing.T) {
 	_ = os.MkdirAll(paths.SkillsDir, 0o755)
 	_ = os.MkdirAll(paths.MemoryDir, 0o755)
 
-	path := filepath.Join(paths.SkillsDir, "prefer-harness-before-search.md")
+	path := paths.SkillSKILL("prefer-harness-before-search")
 	r1 := Recommendation{
 		ID: "a", Type: "skill", Title: "Follow guides",
 		Fingerprint: FingerprintKey("skill", path, "prefer-harness"),
@@ -54,7 +57,7 @@ func TestApplyAndRevert(t *testing.T) {
 	_ = os.MkdirAll(paths.MemoryDir, 0o755)
 	_ = paths.EnsureDirs()
 
-	skill := filepath.Join(paths.SkillsDir, "new-skill.md")
+	skill := paths.SkillSKILL("new-skill")
 	r := Recommendation{
 		ID: "rec1", Type: "skill", Title: "Add skill", Rationale: "because",
 		Fingerprint: FingerprintKey("skill", skill, "new"),
@@ -64,7 +67,7 @@ func TestApplyAndRevert(t *testing.T) {
 	if _, err := MergePending(paths, []Recommendation{r}); err != nil {
 		t.Fatal(err)
 	}
-	if err := Apply(paths, "rec1"); err != nil {
+	if err := Apply(paths, "rec1", Decision{Reason: "The proposed skill now covers the recurring workflow.", Actor: "agent"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(skill); err != nil {
@@ -74,11 +77,22 @@ func TestApplyAndRevert(t *testing.T) {
 	if len(pending) != 0 {
 		t.Fatal("pending should be empty after apply")
 	}
-	if err := Revert(paths, "rec1"); err != nil {
+	history, err := LoadHistory(paths)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("load applied history: len=%d err=%v", len(history), err)
+	}
+	if history[0].DecisionActor != "agent" || history[0].DecisionReason == "" || history[0].DecisionAt.IsZero() {
+		t.Fatalf("decision metadata not persisted: %+v", history[0])
+	}
+	if err := Revert(paths, "rec1", Decision{Reason: "The skill conflicted with existing guidance.", Actor: "human"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(skill); !os.IsNotExist(err) {
 		t.Fatal("skill should be removed on revert when it did not exist")
+	}
+	history, _ = LoadHistory(paths)
+	if history[0].Status != "reverted" || history[0].DecisionActor != "human" || !strings.Contains(history[0].DecisionReason, "conflicted") {
+		t.Fatalf("revert decision metadata not persisted: %+v", history[0])
 	}
 }
 
@@ -87,14 +101,30 @@ func TestSuppressAfterDismiss(t *testing.T) {
 	paths := harness.Resolve(root)
 	_ = os.MkdirAll(filepath.Dir(paths.PendingRecs), 0o755)
 	_ = os.MkdirAll(paths.SkillsDir, 0o755)
-	path := filepath.Join(paths.SkillsDir, "x.md")
+	path := paths.SkillSKILL("x")
 	fp := FingerprintKey("skill", path, "x")
 	r := Recommendation{
 		ID: "d1", Type: "skill", Title: "t", Fingerprint: fp,
 		ProposedPath: path, ProposedBody: "# x\n", Evidence: []string{"e"}, Status: "pending",
 	}
 	_, _ = MergePending(paths, []Recommendation{r})
-	_ = Dismiss(paths, "d1")
+	if err := Dismiss(paths, "d1", Decision{Reason: "This duplicates an existing skill.", Actor: "human"}); err != nil {
+		t.Fatal(err)
+	}
+	history, err := LoadHistory(paths)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("load dismissed history: len=%d err=%v", len(history), err)
+	}
+	if history[0].DecisionActor != "human" || history[0].DecisionReason != "This duplicates an existing skill." || history[0].DecisionAt.IsZero() {
+		t.Fatalf("dismiss decision metadata not persisted: %+v", history[0])
+	}
+	lessons, err := memory.NewStore(paths).ListLessons()
+	if err != nil || len(lessons) == 0 {
+		t.Fatalf("dismissal feedback was not retained as memory: len=%d err=%v", len(lessons), err)
+	}
+	if !strings.Contains(lessons[len(lessons)-1].Text, "duplicates an existing skill") {
+		t.Fatalf("dismissal reason missing from memory: %+v", lessons[len(lessons)-1])
+	}
 	again := Recommendation{
 		ID: "d2", Type: "skill", Title: "t", Fingerprint: fp,
 		ProposedPath: path, ProposedBody: "# x\n", Evidence: []string{"e2"}, Status: "pending",
@@ -102,5 +132,110 @@ func TestSuppressAfterDismiss(t *testing.T) {
 	ups, _ := MergePending(paths, []Recommendation{again})
 	if len(ups) != 0 {
 		t.Fatal("should suppress dismissed fingerprint", ups)
+	}
+}
+
+func TestDecisionReasonRequired(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	_ = paths.EnsureDirs()
+	r := Recommendation{
+		ID: "required", Type: "skill", Title: "t",
+		ProposedPath: paths.SkillSKILL("required"),
+		ProposedBody: "# required\n", Evidence: []string{"e"}, Status: "pending",
+	}
+	_, _ = MergePending(paths, []Recommendation{r})
+	if err := Apply(paths, "required", Decision{Actor: "agent"}); err == nil {
+		t.Fatal("apply should reject an empty decision reason")
+	}
+	pending, _ := LoadPending(paths)
+	if len(pending) != 1 {
+		t.Fatalf("rejected decision should remain pending, got %d", len(pending))
+	}
+}
+
+func TestInsufficientEvidenceDoesNotGenerateRecommendations(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	_ = paths.EnsureDirs()
+	recs, err := Generate(paths, "empty", eval.Result{
+		SessionID: "empty", EvidenceStatus: "insufficient",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("insufficient evidence generated recommendations: %+v", recs)
+	}
+}
+
+func TestGenerateNestedAgentsWhenHotArea(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	_ = paths.EnsureDirs()
+
+	recs, err := Generate(paths, "s1", eval.Result{
+		SessionID:       "s1",
+		EvidenceStatus:  "sufficient",
+		HotAreas:        []string{"internal/recommend"},
+		Dimensions:      map[string]float64{"wandering": 0.8, "harness_use": 0.5, "scope": 0.7},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var docs *Recommendation
+	for i := range recs {
+		if recs[i].Type == "docs" {
+			docs = &recs[i]
+			break
+		}
+	}
+	if docs == nil {
+		t.Fatal("expected docs recommendation")
+	}
+	wantPath := filepath.Join(root, "internal", "recommend", "AGENTS.md")
+	if docs.ProposedPath != wantPath {
+		t.Fatalf("proposed path = %q, want %q", docs.ProposedPath, wantPath)
+	}
+	if !strings.Contains(docs.Why, "Why:") || !strings.Contains(docs.Why, "How it helps:") {
+		t.Fatalf("why must spell out problem and benefit: %q", docs.Why)
+	}
+	if !strings.Contains(docs.ProposedBody, "internal/recommend") {
+		t.Fatalf("body should mention hot area: %q", docs.ProposedBody)
+	}
+
+	if err := Apply(paths, docs.ID, Decision{Reason: "Nested AGENTS.md will cut rediscovery in this package.", Actor: "agent"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# Agent instructions") {
+		t.Fatalf("nested AGENTS.md should be a full document: %s", data)
+	}
+}
+
+func TestGenerateRootAgentsWithoutHotArea(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	_ = paths.EnsureDirs()
+	recs, err := Generate(paths, "s2", eval.Result{
+		SessionID:      "s2",
+		EvidenceStatus: "sufficient",
+		Dimensions:     map[string]float64{"wandering": 0.9, "harness_use": 0.5, "scope": 0.7},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range recs {
+		if r.Type == "docs" && r.ProposedPath == paths.AgentsMD {
+			found = true
+			if !strings.Contains(r.Why, "How it helps:") {
+				t.Fatalf("root docs why incomplete: %q", r.Why)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected root AGENTS.md docs rec, got %+v", recs)
 	}
 }

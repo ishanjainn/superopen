@@ -15,7 +15,7 @@ import (
 func cmdHarvest() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "harvest",
-		Short: "Budgeted session harvest into memory + knowledge/rules/skills",
+		Short: "Budgeted session harvest into memory + AGENTS.md / .agents/rules / .agents/skills",
 		Long: `Summarize a session locally, then one small coding-agent CLI call for JSON deltas.
 Triggers: session end, idle (≥ memory.idle_harvest_hours), or explicit finalize.`,
 	}

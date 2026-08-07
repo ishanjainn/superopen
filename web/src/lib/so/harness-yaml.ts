@@ -63,7 +63,7 @@ checks:
   - no_secrets
 
 agent_rules:
-  - "Prefer .so/graph query and .so/knowledge before broad Grep"
+  - "Prefer so graph query and AGENTS.md before broad Grep"
   - "Keep diffs focused to the stated task"
 
 judge_rubric: |

@@ -151,7 +151,7 @@ func handle(ctx context.Context, in normalize.Input) error {
 		// review step (the diff is shown but the apply is the
 		// default action) - matches today's auto_accept behavior on
 		// Cursor's afterFileEdit.
-		if isApplyPatchTool(p.ToolName) && normalizeStatus(p) != "error" {
+		if isApplyPatchTool(effectiveToolName(p)) && normalizeStatus(p) != "error" {
 			emitApplyPatchEditDecisions(in, p, cwd)
 		}
 		// Cache the call on the turn fragment so the Stop event can
@@ -159,7 +159,7 @@ func handle(ctx context.Context, in normalize.Input) error {
 		// `gen_ai.input.messages` + `gen_ai.output.messages`.
 		stampTurnFragment(p, in.ContentCapture, func(f *sessionstate.CodexTurnFragment) {
 			rec := sessionstate.CodexToolRecord{
-				ToolName:    p.ToolName,
+				ToolName:    effectiveToolName(p),
 				ToolUseID:   p.ToolUseID,
 				Status:      normalizeStatus(p),
 				Cwd:         cwd,
@@ -191,10 +191,12 @@ func handle(ctx context.Context, in normalize.Input) error {
 		// `coding_agent.llm.turn` span - the canonical
 		// "generation" record per OTel GenAI.
 		emitTurnOnStop(in, p, cwd, permissionMode)
-		// Codex has NO `SessionEnd` event - the rollout just ends
-		// when the user closes the Codex CLI. We periodically
-		// re-emit the session-root span so the Sessions row lights
-		// up with up-to-the-turn rollups. Deterministic SpanIDs
+		// Codex Stop closes one assistant turn, not the chat. Codex has
+		// no SessionEnd hook, so keep the session root active here. The
+		// companion `so sessions refresh` hook materializes the latest
+		// transcript without running final evaluations. Explicit
+		// `so sessions finalize` closes the chat when needed.
+		// Deterministic SpanIDs
 		// collapse all re-emits onto the same `otel_traces` row,
 		// so this is purely a wire / CPU optimisation; throttle to
 		// at most once per ~60s of wall-clock so long Codex
@@ -202,8 +204,7 @@ func handle(ctx context.Context, in normalize.Input) error {
 		// minute) don't ship a redundant session-root span per
 		// turn.
 		if shouldEmitCodexSessionRoot(p.SessionID) {
-			s := buildSession(in, p, vcs, cls, permissionMode, cwd, "ended", parseEventTime(p.Timestamp))
-			s.Outcome = semconv.CodingAgentSessionOutcomeCompleted
+			s := buildSession(in, p, vcs, cls, permissionMode, cwd, "active", time.Time{})
 			_ = in.Emit.EmitSession(s)
 			markCodexSessionRootEmitted(p.SessionID)
 		}
@@ -218,7 +219,7 @@ func handle(ctx context.Context, in normalize.Input) error {
 				"coding_agent.hook.event":        event,
 				"coding_agent.turn.id":           p.TurnID,
 				"coding_agent.session.loop.kind": "assistant_turn_end",
-				"coding_agent.session.outcome":   semconv.CodingAgentSessionOutcomeCompleted,
+				"coding_agent.session.outcome":   "active",
 				"codex.stop_hook_active":         p.StopHookActive,
 			},
 		})
@@ -339,7 +340,7 @@ func buildToolCall(in normalize.Input, p codexPayload, cwd string) normalize.Too
 	}
 	t := normalize.ToolCall{
 		SessionID:  p.SessionID,
-		ToolName:   p.ToolName,
+		ToolName:   effectiveToolName(p),
 		ToolUseID:  p.ToolUseID,
 		Vendor:     in.Vendor,
 		Model:      p.Model,
@@ -362,7 +363,7 @@ func buildToolCall(in normalize.Input, p codexPayload, cwd string) normalize.Too
 	// Shell / apply_patch are the most common codex tools - expose
 	// the command head so dashboards can render "ran: ls" without
 	// having to parse JSON.
-	if cmd := commandFromToolInput(p.ToolName, p.ToolInput, in.ContentCapture); cmd != "" {
+	if cmd := commandFromToolInput(effectiveToolName(p), p.ToolInput, in.ContentCapture); cmd != "" {
 		t.Command = cmd
 	}
 	if normalizeStatus(p) == "error" {
@@ -370,6 +371,50 @@ func buildToolCall(in normalize.Input, p codexPayload, cwd string) normalize.Too
 		t.ErrorMsg = errorMessage(p.Error)
 	}
 	return t
+}
+
+// effectiveToolName unwraps Codex code-mode's generic `exec` tool. The
+// rollout/hook layer may expose every nested operation as exec/Bash even when
+// the assistant actually invoked apply_patch, update_plan, browser, or a
+// subagent tool. Preserve Bash for real shell execution, but give Map and the
+// session timeline the operation users recognize for non-shell calls.
+func effectiveToolName(p codexPayload) string {
+	raw := strings.TrimSpace(p.ToolName)
+	lower := strings.ToLower(raw)
+	if lower != "exec" && lower != "bash" && lower != "code" {
+		return raw
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(p.ToolInput, &fields) != nil {
+		return raw
+	}
+	code := ""
+	for _, key := range []string{"code", "input", "script"} {
+		if value := fields[key]; len(value) > 0 {
+			_ = json.Unmarshal(value, &code)
+			if strings.TrimSpace(code) != "" {
+				break
+			}
+		}
+	}
+	code = strings.ToLower(code)
+	switch {
+	case strings.Contains(code, "tools.apply_patch"):
+		return "apply_patch"
+	case strings.Contains(code, "tools.update_plan"):
+		return "Update plan"
+	case strings.Contains(code, "tools.view_image"):
+		return "View image"
+	case strings.Contains(code, "imagegen"):
+		return "Image generation"
+	case strings.Contains(code, "collaboration.spawn_agent"):
+		return "Subagent"
+	case strings.Contains(code, "mcp__node_repl__js") || strings.Contains(code, "browser."):
+		return "Browser"
+	case strings.Contains(code, "tools.exec_command"), strings.Contains(code, "tools.write_stdin"):
+		return "Bash"
+	}
+	return raw
 }
 
 // emitTurnOnStop builds and emits one `coding_agent.llm.turn` span
@@ -436,6 +481,8 @@ func emitTurnOnStop(in normalize.Input, p codexPayload, cwd, permissionMode stri
 		// usage.
 		transcriptPath = findRolloutForSession(p.SessionID)
 	}
+	var reasoningSummary string
+	var reasoningObserved bool
 	if snap, ok := readTokenUsageForTurn(transcriptPath, p.TurnID); ok {
 		turn.InputTokens = snap.TurnUsage.InputTokens
 		turn.OutputTokens = snap.TurnUsage.OutputTokens
@@ -456,6 +503,25 @@ func emitTurnOnStop(in normalize.Input, p codexPayload, cwd, permissionMode stri
 				turn.Extras = map[string]string{}
 			}
 			turn.Extras["coding_agent.llm.reasoning.tokens"] = formatInt(snap.TurnUsage.ReasoningOutputTokens)
+		}
+		reasoningSummary = snap.ReasoningSummary
+		reasoningObserved = snap.ReasoningObserved
+	} else {
+		// A rollout can contain a completed reasoning item even when a
+		// token_count snapshot is missing or arrived out of order.
+		reasoningSummary, reasoningObserved = readReasoningSummaryForTurn(transcriptPath, p.TurnID)
+	}
+	if reasoningObserved {
+		if turn.Extras == nil {
+			turn.Extras = map[string]string{}
+		}
+		availability := "false"
+		if reasoningSummary != "" {
+			availability = "true"
+		}
+		turn.Extras["coding_agent.llm.reasoning.summary.available"] = availability
+		if in.ContentCapture == semconv.CodingAgentContentCaptureFull {
+			turn.ThoughtText = reasoningSummary
 		}
 	}
 
@@ -857,7 +923,12 @@ func commandFromToolInput(toolName string, raw json.RawMessage, capture string) 
 
 // isApplyPatchTool reports whether the tool name is Codex's edit tool.
 func isApplyPatchTool(name string) bool {
-	return strings.ToLower(name) == "apply_patch"
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "apply_patch", "write", "edit":
+		return true
+	default:
+		return false
+	}
 }
 
 // emitApplyPatchEditDecisions parses Codex's apply_patch input into
@@ -912,7 +983,7 @@ func applyPatchBody(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return ""
 	}
-	for _, k := range []string{"input", "patch", "diff"} {
+	for _, k := range []string{"command", "input", "patch", "diff"} {
 		v, ok := m[k]
 		if !ok || len(v) == 0 {
 			continue
@@ -920,6 +991,59 @@ func applyPatchBody(raw json.RawMessage) string {
 		var s string
 		if err := json.Unmarshal(v, &s); err == nil && s != "" {
 			return s
+		}
+	}
+
+	// Code-mode exposes nested tools through a generic `exec` hook. Its
+	// tool_input contains JavaScript such as:
+	//
+	//   const patch = "*** Begin Patch\\n...";
+	//   text(await tools.apply_patch(patch));
+	//
+	// Decode the JSON-compatible JavaScript string literal so the normal patch
+	// parser can still emit one file-level EditDecision per changed path.
+	for _, k := range []string{"code", "input", "script"} {
+		v, ok := m[k]
+		if !ok {
+			continue
+		}
+		var code string
+		if json.Unmarshal(v, &code) != nil || !strings.Contains(code, "tools.apply_patch") {
+			continue
+		}
+		if patch := patchLiteralFromCodeMode(code); patch != "" {
+			return patch
+		}
+	}
+	return ""
+}
+
+func patchLiteralFromCodeMode(code string) string {
+	start := strings.Index(code, "*** Begin Patch")
+	if start < 0 {
+		return ""
+	}
+	// Walk back to the opening quote. Codex currently emits a JSON-compatible
+	// double-quoted literal; using json.Unmarshal handles escaped newlines and
+	// quotes without inventing a JavaScript parser.
+	quote := strings.LastIndex(code[:start], `"`)
+	if quote < 0 {
+		return ""
+	}
+	for end := quote + 1; end < len(code); end++ {
+		if code[end] != '"' {
+			continue
+		}
+		backslashes := 0
+		for i := end - 1; i > quote && code[i] == '\\'; i-- {
+			backslashes++
+		}
+		if backslashes%2 != 0 {
+			continue
+		}
+		var decoded string
+		if json.Unmarshal([]byte(code[quote:end+1]), &decoded) == nil && strings.Contains(decoded, "*** Begin Patch") {
+			return decoded
 		}
 	}
 	return ""

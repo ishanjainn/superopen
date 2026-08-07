@@ -10,6 +10,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/discover"
 	"github.com/ishanjainn/superopen/internal/guardrails"
 	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/nativedocs"
 	"gopkg.in/yaml.v3"
 )
 
@@ -21,49 +22,54 @@ type SeedOptions struct {
 	Force bool
 }
 
-// Seed writes context/skills/guardrails/evals/rules from templates + discovered repo profile.
+// Seed writes native AGENTS.md / vendor rules / vendor skills plus .so runtime templates.
 func Seed(paths harness.Paths, opts SeedOptions) error {
 	p := opts.Profile
 	replacements := map[string]string{
 		"{{STRUCTURE}}": p.Structure,
 		"{{STACK}}":     p.Stack,
 	}
-
-	pairs := []struct{ src, dst string }{
-		{"knowledge/architecture.md", filepath.Join(paths.KnowledgeDir, "architecture.md")},
-		{"knowledge/conventions.md", filepath.Join(paths.KnowledgeDir, "conventions.md")},
-		{"knowledge/decisions.md", filepath.Join(paths.KnowledgeDir, "decisions.md")},
-		{"rules/coding.md", filepath.Join(paths.RulesDir, "coding.md")},
-		{"skills/create-api.md", filepath.Join(paths.SkillsDir, "create-api.md")},
-		{"skills/debugging.md", filepath.Join(paths.SkillsDir, "debugging.md")},
-		{"skills/testing.md", filepath.Join(paths.SkillsDir, "testing.md")},
-	}
-	for _, pair := range pairs {
-		if !opts.Force {
-			if _, err := os.Stat(pair.dst); err == nil {
-				continue
-			}
-		}
-		data, err := os.ReadFile(filepath.Join(opts.TemplateRoot, pair.src))
+	readTpl := func(rel string) string {
+		data, err := os.ReadFile(filepath.Join(opts.TemplateRoot, rel))
 		if err != nil {
-			data = []byte("# " + filepath.Base(pair.dst) + "\n")
+			return ""
 		}
 		content := string(data)
 		for k, v := range replacements {
 			content = strings.ReplaceAll(content, k, v)
 		}
-		base := filepath.Base(pair.dst)
-		if base == "architecture.md" {
-			content = enrichArchitecture(content, p)
+		return content
+	}
+
+	arch := enrichArchitecture(readTpl("knowledge/architecture.md"), p)
+	conv := enrichConventions(readTpl("knowledge/conventions.md"), p)
+	dec := readTpl("knowledge/decisions.md")
+	if err := nativedocs.EnsureAgentsMD(paths, nativedocs.DefaultAgentsBody(arch, conv, dec), opts.Force); err != nil {
+		return err
+	}
+
+	coding := readTpl("rules/coding.md")
+	if coding == "" {
+		coding = "# Coding rules\n\n- Prefer `so graph query` and `AGENTS.md` before broad Grep\n"
+	}
+	if codingPath, err := nativedocs.RulePath(paths, "coding"); err == nil {
+		if opts.Force {
+			_ = os.MkdirAll(filepath.Dir(codingPath), 0o755)
+			_ = os.WriteFile(codingPath, []byte(coding), 0o644)
+		} else if _, err := os.Stat(codingPath); err != nil {
+			_ = os.MkdirAll(filepath.Dir(codingPath), 0o755)
+			_ = os.WriteFile(codingPath, []byte(coding), 0o644)
 		}
-		if base == "conventions.md" {
-			content = enrichConventions(content, p)
+	}
+
+	for _, name := range []string{"create-api", "debugging", "testing"} {
+		body := readTpl("skills/" + name + ".md")
+		if body == "" {
+			body = "# " + name + "\n"
 		}
-		if err := os.MkdirAll(filepath.Dir(pair.dst), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(pair.dst, []byte(content), 0o644); err != nil {
-			return err
+		_ = nativedocs.WriteSkillCreateOnly(paths, name, body)
+		if opts.Force {
+			_ = os.WriteFile(paths.SkillSKILL(name), []byte(strings.TrimSpace(body)+"\n"), 0o644)
 		}
 	}
 
@@ -74,17 +80,19 @@ func Seed(paths harness.Paths, opts SeedOptions) error {
 		return err
 	}
 
-	brief := `# Superopen agent brief
+	rulesRel := harness.RelFromRepo(paths.RepoRoot, paths.RulesDir)
+	skillsRel := harness.RelFromRepo(paths.RepoRoot, paths.SkillsDir)
+	brief := fmt.Sprintf(`# Superopen agent brief
 
-Prefer .so/ before raw exploration.
+Prefer AGENTS.md (and nested */AGENTS.md), existing vendor rules/skills dirs, and so graph query.
 
-- Graph: .so/graph/graph.json - query with ` + "`so graph query`" + `
-- Knowledge: .so/knowledge/
-- Rules: .so/rules/
-- Skills: .so/skills/
+- Graph: .so/graph/graph.json - query with `+"`so graph query`"+` (local, regenerable)
+- Knowledge: AGENTS.md
+- Rules: %s (%s)
+- Skills: %s/<name>/SKILL.md (%s)
 - Guardrails: .so/guardrails/guardrails.yaml
 - Active Context: .so/memory/active-context.md (SessionStart inject)
-`
+`, rulesRel, harness.KindForRulesDir(paths.RulesDir), skillsRel, harness.KindForSkillsDir(paths.SkillsDir))
 	if len(p.Agents) > 0 {
 		brief += "\n## Existing agent instructions discovered\n\n"
 		for _, a := range p.Agents {
@@ -122,32 +130,43 @@ Prefer .so/ before raw exploration.
 	return nil
 }
 
+const defaultSOGitignore = `# Superopen - tracked under .so/: config, guardrails, discovery, AGENT.md.
+# Everything regenerable or machine-local is ignored so feature branches stay clean.
+
+# Local telemetry / sessions / traces
+traces/
+sessions/
+audit/
+run/
+session-state/
+port/
+ui-prefs.json
+finalize-pending
+
+# Regenerable graph + viz (agents still query local graph.json)
+graph/
+viz/
+
+# Memory packs and harvest ledgers (durable guidance goes to AGENTS.md / .agents/)
+memory/
+
+# Eval run history + recommendation pending state (applied changes land in native docs)
+evals/history.json
+recommendations/pending.json
+recommendations/history.json
+`
+
 func seedSOGitignore(paths harness.Paths, templateRoot string) error {
 	dst := filepath.Join(paths.Root, ".gitignore")
 	if _, err := os.Stat(dst); err == nil {
-		return nil
+		return nil // never overwrite an existing .so/.gitignore
 	}
 	data, err := os.ReadFile(filepath.Join(templateRoot, "so.gitignore"))
 	if err != nil {
-		data = []byte(`*
-!.gitignore
-!knowledge/
-!knowledge/**
-!rules/
-!rules/**
-!skills/
-!skills/**
-!guardrails/
-!guardrails/**
-!evals/
-!evals/**
-!AGENT.md
-!config.yaml
-`)
+		data = []byte(defaultSOGitignore)
 	}
 	return os.WriteFile(dst, data, 0o644)
 }
-
 
 func seedGuardrails(paths harness.Paths, p discover.Profile, templateRoot string, force bool) error {
 	if !force {

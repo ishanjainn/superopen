@@ -25,6 +25,28 @@ type PortableTurn struct {
 	Model     string `json:"model,omitempty"`
 }
 
+// RanCommand is a shell command recovered from a dropped tool call.
+type RanCommand struct {
+	Cmd      string `json:"cmd"`
+	ExitCode *int   `json:"exit_code,omitempty"` // nil when the source records no status
+}
+
+// WorkingState is what the source agent actually did, recovered from tool calls
+// that PortableTurn cannot represent. Turns carry the conversation; this carries
+// the side effects, so the destination agent need not re-discover them.
+type WorkingState struct {
+	FilesRead   []string     `json:"files_read,omitempty"`
+	FilesEdited []string     `json:"files_edited,omitempty"`
+	Commands    []RanCommand `json:"commands,omitempty"`
+	GitBranch   string       `json:"git_branch,omitempty"`
+}
+
+// Empty reports whether nothing was recovered.
+func (w WorkingState) Empty() bool {
+	return len(w.FilesRead) == 0 && len(w.FilesEdited) == 0 &&
+		len(w.Commands) == 0 && w.GitBranch == ""
+}
+
 // PortableSession is the hub IR.
 type PortableSession struct {
 	SchemaVersion   string         `json:"schema_version"`
@@ -37,6 +59,7 @@ type PortableSession struct {
 	UpdatedAt       int64          `json:"updated_at,omitempty"`
 	Turns           []PortableTurn `json:"turns"`
 	DroppedTurns    int            `json:"dropped_turns"`
+	WorkingState    WorkingState   `json:"working_state,omitzero"`
 	SourceMetadata  map[string]any `json:"source_metadata,omitempty"`
 }
 

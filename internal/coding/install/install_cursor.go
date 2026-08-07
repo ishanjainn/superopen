@@ -179,7 +179,7 @@ func mergeCursorHooks(existing, template cursorHooksFile) cursorHooksFile {
 	return merged
 }
 
-// isOurHookEntry reports whether a hook entry was authored by Superopen (or a legacy install). It
+// isOurHookEntry reports whether a hook entry was authored by Superopen (or a prior install). It
 // runs on the raw bytes to avoid a strict struct that might choke on
 // extra fields. We don't substring-match the full RawMessage because
 // the marker could appear inside an unrelated string field; instead we

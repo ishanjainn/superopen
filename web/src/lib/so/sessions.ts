@@ -1,3 +1,4 @@
+import { execFileSync } from "child_process";
 import { readdirSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -89,10 +90,95 @@ export function humanizePromptPreview(raw?: string): string {
 
 function displayTitle(meta: SessionMeta): string {
   const titled = humanizePromptPreview(meta.title);
-  if (titled) return titled;
+  if (titled && !isPlaceholderTitle(titled, meta.id)) return titled;
   const preview = humanizePromptPreview(meta.prompt_preview);
-  if (preview) return preview;
+  if (preview && !isPlaceholderTitle(preview, meta.id)) return preview;
   return meta.id;
+}
+
+/** OpenCode defaults to "New session - <iso>"; treat as empty until AI renames. */
+export function isPlaceholderTitle(title?: string, sessionId?: string): boolean {
+  const t = String(title || "").trim();
+  if (!t) return true;
+  if (sessionId && t === String(sessionId).trim()) return true;
+  if (/^new session\b/i.test(t)) return true;
+  return false;
+}
+
+let openCodeTitleCache: { mtimeMs: number; size: number; titles: Map<string, string> } | null =
+  null;
+
+function openCodeDBPath(): string {
+  const env = String(process.env.OPENCODE_DB || "").trim();
+  if (env) return env;
+  const xdg = String(process.env.XDG_DATA_HOME || "").trim();
+  if (xdg) return join(xdg, "opencode", "opencode.db");
+  return join(homedir(), ".local", "share", "opencode", "opencode.db");
+}
+
+function loadOpenCodeTitles(): Map<string, string> {
+  const db = openCodeDBPath();
+  if (!fileExists(db)) return new Map();
+  let st;
+  try {
+    st = statSync(db);
+  } catch {
+    return new Map();
+  }
+  if (
+    openCodeTitleCache &&
+    openCodeTitleCache.mtimeMs === st.mtimeMs &&
+    openCodeTitleCache.size === st.size
+  ) {
+    return openCodeTitleCache.titles;
+  }
+  const titles = new Map<string, string>();
+  try {
+    // Prefer CLI sqlite3 (no native dep); schema is `session` (fallback `sessions`).
+    let raw = "";
+    try {
+      raw = execFileSync("sqlite3", ["-json", db, "SELECT id, title FROM session;"], {
+        encoding: "utf8",
+        timeout: 2000,
+      });
+    } catch {
+      raw = execFileSync("sqlite3", ["-json", db, "SELECT id, title FROM sessions;"], {
+        encoding: "utf8",
+        timeout: 2000,
+      });
+    }
+    const rows = JSON.parse(raw || "[]") as { id?: string; title?: string }[];
+    for (const row of rows) {
+      const id = String(row.id || "").trim();
+      const title = String(row.title || "").trim();
+      if (!id || isPlaceholderTitle(title, id)) continue;
+      titles.set(id, title);
+    }
+  } catch {
+    /* fail-soft: keep placeholder / prompt preview */
+  }
+  openCodeTitleCache = { mtimeMs: st.mtimeMs, size: st.size, titles };
+  return titles;
+}
+
+/** Refresh OpenCode stub titles from the host DB and persist into meta.json. */
+function resolveOpenCodeTitle(meta: SessionMeta, sessionPath: string): void {
+  const vendor = String(meta.vendor || "").toLowerCase();
+  if (!vendor.includes("opencode")) return;
+  if (!isPlaceholderTitle(meta.title, meta.id)) return;
+  const got = loadOpenCodeTitles().get(meta.id);
+  if (!got) return;
+  meta.title = got;
+  try {
+    const path = join(sessionPath, "meta.json");
+    const onDisk = readJSON<SessionMeta>(path);
+    if (!onDisk) return;
+    if (!isPlaceholderTitle(onDisk.title, onDisk.id || meta.id)) return;
+    onDisk.title = got;
+    writeFileSync(path, JSON.stringify(onDisk, null, 2) + "\n");
+  } catch {
+    /* display-only is enough */
+  }
 }
 
 const UUID_RE =
@@ -356,15 +442,69 @@ function loadTranscriptSpans(sessionPath: string): TraceSpan[] {
   return out;
 }
 
+export function mergeTraceSpans(...groups: TraceSpan[][]): TraceSpan[] {
+  const merged = new Map<string, TraceSpan>();
+  for (const spans of groups) {
+    for (const span of spans) {
+      const traceID = String(span.trace_id || "");
+      const spanID = String(span.span_id || "");
+      const key =
+        traceID || spanID
+          ? `${traceID}:${spanID}`
+          : [
+              span.session_id,
+              span.name,
+              span.start_time_unix_nano,
+              span.role,
+              span.timestamp,
+              span.text,
+            ]
+              .map((value) => String(value || ""))
+              .join(":");
+      merged.set(key, span);
+    }
+  }
+  return Array.from(merged.values()).sort(
+    (a, b) =>
+      Number(a.start_time_unix_nano || a.timestamp || 0) -
+      Number(b.start_time_unix_nano || b.timestamp || 0)
+  );
+}
+
+function codexRolloutUpdatedAt(sessionId: string): number {
+  const base = join(homedir(), ".codex", "sessions");
+  const now = new Date();
+  for (const offset of [0, -1]) {
+    const day = new Date(now);
+    day.setUTCDate(day.getUTCDate() + offset);
+    const dir = join(
+      base,
+      String(day.getUTCFullYear()),
+      String(day.getUTCMonth() + 1).padStart(2, "0"),
+      String(day.getUTCDate()).padStart(2, "0")
+    );
+    if (!fileExists(dir)) continue;
+    try {
+      const name = readdirSync(dir).find(
+        (entry) => entry.includes(sessionId) && entry.endsWith(".jsonl")
+      );
+      if (name) return statSync(join(dir, name)).mtimeMs;
+    } catch {
+      // Best-effort diagnostic only.
+    }
+  }
+  return 0;
+}
+
 function enrichSessionStats(
   soDir: string,
   sessionPath: string,
   meta: SessionMeta
 ): { turns: number; checkpoints: number } {
-  let spans = loadTranscriptSpans(sessionPath);
-  if (spans.length === 0) {
-    spans = loadLiveTraces(soDir, String(meta.id || ""));
-  }
+  const spans = mergeTraceSpans(
+    loadTranscriptSpans(sessionPath),
+    loadLiveTraces(soDir, String(meta.id || ""))
+  );
   return {
     turns: countTurnsFromSpans(spans),
     checkpoints: countCheckpointDirs(sessionPath),
@@ -563,11 +703,10 @@ function loadSessionSpans(item: ListItem): TraceSpan[] {
   const so = item.so_root;
   if (!so || !item.id) return [];
   const sessionPath = join(so, "sessions", item.id);
-  let spans = loadTranscriptSpans(sessionPath);
-  if (spans.length === 0) {
-    spans = loadLiveTraces(so, item.id);
-  }
-  return spans;
+  return mergeTraceSpans(
+    loadTranscriptSpans(sessionPath),
+    loadLiveTraces(so, item.id)
+  );
 }
 
 /**
@@ -620,6 +759,9 @@ function listSessionsInSo(soDir: string, projectId: string): ListItem[] {
     const meta = readJSON<SessionMeta>(join(sessionPath, "meta.json"));
     if (!meta) continue;
     if (!meta.id) meta.id = name;
+    resolveOpenCodeTitle(meta, sessionPath);
+    // Placeholder ids from broken hooks (OpenCode/Pi missing sessionID).
+    if (meta.id === "unknown" || name === "unknown") continue;
     // Subagents are not top-level sessions - they nest under the parent chat.
     if (isNestedSubagent(meta, links, dir)) continue;
     const footprint = readJSON<{ files?: { path: string }[] }>(
@@ -777,6 +919,7 @@ export function getSessionDetail(id: string, projectFilter = "") {
       readJSON<SessionMeta>(join(sessionPath, "meta.json")) ||
       ({ id } as SessionMeta);
     if (!meta.id) meta.id = id;
+    resolveOpenCodeTitle(meta, sessionPath);
     meta.project_id = p.id;
     meta.title = displayTitle(meta);
     meta.prompt_preview =
@@ -787,25 +930,29 @@ export function getSessionDetail(id: string, projectFilter = "") {
     }
 
     const footprint = readJSON(join(sessionPath, "footprint.json"));
-    const transcriptPath = join(sessionPath, "transcript.jsonl");
-    const transcript: unknown[] = [];
-    if (fileExists(transcriptPath)) {
-      const lines = readText(transcriptPath).split("\n");
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          transcript.push(JSON.parse(line));
-        } catch {
-          /* skip */
-        }
+    // Materialized transcripts can lag behind live OTLP during an active chat.
+    // Merge both sources so an existing stale transcript never hides new turns.
+    const transcript = mergeTraceSpans(
+      loadTranscriptSpans(sessionPath),
+      loadLiveTraces(so, id)
+    );
+    const rolloutUpdatedAt = codexRolloutUpdatedAt(id);
+    const recordedEnd = meta.ended_at ? new Date(meta.ended_at).getTime() : 0;
+    if (
+      meta.status === "ended" &&
+      rolloutUpdatedAt > recordedEnd + 15_000
+    ) {
+      // Older Codex hooks treated every assistant Stop as chat closure. A
+      // rollout that keeps advancing proves the chat is active; repair the
+      // stale materialized status so evaluations are labeled snapshots.
+      meta.status = "active";
+      meta.ended_at = undefined;
+      try {
+        writeFileSync(join(sessionPath, "meta.json"), JSON.stringify(meta, null, 2));
+      } catch {
+        // The response can still report the corrected in-memory status.
       }
     }
-    // Active Cursor sessions often have OTLP spans in .so/traces before finalize
-    // writes transcript.jsonl - fall back so Chat UI is not empty mid-session.
-    if (transcript.length === 0) {
-      transcript.push(...loadLiveTraces(so, id));
-    }
-
     const subagents: SessionMeta[] = [];
     const sessionsDir = join(so, "sessions");
     const links = loadAgentLinks(sessionsDir);

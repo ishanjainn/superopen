@@ -154,7 +154,7 @@ func run(cmd *cobra.Command, vendor, event string) (rerr error) {
 		return nil
 	}
 
-	// Surface allow-listed values from ~/.config/so/config.env (and legacy paths)
+	// Surface allow-listed values from ~/.config/so/config.env
 	// into the process environment BEFORE adapters read them. Per-vendor
 	// adapters call os.Getenv directly (e.g. for the repo allowlist),
 	// so without this step a value set in config.env would be invisible
@@ -701,7 +701,8 @@ func peekContext(payload []byte) peekedContext {
 		}
 		return ""
 	}
-	out.SessionID = pickString("session_id", "conversation_id", "sessionId", "thread_id")
+	// sessionID (OpenCode) is distinct from sessionId — include both casings.
+	out.SessionID = pickString("session_id", "conversation_id", "sessionId", "sessionID", "thread_id")
 	// Distinct conversation id (when the vendor reports one) - this is
 	// what survives subagent spawns and, on a few vendors, IDE
 	// restarts. UI uses it as the rollup key in preference to

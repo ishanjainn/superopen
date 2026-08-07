@@ -3,6 +3,7 @@ package coding
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -12,10 +13,8 @@ import (
 
 // Install installs coding-agent observability for the given vendors.
 // endpoint is best-effort written to the platform config.env when non-empty.
-// pluginRoot is unused (manifests are embedded); kept for call-site compatibility.
-func Install(repoRoot, endpoint string, vendors []string, pluginRoot string) error {
+func Install(repoRoot, endpoint string, vendors []string) error {
 	_ = repoRoot
-	_ = pluginRoot
 	if endpoint != "" {
 		_ = writeEndpointConfig(endpoint)
 	}
@@ -44,29 +43,23 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 		return out
 	}
 	codexDir, _ := userpaths.CodexMarketplaceDir()
-	legacySO, _ := userpaths.LegacyDataDirSO()
 
 	for _, v := range vendors {
 		switch v {
 		case "claude", "claude-code":
-			_, e1 := os.Stat(filepath.Join(home, ".claude", "plugins", "superopen-cc"))
-			out["claude-code"] = e1 == nil
+			manifest := filepath.Join(home, ".claude", "plugins", "superopen-cc", "hooks", "hooks.json")
+			data, e := os.ReadFile(manifest)
+			out["claude-code"] = e == nil && hookBinaryAvailable(string(data), "cc")
 		case "cursor":
 			data, e := os.ReadFile(filepath.Join(home, ".cursor", "hooks.json"))
 			out["cursor"] = e == nil && (strings.Contains(string(data), "so coding hook --vendor=cursor") ||
 				strings.Contains(string(data), " coding hook --vendor=cursor"))
 		case "codex":
 			ok := false
-			for _, p := range []string{
-				codexDir,
-				filepath.Join(legacySO, "codex-marketplace"),
-			} {
-				if p == "" {
-					continue
-				}
-				if _, e := os.Stat(p); e == nil {
+			if codexDir != "" {
+				manifest := filepath.Join(codexDir, "plugins", "superopen", "hooks", "hooks.json")
+				if data, e := os.ReadFile(manifest); e == nil && hookBinaryAvailable(string(data), "codex") {
 					ok = true
-					break
 				}
 			}
 			out["codex"] = ok
@@ -74,17 +67,40 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 			data, e := os.ReadFile(filepath.Join(home, ".gemini", "settings.json"))
 			out["gemini"] = e == nil && strings.Contains(string(data), "coding hook --vendor=gemini")
 		case "opencode":
-			_, e := os.Stat(filepath.Join(home, ".opencode", "plugins", "superopen.ts"))
+			// Host loads ~/.config/opencode/plugins (not ~/.opencode/plugins).
+			_, e := os.Stat(filepath.Join(home, ".config", "opencode", "plugins", "superopen.ts"))
 			out["opencode"] = e == nil
 		case "copilot-cli", "copilot":
-			data, e := os.ReadFile(filepath.Join(home, ".github", "hooks", "superopen.json"))
+			// Copilot CLI: ~/.copilot/hooks (not ~/.github/hooks).
+			data, e := os.ReadFile(filepath.Join(home, ".copilot", "hooks", "superopen.json"))
 			out["copilot-cli"] = e == nil && strings.Contains(string(data), "coding hook --vendor=copilot")
 		case "pi":
-			_, e := os.Stat(filepath.Join(home, ".pi", "extensions", "superopen", "index.ts"))
+			// Host loads ~/.pi/agent/extensions (not ~/.pi/extensions).
+			_, e := os.Stat(filepath.Join(home, ".pi", "agent", "extensions", "superopen", "index.ts"))
 			out["pi"] = e == nil
 		}
 	}
 	return out
+}
+
+func hookBinaryAvailable(manifest, vendor string) bool {
+	marker := " coding hook --vendor=" + vendor
+	idx := strings.Index(manifest, marker)
+	if idx < 0 {
+		return false
+	}
+	lineStart := strings.LastIndex(manifest[:idx], "\"")
+	if lineStart < 0 {
+		return false
+	}
+	bin := strings.TrimSpace(manifest[lineStart+1 : idx])
+	bin = strings.Trim(bin, "'\"")
+	if bin == "so" {
+		_, err := exec.LookPath(bin)
+		return err == nil
+	}
+	info, err := os.Stat(bin)
+	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
 }
 
 func writeEndpointConfig(endpoint string) error {

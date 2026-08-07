@@ -37,10 +37,14 @@ type GraphConfig struct {
 }
 
 type EvalsConfig struct {
-	Auto         bool   `yaml:"auto"`
-	OnSessionEnd bool   `yaml:"on_session_end"`
-	// Backend: auto | heuristics | agent_cli | llm_api
-	// auto prefers Claude Code / Codex CLI (reuse coding-agent login), then API key.
+	Auto         bool `yaml:"auto"`
+	OnSessionEnd bool `yaml:"on_session_end"`
+	// ActiveCooldownHours: min gap between snapshot evals on an open chat (default 6).
+	// Manual `so eval --force` / Sessions UI Evaluate bypasses this.
+	ActiveCooldownHours int `yaml:"active_cooldown_hours,omitempty"`
+	// Backend: auto | agent_cli | llm_api | heuristics
+	// Default auto: sealed Claude/Codex CLI → API key → heuristics. Prefer agent
+	// judging for useful harness improvements; heuristics only when no model is available.
 	Backend string `yaml:"backend"`
 	// AgentCLI: auto | claude | codex - which sealed CLI to use for agent_cli/auto.
 	AgentCLI string `yaml:"agent_cli,omitempty"`
@@ -52,7 +56,7 @@ type RecommendationsConfig struct {
 	Auto            bool `yaml:"auto"`
 	RequireApproval bool `yaml:"require_approval"`
 	// AutoApplyTiers: soft | policy | evals | all. Empty + require_approval=true → [soft].
-	// require_approval=false maps to [all] for back-compat.
+	// require_approval=false → [all].
 	AutoApplyTiers []string `yaml:"auto_apply_tiers,omitempty"`
 }
 
@@ -100,7 +104,7 @@ type VizConfig struct {
 
 type MemoryConfig struct {
 	// Enabled defaults true. When on, SessionStart always injects Active Context.
-	Enabled *bool `yaml:"enabled,omitempty"`
+	Enabled  *bool  `yaml:"enabled,omitempty"`
 	Provider string `yaml:"provider"`
 	// Backend: auto | agent_cli | llm_api | heuristics - same semantics as evals.backend.
 	// auto prefers Claude Code / Codex CLI, else API key, else heuristics.
@@ -207,6 +211,14 @@ func (c Config) IdleHarvestHours() int {
 	return 6
 }
 
+// EvalsActiveCooldownHours returns min gap between active-chat snapshot evals (default 6).
+func (c Config) EvalsActiveCooldownHours() int {
+	if c.Evals.ActiveCooldownHours > 0 {
+		return c.Evals.ActiveCooldownHours
+	}
+	return 6
+}
+
 // AutoApplyTiersResolved returns which recommendation tiers auto-apply on finalize.
 // require_approval=false → all. Empty tiers + approval → soft only.
 func (c Config) AutoApplyTiersResolved() []string {
@@ -306,16 +318,13 @@ func (c Config) RetentionDays() int {
 	return 7
 }
 
-// GuardrailsEnabled respects SUPEROPEN_GUARDRAILS env (off|0|false|no) then config (default true).
-// SUPEROPEN_GOVERNANCE is accepted as a deprecated alias.
+// GuardrailsEnabled respects SUPEROPEN_GUARDRAILS env then config (default true).
 func (c Config) GuardrailsEnabled() bool {
-	for _, key := range []string{"SUPEROPEN_GUARDRAILS", "SUPEROPEN_GOVERNANCE"} {
-		switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
-		case "off", "0", "false", "no", "disabled":
-			return false
-		case "on", "1", "true", "yes", "enabled":
-			return true
-		}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("SUPEROPEN_GUARDRAILS"))) {
+	case "off", "0", "false", "no", "disabled":
+		return false
+	case "on", "1", "true", "yes", "enabled":
+		return true
 	}
 	if c.Guardrails.Enabled != nil {
 		return *c.Guardrails.Enabled
@@ -345,15 +354,6 @@ func Load(path string) (Config, error) {
 	cfg := Default()
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
-	}
-	// Migrate legacy `governance:` config key into `guardrails:`.
-	var legacy struct {
-		Governance *GuardrailsConfig `yaml:"governance"`
-	}
-	if err := yaml.Unmarshal(data, &legacy); err == nil && legacy.Governance != nil {
-		if cfg.Guardrails.Enabled == nil {
-			cfg.Guardrails = *legacy.Governance
-		}
 	}
 	cfg.normalizeObservability()
 	return cfg, nil

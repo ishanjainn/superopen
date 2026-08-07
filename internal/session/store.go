@@ -425,15 +425,15 @@ func (s *Store) FillMissingTitles(client *llm.Client, limit int) int {
 		if filled >= limit {
 			break
 		}
-		if strings.TrimSpace(e.Title) != "" {
+		if !IsPlaceholderTitle(e.Title, e.ID) {
 			continue
 		}
 		meta, err := s.Get(e.ID)
-		if err != nil || strings.TrimSpace(meta.Title) != "" {
+		if err != nil || !IsPlaceholderTitle(meta.Title, meta.ID) {
 			continue
 		}
 		EnsureTitle(&meta, client)
-		if strings.TrimSpace(meta.Title) == "" {
+		if IsPlaceholderTitle(meta.Title, meta.ID) {
 			continue
 		}
 		if err := s.UpdateMeta(meta); err != nil {
@@ -464,6 +464,94 @@ func (s *Store) GetFootprint(id string) (Footprint, error) {
 	return fp, json.Unmarshal(data, &fp)
 }
 
+// VendorFromAttrs picks the coding-agent identity from span attributes.
+// Prefer coding_agent.client (what hooks stamp) over the older
+// coding_agent.vendor key, which is often absent on live Claude Code spans.
+func VendorFromAttrs(attrs map[string]string) string {
+	if attrs == nil {
+		return ""
+	}
+	for _, k := range []string{
+		"coding_agent.client",
+		"coding_agent.vendor",
+		"gen_ai.agent.name",
+	} {
+		if v := strings.TrimSpace(attrs[k]); v != "" {
+			return v
+		}
+	}
+	if v := strings.TrimSpace(attrs["service.name"]); v != "" &&
+		!strings.EqualFold(v, "opentelemetry") &&
+		!strings.EqualFold(v, "unknown") {
+		return v
+	}
+	return ""
+}
+
+// VendorFromSpans returns the first non-empty vendor across spans.
+func VendorFromSpans(spans []tracestore.Span) string {
+	for _, sp := range spans {
+		if v := VendorFromAttrs(sp.Attributes); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// mergeMetaSticky keeps previously detected identity fields when a later
+// Start/upsert arrives with blanks (e.g. finalize reading coding_agent.vendor
+// while spans only set coding_agent.client). Once vendor/model/user are known,
+// empty updates must not clear them.
+func mergeMetaSticky(existing, incoming Meta) Meta {
+	out := incoming
+	if out.ID == "" {
+		out.ID = existing.ID
+	}
+	if strings.TrimSpace(out.Vendor) == "" {
+		out.Vendor = existing.Vendor
+	}
+	if strings.TrimSpace(out.Model) == "" {
+		out.Model = existing.Model
+	}
+	if strings.TrimSpace(out.User) == "" {
+		out.User = existing.User
+	}
+	if strings.TrimSpace(out.Title) == "" {
+		out.Title = existing.Title
+	}
+	if strings.TrimSpace(out.PromptPreview) == "" {
+		out.PromptPreview = existing.PromptPreview
+	}
+	if strings.TrimSpace(out.ProjectID) == "" {
+		out.ProjectID = existing.ProjectID
+	}
+	if strings.TrimSpace(out.RepoRoot) == "" {
+		out.RepoRoot = existing.RepoRoot
+	}
+	if strings.TrimSpace(out.Branch) == "" {
+		out.Branch = existing.Branch
+	}
+	if strings.TrimSpace(out.ParentID) == "" {
+		out.ParentID = existing.ParentID
+	}
+	if !out.IsSubagent && existing.IsSubagent && out.ParentID != "" {
+		out.IsSubagent = true
+	}
+	if out.StartedAt.IsZero() {
+		out.StartedAt = existing.StartedAt
+	}
+	if out.Tokens == 0 {
+		out.Tokens = existing.Tokens
+	}
+	if out.CostUSD == 0 {
+		out.CostUSD = existing.CostUSD
+	}
+	if out.DurationMs == 0 {
+		out.DurationMs = existing.DurationMs
+	}
+	return out
+}
+
 // UpdateMeta writes meta.json and refreshes the sessions index.
 func (s *Store) UpdateMeta(meta Meta) error {
 	dir := s.Paths.SessionDir(meta.ID)
@@ -479,6 +567,9 @@ func (s *Store) UpdateMeta(meta Meta) error {
 func (s *Store) Start(meta Meta) error {
 	if meta.ID == "" {
 		meta.ID = fmt.Sprintf("ses_%d", time.Now().UnixNano())
+	}
+	if existing, err := s.Get(meta.ID); err == nil {
+		meta = mergeMetaSticky(existing, meta)
 	}
 	if meta.StartedAt.IsZero() {
 		meta.StartedAt = time.Now().UTC()
@@ -579,13 +670,7 @@ func (s *Store) UpsertActiveFromSpans(spans []tracestore.Span) {
 				meta.StartedAt = time.Unix(0, sp.StartTimeUnixN).UTC()
 			}
 			if meta.Vendor == "" {
-				if v := sp.Attributes["coding_agent.client"]; v != "" {
-					meta.Vendor = v
-				} else if v := sp.Attributes["coding_agent.vendor"]; v != "" {
-					meta.Vendor = v
-				} else if v := sp.Attributes["gen_ai.agent.name"]; v != "" {
-					meta.Vendor = v
-				}
+				meta.Vendor = VendorFromAttrs(sp.Attributes)
 			}
 			if meta.Model == "" {
 				if v := sp.Attributes["gen_ai.request.model"]; v != "" {
@@ -625,7 +710,7 @@ func (s *Store) UpsertActiveFromSpans(spans []tracestore.Span) {
 		if meta.IsSubagent && meta.ParentID == "" {
 			meta.IsSubagent = false
 		}
-		if strings.TrimSpace(meta.Title) == "" {
+		if IsPlaceholderTitle(meta.Title, meta.ID) {
 			EnsureTitle(&meta, nil)
 		}
 		if meta.StartedAt.IsZero() {
@@ -656,19 +741,25 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 
 	meta, err := s.Get(id)
 	if err != nil {
-		meta = Meta{ID: id, Vendor: "unknown", StartedAt: time.Now().UTC()}
+		meta = Meta{ID: id, StartedAt: time.Now().UTC()}
 		if len(spans) > 0 {
 			meta.StartedAt = time.Unix(0, spans[0].StartTimeUnixN).UTC()
-			if v := spans[0].Attributes["coding_agent.vendor"]; v != "" {
-				meta.Vendor = v
-			} else if v := spans[0].Attributes["coding_agent.client"]; v != "" {
-				meta.Vendor = v
-			}
-			if v := spans[0].Attributes["gen_ai.request.model"]; v != "" {
-				meta.Model = v
-			} else if v := spans[0].Attributes["gen_ai.response.model"]; v != "" {
-				meta.Model = v
-			}
+		}
+	}
+	// Always (re)fill empty vendor from spans — never leave "" after materialize,
+	// and never rely on a prior Start that only read coding_agent.vendor.
+	if strings.TrimSpace(meta.Vendor) == "" {
+		if v := VendorFromSpans(spans); v != "" {
+			meta.Vendor = v
+		} else {
+			meta.Vendor = "unknown"
+		}
+	}
+	if meta.Model == "" && len(spans) > 0 {
+		if v := spans[0].Attributes["gen_ai.request.model"]; v != "" {
+			meta.Model = v
+		} else if v := spans[0].Attributes["gen_ai.response.model"]; v != "" {
+			meta.Model = v
 		}
 	}
 
@@ -695,6 +786,11 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 			}
 		}
 		_ = enc.Encode(safe)
+		if meta.Vendor == "" || meta.Vendor == "unknown" {
+			if v := VendorFromAttrs(sp.Attributes); v != "" {
+				meta.Vendor = v
+			}
+		}
 		if meta.Model == "" {
 			if m := sp.Attributes["gen_ai.request.model"]; m != "" {
 				meta.Model = m
@@ -773,8 +869,8 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 		meta.IsSubagent = false
 	}
 
-	// Prefer Claude aiTitle / Codex thread_name when the session id matches.
-	if strings.TrimSpace(meta.Title) == "" {
+	// Prefer Claude aiTitle / Codex thread_name / OpenCode AI title when the id matches.
+	if IsPlaceholderTitle(meta.Title, meta.ID) {
 		EnsureTitle(&meta, nil) // vendor lookup only; LLM fill happens via FillMissingTitles
 	}
 

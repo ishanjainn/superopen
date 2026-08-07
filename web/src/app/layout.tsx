@@ -5,8 +5,15 @@ import { ThemeProvider } from "@/components/shell/theme-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Superopen",
+  title: {
+    default: "Superopen | Agent Harness Engineering",
+    template: "%s · Superopen",
+  },
   description: "Open source Agent Harness Engineering",
+  icons: {
+    icon: "/brand-mark.png",
+    apple: "/brand-mark.png",
+  },
 };
 
 /** Apply theme class before paint. Default dark when no preference stored. */
@@ -15,7 +22,10 @@ const themeBootScript = `(function(){try{var t=localStorage.getItem('so-theme')|
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="bg-stone-50 text-stone-900 antialiased">
+      <body
+        suppressHydrationWarning
+        className="bg-stone-50 text-stone-900 antialiased"
+      >
         <Script id="so-theme-boot" strategy="beforeInteractive">
           {themeBootScript}
         </Script>

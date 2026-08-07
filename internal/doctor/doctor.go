@@ -2,16 +2,13 @@ package doctor
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/ishanjainn/superopen/internal/coding"
 	"github.com/ishanjainn/superopen/internal/config"
-	"github.com/ishanjainn/superopen/internal/entitlement"
 	"github.com/ishanjainn/superopen/internal/githooks"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/inject"
@@ -63,11 +60,14 @@ func Run(repoRoot string) []Check {
 		}
 		checks = append(checks, Check{Name: "llm", OK: true, Detail: detail})
 	} else {
-		detail := "optional API key - memory/evals prefer coding-agent CLI (claude/codex); set OPENAI_API_KEY / ANTHROPIC_API_KEY only for headless llm_api"
-		checks = append(checks, Check{Name: "llm", OK: true, Warn: true, Detail: detail})
+		checks = append(checks, Check{
+			Name:   "llm",
+			OK:     true,
+			Detail: "no API key (evals.backend=auto uses agent CLI first, then API, then heuristics)",
+		})
 	}
 
-	// Coding-agent CLIs reused for sealed backend evals/recommendations.
+	// Coding-agent CLIs for evals.backend=auto|agent_cli.
 	if found := detectAgentCLIs(); len(found) > 0 {
 		checks = append(checks, Check{
 			Name:   "eval_agent_cli",
@@ -78,7 +78,7 @@ func Run(repoRoot string) []Check {
 		checks = append(checks, Check{
 			Name:   "eval_agent_cli",
 			OK:     false,
-			Detail: "claude/codex not on PATH - evals fall back to API key or heuristics",
+			Detail: "claude/codex not on PATH — evals.backend=auto falls back to API key or heuristics",
 		})
 	}
 
@@ -135,27 +135,10 @@ func Run(repoRoot string) []Check {
 		checks = append(checks, Check{Name: "retrieve_index", OK: false, Detail: "run so sync to build corpus index"})
 	}
 
-	// Port ledger
+	// Port ledger (only report when present; empty is normal)
 	ledger := filepath.Join(paths.Root, "port", "ledger.json")
 	if _, err := os.Stat(ledger); err == nil {
 		checks = append(checks, Check{Name: "port_ledger", OK: true, Detail: ledger})
-	} else {
-		checks = append(checks, Check{Name: "port_ledger", OK: true, Warn: true, Detail: "no ports yet - so sessions port creates .so/port/ledger.json"})
-	}
-
-	// OTLP health
-	endpoint := strings.TrimRight(cfg.Observability.Listen, "/")
-	client := &http.Client{Timeout: 1 * time.Second}
-	resp, err := client.Get(endpoint + "/health")
-	if err != nil {
-		checks = append(checks, Check{Name: "otlp_receiver", OK: true, Warn: true, Detail: "not running - start with so dev (" + err.Error() + ")"})
-	} else {
-		resp.Body.Close()
-		if resp.StatusCode == 200 {
-			checks = append(checks, Check{Name: "otlp_receiver", OK: true, Detail: endpoint})
-		} else {
-			checks = append(checks, Check{Name: "otlp_receiver", OK: true, Warn: true, Detail: fmt.Sprintf("%s status=%d", endpoint, resp.StatusCode)})
-		}
 	}
 
 	// Project registry
@@ -165,27 +148,25 @@ func Run(repoRoot string) []Check {
 		checks = append(checks, Check{Name: "projects_registry", OK: true, Detail: fmt.Sprintf("%d project(s)", len(projs))})
 	}
 
-	// Git hooks
-	hooksOK := false
-	if out, err := exec.Command("git", "-C", repoRoot, "rev-parse", "--git-path", "hooks").Output(); err == nil {
-		prep := filepath.Join(strings.TrimSpace(string(out)), "prepare-commit-msg")
-		if !filepath.IsAbs(prep) {
-			prep = filepath.Join(repoRoot, prep)
-		}
-		if data, err := os.ReadFile(prep); err == nil && strings.Contains(string(data), "githook") {
-			hooksOK = true
-		}
-	}
+	// Git hooks: Superopen no longer installs commit/push hooks (they slowed
+	// commits and hung pushes while syncing refs/so/sessions). Absence is OK.
 	_ = githooks.TrailerSession
-	checks = append(checks, Check{Name: "git_hooks", OK: hooksOK, Detail: "prepare-commit-msg SO-Session"})
-
-	// Paid entitlement (informational - OK either way)
-	st, _ := entitlement.Load()
-	if st.Authenticated && st.Paid {
-		checks = append(checks, Check{Name: "cloud_otlp", OK: true, Detail: "paid auth unlocked"})
-	} else {
-		checks = append(checks, Check{Name: "cloud_otlp", OK: true, Detail: "local-only (login to unlock paid OTLP)"})
+	hooksDetail := "disabled (no Superopen commit/push hooks)"
+	if out, err := exec.Command("git", "-C", repoRoot, "rev-parse", "--git-path", "hooks").Output(); err == nil {
+		dir := strings.TrimSpace(string(out))
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(repoRoot, dir)
+		}
+		for _, name := range []string{"pre-push", "post-commit", "prepare-commit-msg"} {
+			p := filepath.Join(dir, name)
+			if data, err := os.ReadFile(p); err == nil && strings.Contains(string(data), "githook") {
+				hooksDetail = "leftover Superopen hook present: " + name + " (run so sync to remove)"
+				checks = append(checks, Check{Name: "git_hooks", OK: false, Warn: true, Detail: hooksDetail})
+				return checks
+			}
+		}
 	}
+	checks = append(checks, Check{Name: "git_hooks", OK: true, Detail: hooksDetail})
 
 	return checks
 }

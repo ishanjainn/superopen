@@ -40,3 +40,33 @@ func TestAppendAndParseTrailers(t *testing.T) {
 		t.Fatalf("duplicate trailer: %s", data)
 	}
 }
+
+func TestInstallRemovesSuperopenHooks(t *testing.T) {
+	dir := t.TempDir()
+	hooks := filepath.Join(dir, ".git", "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// fake git repo for rev-parse --git-path hooks
+	if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prePush := filepath.Join(hooks, "pre-push")
+	body := "#!/bin/sh\n# Superopen pre-push\nexec so githook pre-push \"$@\"\n"
+	if err := os.WriteFile(prePush, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(hooks, "pre-commit")
+	if err := os.WriteFile(foreign, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := githooks.Install(dir, "so"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(prePush); !os.IsNotExist(err) {
+		t.Fatalf("expected Superopen pre-push removed, err=%v", err)
+	}
+	if _, err := os.Stat(foreign); err != nil {
+		t.Fatalf("foreign hook should remain: %v", err)
+	}
+}

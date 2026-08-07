@@ -12,13 +12,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	agentimport "github.com/ishanjainn/superopen/internal/agentimport"
-	"github.com/ishanjainn/superopen/internal/blame"
 	"github.com/ishanjainn/superopen/internal/axi"
+	"github.com/ishanjainn/superopen/internal/blame"
 	"github.com/ishanjainn/superopen/internal/checkpoint"
 	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/entitlement"
 	"github.com/ishanjainn/superopen/internal/githooks"
+	"github.com/ishanjainn/superopen/internal/gitruntime"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/llm"
 	"github.com/ishanjainn/superopen/internal/memory"
@@ -122,8 +122,8 @@ Works even when the repo path no longer exists on disk.`,
 	c.AddCommand(pruneCmd)
 
 	c.AddCommand(&cobra.Command{
-		Use:   "use [id-or-path]",
-		Args:  cobra.ExactArgs(1),
+		Use:  "use [id-or-path]",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := projects.Use(args[0])
 			if err != nil {
@@ -175,8 +175,8 @@ func cmdStatus() *cobra.Command {
 func cmdCheckpoint() *cobra.Command {
 	c := &cobra.Command{Use: "checkpoint", Short: "Manage restorable session checkpoints"}
 	c.AddCommand(&cobra.Command{
-		Use:   "list [session-id]",
-		Args:  cobra.ExactArgs(1),
+		Use:  "list [session-id]",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cs := checkpoint.NewStore(harness.Resolve(repoRoot()))
 			list, err := cs.List(args[0])
@@ -211,8 +211,8 @@ func cmdCheckpoint() *cobra.Command {
 		},
 	})
 	c.AddCommand(&cobra.Command{
-		Use:   "show [session-id] [checkpoint-id]",
-		Args:  cobra.ExactArgs(2),
+		Use:  "show [session-id] [checkpoint-id]",
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			m, err := checkpoint.NewStore(harness.Resolve(repoRoot())).Get(args[0], args[1])
 			if err != nil {
@@ -226,8 +226,8 @@ func cmdCheckpoint() *cobra.Command {
 		},
 	})
 	c.AddCommand(&cobra.Command{
-		Use:   "restore [session-id] [checkpoint-id]",
-		Args:  cobra.ExactArgs(2),
+		Use:  "restore [session-id] [checkpoint-id]",
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
 			if err := checkpoint.NewStore(harness.Resolve(root)).Restore(args[0], args[1], root); err != nil {
@@ -346,11 +346,12 @@ func cmdGitHook() *cobra.Command {
 		},
 	})
 	c.AddCommand(&cobra.Command{
-		Use: "post-commit",
+		Use:   "post-commit",
+		Short: "Finalize session into untracked store; never rewrite tracked Superopen caches",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
 			paths := harness.Resolve(root)
-			_ = finalizeLatestSession(root)
+			_ = finalizeSession(root, "", finalizeOpts{SkipTrackedMutations: true})
 			// Attribution + trailer already on message; refresh meta from HEAD.
 			shaOut, _ := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
 			sha := strings.TrimSpace(string(shaOut))
@@ -389,16 +390,29 @@ func cmdGitHook() *cobra.Command {
 			_ = ss.UpdateMeta(meta)
 			// Auto checkpoint on commit.
 			_, _ = checkpoint.NewStore(paths).CreateFromFootprint(sid, root, "post-commit")
+			_, _ = gitruntime.SnapshotSessionDir(root, paths.SessionDir(sid), sid)
 			_ = session.NewStateStore(paths).End(sid)
 			return nil
 		},
 	})
 	refreshHook := func(cmd *cobra.Command, args []string) error {
+		// After any SHA-changing checkout/merge: rebuild untracked graph/context only.
 		root := repoRoot()
-		return syncpkg.Refresh(syncpkg.RefreshOptions{RepoRoot: root})
+		return syncpkg.Refresh(syncpkg.RefreshOptions{RepoRoot: root, SkipInject: true})
 	}
 	c.AddCommand(&cobra.Command{Use: "post-merge", RunE: refreshHook})
 	c.AddCommand(&cobra.Command{Use: "post-checkout", RunE: refreshHook})
+	c.AddCommand(&cobra.Command{
+		Use:   "pre-push",
+		Short: "Fast-forward push refs/so/sessions/* (never force)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			remote := "origin"
+			if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+				remote = args[0]
+			}
+			return gitruntime.PushSessionsFF(repoRoot(), remote)
+		},
+	})
 	return c
 }
 
@@ -437,35 +451,6 @@ func cmdLogout() *cobra.Command {
 			return entitlement.Clear()
 		},
 	}
-}
-
-func cmdImport() *cobra.Command {
-	c := &cobra.Command{Use: "import", Short: "Import vendor transcript history into .so/sessions (deprecated: use so sessions port --to so)"}
-	c.AddCommand(&cobra.Command{
-		Use: "claude-code",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(os.Stderr, "note: so import is deprecated; prefer: so sessions port --from claude --to so --all")
-			n, err := agentimport.ClaudeCode(harness.Resolve(repoRoot()))
-			if err != nil {
-				return err
-			}
-			fmt.Printf("imported %d sessions\n", n)
-			return nil
-		},
-	})
-	c.AddCommand(&cobra.Command{
-		Use: "codex",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(os.Stderr, "note: so import is deprecated; prefer: so sessions port --from codex --to so --all")
-			n, err := agentimport.Codex(harness.Resolve(repoRoot()))
-			if err != nil {
-				return err
-			}
-			fmt.Printf("imported %d sessions\n", n)
-			return nil
-		},
-	})
-	return c
 }
 
 func extendSessionsCmd(c *cobra.Command) {

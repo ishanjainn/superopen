@@ -21,9 +21,10 @@ import (
 
 // RefreshOptions controls the cheap post-pull refresh path.
 type RefreshOptions struct {
-	RepoRoot  string
-	SkipGraph bool
-	Force     bool
+	RepoRoot   string
+	SkipGraph  bool
+	SkipInject bool // git hooks: never rewrite tracked AGENTS.md / skills
+	Force      bool
 }
 
 type refreshMarker struct {
@@ -36,8 +37,9 @@ func refreshMarkerPath(paths harness.Paths) string {
 	return filepath.Join(paths.MemoryDir, "last-refresh.json")
 }
 
-// Refresh is a lite sync for post-merge / post-checkout / so refresh.
-// Skips coding-hook reinstall and citymap; rebuilds graph only when shared harness or HEAD changed.
+// Refresh is a lite sync for post-merge / post-checkout / so refresh after HEAD moves.
+// Rebuilds untracked runtime (graph, memory packs, retrieve). Git hooks should set
+// SkipInject so a stale or newer `so` binary cannot dirty tracked injectors.
 func Refresh(opts RefreshOptions) error {
 	root := opts.RepoRoot
 	paths := harness.Resolve(root)
@@ -53,18 +55,25 @@ func Refresh(opts RefreshOptions) error {
 	marker := loadRefreshMarker(paths)
 	sharedChanged := sharedHarnessChanged(paths, marker.At) || opts.Force
 	shaChanged := sha != "" && sha != marker.SHA
+	// A commit always changes HEAD, but Graphify's own clustering is not
+	// deterministic - rebuilding on every commit regardless of what changed
+	// churns graph.json/graph.html/GRAPH_REPORT.md even when nothing Graphify
+	// would index actually moved (e.g. a commit touching only .so/ or docs).
+	sourceChanged := shaChanged && (marker.SHA == "" || indexableFilesChanged(root, marker.SHA, sha))
 
 	_ = guardrails.EnsureDefaults(paths)
 	_ = memory.NewStore(paths).Ensure()
 	_, _ = memory.NewStore(paths).RefreshActive("")
-	_ = inject.Apply(root)
+	if !opts.SkipInject {
+		_ = inject.Apply(root)
+	}
 	if _, err := retrieve.Rebuild(root, paths); err != nil {
 		return fmt.Errorf("retrieve index: %w", err)
 	}
 	_ = recommend.MarkStaleFlags(paths)
 
 	builtGraph := false
-	if !opts.SkipGraph && (sharedChanged || shaChanged || opts.Force) {
+	if !opts.SkipGraph && (sharedChanged || sourceChanged || opts.Force) {
 		codeOnly := !cfg.Graph.Semantic
 		if _, err := graph.Build(root, paths, codeOnly, cfg.Graph.SemanticBackend); err != nil {
 			return fmt.Errorf("graph: %w", err)
@@ -83,6 +92,52 @@ func gitSHA(root string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// nonIndexablePrefixes are paths Graphify never indexes for code structure, so
+// a commit that only touches these should not trigger a graph rebuild.
+var nonIndexablePrefixes = []string{".so/", ".git/"}
+
+// nonIndexableExts are file types that don't change code structure/edges even
+// when they legitimately change (docs, lockfiles, generated data).
+var nonIndexableExts = map[string]bool{
+	".md": true, ".txt": true, ".lock": true,
+}
+
+func isIndexablePath(p string) bool {
+	for _, prefix := range nonIndexablePrefixes {
+		if strings.HasPrefix(p, prefix) {
+			return false
+		}
+	}
+	base := filepath.Base(p)
+	if base == "package-lock.json" || base == "go.sum" {
+		return false
+	}
+	return !nonIndexableExts[filepath.Ext(p)]
+}
+
+// indexableFilesChanged reports whether any file Graphify would actually
+// index changed between two commits. Fails open (true) on any git error so a
+// diff failure never silently suppresses a real rebuild.
+func indexableFilesChanged(root, fromSHA, toSHA string) bool {
+	if fromSHA == "" || toSHA == "" || fromSHA == toSHA {
+		return true
+	}
+	out, err := exec.Command("git", "-C", root, "diff", "--name-only", fromSHA, toSHA).Output()
+	if err != nil {
+		return true
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if isIndexablePath(line) {
+			return true
+		}
+	}
+	return false
 }
 
 func loadRefreshMarker(paths harness.Paths) refreshMarker {
@@ -109,8 +164,11 @@ func sharedHarnessChanged(paths harness.Paths, since time.Time) bool {
 		return true
 	}
 	dirs := []string{
-		paths.KnowledgeDir, paths.RulesDir, paths.SkillsDir,
+		paths.RulesDir, paths.SkillsDir,
 		paths.GuardrailsDir, paths.EvalsDir,
+	}
+	if info, err := os.Stat(paths.AgentsMD); err == nil && info.ModTime().After(since) {
+		return true
 	}
 	for _, d := range dirs {
 		changed := false

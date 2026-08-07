@@ -1,13 +1,12 @@
-"use client";
+import Client from "./client";
 
-import { HarnessFilesPage } from "@/components/harness-files-page";
-
-export default function RulesPage() {
-  return (
-    <HarnessFilesPage
-      title="Rules"
-      dir="rules"
-      emptyHint="No rules yet. Create one with New, or add markdown under .so/rules/."
-    />
-  );
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  // Unwrap Next.js 15+ async searchParams before rendering the client tree
+  // (avoids sync-dynamic-apis warnings from prop enumeration).
+  await searchParams;
+  return <Client />;
 }

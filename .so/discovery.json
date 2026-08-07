@@ -1,0 +1,63 @@
+{
+  "stack": "Go",
+  "structure": "- CODE_OF_CONDUCT.md (file)\n- CONTRIBUTING.md (file)\n- LICENSE (file)\n- Makefile (file)\n- NOTICE (file)\n- README.md (file)\n- SECURITY.md (file)\n- VERSION (file)\n- cmd (dir)\n- docs (dir)\n- go.mod (file)\n- go.sum (file)\n- internal (dir)\n- npm (dir)\n- plugins (dir)\n- scripts (dir)\n- sdk (dir)\n- templates (dir)\n- web (dir)",
+  "graph": {
+    "node_count": 3371,
+    "edge_count": 8145,
+    "languages": {
+      "go": 1872,
+      "python": 82,
+      "typescript": 1066
+    },
+    "top_dirs": [
+      "internal",
+      "web",
+      "cmd",
+      "sdk",
+      "scripts",
+      "plugins",
+      "npm",
+      "internal_execx_spawn_detached_test_go_t",
+      "internal_port_ledger_go_mutex",
+      "internal_seed_upgrade_go_client"
+    ],
+    "sample_files": [
+      ".github/scripts/release-packages.py",
+      ".github/scripts/release-packages.py",
+      ".github/scripts/release-packages.py",
+      ".github/scripts/release-packages.py",
+      ".github/scripts/release-packages.py",
+      ".github/scripts/release-packages.py",
+      ".github/scripts/release-packages.py",
+      ".github/scripts/release-packages.py",
+      ".github/scripts/release-packages.py",
+      ".github/scripts/release-packages.py",
+      ".github/scripts/release-packages.py",
+      ".github/scripts/release-packages.py"
+    ]
+  },
+  "agents": [
+    {
+      "path": "/Users/ishanjain/work/superopen/CONTRIBUTING.md",
+      "kind": "contributing",
+      "headings": [
+        "Contributing to Superopen",
+        "Before you start",
+        "Development setup",
+        "Development workflow",
+        "Pull requests",
+        "Issues and questions"
+      ],
+      "rules": [
+        "Prefer Conventional Commit titles, for example feat: add project prune or"
+      ],
+      "excerpt": "# Contributing to Superopen\n\nThanks for helping improve Superopen. Contributions of code, documentation, bug\nreports, and integration feedback are all welcome.\n\n## Before you start\n\n- Read the [README](README.md) for install and product overview.\n- Follow the [Code of Conduct](CODE_OF_CONDUCT.md).\n- For a substantial change, open or discuss an issue first so maintainers can\n  confirm the scope. Small documentation fixes can go straight to a pull\n  request.\n\n## Development setup\n\n\nOptional smoke (writes a local `.so/` under the current directory):\n\n\n## Development workflow\n\n1. Fork the repository and clone your fork.\n2. Create a focused branch: `git switch -c fix/short-description`\n3. Make the change, including tests and documentation when they are relevant.\n   Keep unrelated formatting and refactors out of the pull request.\n4. Run the focused checks for what you changed:\n\n   | Area | Checks |\n   |---|---|\n   | Go / CLI | `go test -race -count=1 ./...` · `go vet ./...` |\n   | Web UI | `cd web \u0026\u0026 npm test \u0026\u0026 npm run typecheck \u0026\u0026 npm run lint` |\n   | Plugins | `bash scripts/sync-plugins.sh` then commit marketplace drift |\n\n5. Commit with a clear subject, push, and open a pull request against `main`.\n\n## Pull requests\n\n- Explain the problem and the solution; link the related issue when one exists.\n- Prefer Conventional Commit titles, for example `feat: add project prune` or\n  `fix(web): restore file search`.\n- Include tests for behavior changes and update user-facing documentation.\n- Complete the pull-request template honestly.\n\n## Issues and questions\n\nSearch existing [issues](https://github.com/ishanjainn/superopen/issues) before opening\na new one. Bug reports should include reproducible steps, expected and actual\nbehavior, and relevant non-sensitive logs.\n\nDo not report security vulnerabilities in a public issue; follow\n[SECURITY.md](SECURITY.md) instead."
+    }
+  ],
+  "derived_rules": [
+    "Prefer Conventional Commit titles, for example feat: add project prune or"
+  ],
+  "themes": [
+    "Go toolchain"
+  ]
+}

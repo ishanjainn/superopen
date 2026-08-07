@@ -56,18 +56,23 @@ func (c *Client) Backend() string {
 	return "llm_api:" + c.Provider
 }
 
-// NewBestCompleter picks how backend evals/recommendations talk to a model:
+// NewBestCompleter picks how backend evals talk to a model:
 //
 //	evals.backend:
-//	  heuristics - never call a model
+//	  auto       - prefer agent CLI on PATH, else API key, else none/heuristics (default)
 //	  agent_cli  - Claude Code / Codex CLI only (reuse coding-agent login)
 //	  llm_api    - API key / gateway only
-//	  auto       - prefer agent CLI on PATH, else API key, else none
+//	  heuristics - never call a model
 //
-// Cursor has no sealed headless CLI for this; use Claude Code or Codex for
-// backend judging. Cursor still works for interactive `/so init` upgrades.
+// Cost balance: agent/LLM judging produces useful harness improvements; heuristics
+// is the free fallback when no model backend is available. Cursor has no sealed
+// headless CLI — use Claude Code or Codex for judging; Cursor still works for `/so init`.
 func NewBestCompleter(cfg config.Config) Completer {
-	return NewCompleterForBackend(cfg, cfg.Evals.Backend)
+	backend := cfg.Evals.Backend
+	if strings.TrimSpace(backend) == "" {
+		backend = "auto"
+	}
+	return NewCompleterForBackend(cfg, backend)
 }
 
 // NewMemoryCompleter uses memory.backend (default auto) - agent CLI preferred.

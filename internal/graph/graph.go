@@ -575,15 +575,20 @@ func ResolvePaths(repoRoot string) harness.Paths {
 }
 
 func QueryRetrieve(paths harness.Paths, question string) ([]retrieve.Hit, error) {
-	hits, err := retrieve.Search(paths, question, 15)
+	return QueryRetrieveVendor(paths, question, "")
+}
+
+// QueryRetrieveVendor ranks harness corpus hits with optional session-vendor weighting.
+func QueryRetrieveVendor(paths harness.Paths, question, vendor string) ([]retrieve.Hit, error) {
+	opts := retrieve.SearchOptions{Limit: 15, Vendor: vendor}
+	hits, err := retrieve.SearchWith(paths, question, opts)
 	if err != nil || len(hits) > 0 {
 		return hits, err
 	}
-	// Index may be missing - rebuild once then retry.
 	if _, err := retrieve.Rebuild(filepath.Dir(paths.Root), paths); err != nil {
 		return nil, err
 	}
-	return retrieve.Search(paths, question, 15)
+	return retrieve.SearchWith(paths, question, opts)
 }
 
 func truncateSnippet(s string, n int) string {

@@ -29,6 +29,9 @@ func patchManifestBytes(_ string, body []byte, soBin string) []byte {
 	if strings.Contains(s, "so sessions finalize") {
 		s = strings.ReplaceAll(s, "so sessions finalize", quoted+" sessions finalize")
 	}
+	if strings.Contains(s, "so sessions refresh") {
+		s = strings.ReplaceAll(s, "so sessions refresh", quoted+" sessions refresh")
+	}
 	return []byte(s)
 }
 

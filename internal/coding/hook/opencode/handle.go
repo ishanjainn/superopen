@@ -5,31 +5,34 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/coding/normalize"
 	"github.com/ishanjainn/superopen/internal/coding/pricing"
 	"github.com/ishanjainn/superopen/internal/coding/sessionstate"
-	"github.com/ishanjainn/superopen/internal/coding/normalize"
+	"github.com/ishanjainn/superopen/internal/otlp"
 )
 
 // Payload covers the JSON we receive from plugins/opencode.
 type payload struct {
-	Type      string `json:"type"`
-	Event     string `json:"event"`
-	SessionID string `json:"session_id"`
-	SessionId string `json:"sessionId"`
-	CWD       string `json:"cwd"`
-	Directory string `json:"directory"`
-	Model     string `json:"model"`
-	Provider  string `json:"provider"`
-	Title     string `json:"title"`
-	Prompt    string `json:"prompt"`
-	Text      string `json:"text"`
-	Role      string `json:"role"`
-	MessageID string `json:"message_id"`
-	ToolName  string `json:"tool_name"`
-	ToolID    string `json:"tool_use_id"`
-	ToolInput json.RawMessage `json:"tool_input"`
-	ToolResult string `json:"tool_result"`
-	Errored   bool   `json:"errored"`
+	Type         string `json:"type"`
+	Event        string `json:"event"`
+	SessionID    string `json:"session_id"`
+	SessionId    string `json:"sessionId"`
+	SessionIDCam string `json:"sessionID"` // OpenCode plugin field
+	CWD          string `json:"cwd"`
+	Directory    string `json:"directory"`
+	Model        string `json:"model"`
+	Provider     string `json:"provider"`
+	Title        string `json:"title"`
+	Prompt       string `json:"prompt"`
+	Text         string `json:"text"`
+	Content      any    `json:"content"` // string | parts[]
+	Role         string `json:"role"`
+	MessageID    string `json:"message_id"`
+	ToolName     string `json:"tool_name"`
+	ToolID       string `json:"tool_use_id"`
+	ToolInput    json.RawMessage `json:"tool_input"`
+	ToolResult   string `json:"tool_result"`
+	Errored      bool   `json:"errored"`
 	// Tokens - OpenCode shape (input excludes cache; we recombine for pricing).
 	Tokens *struct {
 		Input     int64 `json:"input"`
@@ -41,8 +44,18 @@ type payload struct {
 		} `json:"cache"`
 	} `json:"tokens"`
 	// Host-reported cost when present (OpenCode AssistantMessage.cost).
-	Cost *float64 `json:"cost"`
-	PartType string `json:"part_type"`
+	Cost     *float64 `json:"cost"`
+	PartType string   `json:"part_type"`
+	Parts    []any    `json:"parts"`
+	Tools    []ocTool `json:"tools"`
+}
+
+type ocTool struct {
+	ToolName   string `json:"tool_name"`
+	ToolUseID  string `json:"tool_use_id"`
+	ToolInput  any    `json:"tool_input"`
+	ToolResult string `json:"tool_result"`
+	Errored    bool   `json:"errored"`
 }
 
 func handle(in normalize.Input) error {
@@ -52,13 +65,15 @@ func handle(in normalize.Input) error {
 	if event == "" {
 		event = strings.ToLower(firstNonEmpty(p.Type, p.Event))
 	}
-	sid := firstNonEmpty(p.SessionID, p.SessionId)
-	if sid == "" {
-		sid = "unknown"
+	sid := firstNonEmpty(p.SessionID, p.SessionId, p.SessionIDCam)
+	if otlp.IsPlaceholderSessionID(sid) {
+		// Never create an "unknown" Sessions row — wait for a real session id.
+		return nil
 	}
 	cwd := firstNonEmpty(p.CWD, p.Directory)
 	model := p.Model
 	now := time.Now().UTC()
+	text := firstNonEmpty(p.Text, p.Prompt, flattenContent(p.Content))
 
 	switch {
 	case strings.Contains(event, "session.created") || event == "sessionstart" || event == "session_start":
@@ -67,7 +82,8 @@ func handle(in normalize.Input) error {
 		})
 
 	case strings.Contains(event, "dispose") || strings.Contains(event, "session.end") ||
-		event == "sessionend" || event == "session_end":
+		event == "sessionend" || event == "session_end" || strings.Contains(event, "session.deleted") ||
+		strings.Contains(event, "session.idle"):
 		s := normalize.Session{
 			SessionID: sid, Vendor: in.Vendor, Model: model, CWD: cwd, EndedAt: now,
 			Outcome: "completed",
@@ -98,21 +114,34 @@ func handle(in normalize.Input) error {
 
 	case strings.Contains(event, "message.updated") || event == "message" || strings.Contains(event, "chat.message"):
 		role := strings.ToLower(p.Role)
-		if role == "user" || p.Prompt != "" {
+		if role == "user" || (p.Prompt != "" && role != "assistant" && len(p.Tools) == 0) {
 			return in.Emit.EmitLLMTurn(normalize.LLMTurn{
 				SessionID: sid, Vendor: in.Vendor, Model: model, StartedAt: now,
-				Prompt: capture(in, firstNonEmpty(p.Prompt, p.Text)),
+				Prompt: capture(in, text),
 			})
 		}
 		turn := normalize.LLMTurn{
 			SessionID: sid, Vendor: in.Vendor, Model: model,
 			StartedAt: now.Add(-time.Second), EndedAt: now,
-			Response:             capture(in, p.Text),
+			Response:             capture(in, firstNonEmpty(text, flattenParts(p.Parts))),
 			AssistantMessageOnly: true,
 		}
 		stampUsage(&turn, p, model)
 		accumulateUsage(sid, in.Vendor, turn)
-		return in.Emit.EmitLLMTurn(turn)
+		if err := in.Emit.EmitLLMTurn(turn); err != nil {
+			return err
+		}
+		for _, t := range p.Tools {
+			_ = in.Emit.EmitToolCall(normalize.ToolCall{
+				SessionID: sid, Vendor: in.Vendor, Model: model,
+				ToolName: t.ToolName, ToolUseID: t.ToolUseID, WorkingDir: cwd,
+				StartedAt: now.Add(-50 * time.Millisecond), EndedAt: now,
+				Errored: t.Errored,
+				Args:    capture(in, rawAny(t.ToolInput)),
+				Result:  capture(in, firstNonEmpty(t.ToolResult, rawAny(t.ToolResult))),
+			})
+		}
+		return nil
 
 	case strings.Contains(event, "message.part.updated") || strings.Contains(event, "step-finish"):
 		// Prefer accumulating step-finish tokens (msg.tokens is last-step only).
@@ -131,16 +160,74 @@ func handle(in normalize.Input) error {
 		return in.Emit.EmitLLMTurn(turn)
 
 	default:
-		if p.Prompt != "" || p.Text != "" {
+		// Do NOT EmitSession for unmatched lifecycle noise — that flooded
+		// traces with empty coding_agent.session spans and created junk rows.
+		if text != "" {
 			return in.Emit.EmitLLMTurn(normalize.LLMTurn{
 				SessionID: sid, Vendor: in.Vendor, Model: model, StartedAt: now,
-				Prompt: capture(in, firstNonEmpty(p.Prompt, p.Text)),
+				Prompt: capture(in, text),
 			})
 		}
-		return in.Emit.EmitSession(normalize.Session{
-			SessionID: sid, Vendor: in.Vendor, Model: model, CWD: cwd, StartedAt: now,
-		})
+		return nil
 	}
+}
+
+func flattenContent(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case []any:
+		var b strings.Builder
+		for _, part := range t {
+			switch p := part.(type) {
+			case string:
+				if p != "" {
+					if b.Len() > 0 {
+						b.WriteByte('\n')
+					}
+					b.WriteString(p)
+				}
+			case map[string]any:
+				for _, k := range []string{"text", "content", "value"} {
+					if s, ok := p[k].(string); ok && s != "" {
+						if b.Len() > 0 {
+							b.WriteByte('\n')
+						}
+						b.WriteString(s)
+						break
+					}
+				}
+			}
+		}
+		return b.String()
+	case map[string]any:
+		for _, k := range []string{"text", "content", "value"} {
+			if s, ok := t[k].(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func flattenParts(parts []any) string {
+	return flattenContent(any(parts))
+}
+
+func rawAny(v any) string {
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func stampUsage(turn *normalize.LLMTurn, p payload, model string) {
@@ -172,7 +259,7 @@ func stampUsage(turn *normalize.LLMTurn, p payload, model string) {
 }
 
 func accumulateUsage(sid, vendor string, turn normalize.LLMTurn) {
-	if sid == "" || sid == "unknown" {
+	if sid == "" || otlp.IsPlaceholderSessionID(sid) {
 		return
 	}
 	st := sessionstate.Load(sid, vendor)

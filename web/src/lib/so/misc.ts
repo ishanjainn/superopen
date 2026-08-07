@@ -220,7 +220,7 @@ export function loadConfig(): Record<string, unknown> {
       })(),
     },
     guardrails: {
-      enabled: !/(?:guardrails|governance):[\s\S]*?enabled:\s*(false|0|off)/i.test(raw),
+      enabled: !/guardrails:[\s\S]*?enabled:\s*(false|0|off)/i.test(raw),
     },
     graph: {
       code: !/graph:[\s\S]*?code:\s*false/i.test(raw),
@@ -297,6 +297,10 @@ export type Recommendation = {
   related_sessions?: string[];
   evidence?: string[];
   created_at?: string;
+  applied_at?: string;
+  decision_reason?: string;
+  decision_actor?: "human" | "agent" | "system" | string;
+  decision_at?: string;
   [key: string]: unknown;
 };
 
@@ -336,9 +340,22 @@ export function fingerprintKey(
   let p = String(proposedPath || "").replace(/\\/g, "/");
   const soIdx = p.lastIndexOf("/.so/");
   if (soIdx >= 0) p = p.slice(soIdx + 5);
-  else if (p.includes("/skills/")) p = `skills/${p.split("/").pop()}`;
-  else if (p.includes("/knowledge/")) p = `knowledge/${p.split("/").pop()}`;
-  else if (p.endsWith("guardrails.yaml")) p = "guardrails/guardrails.yaml";
+  else if (p.includes("/.agents/skills/") || /\/\.(claude|cursor|gemini|opencode|codex|github|pi)\/skills\//.test(p)) {
+    const parts = p.split("/");
+    const i = parts.lastIndexOf("skills");
+    p = i >= 0 ? `skills/${parts[i + 1]}` : `skills/${parts.pop()}`;
+  } else if (p.includes("/skills/")) {
+    const parts = p.split("/");
+    const base = parts[parts.length - 1];
+    p = base === "SKILL.md" ? `skills/${parts[parts.length - 2]}` : `skills/${base}`;
+  } else if (p.endsWith("/AGENTS.md") || p.endsWith("AGENTS.md")) p = "AGENTS.md";
+  else if (
+    p.includes("/.agents/rules/") ||
+    /\/\.(cursor|claude|gemini|codex|opencode|pi)\/rules\//.test(p) ||
+    p.includes("/.github/instructions/")
+  ) {
+    p = `rules/${p.split("/").pop()}`;
+  } else if (p.endsWith("guardrails.yaml")) p = "guardrails/guardrails.yaml";
   const t = String(recType || "").toLowerCase().trim();
   const k = String(kind || "").toLowerCase().trim();
   return k ? `${t}|${p}|${k}` : `${t}|${p}`;

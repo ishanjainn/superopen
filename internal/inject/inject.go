@@ -1,9 +1,9 @@
 package inject
 
 import (
-	"github.com/ishanjainn/superopen/internal/config"
 	_ "embed"
 	"fmt"
+	"github.com/ishanjainn/superopen/internal/config"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,18 +35,19 @@ func Brief() string {
 	lines := []string{
 		"## Superopen",
 		"",
-		"This project is managed by Superopen (`.so/`). Prefer `.so/` before raw exploration to save tokens.",
+		"This project uses Superopen. Prefer AGENTS.md (including nested dir/AGENTS.md), existing vendor rules & skills dirs when present, and `so graph query` before raw exploration.",
 		"",
 		"Invoke with `/so` (Claude Code, Cursor, Gemini, Copilot, OpenCode, Pi) or `$so` (Codex):",
 		"- `/so` - help",
 		"- `/so init` - bootstrap Superopen if missing",
 		"- `/so graph query \"<question>\"` - ask the repo knowledge graph",
-		"- `/so graph` - rebuild `.so/graph/` (never leave `graphify-out/` at repo root)",
+		"- `/so graph` - rebuild `.so/graph/` (local, regenerable)",
 		"- `/so doctor` - health check",
 		"",
 		"Rules:",
 		"- For codebase questions, run `so graph query \"<question>\"` when `.so/graph/graph.json` exists.",
-		"- Read relevant files under `.so/knowledge/` and `.so/rules/`, plus matching skills in `.so/skills/` for the task.",
+		"- Read `AGENTS.md` (and nested `*/AGENTS.md`), project rules, and matching skills for the task.",
+		"- When updating guidance: edit existing rule/skill files in the dirs this repo already uses; prune obsolete lines instead of only appending.",
 		"- Read `.so/memory/active-context.md` when present (session memory pack shared across coding agents).",
 	}
 	cfg := config.Default()
@@ -89,8 +90,6 @@ func EnsureSkills(force bool) (InstallResult, error) {
 			}
 			out.Paths = append(out.Paths, paths...)
 		}
-		// Always scrub legacy Cursor command duplicate when ensuring.
-		_ = os.Remove(filepath.Join(home, ".cursor", "commands", "so.md"))
 	}
 	if root := findGitRoot(""); root != "" {
 		need := force || !fileExists(filepath.Join(root, ".cursor", "skills", "so", "SKILL.md")) ||
@@ -106,14 +105,8 @@ func EnsureSkills(force bool) (InstallResult, error) {
 			}
 			out.Paths = append(out.Paths, paths...)
 		}
-		_ = os.Remove(filepath.Join(root, ".cursor", "commands", "so.md"))
 	}
 	return out, nil
-}
-
-// EnsureGlobalSkill installs the /so skill if missing (compat wrapper).
-func EnsureGlobalSkill() (InstallResult, error) {
-	return EnsureSkills(false)
 }
 
 func fileExists(path string) bool {
@@ -191,8 +184,8 @@ func Apply(repoRoot string) error {
 	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
 		return err
 	}
-	mdc := "---\ndescription: Superopen always-on context. Prefer /so and .so/ before broad search.\nalwaysApply: true\n---\n\n" + Brief()
-	if err := os.WriteFile(filepath.Join(cursorDir, "superopen.mdc"), []byte(mdc), 0o644); err != nil {
+	mdc := "---\ndescription: Superopen always-on context. Prefer AGENTS.md, existing vendor rules/skills, and so graph query.\nalwaysApply: true\n---\n\n" + Brief()
+	if err := writeFileIfChanged(filepath.Join(cursorDir, "superopen.mdc"), []byte(mdc)); err != nil {
 		return err
 	}
 
@@ -241,39 +234,37 @@ func writeSkillBundle(root, skillBody string, globalHome bool) ([]string, error)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return written, err
 		}
-		if err := os.WriteFile(path, []byte(skillBody), 0o644); err != nil {
+		if err := writeFileIfChanged(path, []byte(skillBody)); err != nil {
 			return written, err
 		}
 		written = append(written, path)
 	}
 
-	// Do NOT write .claude/commands/so.md or .cursor/commands/so.md.
-	// Cursor surfaces both Agent Skills and Claude "commands" as /so, so a
-	// companion command stub duplicates the skill entry in the slash menu.
-	for _, legacy := range []string{
-		filepath.Join(root, ".claude", "commands", "so.md"),
-		filepath.Join(root, ".cursor", "commands", "so.md"),
-	} {
-		_ = os.Remove(legacy)
-	}
 	return written, nil
 }
 
 func installHarnessSkillsIndex(repoRoot string) error {
-	skillsSrc := filepath.Join(repoRoot, ".so", "skills")
+	skillsSrc := filepath.Join(repoRoot, ".agents", "skills")
 	agentsSkills := filepath.Join(repoRoot, ".agents", "skills", "superopen")
 	if err := os.MkdirAll(agentsSkills, 0o755); err != nil {
 		return err
 	}
-	skillMD := "# Superopen skills\n\nTask skills live in `.so/skills/`. For the `/so` slash skill see `.agents/skills/so/SKILL.md`.\n\n"
+	skillMD := "# Superopen skills\n\nTask skills live in `.agents/skills/<name>/SKILL.md`. For the `/so` slash skill see `.agents/skills/so/SKILL.md`.\n\n"
 	if entries, err := os.ReadDir(skillsSrc); err == nil {
 		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-				skillMD += fmt.Sprintf("- `%s`\n", e.Name())
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if name == "so" || name == "superopen" {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(skillsSrc, name, "SKILL.md")); err == nil {
+				skillMD += fmt.Sprintf("- `%s`\n", name)
 			}
 		}
 	}
-	return os.WriteFile(filepath.Join(agentsSkills, "SKILL.md"), []byte(skillMD), 0o644)
+	return writeFileIfChanged(filepath.Join(agentsSkills, "SKILL.md"), []byte(skillMD))
 }
 
 func upsertFile(path, block string) error {
@@ -282,39 +273,55 @@ func upsertFile(path, block string) error {
 		existing = string(data)
 	}
 	updated := replaceOrAppend(existing, block)
+	if updated == existing {
+		return nil
+	}
 	return os.WriteFile(path, []byte(updated), 0o644)
 }
 
+func writeFileIfChanged(path string, body []byte) error {
+	if prev, err := os.ReadFile(path); err == nil && string(prev) == string(body) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, body, 0o644)
+}
+
 func replaceOrAppend(existing, block string) string {
+	block = strings.TrimRight(block, "\n") + "\n"
 	start := strings.Index(existing, startMarker)
 	end := strings.Index(existing, endMarker)
 	if start >= 0 && end > start {
 		end += len(endMarker)
+		// Drop all trailing blank lines after the marker so re-inject is stable.
+		for end < len(existing) && existing[end] == '\n' {
+			end++
+		}
 		return existing[:start] + block + existing[end:]
 	}
 	if strings.TrimSpace(existing) == "" {
 		return block
 	}
-	if !strings.HasSuffix(existing, "\n") {
-		existing += "\n"
-	}
-	return existing + "\n" + block
+	existing = strings.TrimRight(existing, "\n") + "\n\n"
+	return existing + block
 }
 
 // Status checks injector presence in a project.
 func Status(repoRoot string) map[string]bool {
 	checks := map[string]string{
-		"AGENTS.md":       filepath.Join(repoRoot, "AGENTS.md"),
-		"CLAUDE.md":       filepath.Join(repoRoot, "CLAUDE.md"),
-		"cursor-rule":     filepath.Join(repoRoot, ".cursor", "rules", "superopen.mdc"),
-		"skill-agents":    filepath.Join(repoRoot, ".agents", "skills", "so", "SKILL.md"),
-		"skill-claude":    filepath.Join(repoRoot, ".claude", "skills", "so", "SKILL.md"),
-		"skill-cursor":    filepath.Join(repoRoot, ".cursor", "skills", "so", "SKILL.md"),
-		"skill-codex":     filepath.Join(repoRoot, ".codex", "skills", "so", "SKILL.md"),
-		"skill-gemini":    filepath.Join(repoRoot, ".gemini", "skills", "so", "SKILL.md"),
-		"skill-opencode":  filepath.Join(repoRoot, ".opencode", "skills", "so", "SKILL.md"),
-		"skill-copilot":   filepath.Join(repoRoot, ".github", "skills", "so", "SKILL.md"),
-		"skill-pi":        filepath.Join(repoRoot, ".pi", "skills", "so", "SKILL.md"),
+		"AGENTS.md":      filepath.Join(repoRoot, "AGENTS.md"),
+		"CLAUDE.md":      filepath.Join(repoRoot, "CLAUDE.md"),
+		"cursor-rule":    filepath.Join(repoRoot, ".cursor", "rules", "superopen.mdc"),
+		"skill-agents":   filepath.Join(repoRoot, ".agents", "skills", "so", "SKILL.md"),
+		"skill-claude":   filepath.Join(repoRoot, ".claude", "skills", "so", "SKILL.md"),
+		"skill-cursor":   filepath.Join(repoRoot, ".cursor", "skills", "so", "SKILL.md"),
+		"skill-codex":    filepath.Join(repoRoot, ".codex", "skills", "so", "SKILL.md"),
+		"skill-gemini":   filepath.Join(repoRoot, ".gemini", "skills", "so", "SKILL.md"),
+		"skill-opencode": filepath.Join(repoRoot, ".opencode", "skills", "so", "SKILL.md"),
+		"skill-copilot":  filepath.Join(repoRoot, ".github", "skills", "so", "SKILL.md"),
+		"skill-pi":       filepath.Join(repoRoot, ".pi", "skills", "so", "SKILL.md"),
 	}
 	out := map[string]bool{}
 	for k, p := range checks {
@@ -330,7 +337,6 @@ func Status(repoRoot string) map[string]bool {
 	}
 	return out
 }
-
 
 // UninstallResult lists paths removed or scrubbed.
 type UninstallResult struct {
