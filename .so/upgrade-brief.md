@@ -1,13 +1,16 @@
 # Superopen upgrade brief
 
-Coding agents: use **your own model** to upgrade `.so/` context/guardrails/evals.
+Coding agents: use **your own model** to upgrade AGENTS.md / guardrails / evals.
 Do **not** ask the user for an API key. Produce the JSON below, then run:
 
 ```bash
-so apply-upgrade
+so apply-upgrade <<'EOF'
+{ ... }
+EOF
 ```
 
-(paste/write the JSON to stdin, or `so apply-upgrade path/to.json`)
+Or write a file and run `so apply-upgrade path/to.json`.
+**Never** pass a file path and a heredoc together — the CLI rejects that so a stale file cannot override fresh JSON.
 
 ## System instructions
 
@@ -27,7 +30,7 @@ Return ONLY valid JSON (no markdown fences) with this shape:
     "agent_rules": ["top rules for an LLM judge"],
     "judge_rubric": "short paragraph for session scoring"
   },
-  "brief": "short AGENT.md brief pointing agents at .so/"
+  "brief": "short AGENT.md brief pointing agents at AGENTS.md, the repo's discovered rules/skills dirs (Cursor/Claude/Codex/Gemini/…), and so graph query"
 }
 
 Rules for quality:
@@ -67,16 +70,24 @@ Go
 - web (dir)
 
 ## Graph summary
-- nodes=3097 edges=7297
-- top_dirs: internal, web, cmd, sdk, scripts, plugins, npm, state, internal_coding_pricing_tokens_test_go_t, internal_graph_graph_html_test_go_t
-- languages: python=82, go=1673, typescript=1009
+- nodes=3345 edges=8113
+- top_dirs: internal, web, cmd, sdk, scripts, plugins, npm, internal_audit_audit_go_time, internal_coding_detect_detect_test_go_t, internal_coding_hook_claudecode_transcript_go_rawmessage
+- languages: go=1850, typescript=1065, python=82
 - sample_files: .github/scripts/release-packages.py, .github/scripts/release-packages.py, .github/scripts/release-packages.py, .github/scripts/release-packages.py, .github/scripts/release-packages.py, .github/scripts/release-packages.py, .github/scripts/release-packages.py, .github/scripts/release-packages.py, .github/scripts/release-packages.py, .github/scripts/release-packages.py, .github/scripts/release-packages.py, .github/scripts/release-packages.py
 
 ## Themes
+- Security basics
 - Go toolchain
 
 ## Derived rules (heuristic)
 - Prefer Conventional Commit titles, for example feat: add project prune or
+- Prefer channels for ownership transfer; mutexes for shared state.
+- Always run race-sensitive packages with go test -race.
+- Never start a goroutine without a clear shutdown or WaitGroup story.
+- Never commit secrets, tokens, or real .env values.
+- Prefer Conventional Commit PR titles (feat:, fix:, docs:).
+- Do not invent secrets or fake paths in examples.
+- Prefer package-scoped runs while iterating; broaden only before merge.
 
 ## Agent sources (excerpts)
 ### CONTRIBUTING.md (contributing)
@@ -131,4 +142,53 @@ a new one. Bug reports should include reproducible steps, expected and actual
 behavior, and relevant non-sensitive logs.
 
 Do not report…
+
+### go-concurrency.md (claude-rule)
+Headings: Go concurrency
+# Go concurrency
+
+- Prefer channels for ownership transfer; mutexes for shared state.
+- Always run race-sensitive packages with `go test -race`.
+- Never start a goroutine without a clear shutdown or WaitGroup story.
+
+### security-basics.md (claude-rule)
+Headings: Security basics
+# Security basics
+
+- Never commit secrets, tokens, or real `.env` values.
+- Sanitize any HTML/SVG rendered from untrusted input.
+- Build URLs with `URL` / `URLSearchParams`, not string concat.
+
+### go-checks.md (codex-rule)
+Headings: Go checks
+# Go checks
+
+- For touched packages run `go test -race -count=1 ./path` and `go vet ./path`.
+- Match neighboring style under `internal/` and `cmd/so/`.
+
+### review-scope.md (codex-rule)
+Headings: Review scope
+# Review scope
+
+- Keep diffs scoped to the requested task.
+- Prefer Conventional Commit PR titles (`feat:`, `fix:`, `docs:`).
+- Do not invent secrets or fake paths in examples.
+
+### SKILL.md (pi-skill)
+Headings: Go focused tests
+# Go focused tests
+
+When editing Go under `cmd/` or `internal/`:
+
+
+Prefer package-scoped runs while iterating; broaden only before merge.
+
+### SKILL.md (pi-skill)
+Headings: PR hygiene
+# PR hygiene
+
+1. Confirm the change matches one focused branch purpose.
+2. Title with Conventional Commits (`feat:`, `fix:`, `docs:`).
+3. Drop unrelated formatting and drive-by refactors before opening the PR.
+4. Link the issue when one exists; summarize problem + solution in the body.
 

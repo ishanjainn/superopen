@@ -2,39 +2,51 @@
 # Edit freely; so sync will not overwrite this file.
 rules:
     - id: no-secrets
-      description: Never commit credentials, API keys, tokens, or other secrets; use non-sensitive examples and configuration placeholders.
+      description: Never commit secrets, API keys, tokens, or real .env values
+      severity: block
+      source: llm
+    - id: no-credential-logs
+      description: Never log credentials, tokens, or secrets
       severity: block
       source: llm
     - id: run-tests
-      description: Run focused tests and validation appropriate to every behavior change, and report any checks not run.
+      description: 'Run focused tests for touched packages before finishing (go test -race -count=1 ./path; web: npm test/typecheck/lint)'
       severity: warn
       source: llm
     - id: avoid-unrelated
-      description: Keep changes focused; do not include unrelated formatting, refactors, or generated drift.
+      description: Keep diffs scoped to the requested task; avoid unrelated refactors
       severity: warn
       source: llm
-    - id: go-validation
-      description: For Go or CLI changes, run go test -race -count=1 ./... and go vet ./... when scope and environment permit.
+    - id: pr-title-convention
+      description: Prefer Conventional Commit PR titles (feat:, fix:, docs:)
       severity: warn
       source: llm
-    - id: web-validation
-      description: For web changes, run the web test, typecheck, and lint commands before handoff.
+    - id: go-race-tests
+      description: Run race-sensitive Go packages with go test -race
       severity: warn
       source: llm
-    - id: plugin-sync
-      description: After plugin changes, run scripts/sync-plugins.sh and include required marketplace synchronization.
+    - id: goroutine-lifecycle
+      description: Never start a goroutine without a clear shutdown or WaitGroup story
       severity: warn
       source: llm
-    - id: behavior-tests
-      description: Add or update tests for behavior changes and user-facing documentation when relevant.
+    - id: go-sync-ownership
+      description: Prefer channels for ownership transfer; mutexes for shared mutable state
       severity: warn
       source: llm
-    - id: conventional-pr-title
-      description: Use a clear Conventional Commit-style pull-request title.
+    - id: sanitize-html-svg
+      description: Sanitize untrusted HTML/SVG before rendering; prefer safe React text bindings
       severity: warn
       source: llm
-    - id: non-sensitive-logs
-      description: Use only non-sensitive logs in issues, tests, fixtures, and documentation.
+    - id: safe-urls
+      description: Build URLs with URL/URLSearchParams, not string concatenation
+      severity: warn
+      source: llm
+    - id: no-fake-paths
+      description: Do not invent secrets or fake paths in examples
+      severity: warn
+      source: llm
+    - id: focused-go-checks
+      description: Prefer package-scoped go test/vet while iterating; broaden only before merge
       severity: warn
       source: llm
 approval: interactive

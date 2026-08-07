@@ -2,12 +2,12 @@
   "stack": "Go",
   "structure": "- CODE_OF_CONDUCT.md (file)\n- CONTRIBUTING.md (file)\n- LICENSE (file)\n- Makefile (file)\n- NOTICE (file)\n- README.md (file)\n- SECURITY.md (file)\n- VERSION (file)\n- bin (dir)\n- cmd (dir)\n- docs (dir)\n- go.mod (file)\n- go.sum (file)\n- internal (dir)\n- npm (dir)\n- plugins (dir)\n- scripts (dir)\n- sdk (dir)\n- templates (dir)\n- web (dir)",
   "graph": {
-    "node_count": 3097,
-    "edge_count": 7297,
+    "node_count": 3345,
+    "edge_count": 8113,
     "languages": {
-      "go": 1673,
+      "go": 1850,
       "python": 82,
-      "typescript": 1009
+      "typescript": 1065
     },
     "top_dirs": [
       "internal",
@@ -17,9 +17,9 @@
       "scripts",
       "plugins",
       "npm",
-      "state",
-      "internal_coding_pricing_tokens_test_go_t",
-      "internal_graph_graph_html_test_go_t"
+      "internal_audit_audit_go_time",
+      "internal_coding_detect_detect_test_go_t",
+      "internal_coding_hook_claudecode_transcript_go_rawmessage"
     ],
     "sample_files": [
       ".github/scripts/release-packages.py",
@@ -52,12 +52,83 @@
         "Prefer Conventional Commit titles, for example feat: add project prune or"
       ],
       "excerpt": "# Contributing to Superopen\n\nThanks for helping improve Superopen. Contributions of code, documentation, bug\nreports, and integration feedback are all welcome.\n\n## Before you start\n\n- Read the [README](README.md) for install and product overview.\n- Follow the [Code of Conduct](CODE_OF_CONDUCT.md).\n- For a substantial change, open or discuss an issue first so maintainers can\n  confirm the scope. Small documentation fixes can go straight to a pull\n  request.\n\n## Development setup\n\n\nOptional smoke (writes a local `.so/` under the current directory):\n\n\n## Development workflow\n\n1. Fork the repository and clone your fork.\n2. Create a focused branch: `git switch -c fix/short-description`\n3. Make the change, including tests and documentation when they are relevant.\n   Keep unrelated formatting and refactors out of the pull request.\n4. Run the focused checks for what you changed:\n\n   | Area | Checks |\n   |---|---|\n   | Go / CLI | `go test -race -count=1 ./...` · `go vet ./...` |\n   | Web UI | `cd web \u0026\u0026 npm test \u0026\u0026 npm run typecheck \u0026\u0026 npm run lint` |\n   | Plugins | `bash scripts/sync-plugins.sh` then commit marketplace drift |\n\n5. Commit with a clear subject, push, and open a pull request against `main`.\n\n## Pull requests\n\n- Explain the problem and the solution; link the related issue when one exists.\n- Prefer Conventional Commit titles, for example `feat: add project prune` or\n  `fix(web): restore file search`.\n- Include tests for behavior changes and update user-facing documentation.\n- Complete the pull-request template honestly.\n\n## Issues and questions\n\nSearch existing [issues](https://github.com/ishanjainn/superopen/issues) before opening\na new one. Bug reports should include reproducible steps, expected and actual\nbehavior, and relevant non-sensitive logs.\n\nDo not report security vulnerabilities in a public issue; follow\n[SECURITY.md](SECURITY.md) instead."
+    },
+    {
+      "path": "/Users/ishanjain/work/superopen/.claude/rules/go-concurrency.md",
+      "kind": "claude-rule",
+      "headings": [
+        "Go concurrency"
+      ],
+      "rules": [
+        "Prefer channels for ownership transfer; mutexes for shared state.",
+        "Always run race-sensitive packages with go test -race.",
+        "Never start a goroutine without a clear shutdown or WaitGroup story."
+      ],
+      "excerpt": "# Go concurrency\n\n- Prefer channels for ownership transfer; mutexes for shared state.\n- Always run race-sensitive packages with `go test -race`.\n- Never start a goroutine without a clear shutdown or WaitGroup story."
+    },
+    {
+      "path": "/Users/ishanjain/work/superopen/.claude/rules/security-basics.md",
+      "kind": "claude-rule",
+      "headings": [
+        "Security basics"
+      ],
+      "rules": [
+        "Never commit secrets, tokens, or real .env values."
+      ],
+      "excerpt": "# Security basics\n\n- Never commit secrets, tokens, or real `.env` values.\n- Sanitize any HTML/SVG rendered from untrusted input.\n- Build URLs with `URL` / `URLSearchParams`, not string concat."
+    },
+    {
+      "path": "/Users/ishanjain/work/superopen/.codex/rules/go-checks.md",
+      "kind": "codex-rule",
+      "headings": [
+        "Go checks"
+      ],
+      "excerpt": "# Go checks\n\n- For touched packages run `go test -race -count=1 ./path` and `go vet ./path`.\n- Match neighboring style under `internal/` and `cmd/so/`."
+    },
+    {
+      "path": "/Users/ishanjain/work/superopen/.codex/rules/review-scope.md",
+      "kind": "codex-rule",
+      "headings": [
+        "Review scope"
+      ],
+      "rules": [
+        "Prefer Conventional Commit PR titles (feat:, fix:, docs:).",
+        "Do not invent secrets or fake paths in examples."
+      ],
+      "excerpt": "# Review scope\n\n- Keep diffs scoped to the requested task.\n- Prefer Conventional Commit PR titles (`feat:`, `fix:`, `docs:`).\n- Do not invent secrets or fake paths in examples."
+    },
+    {
+      "path": "/Users/ishanjain/work/superopen/.pi/skills/go-focused-tests/SKILL.md",
+      "kind": "pi-skill",
+      "headings": [
+        "Go focused tests"
+      ],
+      "rules": [
+        "Prefer package-scoped runs while iterating; broaden only before merge."
+      ],
+      "excerpt": "# Go focused tests\n\nWhen editing Go under `cmd/` or `internal/`:\n\n\nPrefer package-scoped runs while iterating; broaden only before merge."
+    },
+    {
+      "path": "/Users/ishanjain/work/superopen/.pi/skills/pr-hygiene/SKILL.md",
+      "kind": "pi-skill",
+      "headings": [
+        "PR hygiene"
+      ],
+      "excerpt": "# PR hygiene\n\n1. Confirm the change matches one focused branch purpose.\n2. Title with Conventional Commits (`feat:`, `fix:`, `docs:`).\n3. Drop unrelated formatting and drive-by refactors before opening the PR.\n4. Link the issue when one exists; summarize problem + solution in the body."
     }
   ],
   "derived_rules": [
-    "Prefer Conventional Commit titles, for example feat: add project prune or"
+    "Prefer Conventional Commit titles, for example feat: add project prune or",
+    "Prefer channels for ownership transfer; mutexes for shared state.",
+    "Always run race-sensitive packages with go test -race.",
+    "Never start a goroutine without a clear shutdown or WaitGroup story.",
+    "Never commit secrets, tokens, or real .env values.",
+    "Prefer Conventional Commit PR titles (feat:, fix:, docs:).",
+    "Do not invent secrets or fake paths in examples.",
+    "Prefer package-scoped runs while iterating; broaden only before merge."
   ],
   "themes": [
+    "Security basics",
     "Go toolchain"
   ]
 }
