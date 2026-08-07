@@ -117,7 +117,7 @@ Map `/so …` arguments to the `so` CLI on PATH (or `$(go env GOPATH)/bin/so` if
 
 ### Headless / CI only
 
-API keys (`OPENAI_API_KEY`, etc.) are **optional**. Backend `so eval` / recommendations prefer a sealed **Claude Code or Codex CLI** on PATH (`evals.backend: auto`) - same login as interactive coding. API keys are a fallback for CI without those CLIs:
+API keys (`OPENAI_API_KEY`, etc.) are **optional**. Session evals default to **`evals.backend: auto`**: sealed **Claude Code / Codex CLI** on PATH first (useful harness improvements), then API key, then offline **heuristics**. Set `heuristics` only when you want zero judging cost.
 
 ```bash
 so init --llm

@@ -1,3 +1,4 @@
+import { execFileSync } from "child_process";
 import { readdirSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -89,10 +90,95 @@ export function humanizePromptPreview(raw?: string): string {
 
 function displayTitle(meta: SessionMeta): string {
   const titled = humanizePromptPreview(meta.title);
-  if (titled) return titled;
+  if (titled && !isPlaceholderTitle(titled, meta.id)) return titled;
   const preview = humanizePromptPreview(meta.prompt_preview);
-  if (preview) return preview;
+  if (preview && !isPlaceholderTitle(preview, meta.id)) return preview;
   return meta.id;
+}
+
+/** OpenCode defaults to "New session - <iso>"; treat as empty until AI renames. */
+export function isPlaceholderTitle(title?: string, sessionId?: string): boolean {
+  const t = String(title || "").trim();
+  if (!t) return true;
+  if (sessionId && t === String(sessionId).trim()) return true;
+  if (/^new session\b/i.test(t)) return true;
+  return false;
+}
+
+let openCodeTitleCache: { mtimeMs: number; size: number; titles: Map<string, string> } | null =
+  null;
+
+function openCodeDBPath(): string {
+  const env = String(process.env.OPENCODE_DB || "").trim();
+  if (env) return env;
+  const xdg = String(process.env.XDG_DATA_HOME || "").trim();
+  if (xdg) return join(xdg, "opencode", "opencode.db");
+  return join(homedir(), ".local", "share", "opencode", "opencode.db");
+}
+
+function loadOpenCodeTitles(): Map<string, string> {
+  const db = openCodeDBPath();
+  if (!fileExists(db)) return new Map();
+  let st;
+  try {
+    st = statSync(db);
+  } catch {
+    return new Map();
+  }
+  if (
+    openCodeTitleCache &&
+    openCodeTitleCache.mtimeMs === st.mtimeMs &&
+    openCodeTitleCache.size === st.size
+  ) {
+    return openCodeTitleCache.titles;
+  }
+  const titles = new Map<string, string>();
+  try {
+    // Prefer CLI sqlite3 (no native dep); schema is `session` (fallback `sessions`).
+    let raw = "";
+    try {
+      raw = execFileSync("sqlite3", ["-json", db, "SELECT id, title FROM session;"], {
+        encoding: "utf8",
+        timeout: 2000,
+      });
+    } catch {
+      raw = execFileSync("sqlite3", ["-json", db, "SELECT id, title FROM sessions;"], {
+        encoding: "utf8",
+        timeout: 2000,
+      });
+    }
+    const rows = JSON.parse(raw || "[]") as { id?: string; title?: string }[];
+    for (const row of rows) {
+      const id = String(row.id || "").trim();
+      const title = String(row.title || "").trim();
+      if (!id || isPlaceholderTitle(title, id)) continue;
+      titles.set(id, title);
+    }
+  } catch {
+    /* fail-soft: keep placeholder / prompt preview */
+  }
+  openCodeTitleCache = { mtimeMs: st.mtimeMs, size: st.size, titles };
+  return titles;
+}
+
+/** Refresh OpenCode stub titles from the host DB and persist into meta.json. */
+function resolveOpenCodeTitle(meta: SessionMeta, sessionPath: string): void {
+  const vendor = String(meta.vendor || "").toLowerCase();
+  if (!vendor.includes("opencode")) return;
+  if (!isPlaceholderTitle(meta.title, meta.id)) return;
+  const got = loadOpenCodeTitles().get(meta.id);
+  if (!got) return;
+  meta.title = got;
+  try {
+    const path = join(sessionPath, "meta.json");
+    const onDisk = readJSON<SessionMeta>(path);
+    if (!onDisk) return;
+    if (!isPlaceholderTitle(onDisk.title, onDisk.id || meta.id)) return;
+    onDisk.title = got;
+    writeFileSync(path, JSON.stringify(onDisk, null, 2) + "\n");
+  } catch {
+    /* display-only is enough */
+  }
 }
 
 const UUID_RE =
@@ -673,6 +759,9 @@ function listSessionsInSo(soDir: string, projectId: string): ListItem[] {
     const meta = readJSON<SessionMeta>(join(sessionPath, "meta.json"));
     if (!meta) continue;
     if (!meta.id) meta.id = name;
+    resolveOpenCodeTitle(meta, sessionPath);
+    // Placeholder ids from broken hooks (OpenCode/Pi missing sessionID).
+    if (meta.id === "unknown" || name === "unknown") continue;
     // Subagents are not top-level sessions - they nest under the parent chat.
     if (isNestedSubagent(meta, links, dir)) continue;
     const footprint = readJSON<{ files?: { path: string }[] }>(
@@ -830,6 +919,7 @@ export function getSessionDetail(id: string, projectFilter = "") {
       readJSON<SessionMeta>(join(sessionPath, "meta.json")) ||
       ({ id } as SessionMeta);
     if (!meta.id) meta.id = id;
+    resolveOpenCodeTitle(meta, sessionPath);
     meta.project_id = p.id;
     meta.title = displayTitle(meta);
     meta.prompt_preview =

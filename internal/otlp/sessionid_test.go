@@ -19,6 +19,14 @@ func TestResolveSessionIDPrefersConversation(t *testing.T) {
 	if got := ResolveSessionID(map[string]string{}, "trace"); got != "trace" {
 		t.Fatalf("fallback got %q", got)
 	}
+	if got := ResolveSessionID(map[string]string{
+		"coding_agent.session.id": "unknown",
+	}, "trace"); got != "trace" {
+		t.Fatalf("placeholder session id must fall through, got %q", got)
+	}
+	if !IsPlaceholderSessionID("unknown") {
+		t.Fatal("expected unknown placeholder")
+	}
 }
 
 func TestResolveParentID(t *testing.T) {

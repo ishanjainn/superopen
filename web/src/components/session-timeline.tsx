@@ -538,7 +538,10 @@ function mergeSubagentsIntoTimeline(
   return out.sort((a, b) => a.at - b.at);
 }
 
-function vendorFromMeta(meta: SessionMeta, spans: Span[]): "cursor" | "claude" | "codex" | "other" {
+function vendorFromMeta(
+  meta: SessionMeta,
+  spans: Span[]
+): "cursor" | "claude" | "codex" | "opencode" | "pi" | "other" {
   const raw = (
     meta.vendor ||
     spans.map((s) => s.attributes?.["coding_agent.client"] || s.attributes?.["coding_agent.vendor"]).find(Boolean) ||
@@ -547,6 +550,8 @@ function vendorFromMeta(meta: SessionMeta, spans: Span[]): "cursor" | "claude" |
   if (raw.includes("cursor")) return "cursor";
   if (raw.includes("claude")) return "claude";
   if (raw.includes("codex")) return "codex";
+  if (raw.includes("opencode")) return "opencode";
+  if (raw === "pi") return "pi";
   return "other";
 }
 
@@ -1347,7 +1352,11 @@ function UserAvatar({ initials }: { initials: string }) {
   );
 }
 
-function VendorAvatar({ vendor }: { vendor: "cursor" | "claude" | "codex" | "other" }) {
+function VendorAvatar({
+  vendor,
+}: {
+  vendor: "cursor" | "claude" | "codex" | "opencode" | "pi" | "other";
+}) {
   const src =
     vendor === "claude"
       ? "/vendors/claude.png"
@@ -1355,16 +1364,39 @@ function VendorAvatar({ vendor }: { vendor: "cursor" | "claude" | "codex" | "oth
         ? "/vendors/codex.png"
         : vendor === "cursor"
           ? "/vendors/cursor.png"
-          : null;
+          : vendor === "opencode"
+            ? "/vendors/opencode.svg"
+            : vendor === "pi"
+              ? "/vendors/pi.png"
+              : null;
+
+  const title =
+    vendor === "claude"
+      ? "Claude"
+      : vendor === "codex"
+        ? "Codex"
+        : vendor === "cursor"
+          ? "Cursor"
+          : vendor === "opencode"
+            ? "OpenCode"
+            : vendor === "pi"
+              ? "Pi"
+              : "AI";
 
   if (src) {
     return (
       <div
         className={cn(
           "flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full",
-          vendor === "claude" ? "bg-neutral-950" : vendor === "codex" ? "bg-white" : "bg-neutral-900"
+          vendor === "claude"
+            ? "bg-neutral-950"
+            : vendor === "codex"
+              ? "bg-white"
+              : vendor === "opencode"
+                ? "bg-neutral-100 dark:bg-neutral-900"
+                : "bg-neutral-900"
         )}
-        title={vendor === "claude" ? "Claude" : vendor === "codex" ? "Codex" : "Cursor"}
+        title={title}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -1372,7 +1404,8 @@ function VendorAvatar({ vendor }: { vendor: "cursor" | "claude" | "codex" | "oth
           alt=""
           className={cn(
             "object-contain",
-            vendor === "claude" ? "size-7" : "size-8"
+            vendor === "claude" ? "size-7" : "size-8",
+            vendor === "opencode" && "p-1.5 dark:invert"
           )}
         />
       </div>

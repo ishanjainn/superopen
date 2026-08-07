@@ -17,26 +17,46 @@ import (
 // DisplayName returns the best human label for a session.
 // Prefer AI/vendor title, then first-prompt preview, then id.
 func DisplayName(m Meta) string {
-	if t := strings.TrimSpace(m.Title); t != "" {
+	if t := strings.TrimSpace(m.Title); t != "" && !IsPlaceholderTitle(t, m.ID) {
 		return humanizePromptPreview(t)
 	}
-	if t := strings.TrimSpace(m.PromptPreview); t != "" {
+	if t := strings.TrimSpace(m.PromptPreview); t != "" && !IsPlaceholderTitle(t, m.ID) {
 		return humanizePromptPreview(t)
 	}
 	return m.ID
 }
 
-// EnsureTitle fills meta.Title when empty: vendor AI name first, then optional LLM.
+// IsPlaceholderTitle is true for empty, id-as-title, and OpenCode's default
+// "New session - <timestamp>" names that get replaced by AI titles later.
+func IsPlaceholderTitle(title, sessionID string) bool {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return true
+	}
+	if sessionID != "" && t == strings.TrimSpace(sessionID) {
+		return true
+	}
+	lower := strings.ToLower(t)
+	if strings.HasPrefix(lower, "new session") {
+		return true
+	}
+	return false
+}
+
+// EnsureTitle fills meta.Title when empty or placeholder: vendor AI name first, then optional LLM.
 func EnsureTitle(meta *Meta, client *llm.Client) {
-	if meta == nil || strings.TrimSpace(meta.Title) != "" {
+	if meta == nil {
 		return
 	}
-	if t := lookupVendorTitle(meta.ID, meta.Vendor); t != "" {
+	if !IsPlaceholderTitle(meta.Title, meta.ID) {
+		return
+	}
+	if t := lookupVendorTitle(meta.ID, meta.Vendor); t != "" && !IsPlaceholderTitle(t, meta.ID) {
 		meta.Title = t
 		return
 	}
 	prompt := strings.TrimSpace(meta.PromptPreview)
-	if prompt == "" || client == nil || !client.Available() {
+	if IsPlaceholderTitle(prompt, meta.ID) || client == nil || !client.Available() {
 		return
 	}
 	if t := generateTitle(client, prompt); t != "" {
@@ -308,8 +328,8 @@ func readOpenCodeJSONTitle(sessionID string) string {
 			continue
 		}
 		title := strings.TrimSpace(doc.Info.Title)
-		if title == "" || title == sessionID || title == doc.Info.ID {
-			continue // stub export used id as title
+		if IsPlaceholderTitle(title, sessionID) || title == doc.Info.ID {
+			continue // stub export / default "New session - …" before AI rename
 		}
 		return title
 	}
@@ -371,7 +391,7 @@ func loadOpenCodeTitles(db string) map[string]string {
 	}
 	for _, row := range rows {
 		title := strings.TrimSpace(row.Title)
-		if row.ID == "" || title == "" || title == row.ID {
+		if row.ID == "" || IsPlaceholderTitle(title, row.ID) {
 			continue
 		}
 		out[row.ID] = title

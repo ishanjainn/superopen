@@ -1,13 +1,12 @@
-"use client";
+import Client from "./client";
 
-import { HarnessFilesPage } from "@/components/harness-files-page";
-
-export default function SkillsPage() {
-  return (
-    <HarnessFilesPage
-      title="Skills"
-      dir="skills"
-      emptyHint="No skills yet across vendor trees. New skills land in the preferred Claude/Cursor/… skills dir as <name>/SKILL.md."
-    />
-  );
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  // Unwrap Next.js 15+ async searchParams before rendering the client tree
+  // (avoids sync-dynamic-apis warnings from prop enumeration).
+  await searchParams;
+  return <Client />;
 }

@@ -158,12 +158,12 @@ When a session ends (`so eval` or finalization), Superopen scores it and may pro
 
 | `evals.backend` | Behavior |
 | --- | --- |
-| `auto` (default) | Claude/Codex CLI on `PATH`, then API key, then heuristics |
+| `auto` (default) | Claude/Codex CLI → API key → heuristics |
 | `agent_cli` | Claude Code or Codex only (`evals.agent_cli`: `auto`, `claude`, or `codex`) |
 | `llm_api` | API key or gateway only |
-| `heuristics` | Offline scoring only |
+| `heuristics` | Offline scoring only (no model tokens) |
 
-The coding-agent CLI login is reused when available, so a normal interactive setup does not require a separate API key. Cursor has no sealed headless judging CLI; use it for interactive `/so init` upgrades and Claude Code or Codex for backend judging.
+Default `auto` reuses your coding-agent login for useful eval notes and recommendations, falls back to an API key, then to free heuristics. Set `heuristics` only when you want zero judging cost.
 
 ---
 

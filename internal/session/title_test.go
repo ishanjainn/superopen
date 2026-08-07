@@ -107,3 +107,44 @@ func TestLookupOpenCodeTitleIgnoresStubID(t *testing.T) {
 		t.Fatalf("stub title should be ignored, got %q", got)
 	}
 }
+
+func TestLookupOpenCodeTitleIgnoresNewSessionStub(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".opencode", "sessions")
+	_ = os.MkdirAll(dir, 0o755)
+	id := "ses_newstub"
+	doc := `{"info":{"id":"` + id + `","title":"New session - 2026-08-07T16:57:04.810Z"}}`
+	_ = os.WriteFile(filepath.Join(dir, id+".json"), []byte(doc), 0o644)
+	if got := lookupOpenCodeTitle(id); got != "" {
+		t.Fatalf("New session stub should be ignored, got %q", got)
+	}
+}
+
+func TestEnsureTitleRefreshesOpenCodePlaceholder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".opencode", "sessions")
+	_ = os.MkdirAll(dir, 0o755)
+	id := "ses_refresh"
+	doc := `{"info":{"id":"` + id + `","title":"Repo scan request"}}`
+	_ = os.WriteFile(filepath.Join(dir, id+".json"), []byte(doc), 0o644)
+	meta := &Meta{
+		ID:    id,
+		Vendor: "opencode",
+		Title: "New session - 2026-08-07T16:57:04.810Z",
+	}
+	EnsureTitle(meta, nil)
+	if meta.Title != "Repo scan request" {
+		t.Fatalf("EnsureTitle title=%q", meta.Title)
+	}
+}
+
+func TestIsPlaceholderTitle(t *testing.T) {
+	if !IsPlaceholderTitle("New session - 2026-08-07T16:57:04.810Z", "ses_x") {
+		t.Fatal("expected New session stub")
+	}
+	if IsPlaceholderTitle("Repo scan", "ses_x") {
+		t.Fatal("real title should not be placeholder")
+	}
+}

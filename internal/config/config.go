@@ -39,8 +39,12 @@ type GraphConfig struct {
 type EvalsConfig struct {
 	Auto         bool `yaml:"auto"`
 	OnSessionEnd bool `yaml:"on_session_end"`
-	// Backend: auto | heuristics | agent_cli | llm_api
-	// auto prefers Claude Code / Codex CLI (reuse coding-agent login), then API key.
+	// ActiveCooldownHours: min gap between snapshot evals on an open chat (default 6).
+	// Manual `so eval --force` / Sessions UI Evaluate bypasses this.
+	ActiveCooldownHours int `yaml:"active_cooldown_hours,omitempty"`
+	// Backend: auto | agent_cli | llm_api | heuristics
+	// Default auto: sealed Claude/Codex CLI → API key → heuristics. Prefer agent
+	// judging for useful harness improvements; heuristics only when no model is available.
 	Backend string `yaml:"backend"`
 	// AgentCLI: auto | claude | codex - which sealed CLI to use for agent_cli/auto.
 	AgentCLI string `yaml:"agent_cli,omitempty"`
@@ -203,6 +207,14 @@ func (c Config) MemoryEnabled() bool {
 func (c Config) IdleHarvestHours() int {
 	if c.Memory.IdleHarvestHours > 0 {
 		return c.Memory.IdleHarvestHours
+	}
+	return 6
+}
+
+// EvalsActiveCooldownHours returns min gap between active-chat snapshot evals (default 6).
+func (c Config) EvalsActiveCooldownHours() int {
+	if c.Evals.ActiveCooldownHours > 0 {
+		return c.Evals.ActiveCooldownHours
 	}
 	return 6
 }

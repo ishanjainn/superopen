@@ -311,11 +311,25 @@ func ResolveSessionID(attrs map[string]string, fallback string) string {
 		"session.id",
 		"session_id",
 	} {
-		if v := attrs[k]; v != "" {
+		if v := strings.TrimSpace(attrs[k]); v != "" && !IsPlaceholderSessionID(v) {
 			return v
 		}
 	}
-	return fallback
+	if strings.TrimSpace(fallback) != "" && !IsPlaceholderSessionID(fallback) {
+		return fallback
+	}
+	return ""
+}
+
+// IsPlaceholderSessionID reports ids that must never become Sessions UI rows
+// (OpenCode/Pi hooks historically fell back to "unknown" when sessionID was missing).
+func IsPlaceholderSessionID(id string) bool {
+	switch strings.ToLower(strings.TrimSpace(id)) {
+	case "", "unknown", "null", "undefined", "nil", "none":
+		return true
+	default:
+		return false
+	}
 }
 
 // ResolveParentID returns the parent chat-thread id when this span belongs

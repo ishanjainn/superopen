@@ -18,16 +18,18 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const project = projectIdFromRequest(req);
-  let body: { session_id?: unknown } = {};
+  let body: { session_id?: unknown; force?: unknown } = {};
   try {
-    body = (await req.json()) as { session_id?: unknown };
+    body = (await req.json()) as { session_id?: unknown; force?: unknown };
   } catch {
     // Empty body evaluates the latest captured session.
   }
   const sessionId =
     typeof body.session_id === "string" ? body.session_id.trim() : "";
+  const force = body.force === true;
   return runWithProjectAsync(project, async () => {
     const args = sessionId ? ["eval", sessionId] : ["eval"];
+    if (force) args.push("--force");
     const result = await soJSON(args, { cwd: repoCwd(), timeoutMs: 180_000 });
     if (!result.ok) {
       return NextResponse.json(

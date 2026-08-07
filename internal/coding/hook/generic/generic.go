@@ -31,9 +31,9 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	sid := str(payload, "session_id", "sessionId", "conversation_id", "id")
-	if sid == "" {
-		sid = "unknown"
+	sid := str(payload, "session_id", "sessionId", "sessionID", "conversation_id", "id")
+	if sid == "" || strings.EqualFold(sid, "unknown") {
+		return nil
 	}
 	cwd := str(payload, "cwd", "working_directory")
 	model := str(payload, "model", "model_id")
@@ -71,13 +71,7 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 				Prompt:    body,
 			})
 		}
-		return in.Emit.EmitSession(normalize.Session{
-			SessionID: sid,
-			Vendor:    a.name,
-			Model:     model,
-			CWD:       cwd,
-			StartedAt: time.Now().UTC(),
-		})
+		return nil
 	}
 }
 

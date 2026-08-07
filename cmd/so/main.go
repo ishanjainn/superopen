@@ -605,15 +605,17 @@ func cmdEval() *cobra.Command {
 			scope := "snapshot"
 			if meta.Status == session.StatusEnded {
 				scope = "complete"
-				if !force && meta.EndedAt != nil {
-					if prior, ok := eval.LatestResult(paths, id); ok && !prior.At.Before(*meta.EndedAt) {
-						return out().HumanOrJSON("evaluation", func() {
-							fmt.Printf("Session %s already has a final whole-chat evaluation from %s\n", id, prior.At.Format(time.RFC3339))
-						}, map[string]any{
-							"result": prior, "reused": true, "scope": scope,
-						})
-					}
+			}
+			if decision := eval.DecideSkip(paths, cfg, meta, force); decision.Skip {
+				if decision.Scope != "" {
+					scope = decision.Scope
 				}
+				return out().HumanOrJSON("evaluation", func() {
+					fmt.Println(eval.SkipMessage(id, decision))
+				}, map[string]any{
+					"result": decision.Prior, "reused": true, "scope": scope,
+					"skip_reason": decision.Reason,
+				})
 			}
 			store := tracestore.NewLocalJSONL(paths.TracesDir)
 			spans, _ := store.Query(tracestore.QueryFilter{SessionID: id})
@@ -641,7 +643,7 @@ func cmdEval() *cobra.Command {
 			})
 		},
 	}
-	c.Flags().BoolVar(&force, "force", false, "Re-run even when a closed chat already has a final evaluation")
+	c.Flags().BoolVar(&force, "force", false, "Re-run even when a closed chat already has a final evaluation, or an open chat is still inside the active cooldown")
 	return c
 }
 
@@ -911,7 +913,7 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) error {
 		fmt.Printf("Skipped empty session %s (no turns/work)\n", latestID)
 		return nil
 	}
-	_ = sess.Start(session.Meta{ID: latestID, Vendor: ss[0].Attributes["coding_agent.vendor"], StartedAt: time.Unix(0, ss[0].StartTimeUnixN).UTC()})
+	_ = sess.Start(session.Meta{ID: latestID, Vendor: session.VendorFromSpans(ss), StartedAt: time.Unix(0, ss[0].StartTimeUnixN).UTC()})
 	tokens, cost, _ := store.SessionCost(latestID)
 	meta, err := sess.MaterializeFromSpans(latestID, ss, tokens, cost)
 	if err != nil {
@@ -1010,7 +1012,7 @@ func refreshSession(root, sessionID string) error {
 		return nil
 	}
 	sess := session.NewStore(paths)
-	_ = sess.Start(session.Meta{ID: id, Vendor: ss[0].Attributes["coding_agent.vendor"], StartedAt: time.Unix(0, ss[0].StartTimeUnixN).UTC()})
+	_ = sess.Start(session.Meta{ID: id, Vendor: session.VendorFromSpans(ss), StartedAt: time.Unix(0, ss[0].StartTimeUnixN).UTC()})
 	tokens, cost, _ := store.SessionCost(id)
 	meta, err := sess.MaterializeFromSpans(id, ss, tokens, cost)
 	if err != nil {

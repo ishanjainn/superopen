@@ -63,11 +63,11 @@ func Run(repoRoot string) []Check {
 		checks = append(checks, Check{
 			Name:   "llm",
 			OK:     true,
-			Detail: "no API key (evals/memory prefer coding-agent CLI; keys only for headless llm_api)",
+			Detail: "no API key (evals.backend=auto uses agent CLI first, then API, then heuristics)",
 		})
 	}
 
-	// Coding-agent CLIs reused for sealed backend evals/recommendations.
+	// Coding-agent CLIs for evals.backend=auto|agent_cli.
 	if found := detectAgentCLIs(); len(found) > 0 {
 		checks = append(checks, Check{
 			Name:   "eval_agent_cli",
@@ -78,7 +78,7 @@ func Run(repoRoot string) []Check {
 		checks = append(checks, Check{
 			Name:   "eval_agent_cli",
 			OK:     false,
-			Detail: "claude/codex not on PATH - evals fall back to API key or heuristics",
+			Detail: "claude/codex not on PATH — evals.backend=auto falls back to API key or heuristics",
 		})
 	}
 
