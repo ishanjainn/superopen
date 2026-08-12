@@ -1,4 +1,4 @@
-// Package otlp wraps the sdk/go OTel exporter for the CLI's hot path.
+// Package codingotlp wraps local OTel span generation for the CLI's hot path.
 //
 // Lifecycle (per hook invocation):
 //
@@ -9,12 +9,8 @@
 // The emitter implements the normalize.Emitter interface so per-vendor
 // adapters under hook/<vendor>/ stay decoupled from OTel mechanics.
 //
-// NOTE: There is currently no disk-backed retry queue. The
-// `emitter.Shutdown(ctxWithFlushBudget)` call has a few-hundred-ms
-// flush budget; if the collector is unreachable past that window the
-// spans are dropped on the floor. This is the single biggest gap
-// Phase D8 covers wiring an OTel BatchSpanProcessor with
-// real retry + a XDG-cached fallback queue.
+// The repository-local `.so/sessions/<id>/events.jsonl` exporter is the only
+// destination and requires no receiver or network connection.
 package codingotlp
 
 import (
@@ -27,9 +23,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/agentconfig"
 	"github.com/ishanjainn/superopen/internal/coding/normalize"
 	"github.com/ishanjainn/superopen/internal/coding/sessionstate"
-	"github.com/ishanjainn/superopen/internal/agentconfig"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/redact"
 	"github.com/ishanjainn/superopen/internal/session"
@@ -38,6 +34,7 @@ import (
 	"github.com/ishanjainn/superopen/sdk/go/semconv"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -402,7 +399,7 @@ func NewEmitter(_ context.Context, cfg *agentconfig.Resolved, vendor string, ext
 			tracer:    otel.GetTracerProvider().Tracer("superopen-cli"),
 			cfg:       cfg,
 			vendor:    vendor,
-			scrub:     redact.ForCapture(cfg.CodingContentCapture),
+			scrub:     redact.StringFull,
 			startedAt: time.Now(),
 		}, nil
 	}
@@ -479,9 +476,12 @@ func NewEmitter(_ context.Context, cfg *agentconfig.Resolved, vendor string, ext
 	extra["telemetry.distro.name"] = "superopen-cli"
 	extra["telemetry.distro.version"] = version.Version
 
+	localExporter := newLocalSessionExporter(extra["code.cwd"])
+	traceExporters := []sdktrace.SpanExporter{}
+	if localExporter != nil {
+		traceExporters = append(traceExporters, localExporter)
+	}
 	if err := sdk.Init(sdk.Config{
-		OtlpEndpoint:    cfg.OTLPEndpoint,
-		OtlpHeaders:     cfg.EffectiveHeaders(),
 		Environment:     cfg.Environment,
 		ApplicationName: cfg.ApplicationName,
 		ServiceVersion:  version.Version,
@@ -491,18 +491,8 @@ func NewEmitter(_ context.Context, cfg *agentconfig.Resolved, vendor string, ext
 		DisableCaptureMessageContent: true,
 		// The hook subcommand is short-lived; batch span processor is
 		// fine - sdk/go calls Shutdown which forces a flush.
-		DisableBatch: false,
-		// Metrics ARE enabled - the coding-agent counters
-		// (`coding_agent.lines_of_code.count`,
-		// `coding_agent.code_edit_tool.decision`,
-		// `coding_agent.commit.count`, `coding_agent.pull_request.count`)
-		// always emit, regardless of content-capture mode, so backends
-		// that consume metrics (Prometheus / Mimir / Grafana cloud)
-		// see the same numbers traces backends see. Cost of the
-		// metrics pipeline is negligible on the short-lived hook
-		// process; the superopen-sdk SDK already wires up a delta
-		// exporter on the same OTLP endpoint as traces.
-		DisableMetrics: false,
+		DisableBatch:   false,
+		TraceExporters: traceExporters,
 		// All coding-agent spans for a given session share a
 		// deterministic TraceID (and the session-root span gets a
 		// deterministic SpanID) so PR #1200's TraceDetailView resolves
@@ -518,7 +508,7 @@ func NewEmitter(_ context.Context, cfg *agentconfig.Resolved, vendor string, ext
 		tracer:    otel.GetTracerProvider().Tracer("superopen-cli"),
 		cfg:       cfg,
 		vendor:    vendor,
-		scrub:     redact.ForCapture(cfg.CodingContentCapture),
+		scrub:     redact.StringFull,
 		startedAt: time.Now(),
 	}, nil
 }
@@ -643,9 +633,6 @@ func (e *Emitter) EmitSession(s normalize.Session) error {
 		return nil
 	}
 
-	if !perEventSpansAllowed(e.cfg.CodingContentCapture) {
-		s = drainCounters(s, e.vendor)
-	}
 	// LOC / edit / commit / PR rollups are stamped on the session-root
 	// span regardless of capture mode - they are scalar telemetry, not
 	// user content, and the Sessions list's "Lines / Accept %" columns
@@ -727,10 +714,6 @@ func (e *Emitter) EmitToolCall(t normalize.ToolCall) error {
 	if e == nil || e.tracer == nil {
 		return errors.New("nil emitter")
 	}
-	if !perEventSpansAllowed(e.cfg.CodingContentCapture) {
-		e.bumpToolCounter(t.SessionID)
-		return nil
-	}
 	startedAt := t.StartedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now()
@@ -748,7 +731,7 @@ func (e *Emitter) EmitToolCall(t normalize.ToolCall) error {
 	)
 	defer span.End(trace.WithTimestamp(endedAt))
 
-	setToolCallAttrs(span, t, e.scrub, e.cfg.CodingContentCapture)
+	setToolCallAttrs(span, t, e.scrub, "full")
 	return nil
 }
 
@@ -767,9 +750,6 @@ func (e *Emitter) EmitEditDecision(d normalize.EditDecision) error {
 	user := resolveLocalUser()
 	recordEditDecision(d.Vendor, user, d.Decision, d.Tool, d.Language)
 	recordLines(d.Vendor, user, d.Decision, d.LinesAdded, d.LinesRemoved)
-	if !perEventSpansAllowed(e.cfg.CodingContentCapture) {
-		return nil
-	}
 	at := d.At
 	if at.IsZero() {
 		at = time.Now()
@@ -794,10 +774,6 @@ func (e *Emitter) EmitLLMTurn(t normalize.LLMTurn) error {
 	if e == nil || e.tracer == nil {
 		return errors.New("nil emitter")
 	}
-	if !perEventSpansAllowed(e.cfg.CodingContentCapture) {
-		e.bumpLLMCounter(t.SessionID, t.InputTokens, t.OutputTokens, t.CostUSD)
-		return nil
-	}
 	startedAt := t.StartedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now()
@@ -815,7 +791,7 @@ func (e *Emitter) EmitLLMTurn(t normalize.LLMTurn) error {
 	)
 	defer span.End(trace.WithTimestamp(endedAt))
 
-	setLLMTurnAttrs(span, t, e.scrub, e.cfg.CodingContentCapture)
+	setLLMTurnAttrs(span, t, e.scrub, "full")
 	return nil
 }
 
@@ -826,10 +802,6 @@ func (e *Emitter) EmitLLMTurn(t normalize.LLMTurn) error {
 func (e *Emitter) EmitSubagent(s normalize.Subagent) error {
 	if e == nil || e.tracer == nil {
 		return errors.New("nil emitter")
-	}
-	if !perEventSpansAllowed(e.cfg.CodingContentCapture) {
-		e.bumpSubagentCounter(s.SessionID)
-		return nil
 	}
 	startedAt := s.StartedAt
 	if startedAt.IsZero() {
@@ -877,9 +849,6 @@ func (e *Emitter) EmitEvent(ev normalize.EventEmission) error {
 	if e == nil || e.tracer == nil {
 		return errors.New("nil emitter")
 	}
-	if !perEventSpansAllowed(e.cfg.CodingContentCapture) {
-		return nil
-	}
 	at := ev.At
 	if at.IsZero() {
 		at = time.Now()
@@ -923,7 +892,7 @@ func (e *Emitter) EmitGitCommit(c normalize.GitCommit) error {
 		trace.WithSpanKind(trace.SpanKindInternal),
 	)
 	defer span.End(trace.WithTimestamp(at))
-	setGitCommitAttrs(span, c, e.scrub, e.cfg.CodingContentCapture)
+	setGitCommitAttrs(span, c, e.scrub, "full")
 	recordCommit(c.Vendor, c.UserID)
 	return nil
 }
@@ -947,7 +916,7 @@ func (e *Emitter) EmitGitPullRequest(p normalize.GitPullRequest) error {
 		trace.WithSpanKind(trace.SpanKindInternal),
 	)
 	defer span.End(trace.WithTimestamp(at))
-	setGitPullRequestAttrs(span, p, e.scrub, e.cfg.CodingContentCapture)
+	setGitPullRequestAttrs(span, p, e.scrub, "full")
 	recordPullRequest(p.Vendor, p.UserID)
 	return nil
 }

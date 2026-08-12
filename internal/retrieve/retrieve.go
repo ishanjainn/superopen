@@ -23,7 +23,7 @@ type IndexDoc struct {
 }
 
 func indexPath(paths harness.Paths) string {
-	return filepath.Join(paths.GraphDir, "retrieve_index.json")
+	return paths.GraphCorpus
 }
 
 // Rebuild walks harness corpus into a simple keyword index.
@@ -118,20 +118,17 @@ func Rebuild(repoRoot string, paths harness.Paths) (int, error) {
 			return nil
 		})
 	}
-	walkDir(paths.GuardrailsDir, "guardrails")
+	addFile(paths.GuardrailsFile, "guardrails")
 	walkDir(paths.MemoryDir, "memory")
 	if data, err := os.ReadFile(paths.GraphJSON); err == nil {
 		docs = append(docs, IndexDoc{Path: ".so/graph/graph.json", Kind: "graph", Content: string(data)})
-	}
-	if data, err := os.ReadFile(paths.GraphReport); err == nil {
-		docs = append(docs, IndexDoc{Path: ".so/graph/GRAPH_REPORT.md", Kind: "graph", Content: string(data)})
 	}
 	// recent session metas
 	_ = filepath.WalkDir(paths.SessionsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
-		if d.Name() == "meta.json" || d.Name() == "footprint.json" {
+		if d.Name() == "session.json" {
 			addFile(path, "session")
 		}
 		return nil
@@ -139,7 +136,14 @@ func Rebuild(repoRoot string, paths harness.Paths) (int, error) {
 	if err := os.MkdirAll(paths.GraphDir, 0o755); err != nil {
 		return 0, err
 	}
-	raw, err := json.MarshalIndent(docs, "", "  ")
+	raw, err := json.MarshalIndent(map[string]any{
+		"_about": map[string]string{
+			"purpose":    "Search index for AGENTS.md, active-vendor rules and skills, guardrails, memory context, and recent session summaries.",
+			"authority":  "derived and rebuildable",
+			"updated_by": "so init, so sync, graph refresh, and documentation updates",
+		},
+		"documents": docs,
+	}, "", "  ")
 	if err != nil {
 		return 0, err
 	}
@@ -183,10 +187,13 @@ func SearchWith(paths harness.Paths, q string, opts SearchOptions) ([]Hit, error
 		}
 		return nil, err
 	}
-	var docs []IndexDoc
-	if err := json.Unmarshal(data, &docs); err != nil {
+	var corpus struct {
+		Documents []IndexDoc `json:"documents"`
+	}
+	if err := json.Unmarshal(data, &corpus); err != nil {
 		return nil, err
 	}
+	docs := corpus.Documents
 	var hits []Hit
 	for _, d := range docs {
 		c := strings.ToLower(d.Content)

@@ -1,24 +1,7 @@
-# Superopen - tracked under .so/: config, guardrails, discovery, AGENT.md.
-# Everything regenerable or machine-local is ignored so feature branches stay clean.
+# Superopen tracking policy: configuration below is committed; generated graph, session, memory, and audit state stays local.
+# Updated by so init when the tracking policy changes; everything ignored below is derived or machine-local.
 
-# Local telemetry / sessions / traces
-traces/
-sessions/
-audit/
-run/
-session-state/
-port/
-ui-prefs.json
-finalize-pending
-
-# Regenerable graph + viz (agents still query local graph.json)
 graph/
-viz/
-
-# Memory packs and harvest ledgers (durable guidance goes to AGENTS.md / .agents/)
+sessions/
 memory/
-
-# Eval run history + recommendation pending state (applied changes land in native docs)
-evals/history.json
-recommendations/pending.json
-recommendations/history.json
+audit/

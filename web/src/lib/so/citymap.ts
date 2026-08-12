@@ -1,8 +1,7 @@
 import { createHash } from "crypto";
-import { mkdirSync, readdirSync, statSync, writeFileSync } from "fs";
-import { fileExists, readText } from "./nodeio";
+import { readdirSync, statSync } from "fs";
 import { dirname, extname, join, relative, sep } from "path";
-import { repoRoot, soPath } from "./root";
+import { repoRoot } from "./root";
 
 const JUNK = new Set([
   "node_modules",
@@ -74,10 +73,6 @@ type LayoutItem = {
   weight: number;
   area: number;
 };
-
-function cachePath(): string {
-  return soPath("viz", "citymap.json");
-}
 
 function estimateLines(bytes: number): number {
   if (bytes <= 0) return 1;
@@ -367,32 +362,8 @@ function applyTreemap(files: CityFile[]): CityDir[] {
   return dirs;
 }
 
-function isUsableCache(raw: CityMap): boolean {
-  if (raw?.version !== CACHE_VERSION) return false;
-  if (!Array.isArray(raw.files) || raw.files.length === 0) return false;
-  if (raw.layout?.algorithm !== "squarified-treemap-v1") return false;
-  // Reject the stub layout where everything piles on (0,0).
-  const first = raw.files[0]?.rect;
-  const spread = raw.files.some(
-    (f) =>
-      Math.abs(f.rect.x - (first?.x ?? 0)) > 0.5 ||
-      Math.abs(f.rect.z - (first?.z ?? 0)) > 0.5
-  );
-  return spread;
-}
-
-/** Build (or load cached) session-map citymap with squarified treemap layout. */
+/** Build the session map in memory; v2 never writes UI caches under .so. */
 export function getCityMap(): CityMap {
-  const cached = cachePath();
-  try {
-    if (fileExists(cached)) {
-      const raw = JSON.parse(readText(cached)) as CityMap;
-      if (isUsableCache(raw)) return raw;
-    }
-  } catch {
-    /* rebuild */
-  }
-
   const root = repoRoot();
   const listed = walkFiles(root);
   const truncated = listed.length >= MAX_FILES;
@@ -432,12 +403,6 @@ export function getCityMap(): CityMap {
     },
   };
 
-  try {
-    mkdirSync(dirname(cached), { recursive: true });
-    writeFileSync(cached, JSON.stringify(city));
-  } catch {
-    /* ignore cache write */
-  }
   return city;
 }
 

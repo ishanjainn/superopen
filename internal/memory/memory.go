@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"bufio"
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/artifactmeta"
 	"github.com/ishanjainn/superopen/internal/audit"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/harnessvalid"
@@ -50,6 +50,36 @@ type EpisodicEntry struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Pattern is durable, compact evidence that the same harness improvement has
+// appeared across coding sessions. Full prompts, tool output, and proposed
+// file bodies stay in the originating session; memory keeps only the evidence
+// summary and counters needed to decide whether a recommendation is recurring.
+type Pattern struct {
+	Fingerprint      string                `json:"fingerprint"`
+	Vendor           string                `json:"vendor"`
+	Kind             string                `json:"kind"`
+	ChangeKind       string                `json:"change_kind,omitempty"`
+	TargetType       string                `json:"target_type,omitempty"`
+	TargetPath       string                `json:"target_path,omitempty"`
+	Summary          string                `json:"summary"`
+	Evidence         []string              `json:"evidence,omitempty"`
+	Occurrences      int                   `json:"occurrences"`
+	SessionIDs       []string              `json:"session_ids,omitempty"`
+	VerifiedSessions []string              `json:"verified_sessions,omitempty"`
+	Confidence       float64               `json:"confidence,omitempty"`
+	ExplicitWorkflow bool                  `json:"explicit_workflow,omitempty"`
+	Status           string                `json:"status"` // pending | applied | dismissed | superseded
+	FirstObservedAt  time.Time             `json:"first_observed_at"`
+	LastObservedAt   time.Time             `json:"last_observed_at"`
+	Verification     []PatternVerification `json:"verification,omitempty"`
+}
+
+type PatternVerification struct {
+	SessionID string    `json:"session_id,omitempty"`
+	Outcome   string    `json:"outcome"`
+	At        time.Time `json:"at"`
+}
+
 type SearchHit struct {
 	Kind    string  `json:"kind"` // lesson|semantic|episodic|prefs|projects|history
 	ID      string  `json:"id,omitempty"`
@@ -69,60 +99,204 @@ type Store struct {
 	Paths harness.Paths
 }
 
+// RefreshState records the last lightweight repository refresh. It lives in
+// memory/state.json so refresh coordination does not create another file.
+type RefreshState struct {
+	SHA        string    `json:"sha,omitempty"`
+	At         time.Time `json:"at,omitempty"`
+	GraphBuilt bool      `json:"graph_built,omitempty"`
+}
+
+type stateFile struct {
+	About       artifactmeta.About `json:"_about"`
+	Lessons     []Lesson           `json:"lessons,omitempty"`
+	Semantic    []SemanticEntry    `json:"semantic,omitempty"`
+	Episodic    []EpisodicEntry    `json:"episodic,omitempty"`
+	Preferences string             `json:"preferences,omitempty"`
+	Projects    string             `json:"projects,omitempty"`
+	History     []string           `json:"history,omitempty"`
+	Harvest     map[string]any     `json:"harvest,omitempty"`
+	Refresh     *RefreshState      `json:"refresh,omitempty"`
+	Patterns    []Pattern          `json:"patterns,omitempty"`
+}
+
+var memoryAbout = artifactmeta.About{
+	Purpose:   "Consolidated lessons, preferences, project notes, harvest cursor, and memory refresh state.",
+	Authority: "local durable memory state", UpdatedBy: "session review and memory consolidation",
+}
+
 func NewStore(paths harness.Paths) *Store {
 	return &Store{Paths: paths}
 }
 
 func (s *Store) Ensure() error {
-	dirs := []string{
-		s.Paths.MemoryDir,
-		filepath.Join(s.Paths.MemoryDir, "history"),
-	}
-	for _, d := range dirs {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			return err
-		}
-	}
-	if err := s.SeedFromTemplates(); err != nil {
+	if err := os.MkdirAll(s.Paths.MemoryDir, 0o755); err != nil {
 		return err
 	}
-	_ = s.repairMemoryStructure()
-	return nil
+	if _, err := os.Stat(s.statePath()); err == nil {
+		return nil
+	}
+	return s.writeState(stateFile{About: memoryAbout, Preferences: defaultTemplate("preferences.md"), Projects: defaultTemplate("projects.md")})
 }
 
 // repairMemoryStructure normalizes preferences/projects without wiping bullets.
 func (s *Store) repairMemoryStructure() error {
-	prefsPath := filepath.Join(s.Paths.MemoryDir, "preferences.md")
-	if data, err := os.ReadFile(prefsPath); err == nil {
-		raw := string(data)
-		if harnessvalid.ValidatePreferences(raw) != nil {
-			_ = os.WriteFile(prefsPath, []byte(harnessvalid.NormalizePreferences(raw)), 0o644)
-		}
+	st, err := s.readState()
+	if err != nil {
+		return err
 	}
-	projPath := filepath.Join(s.Paths.MemoryDir, "projects.md")
-	if data, err := os.ReadFile(projPath); err == nil {
-		raw := string(data)
-		if harnessvalid.ValidateProjects(raw) != nil {
-			_ = os.WriteFile(projPath, []byte(harnessvalid.NormalizeProjects(raw)), 0o644)
+	if harnessvalid.ValidatePreferences(st.Preferences) != nil {
+		st.Preferences = harnessvalid.NormalizePreferences(st.Preferences)
+	}
+	if harnessvalid.ValidateProjects(st.Projects) != nil {
+		st.Projects = harnessvalid.NormalizeProjects(st.Projects)
+	}
+	return s.writeState(st)
+}
+
+func (s *Store) statePath() string { return filepath.Join(s.Paths.MemoryDir, "state.json") }
+
+// LoadRefreshState returns the consolidated lightweight-refresh marker.
+func (s *Store) LoadRefreshState() RefreshState {
+	st, err := s.readState()
+	if err != nil || st.Refresh == nil {
+		return RefreshState{}
+	}
+	return *st.Refresh
+}
+
+// SaveRefreshState updates only the refresh section of memory/state.json.
+func (s *Store) SaveRefreshState(refresh RefreshState) error {
+	if err := s.Ensure(); err != nil {
+		return err
+	}
+	st, err := s.readState()
+	if err != nil {
+		return err
+	}
+	st.Refresh = &refresh
+	return s.writeState(st)
+}
+
+// UpsertPattern records one session occurrence. A session contributes at most
+// once to a fingerprint, which makes finalize retries idempotent.
+func (s *Store) UpsertPattern(p Pattern, sessionID string, verified bool) (Pattern, error) {
+	if err := s.Ensure(); err != nil {
+		return Pattern{}, err
+	}
+	p.Fingerprint = strings.TrimSpace(p.Fingerprint)
+	p.Vendor = harness.NormalizeVendorKind(p.Vendor)
+	p.Summary = truncate(p.Summary, 320)
+	p.Evidence = compactStrings(p.Evidence, 6, 240)
+	sessionID = strings.TrimSpace(sessionID)
+	if p.Fingerprint == "" || p.Vendor == "" || p.Summary == "" || sessionID == "" {
+		return Pattern{}, fmt.Errorf("pattern requires fingerprint, supported vendor, summary, and session")
+	}
+	now := time.Now().UTC()
+	st, err := s.readState()
+	if err != nil {
+		return Pattern{}, err
+	}
+	for i := range st.Patterns {
+		cur := &st.Patterns[i]
+		if cur.Fingerprint != p.Fingerprint || cur.Vendor != p.Vendor {
+			continue
+		}
+		if !containsString(cur.SessionIDs, sessionID) {
+			cur.SessionIDs = append(cur.SessionIDs, sessionID)
+			cur.Occurrences++
+		}
+		if verified && !containsString(cur.VerifiedSessions, sessionID) {
+			cur.VerifiedSessions = append(cur.VerifiedSessions, sessionID)
+			cur.Verification = append(cur.Verification, PatternVerification{SessionID: sessionID, Outcome: "passed", At: now})
+		}
+		cur.Confidence = maxFloat(cur.Confidence, p.Confidence)
+		cur.ExplicitWorkflow = cur.ExplicitWorkflow || p.ExplicitWorkflow
+		cur.LastObservedAt = now
+		if p.Summary != "" {
+			cur.Summary = p.Summary
+		}
+		cur.Evidence = compactStrings(append(cur.Evidence, p.Evidence...), 6, 240)
+		if cur.Status == "" {
+			cur.Status = "pending"
+		}
+		if err := s.writeState(st); err != nil {
+			return Pattern{}, err
+		}
+		return *cur, nil
+	}
+	p.Occurrences = 1
+	p.SessionIDs = []string{sessionID}
+	p.FirstObservedAt = now
+	p.LastObservedAt = now
+	if p.Status == "" {
+		p.Status = "pending"
+	}
+	if verified {
+		p.VerifiedSessions = []string{sessionID}
+		p.Verification = []PatternVerification{{SessionID: sessionID, Outcome: "passed", At: now}}
+	}
+	st.Patterns = append(st.Patterns, p)
+	if err := s.writeState(st); err != nil {
+		return Pattern{}, err
+	}
+	return p, nil
+}
+
+func (s *Store) ListPatterns() ([]Pattern, error) {
+	st, err := s.readState()
+	return st.Patterns, err
+}
+
+func (s *Store) SetPatternStatus(fingerprint, vendor, status string) error {
+	st, err := s.readState()
+	if err != nil {
+		return err
+	}
+	vendor = harness.NormalizeVendorKind(vendor)
+	for i := range st.Patterns {
+		if st.Patterns[i].Fingerprint == fingerprint && st.Patterns[i].Vendor == vendor {
+			st.Patterns[i].Status = status
+			return s.writeState(st)
 		}
 	}
 	return nil
 }
 
-func (s *Store) lessonsPath() string {
-	return filepath.Join(s.Paths.MemoryDir, "lessons.jsonl")
-}
-
-func (s *Store) semanticPath() string {
-	return filepath.Join(s.Paths.MemoryDir, "semantic.jsonl")
-}
-
-func (s *Store) episodicPath() string {
-	return filepath.Join(s.Paths.MemoryDir, "episodic.jsonl")
+// RemoveSessionReferences prevents retention from leaving pointers to deleted
+// session artifacts. Aggregate occurrence counts and redacted summaries remain
+// durable so previously learned recurrence is not forgotten.
+func (s *Store) RemoveSessionReferences(sessionID string) error {
+	st, err := s.readState()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	changed := false
+	for i := range st.Patterns {
+		before := len(st.Patterns[i].SessionIDs) + len(st.Patterns[i].VerifiedSessions) + len(st.Patterns[i].Verification)
+		st.Patterns[i].SessionIDs = withoutString(st.Patterns[i].SessionIDs, sessionID)
+		st.Patterns[i].VerifiedSessions = withoutString(st.Patterns[i].VerifiedSessions, sessionID)
+		verification := st.Patterns[i].Verification[:0]
+		for _, v := range st.Patterns[i].Verification {
+			if v.SessionID != sessionID {
+				verification = append(verification, v)
+			}
+		}
+		st.Patterns[i].Verification = verification
+		after := len(st.Patterns[i].SessionIDs) + len(st.Patterns[i].VerifiedSessions) + len(st.Patterns[i].Verification)
+		changed = changed || before != after
+	}
+	if !changed {
+		return nil
+	}
+	return s.writeState(st)
 }
 
 func (s *Store) ActivePath() string {
-	return filepath.Join(s.Paths.MemoryDir, "active-context.md")
+	return filepath.Join(s.Paths.MemoryDir, "context.md")
 }
 
 var injectionRe = regexp.MustCompile(`(?i)(ignore (all )?(previous|prior) (instructions|rules)|system\s*:|<\s*/?\s*system\s*>|do not follow|disregard (the )?above)`)
@@ -161,7 +335,12 @@ func (s *Store) AddLesson(l Lesson, mode Mode) error {
 	if l.CreatedAt.IsZero() {
 		l.CreatedAt = time.Now().UTC()
 	}
-	if err := appendJSONL(s.lessonsPath(), l); err != nil {
+	st, err := s.readState()
+	if err != nil {
+		return err
+	}
+	st.Lessons = append(st.Lessons, l)
+	if err := s.writeState(st); err != nil {
 		return err
 	}
 	_ = audit.Append(s.Paths, audit.Event{
@@ -174,14 +353,8 @@ func (s *Store) AddLesson(l Lesson, mode Mode) error {
 }
 
 func (s *Store) ListLessons() ([]Lesson, error) {
-	var out []Lesson
-	err := readJSONL(s.lessonsPath(), func(raw []byte) {
-		var l Lesson
-		if json.Unmarshal(raw, &l) == nil && l.Text != "" {
-			out = append(out, l)
-		}
-	})
-	return out, err
+	st, err := s.readState()
+	return st.Lessons, err
 }
 
 // DeleteLesson removes a lesson by id and refreshes lessons.md.
@@ -206,7 +379,12 @@ func (s *Store) DeleteLesson(id string) error {
 	if !found {
 		return fmt.Errorf("lesson not found: %s", id)
 	}
-	if err := rewriteJSONL(s.lessonsPath(), kept); err != nil {
+	st, err := s.readState()
+	if err != nil {
+		return err
+	}
+	st.Lessons = kept
+	if err := s.writeState(st); err != nil {
 		return err
 	}
 	_ = audit.Append(s.Paths, audit.Event{Action: "delete", Type: "lesson", Key: id})
@@ -242,7 +420,12 @@ func (s *Store) UpdateLesson(id, text string) error {
 	if !found {
 		return fmt.Errorf("lesson not found: %s", id)
 	}
-	if err := rewriteJSONL(s.lessonsPath(), lessons); err != nil {
+	st, err := s.readState()
+	if err != nil {
+		return err
+	}
+	st.Lessons = lessons
+	if err := s.writeState(st); err != nil {
 		return err
 	}
 	_ = audit.Append(s.Paths, audit.Event{Action: "update", Type: "lesson", Key: id, Detail: truncate(text, 160)})
@@ -273,7 +456,12 @@ func (s *Store) UpsertSemantic(e SemanticEntry, mode Mode) error {
 		}
 	}
 	kept = append(kept, e)
-	if err := rewriteJSONL(s.semanticPath(), kept); err != nil {
+	st, err := s.readState()
+	if err != nil {
+		return err
+	}
+	st.Semantic = kept
+	if err := s.writeState(st); err != nil {
 		return err
 	}
 	_ = audit.Append(s.Paths, audit.Event{Action: "update", Type: "semantic", Key: e.Key, Detail: truncate(e.Value, 120)})
@@ -281,14 +469,8 @@ func (s *Store) UpsertSemantic(e SemanticEntry, mode Mode) error {
 }
 
 func (s *Store) ListSemantic() ([]SemanticEntry, error) {
-	var out []SemanticEntry
-	err := readJSONL(s.semanticPath(), func(raw []byte) {
-		var e SemanticEntry
-		if json.Unmarshal(raw, &e) == nil && e.Key != "" {
-			out = append(out, e)
-		}
-	})
-	return out, err
+	st, err := s.readState()
+	return st.Semantic, err
 }
 
 func (s *Store) AddEpisodic(e EpisodicEntry, mode Mode) error {
@@ -309,33 +491,32 @@ func (s *Store) AddEpisodic(e EpisodicEntry, mode Mode) error {
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = time.Now().UTC()
 	}
-	return appendJSONL(s.episodicPath(), e)
+	st, err := s.readState()
+	if err != nil {
+		return err
+	}
+	st.Episodic = append(st.Episodic, e)
+	return s.writeState(st)
 }
 
 func (s *Store) ListEpisodic() ([]EpisodicEntry, error) {
-	var out []EpisodicEntry
-	err := readJSONL(s.episodicPath(), func(raw []byte) {
-		var e EpisodicEntry
-		if json.Unmarshal(raw, &e) == nil && e.Text != "" {
-			out = append(out, e)
-		}
-	})
-	return out, err
+	st, err := s.readState()
+	return st.Episodic, err
 }
 
 func (s *Store) AppendHistory(summary string) error {
 	if err := s.Ensure(); err != nil {
 		return err
 	}
-	day := time.Now().UTC().Format("2006-01-02")
-	p := filepath.Join(s.Paths.MemoryDir, "history", day+".md")
-	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	st, err := s.readState()
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = fmt.Fprintf(f, "\n### %s\n%s\n", time.Now().UTC().Format(time.RFC3339), strings.TrimSpace(summary))
-	return err
+	st.History = append(st.History, fmt.Sprintf("### %s\n%s", time.Now().UTC().Format(time.RFC3339), strings.TrimSpace(summary)))
+	if len(st.History) > 100 {
+		st.History = st.History[len(st.History)-100:]
+	}
+	return s.writeState(st)
 }
 
 func (s *Store) Search(q string, limit int) ([]SearchHit, error) {
@@ -382,19 +563,13 @@ func (s *Store) Search(q string, limit int) ([]SearchHit, error) {
 			add("episodic", e.ID, e.Text, score(e.Text))
 		}
 	}
-	for _, name := range []string{"preferences.md", "projects.md"} {
-		if data, err := os.ReadFile(filepath.Join(s.Paths.MemoryDir, name)); err == nil {
-			add(strings.TrimSuffix(name, ".md"), name, string(data), score(string(data)))
+	if st, err := s.readState(); err == nil {
+		add("preferences", "preferences", st.Preferences, score(st.Preferences))
+		add("projects", "projects", st.Projects, score(st.Projects))
+		for i, h := range st.History {
+			add("history", fmt.Sprintf("history-%d", i), h, score(h))
 		}
 	}
-	_ = filepath.WalkDir(filepath.Join(s.Paths.MemoryDir, "history"), func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
-			return nil
-		}
-		data, _ := os.ReadFile(path)
-		add("history", filepath.Base(path), string(data), score(string(data)))
-		return nil
-	})
 	// sort by score desc
 	for i := 0; i < len(hits); i++ {
 		for j := i + 1; j < len(hits); j++ {
@@ -419,13 +594,15 @@ func (s *Store) BuildSessionContext(budget int, query string, mode Mode) (Contex
 	}
 	pack := ContextPack{Mode: mode, Sections: map[string]int{}, ActivePath: s.ActivePath()}
 	if mode == ModeTemporary {
-		pack.Text = "# Superopen memory\n\n(temporary mode - no memory injected)\n"
+		pack.Text = "<!-- Superopen generated session context. This is derived from approved memory and project guidance and may be regenerated. -->\n<!-- Updated by session review and memory consolidation. -->\n# Superopen memory\n\n(temporary mode - no memory injected)\n"
 		pack.CharCount = len(pack.Text)
 		_ = os.WriteFile(s.ActivePath(), []byte(pack.Text), 0o644)
 		return pack, nil
 	}
 
 	var b strings.Builder
+	b.WriteString("<!-- Superopen generated session context. This is derived from approved memory and project guidance and may be regenerated. -->\n")
+	b.WriteString("<!-- Updated by session review and memory consolidation. -->\n")
 	b.WriteString("# Superopen session memory\n\n")
 	b.WriteString("Read this pack before exploring. Prefer `so graph query` / `AGENTS.md` for code structure.\n\n")
 
@@ -445,10 +622,9 @@ func (s *Store) BuildSessionContext(budget int, query string, mode Mode) (Contex
 		pack.Sections[title] = len(body)
 	}
 
-	prefs, _ := os.ReadFile(filepath.Join(s.Paths.MemoryDir, "preferences.md"))
-	writeSection("Preferences", string(prefs), 2000)
-	projects, _ := os.ReadFile(filepath.Join(s.Paths.MemoryDir, "projects.md"))
-	writeSection("Projects", string(projects), 2500)
+	st, _ := s.readState()
+	writeSection("Preferences", st.Preferences, 2000)
+	writeSection("Projects", st.Projects, 2500)
 	writeSection("History", s.readRecentHistory(14), 2600)
 
 	if sem, err := s.ListSemantic(); err == nil && len(sem) > 0 {
@@ -526,33 +702,15 @@ func (s *Store) BuildSessionContext(budget int, query string, mode Mode) (Contex
 }
 
 func (s *Store) readRecentHistory(days int) string {
-	var parts []string
-	now := time.Now().UTC()
-	for i := 0; i < 181; i++ {
-		day := now.AddDate(0, 0, -i)
-		p := filepath.Join(s.Paths.MemoryDir, "history", day.Format("2006-01-02")+".md")
-		data, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-		content := strings.TrimSpace(string(data))
-		if content == "" {
-			continue
-		}
-		header := "#### " + day.Format("2006-01-02")
-		switch {
-		case i < days:
-			parts = append(parts, header+"\n"+content)
-		case i < 61:
-			first := firstEntry(content)
-			n := strings.Count(content, "### ")
-			parts = append(parts, fmt.Sprintf("%s\n%s\n…%d more entries", header, first, max(0, n-1)))
-		case i < 181:
-			n := strings.Count(content, "### ")
-			parts = append(parts, fmt.Sprintf("%s - %d entries", header, n))
-		}
+	st, err := s.readState()
+	if err != nil {
+		return ""
 	}
-	return strings.Join(parts, "\n\n")
+	start := 0
+	if len(st.History) > days {
+		start = len(st.History) - days
+	}
+	return strings.Join(st.History[start:], "\n\n")
 }
 
 func firstEntry(content string) string {
@@ -563,7 +721,7 @@ func firstEntry(content string) string {
 	return truncate("### "+parts[1], 400)
 }
 
-// Consolidate updates prefs/projects/history/semantic, then rebuilds active-context.md.
+// Consolidate updates the consolidated state, then rebuilds context.md.
 func (s *Store) Consolidate(sessionSummary string, completer llm.Completer) (hint string, err error) {
 	if err := s.Ensure(); err != nil {
 		return "", err
@@ -576,18 +734,18 @@ func (s *Store) Consolidate(sessionSummary string, completer llm.Completer) (hin
 
 	if completer == nil || !completer.Available() {
 		if summary != "" {
-			p := filepath.Join(s.Paths.MemoryDir, "projects.md")
-			existing, _ := os.ReadFile(p)
-			updated := harnessvalid.AppendToProjectsSection(string(existing), "Notes",
+			st, _ := s.readState()
+			updated := harnessvalid.AppendToProjectsSection(st.Projects, "Notes",
 				fmt.Sprintf("%s - %s", time.Now().UTC().Format("2006-01-02"), truncate(summary, 200)))
-			_ = os.WriteFile(p, []byte(updated), 0o644)
+			st.Projects = updated
+			_ = s.writeState(st)
 			s.heuristicSemanticFromSummary(summary)
 		}
 		_, _ = s.BuildSessionContext(12000, "", ModePersistent)
 		return "Install/login Claude Code or Codex for richer consolidation, or set an API key.", nil
 	}
-	prefs, _ := os.ReadFile(filepath.Join(s.Paths.MemoryDir, "preferences.md"))
-	projects, _ := os.ReadFile(filepath.Join(s.Paths.MemoryDir, "projects.md"))
+	st, _ := s.readState()
+	prefs, projects := []byte(st.Preferences), []byte(st.Projects)
 	out, err := completer.Complete(
 		`You update Superopen memory. Reply JSON only:
 {"preferences_md":"...","projects_md":"...","semantic":[{"key":"...","value":"..."}]}
@@ -619,7 +777,7 @@ projects_md MUST start with "# Projects" and include H2 sections exactly: "## Cu
 		if harnessvalid.ValidatePreferences(parsed.PreferencesMD) != nil {
 			_ = audit.Append(s.Paths, audit.Event{Action: "memory.structure_reject", Type: "memory", Detail: "preferences"})
 		} else {
-			_ = os.WriteFile(filepath.Join(s.Paths.MemoryDir, "preferences.md"), []byte(harnessvalid.NormalizePreferences(parsed.PreferencesMD)), 0o644)
+			st.Preferences = harnessvalid.NormalizePreferences(parsed.PreferencesMD)
 		}
 	}
 	if strings.TrimSpace(parsed.ProjectsMD) != "" {
@@ -627,9 +785,10 @@ projects_md MUST start with "# Projects" and include H2 sections exactly: "## Cu
 		if harnessvalid.ValidateProjects(norm) != nil {
 			_ = audit.Append(s.Paths, audit.Event{Action: "memory.structure_reject", Type: "memory", Detail: "projects"})
 		} else {
-			_ = os.WriteFile(filepath.Join(s.Paths.MemoryDir, "projects.md"), []byte(norm), 0o644)
+			st.Projects = norm
 		}
 	}
+	_ = s.writeState(st)
 	n := 0
 	for _, e := range parsed.Semantic {
 		k := strings.TrimSpace(e.Key)
@@ -694,18 +853,19 @@ type Status struct {
 func (s *Store) Status() Status {
 	_ = s.Ensure()
 	st := Status{ActivePath: s.ActivePath(), StructureOK: true}
-	if data, err := os.ReadFile(filepath.Join(s.Paths.MemoryDir, "preferences.md")); err == nil {
-		st.PrefsStub = IsStubMarkdown(string(data))
-		if harnessvalid.ValidatePreferences(string(data)) != nil {
+	mem, memErr := s.readState()
+	if memErr == nil {
+		st.PrefsStub = IsStubMarkdown(mem.Preferences)
+		if harnessvalid.ValidatePreferences(mem.Preferences) != nil {
 			st.StructureOK = false
 		}
 	} else {
 		st.PrefsStub = true
 		st.StructureOK = false
 	}
-	if data, err := os.ReadFile(filepath.Join(s.Paths.MemoryDir, "projects.md")); err == nil {
-		st.ProjectsStub = IsStubMarkdown(string(data))
-		if harnessvalid.ValidateProjects(string(data)) != nil {
+	if memErr == nil {
+		st.ProjectsStub = IsStubMarkdown(mem.Projects)
+		if harnessvalid.ValidateProjects(mem.Projects) != nil {
 			st.StructureOK = false
 		}
 	} else {
@@ -725,63 +885,61 @@ func (s *Store) Status() Status {
 }
 
 func (s *Store) exportLessonsMarkdown() error {
-	lessons, err := s.ListLessons()
-	if err != nil {
-		return err
-	}
-	var b strings.Builder
-	b.WriteString("# Lessons\n\n")
-	for _, l := range lessons {
-		b.WriteString(fmt.Sprintf("## %s (%s)\n%s\n\n", l.ID, l.CreatedAt.Format(time.RFC3339), l.Text))
-	}
-	return os.WriteFile(s.Paths.Lessons, []byte(b.String()), 0o644)
-}
-
-func appendJSONL(path string, v any) error {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
-	return enc.Encode(v)
-}
-
-func rewriteJSONL[T any](path string, items []T) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
-	for _, it := range items {
-		if err := enc.Encode(it); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
-func readJSONL(path string, fn func([]byte)) error {
-	f, err := os.Open(path)
+func (s *Store) readState() (stateFile, error) {
+	var st stateFile
+	data, err := os.ReadFile(s.statePath())
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
+		return st, err
+	}
+	err = json.Unmarshal(data, &st)
+	return st, err
+}
+
+func (s *Store) writeState(st stateFile) error {
+	st.About = memoryAbout
+	b, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
 		return err
 	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		cp := append([]byte(nil), line...)
-		fn(cp)
+	if err := os.MkdirAll(s.Paths.MemoryDir, 0o755); err != nil {
+		return err
 	}
-	return sc.Err()
+	return os.WriteFile(s.statePath(), append(b, '\n'), 0o644)
+}
+
+func (s *Store) AppendPreferenceText(text string) error {
+	if err := s.Ensure(); err != nil {
+		return err
+	}
+	st, err := s.readState()
+	if err != nil {
+		return err
+	}
+	updated := harnessvalid.AppendPreferencesBullet(st.Preferences, strings.TrimSpace(text))
+	if err := harnessvalid.ValidatePreferences(updated); err != nil {
+		return err
+	}
+	st.Preferences = updated
+	return s.writeState(st)
+}
+
+func (s *Store) AppendProjectNote(text string) error {
+	if err := s.Ensure(); err != nil {
+		return err
+	}
+	st, err := s.readState()
+	if err != nil {
+		return err
+	}
+	updated := harnessvalid.AppendToProjectsSection(st.Projects, "Notes", strings.TrimSpace(text))
+	if err := harnessvalid.ValidateProjects(updated); err != nil {
+		return err
+	}
+	st.Projects = updated
+	return s.writeState(st)
 }
 
 func truncate(s string, n int) string {
@@ -790,6 +948,49 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+func compactStrings(values []string, limit, maxLen int) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, limit)
+	for _, value := range values {
+		value = truncate(value, maxLen)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+		if len(out) == limit {
+			break
+		}
+	}
+	return out
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func withoutString(values []string, needle string) []string {
+	out := values[:0]
+	for _, value := range values {
+		if value != needle {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func max(a, b int) int {

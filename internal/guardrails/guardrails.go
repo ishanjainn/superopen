@@ -19,10 +19,11 @@ type Rule struct {
 	Source      string `yaml:"source,omitempty" json:"source,omitempty"`
 }
 
-// File is the single on-disk guardrails document (.so/guardrails/guardrails.yaml).
+// File is the single on-disk guardrails document (.so/guardrails.yaml).
 type File struct {
 	Rules          []Rule   `yaml:"rules,omitempty"`
 	Approval       string   `yaml:"approval"` // yolo | auto | interactive
+	DeniedTools    []string `yaml:"denied_tools"`
 	DeniedCommands []string `yaml:"denied_commands"`
 	SensitivePaths []string `yaml:"sensitive_paths"`
 	RedactOutput   bool     `yaml:"redact_output"`
@@ -31,6 +32,7 @@ type File struct {
 // Policy is the enforcement slice of File (used by hooks).
 type Policy struct {
 	Approval       string   `yaml:"approval"`
+	DeniedTools    []string `yaml:"denied_tools"`
 	DeniedCommands []string `yaml:"denied_commands"`
 	SensitivePaths []string `yaml:"sensitive_paths"`
 	RedactOutput   bool     `yaml:"redact_output"`
@@ -52,6 +54,7 @@ func DefaultPolicy() Policy {
 	return Policy{
 		Approval:     "interactive",
 		RedactOutput: true,
+		DeniedTools:  []string{},
 		DeniedCommands: []string{
 			"rm -rf /",
 			"rm -rf /*",
@@ -67,6 +70,7 @@ func DefaultPolicy() Policy {
 		// Narrow by default: only Superopen audit trail.
 		// Broader secret-path blocks are opt-in via editing guardrails.yaml.
 		SensitivePaths: []string{
+			"**/.so/sessions/**",
 			"**/.so/audit/**",
 		},
 	}
@@ -74,7 +78,7 @@ func DefaultPolicy() Policy {
 
 // Path is the canonical single guardrails file.
 func Path(paths harness.Paths) string {
-	return filepath.Join(paths.GuardrailsDir, "guardrails.yaml")
+	return paths.GuardrailsFile
 }
 
 func Load(paths harness.Paths) (Engine, error) {
@@ -91,6 +95,9 @@ func Load(paths harness.Paths) (Engine, error) {
 	if len(f.DeniedCommands) > 0 {
 		eng.Policy.DeniedCommands = f.DeniedCommands
 	}
+	if f.DeniedTools != nil {
+		eng.Policy.DeniedTools = f.DeniedTools
+	}
 	if len(f.SensitivePaths) > 0 {
 		eng.Policy.SensitivePaths = f.SensitivePaths
 	}
@@ -103,7 +110,7 @@ func Load(paths harness.Paths) (Engine, error) {
 
 // EnsureDefaults ensures guardrails.yaml exists with baseline policy fields.
 func EnsureDefaults(paths harness.Paths) error {
-	if err := os.MkdirAll(paths.GuardrailsDir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(paths.GuardrailsFile), 0o755); err != nil {
 		return err
 	}
 	dst := Path(paths)
@@ -114,6 +121,7 @@ func EnsureDefaults(paths harness.Paths) error {
 	f := File{
 		Approval:       def.Approval,
 		RedactOutput:   def.RedactOutput,
+		DeniedTools:    def.DeniedTools,
 		DeniedCommands: def.DeniedCommands,
 		SensitivePaths: def.SensitivePaths,
 	}
@@ -121,12 +129,31 @@ func EnsureDefaults(paths harness.Paths) error {
 	if err != nil {
 		return err
 	}
-	header := "# Superopen guardrails (advisory rules + enforcement)\n# Edit freely; so sync will not overwrite.\n\n"
+	header := "# Superopen guardrails. These are shared project safety rules enforced at coding-agent hook boundaries.\n# Authoritative project policy updated by project maintainers; so sync will not overwrite.\n\n"
 	return os.WriteFile(dst, append([]byte(header), data...), 0o644)
 }
 
 func (e Engine) deniedCommands() []string {
 	return append([]string{}, e.Policy.DeniedCommands...)
+}
+
+func (e Engine) deniedTools() []string {
+	return append([]string{}, e.Policy.DeniedTools...)
+}
+
+// CheckTool enforces exact or wildcard matches against a vendor's tool name.
+func (e Engine) CheckTool(tool string) Decision {
+	tool = strings.ToLower(strings.TrimSpace(tool))
+	if tool == "" {
+		return Decision{Allow: true}
+	}
+	for _, pattern := range e.deniedTools() {
+		pattern = strings.ToLower(strings.TrimSpace(pattern))
+		if pattern != "" && wildMatch(pattern, tool) {
+			return Decision{Allow: false, Reason: "denied tool pattern", Rule: pattern, Matcher: "tool"}
+		}
+	}
+	return Decision{Allow: true}
 }
 
 func (e Engine) sensitivePaths() []string {
@@ -172,9 +199,11 @@ func (e Engine) Explain() map[string]any {
 		"rules":           e.Rules,
 		"rules_count":     len(e.Rules),
 		"approval":        e.Approval(),
+		"denied_tools":    e.deniedTools(),
 		"denied_commands": e.deniedCommands(),
 		"sensitive_paths": e.sensitivePaths(),
 		"redact_output":   e.Policy.RedactOutput,
+		"tool_count":      len(e.deniedTools()),
 		"denied_count":    len(e.deniedCommands()),
 		"sensitive_count": len(e.sensitivePaths()),
 	}

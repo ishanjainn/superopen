@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 const pendingFileName = "PENDING.json"
@@ -47,7 +49,11 @@ type PendingResume struct {
 }
 
 func portRunDir(repoRoot string) string {
-	return filepath.Join(repoRoot, ".so", "port")
+	dir, err := userpaths.RuntimeDir(repoRoot)
+	if err != nil {
+		return filepath.Join(os.TempDir(), "superopen-runtime", "port")
+	}
+	return filepath.Join(dir, "port")
 }
 
 // ArmResume writes a one-shot pending conversation for the next coding-agent

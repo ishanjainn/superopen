@@ -13,6 +13,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/llm"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/recommend"
+	"github.com/ishanjainn/superopen/internal/session"
 )
 
 var correctionRes = []*regexp.Regexp{
@@ -57,7 +58,15 @@ func MineTranscript(paths harness.Paths, sessionID string, transcriptLines []str
 	}
 	var recs []recommend.Recommendation
 	now := time.Now().UTC()
+	vendor := ""
+	if meta, err := session.NewStore(paths).Get(sessionID); err == nil {
+		vendor = meta.Vendor
+	}
+	skillsDir := harness.SkillsDirForVendor(paths.RepoRoot, vendor)
 	for _, l := range lessons {
+		if skillsDir == "" {
+			continue
+		}
 		body := heuristicSkillBody(l.Text)
 		if completer != nil && completer.Available() {
 			if out, err := completer.Complete(
@@ -68,7 +77,7 @@ func MineTranscript(paths harness.Paths, sessionID string, transcriptLines []str
 			}
 		}
 		slug := slugify(l.Text)
-		path := paths.SkillSKILL(slug)
+		path := filepath.Join(skillsDir, slug, "SKILL.md")
 		recs = append(recs, recommend.Recommendation{
 			ID:           fmt.Sprintf("rec_learn_%d_%s", now.UnixNano(), slug),
 			Fingerprint:  recommend.FingerprintKey("skill", path, slug),
@@ -90,9 +99,9 @@ func MineTranscript(paths harness.Paths, sessionID string, transcriptLines []str
 	return lessons, recs, nil
 }
 
-// MineSessionFile reads .so/sessions/<id>/transcript.jsonl loosely as text lines.
+// MineSessionFile reads .so/sessions/<id>/events.jsonl loosely as text lines.
 func MineSessionFile(paths harness.Paths, sessionID string, completer llm.Completer) ([]memory.Lesson, []recommend.Recommendation, error) {
-	p := filepath.Join(paths.SessionDir(sessionID), "transcript.jsonl")
+	p := filepath.Join(paths.SessionDir(sessionID), "events.jsonl")
 	data, err := os.ReadFile(p)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -105,7 +114,7 @@ func MineSessionFile(paths harness.Paths, sessionID string, completer llm.Comple
 }
 
 func heuristicSkillBody(text string) string {
-	return fmt.Sprintf("# Skill from correction\n\n## Rule\n\n%s\n\n## Checklist\n\n1. Apply this rule before finishing related work.\n2. Prefer `.so/memory/active-context.md` and graph query over rediscovery.\n", text)
+	return fmt.Sprintf("# Skill from correction\n\n## Rule\n\n%s\n\n## Checklist\n\n1. Apply this rule before finishing related work.\n2. Prefer `.so/memory/context.md` and graph query over rediscovery.\n", text)
 }
 
 func slugify(s string) string {

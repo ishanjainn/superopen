@@ -139,11 +139,11 @@ const (
 	CodingAgentEditDecisionModify       = "modify"
 	CodingAgentEditDecisionAutoAccepted = "auto_accepted"
 
-	CodingAgentEditDecisionSourceUserInteractive    = "user_interactive"
-	CodingAgentEditDecisionSourceUserPermanentRule  = "user_permanent_rule"
-	CodingAgentEditDecisionSourceHook               = "hook"
-	CodingAgentEditDecisionSourceConfig             = "config"
-	CodingAgentEditDecisionSourcePolicy             = "policy"
+	CodingAgentEditDecisionSourceUserInteractive   = "user_interactive"
+	CodingAgentEditDecisionSourceUserPermanentRule = "user_permanent_rule"
+	CodingAgentEditDecisionSourceHook              = "hook"
+	CodingAgentEditDecisionSourceConfig            = "config"
+	CodingAgentEditDecisionSourcePolicy            = "policy"
 )
 
 // Tool causality attributes - link tool invocations back to the model
@@ -210,10 +210,6 @@ const (
 	// CodingAgentPolicyPermissionMode captures how permissive the run is
 	// (e.g. "interactive", "auto_accept", "dangerously_skip_permissions").
 	CodingAgentPolicyPermissionMode = "coding_agent.policy.permission_mode"
-	// CodingAgentContentCaptureMode is the active capture posture:
-	// minimal | metadata_only | full. See `cli/internal/otlp/attrs.go`
-	// for the per-mode attribute matrix.
-	CodingAgentContentCaptureMode = "coding_agent.content_capture_mode"
 )
 
 const (
@@ -222,18 +218,8 @@ const (
 	CodingAgentUserClassificationDisputed = "disputed"
 	CodingAgentUserClassificationUnknown  = "unknown"
 
-	// CodingAgentContentCaptureMinimal - only session bookends and
-	// rolled-up counters. No per-event spans. Cheapest tier; for
-	// enterprises that want budget visibility without per-prompt
-	// content. See Phase C of the coding-agents plan.
-	CodingAgentContentCaptureMinimal = "minimal"
-	// CodingAgentContentCaptureMetadataOnly - per-event spans with
-	// counts/timings/cost/repo but redacted bodies (no prompts, no
-	// tool args, no shell flags). Recommended default.
-	CodingAgentContentCaptureMetadataOnly = "metadata_only"
-	// CodingAgentContentCaptureFull - everything metadata mode has
-	// plus prompts, responses, thoughts, tool args, tool results.
-	// Tier-2 PII redaction still runs. For trust+safety reviews.
+	// CodingAgentContentCaptureFull is the invariant used internally by
+	// adapters: all local event fields are retained after secret redaction.
 	CodingAgentContentCaptureFull = "full"
 )
 
@@ -262,11 +248,11 @@ const (
 // Span names emitted by the CLI normalizer. Keep these as constants so
 // dashboard SQL can match against a small, stable set.
 const (
-	CodingAgentSpanSession        = "coding_agent.session"
-	CodingAgentSpanToolCall       = "coding_agent.tool.call"
-	CodingAgentSpanEditDecision   = "coding_agent.edit.decision"
-	CodingAgentSpanSubagent       = "coding_agent.subagent"
-	CodingAgentSpanLLMTurn        = "coding_agent.llm.turn"
+	CodingAgentSpanSession      = "coding_agent.session"
+	CodingAgentSpanToolCall     = "coding_agent.tool.call"
+	CodingAgentSpanEditDecision = "coding_agent.edit.decision"
+	CodingAgentSpanSubagent     = "coding_agent.subagent"
+	CodingAgentSpanLLMTurn      = "coding_agent.llm.turn"
 	// CodingAgentSpanGitCommit is emitted when the agent's Bash /
 	// shell tool ran a `git commit` invocation. One span per detected
 	// commit, child of the session-root trace.

@@ -13,10 +13,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ishanjainn/superopen/internal/audit"
+	"github.com/ishanjainn/superopen/internal/axi"
 	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/guardrails"
 	"github.com/ishanjainn/superopen/internal/harness"
-	"github.com/ishanjainn/superopen/internal/axi"
 	"github.com/ishanjainn/superopen/internal/learn"
 	"github.com/ishanjainn/superopen/internal/llm"
 	"github.com/ishanjainn/superopen/internal/memory"
@@ -151,7 +151,7 @@ func cmdMemory() *cobra.Command {
 
 	refresh := &cobra.Command{
 		Use:   "refresh",
-		Short: "Rebuild active-context.md inject pack",
+		Short: "Rebuild context.md inject pack",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			q, _ := cmd.Flags().GetString("query")
 			paths := harness.Resolve(repoRoot())
@@ -476,7 +476,7 @@ func attachSessionsStart(sessions *cobra.Command) {
 	start.Flags().StringVar(&query, "query", "", "Optional memory retrieval query")
 	start.Flags().StringVar(&mode, "mode", "persistent", "persistent|incognito|temporary")
 	start.Flags().BoolVar(&fromMemory, "from-memory", true, "Build memory pack (always true)")
-	start.Flags().BoolVar(&noLaunch, "no-launch", false, "Only write active-context.md")
+	start.Flags().BoolVar(&noLaunch, "no-launch", false, "Only write context.md")
 	_ = fromMemory
 	sessions.AddCommand(start)
 }

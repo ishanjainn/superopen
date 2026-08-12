@@ -78,7 +78,7 @@ func (s *Store) HybridSearchVendor(q string, limit int, vendor string) ([]Search
 	return out, nil
 }
 
-// RefreshActive rebuilds active-context.md (Write→Store→Inject).
+// RefreshActive rebuilds context.md (Write→Store→Inject).
 func (s *Store) RefreshActive(query string) (ContextPack, error) {
 	return s.BuildSessionContext(12000, query, ModePersistent)
 }

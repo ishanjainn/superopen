@@ -33,10 +33,10 @@ type Flags struct {
 
 // Out is the presentation context for one command invocation.
 type Out struct {
-	Flags  Flags
-	W      io.Writer
-	ErrW   io.Writer
-	hints  []string
+	Flags Flags
+	W     io.Writer
+	ErrW  io.Writer
+	hints []string
 }
 
 // Bind attaches --json / --full to the root command (persistent).

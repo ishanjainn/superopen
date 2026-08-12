@@ -161,7 +161,7 @@ function loadOpenCodeTitles(): Map<string, string> {
   return titles;
 }
 
-/** Refresh OpenCode stub titles from the host DB and persist into meta.json. */
+/** Refresh OpenCode stub titles from the host DB and persist into session.json. */
 function resolveOpenCodeTitle(meta: SessionMeta, sessionPath: string): void {
   const vendor = String(meta.vendor || "").toLowerCase();
   if (!vendor.includes("opencode")) return;
@@ -170,7 +170,7 @@ function resolveOpenCodeTitle(meta: SessionMeta, sessionPath: string): void {
   if (!got) return;
   meta.title = got;
   try {
-    const path = join(sessionPath, "meta.json");
+    const path = join(sessionPath, "session.json");
     const onDisk = readJSON<SessionMeta>(path);
     if (!onDisk) return;
     if (!isPlaceholderTitle(onDisk.title, onDisk.id || meta.id)) return;
@@ -185,7 +185,7 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function loadAgentLinks(sessionsDir: string): Record<string, string> {
-  const path = join(sessionsDir, "agent-links.json");
+  const path = join(sessionsDir, "index.json");
   const doc = readJSON<{ links?: Record<string, { parent_id?: string }> }>(path);
   const out: Record<string, string> = {};
   for (const [child, entry] of Object.entries(doc?.links || {})) {
@@ -217,7 +217,7 @@ function discoverCursorParent(childId: string): string {
 }
 
 function clearAgentLink(sessionsDir: string, childId: string) {
-  const path = join(sessionsDir, "agent-links.json");
+  const path = join(sessionsDir, "index.json");
   const existing = readJSON<{ links: Record<string, { parent_id: string; source?: string }> }>(
     path
   );
@@ -237,20 +237,19 @@ function clearFalseNesting(sessionPath: string, sessionsDir: string, meta: Sessi
   meta.parent_id = undefined;
   meta.is_subagent = false;
   try {
-    writeFileSync(join(sessionPath, "meta.json"), JSON.stringify(meta, null, 2));
+    writeFileSync(join(sessionPath, "session.json"), JSON.stringify(meta, null, 2));
   } catch {
     /* best-effort */
   }
 }
 
 function parentIsEmptyStub(sessionsDir: string, parentId: string): boolean {
-  const metaPath = join(sessionsDir, parentId, "meta.json");
+  const metaPath = join(sessionsDir, parentId, "session.json");
   if (!fileExists(metaPath)) return false; // parent not on disk yet - keep nesting
   const meta = readJSON<SessionMeta>(metaPath);
   if (!meta) return false;
   const sessionPath = join(sessionsDir, parentId);
-  const soDir = join(sessionsDir, "..");
-  const stats = enrichSessionStats(soDir, sessionPath, meta);
+  const stats = enrichSessionStats(sessionPath, meta);
   return isEmptySession({
     ...meta,
     checkpoints: stats.checkpoints,
@@ -265,10 +264,16 @@ function persistAgentLink(
   childId: string,
   parentId: string
 ) {
-  const path = join(sessionsDir, "agent-links.json");
+  const path = join(sessionsDir, "index.json");
   let doc: { links: Record<string, { parent_id: string; source?: string }> } = {
+    _about: {
+      purpose: "Rebuildable catalog of sessions, parent-child links, pending reviews, and the latest session for each vendor.",
+      authority: "derived from session.json files with temporary coordination state",
+      updated_by: "session ingestion and review workers",
+    },
+    sessions: [],
     links: {},
-  };
+  } as { links: Record<string, { parent_id: string; source?: string }> };
   const existing = readJSON<typeof doc>(path);
   if (existing?.links) doc = existing;
   if (doc.links[childId]?.parent_id === parentId) return;
@@ -289,7 +294,7 @@ function repairSubagentMeta(
   meta.parent_id = parentId;
   meta.is_subagent = true;
   try {
-    writeFileSync(join(sessionPath, "meta.json"), JSON.stringify(meta, null, 2));
+    writeFileSync(join(sessionPath, "session.json"), JSON.stringify(meta, null, 2));
   } catch {
     /* best-effort */
   }
@@ -299,7 +304,7 @@ function repairOrphanSubagentFlag(sessionPath: string, meta: SessionMeta) {
   if (!meta.is_subagent || meta.parent_id) return;
   meta.is_subagent = false;
   try {
-    writeFileSync(join(sessionPath, "meta.json"), JSON.stringify(meta, null, 2));
+    writeFileSync(join(sessionPath, "session.json"), JSON.stringify(meta, null, 2));
   } catch {
     /* best-effort */
   }
@@ -383,32 +388,21 @@ export type RestoreCheckpoint = {
 function listCheckpoints(sessionPath: string, sessionId: string): RestoreCheckpoint[] {
   const dir = join(sessionPath, "checkpoints");
   if (!fileExists(dir)) return [];
-  const out: RestoreCheckpoint[] = [];
-  try {
-    for (const name of readdirSync(dir)) {
-      const cpDir = join(dir, name);
-      try {
-        if (!statSync(cpDir).isDirectory()) continue;
-      } catch {
-        continue;
-      }
-      const meta =
-        readJSON<RestoreCheckpoint>(join(cpDir, "meta.json")) ||
-        ({ id: Number(name) || 0 } as RestoreCheckpoint);
-      if (!meta.id) meta.id = Number(name) || out.length + 1;
-      if (!meta.session_id) meta.session_id = sessionId;
-      out.push(meta);
-    }
-  } catch {
-    return [];
-  }
+	const manifest = readJSON<{ checkpoints?: RestoreCheckpoint[] }>(join(dir, "manifest.json"));
+	const out = [...(manifest?.checkpoints || [])];
+	for (const meta of out) if (!meta.session_id) meta.session_id = sessionId;
   out.sort((a, b) => b.id - a.id);
   return out;
 }
 
-function countTurnsFromSpans(spans: TraceSpan[]): number {
+export function countTurnsFromSpans(spans: TraceSpan[]): number {
   let n = 0;
   for (const sp of spans) {
+    const name = String(sp.name || "").toLowerCase();
+    if (name.includes("user_prompt") || name.includes("user.prompt")) {
+      n++;
+      continue;
+    }
     const attrs = sp.attributes || {};
     if (attrs["gen_ai.prompt"] || attrs["gen_ai.content.prompt"]) {
       n++;
@@ -428,7 +422,7 @@ function countTurnsFromSpans(spans: TraceSpan[]): number {
 }
 
 function loadTranscriptSpans(sessionPath: string): TraceSpan[] {
-  const transcriptPath = join(sessionPath, "transcript.jsonl");
+  const transcriptPath = join(sessionPath, "events.jsonl");
   if (!fileExists(transcriptPath)) return [];
   const out: TraceSpan[] = [];
   for (const line of readText(transcriptPath).split("\n")) {
@@ -497,13 +491,11 @@ function codexRolloutUpdatedAt(sessionId: string): number {
 }
 
 function enrichSessionStats(
-  soDir: string,
   sessionPath: string,
   meta: SessionMeta
 ): { turns: number; checkpoints: number } {
   const spans = mergeTraceSpans(
-    loadTranscriptSpans(sessionPath),
-    loadLiveTraces(soDir, String(meta.id || ""))
+    loadTranscriptSpans(sessionPath)
   );
   return {
     turns: countTurnsFromSpans(spans),
@@ -521,70 +513,15 @@ function spanSessionIDs(sp: TraceSpan): string[] {
   ].filter(Boolean) as string[];
 }
 
-/** Read live OTLP spans for a session from .so/traces/*.jsonl (active sessions). */
-function loadLiveTraces(soDir: string, sessionId: string): TraceSpan[] {
-  const tracesDir = join(soDir, "traces");
-  if (!fileExists(tracesDir)) return [];
-  const out: TraceSpan[] = [];
-  for (const name of readdirSync(tracesDir)) {
-    if (!name.endsWith(".jsonl")) continue;
-    let body = "";
-    try {
-      body = readText(join(tracesDir, name));
-    } catch {
-      continue;
-    }
-    for (const line of body.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const sp = JSON.parse(line) as TraceSpan;
-        if (spanSessionIDs(sp).includes(sessionId)) out.push(sp);
-      } catch {
-        /* skip */
-      }
-    }
-  }
-  out.sort(
-    (a, b) =>
-      Number(a.start_time_unix_nano || 0) - Number(b.start_time_unix_nano || 0)
-  );
-  return out;
-}
-
-/** session id → gen_ai.user.name from daily OTLP dumps (best-effort). */
+/** session id → gen_ai.user.name from file-backed session streams. */
 function loadUserMap(soDir: string): Map<string, string> {
   const out = new Map<string, string>();
-  const tracesDir = join(soDir, "traces");
-  if (!fileExists(tracesDir)) return out;
-  let names: string[] = [];
-  try {
-    names = readdirSync(tracesDir).filter((n) => n.endsWith(".jsonl"));
-  } catch {
-    return out;
-  }
-  // Newest first so active identity wins.
-  names.sort().reverse();
-  for (const name of names) {
-    let body = "";
-    try {
-      body = readText(join(tracesDir, name));
-    } catch {
-      continue;
-    }
-    for (const line of body.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const sp = JSON.parse(line) as TraceSpan;
-        const user = String(sp.attributes?.["gen_ai.user.name"] || "").trim();
-        if (!user) continue;
-        for (const id of spanSessionIDs(sp)) {
-          if (id && !out.has(id)) out.set(id, user);
-        }
-      } catch {
-        /* skip */
-      }
-    }
-  }
+	const sessionsDir = join(soDir, "sessions");
+	if (!fileExists(sessionsDir)) return out;
+	for (const name of readdirSync(sessionsDir)) {
+		const meta = readJSON<SessionMeta>(join(sessionsDir, name, "session.json"));
+		if (meta?.id && meta.user) out.set(meta.id, String(meta.user));
+	}
   return out;
 }
 
@@ -642,7 +579,7 @@ function matchToolName(name: string, needle: string): boolean {
   return n.includes(needle) || needle.includes(n);
 }
 
-/** Scan transcript / live OTLP spans for file, tool, or chat hits. */
+/** Scan the session event stream for file, tool, or chat hits. */
 function matchSpansContent(
   spans: TraceSpan[],
   needle: string,
@@ -704,13 +641,12 @@ function loadSessionSpans(item: ListItem): TraceSpan[] {
   if (!so || !item.id) return [];
   const sessionPath = join(so, "sessions", item.id);
   return mergeTraceSpans(
-    loadTranscriptSpans(sessionPath),
-    loadLiveTraces(so, item.id)
+    loadTranscriptSpans(sessionPath)
   );
 }
 
 /**
- * Match free text / file: / tool: against title, footprint files, transcript, and live traces.
+ * Match free text / file: / tool: against title, footprint files, and the session event stream.
  * Returns a label like `file:foo.ts`, `tool:Bash`, `chat:…`, or `title`.
  */
 function matchSessionContent(
@@ -756,7 +692,7 @@ function listSessionsInSo(soDir: string, projectId: string): ListItem[] {
     } catch {
       continue;
     }
-    const meta = readJSON<SessionMeta>(join(sessionPath, "meta.json"));
+    const meta = readJSON<SessionMeta>(join(sessionPath, "session.json"));
     if (!meta) continue;
     if (!meta.id) meta.id = name;
     resolveOpenCodeTitle(meta, sessionPath);
@@ -764,14 +700,13 @@ function listSessionsInSo(soDir: string, projectId: string): ListItem[] {
     if (meta.id === "unknown" || name === "unknown") continue;
     // Subagents are not top-level sessions - they nest under the parent chat.
     if (isNestedSubagent(meta, links, dir)) continue;
-    const footprint = readJSON<{ files?: { path: string }[] }>(
-      join(sessionPath, "footprint.json")
-    );
+		const sessionDoc = readJSON<{ footprint?: { files?: { path: string }[] } }>(join(sessionPath, "session.json"));
+		const footprint = sessionDoc?.footprint;
     const files = (footprint?.files || []).map((f) => f.path).filter(Boolean);
     const title = displayTitle(meta);
     const user =
       String(meta.user || "").trim() || users.get(meta.id) || undefined;
-    const stats = enrichSessionStats(soDir, sessionPath, meta);
+    const stats = enrichSessionStats(sessionPath, meta);
     const item: ListItem = {
       ...meta,
       user,
@@ -916,7 +851,7 @@ export function getSessionDetail(id: string, projectFilter = "") {
     const sessionPath = join(so, "sessions", id);
     if (!fileExists(sessionPath)) continue;
     const meta =
-      readJSON<SessionMeta>(join(sessionPath, "meta.json")) ||
+      readJSON<SessionMeta>(join(sessionPath, "session.json")) ||
       ({ id } as SessionMeta);
     if (!meta.id) meta.id = id;
     resolveOpenCodeTitle(meta, sessionPath);
@@ -929,13 +864,10 @@ export function getSessionDetail(id: string, projectFilter = "") {
       meta.user = users.get(id) || undefined;
     }
 
-    const footprint = readJSON(join(sessionPath, "footprint.json"));
-    // Materialized transcripts can lag behind live OTLP during an active chat.
-    // Merge both sources so an existing stale transcript never hides new turns.
-    const transcript = mergeTraceSpans(
-      loadTranscriptSpans(sessionPath),
-      loadLiveTraces(so, id)
-    );
+		const sessionDoc = readJSON<{ footprint?: unknown; evaluation?: unknown; review?: { findings?: unknown[] } }>(join(sessionPath, "session.json"));
+		const footprint = sessionDoc?.footprint;
+    // Hooks append directly to this file, including during active chats.
+    const transcript = loadTranscriptSpans(sessionPath);
     const rolloutUpdatedAt = codexRolloutUpdatedAt(id);
     const recordedEnd = meta.ended_at ? new Date(meta.ended_at).getTime() : 0;
     if (
@@ -948,7 +880,7 @@ export function getSessionDetail(id: string, projectFilter = "") {
       meta.status = "active";
       meta.ended_at = undefined;
       try {
-        writeFileSync(join(sessionPath, "meta.json"), JSON.stringify(meta, null, 2));
+        writeFileSync(join(sessionPath, "session.json"), JSON.stringify(meta, null, 2));
       } catch {
         // The response can still report the corrected in-memory status.
       }
@@ -960,7 +892,7 @@ export function getSessionDetail(id: string, projectFilter = "") {
       for (const name of readdirSync(sessionsDir)) {
         if (name === "index.json" || name.startsWith(".") || name === id) continue;
         const childMeta = readJSON<SessionMeta>(
-          join(sessionsDir, name, "meta.json")
+          join(sessionsDir, name, "session.json")
         );
         if (!childMeta) continue;
         if (!childMeta.id) childMeta.id = name;
@@ -988,9 +920,8 @@ export function getSessionDetail(id: string, projectFilter = "") {
       );
     }
 
-    const stats = enrichSessionStats(so, sessionPath, meta);
-    const evalPath = join(sessionPath, "eval.json");
-    const evalResult = fileExists(evalPath) ? readJSON(evalPath) : null;
+    const stats = enrichSessionStats(sessionPath, meta);
+		const evalResult = sessionDoc?.evaluation || null;
     return {
       meta,
       transcript,
@@ -999,6 +930,7 @@ export function getSessionDetail(id: string, projectFilter = "") {
       // Replay lives in Map / `so sessions` CLI - not duplicated in Chat.
       replay: undefined,
       eval: evalResult,
+      findings: Array.isArray(sessionDoc?.review?.findings) ? sessionDoc.review.findings : [],
       subagents,
     };
   }

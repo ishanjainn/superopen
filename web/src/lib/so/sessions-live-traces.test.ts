@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeTraceSpans } from "./sessions";
+import { countTurnsFromSpans, mergeTraceSpans } from "./sessions";
 
 describe("mergeTraceSpans", () => {
   it("adds live spans that are newer than a materialized transcript", () => {
@@ -34,5 +34,18 @@ describe("mergeTraceSpans", () => {
     ];
 
     expect(mergeTraceSpans(turns)).toEqual(turns);
+  });
+});
+
+describe("file-backed active sessions", () => {
+  it("counts a prompt hook event as a visible turn before session end", () => {
+    expect(
+      countTurnsFromSpans([
+        {
+          name: "coding_agent.user_prompt.submit",
+          attributes: { "coding_agent.session.id": "session-1" },
+        },
+      ])
+    ).toBe(1);
   });
 });

@@ -17,7 +17,12 @@ func TestResolveAndEnsureDirs(t *testing.T) {
 	if !p.Exists() {
 		t.Fatal("expected harness to exist")
 	}
-	if _, err := os.Stat(filepath.Join(p.Root, "sessions")); err != nil {
+	if _, err := os.Stat(filepath.Join(p.Root, "graph")); err != nil {
 		t.Fatal(err)
+	}
+	for _, dir := range []string{"sessions", "memory", "audit"} {
+		if _, err := os.Stat(filepath.Join(p.Root, dir)); err != nil {
+			t.Fatalf("expected eager %s directory: %v", dir, err)
+		}
 	}
 }

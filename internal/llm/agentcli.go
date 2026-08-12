@@ -75,6 +75,25 @@ func NewBestCompleter(cfg config.Config) Completer {
 	return NewCompleterForBackend(cfg, backend)
 }
 
+// NewVendorCompleter keeps self-review vendor-affine when that vendor has a
+// sealed CLI. Other vendors use the configured fallback and record its backend.
+func NewVendorCompleter(cfg config.Config, vendor string) Completer {
+	v := strings.ToLower(strings.TrimSpace(vendor))
+	prefer := ""
+	if strings.Contains(v, "claude") {
+		prefer = "claude"
+	}
+	if strings.Contains(v, "codex") {
+		prefer = "codex"
+	}
+	if prefer != "" {
+		if c := newAgentCLI(cfg, prefer); c != nil && c.Available() {
+			return c
+		}
+	}
+	return NewBestCompleter(cfg)
+}
+
 // NewMemoryCompleter uses memory.backend (default auto) - agent CLI preferred.
 func NewMemoryCompleter(cfg config.Config) Completer {
 	backend := cfg.Memory.Backend
@@ -107,7 +126,7 @@ func NewCompleterForBackend(cfg config.Config, backend string) Completer {
 		if c := newAgentCLI(cfg, wantCLI); c != nil && c.Available() {
 			return c
 		}
-		if api.Available() {
+		if cfg.HasExplicitLLM() && api.Available() {
 			return api
 		}
 		return nil

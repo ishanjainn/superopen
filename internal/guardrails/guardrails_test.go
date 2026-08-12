@@ -24,9 +24,13 @@ func TestDenyCommandAndSensitivePath(t *testing.T) {
 	if d.Allow {
 		t.Fatalf("expected deny, got %#v", d)
 	}
+	d = eng.CheckPath("/tmp/project/.so/sessions/session-1/events.jsonl")
+	if d.Allow {
+		t.Fatalf("expected session-history deny, got %#v", d)
+	}
 	d = eng.CheckPath("/tmp/project/.so/audit/events.jsonl")
 	if d.Allow {
-		t.Fatalf("expected audit-path deny, got %#v", d)
+		t.Fatalf("expected audit-history deny, got %#v", d)
 	}
 	// Normal secrets paths are NOT hard-denied by default.
 	d = eng.CheckPath("/tmp/project/.env")
@@ -36,6 +40,18 @@ func TestDenyCommandAndSensitivePath(t *testing.T) {
 	d = eng.CheckCommand("go test ./...")
 	if !d.Allow {
 		t.Fatalf("expected allow, got %#v", d)
+	}
+}
+
+func TestDenyToolSupportsExactAndWildcardNames(t *testing.T) {
+	eng := Engine{Policy: Policy{DeniedTools: []string{"mcp__production__delete_*", "browser.close"}}}
+	for _, tool := range []string{"mcp__production__delete_record", "BROWSER.CLOSE"} {
+		if d := eng.CheckTool(tool); d.Allow || d.Matcher != "tool" {
+			t.Fatalf("tool %q was not denied: %#v", tool, d)
+		}
+	}
+	if d := eng.CheckTool("browser.open"); !d.Allow {
+		t.Fatalf("unlisted tool denied: %#v", d)
 	}
 }
 
@@ -73,11 +89,10 @@ func TestEnsureDefaultsCreatesFile(t *testing.T) {
 	}
 }
 
-
 func TestMatchPathDoesNotDenyNormalFiles(t *testing.T) {
 	eng := Engine{Policy: DefaultPolicy()}
 	for _, p := range []string{
-		"/Users/me/work/cloud-onboarding/.so/upgrade-brief.md",
+		"/Users/me/work/cloud-onboarding/.so/config.yaml",
 		"/Users/me/work/cloud-onboarding/CLAUDE.md",
 		"/Users/me/work/repo/internal/config/config.go",
 		"/tmp/project/README.md",
@@ -87,10 +102,13 @@ func TestMatchPathDoesNotDenyNormalFiles(t *testing.T) {
 			t.Fatalf("unexpected deny for %s: %#v", p, d)
 		}
 	}
-	// Default policy only hard-denies Superopen audit paths.
-	d := eng.CheckPath("/tmp/project/.so/audit/events.jsonl")
+	// Default policy only hard-denies Superopen session and audit history paths.
+	d := eng.CheckPath("/tmp/project/.so/sessions/session-1/events.jsonl")
 	if d.Allow {
-		t.Fatalf("expected deny for audit path")
+		t.Fatalf("expected deny for session history path")
+	}
+	if d := eng.CheckPath("/tmp/project/.so/audit/events.jsonl"); d.Allow {
+		t.Fatalf("expected deny for audit history path")
 	}
 	for _, p := range []string{
 		"/Users/me/.ssh/id_rsa",

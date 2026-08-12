@@ -19,6 +19,16 @@ function fileParamFromPath(dir: string, path: string): string {
     }
     return rest;
   }
+  // Native vendor files keep their real repository-relative path in the URL.
+  const nativeRule =
+    dir === "rules" &&
+    /^\.(?:claude\/rules|cursor\/rules|agents\/rules|gemini\/rules|opencode\/rules|codex\/rules|github\/instructions|pi\/rules)\//.test(path);
+  const nativeSkill =
+    dir === "skills" &&
+    /^\.(?:claude|cursor|agents|gemini|opencode|codex|github|pi)\/skills\//.test(path);
+  if (nativeRule || nativeSkill) {
+    return path;
+  }
   const parts = path.split("/");
   return parts[parts.length - 1] || path;
 }
@@ -41,7 +51,7 @@ function matchEntry(
     list.find((e) => !e.isDir && e.path === q) ||
     list.find((e) => !e.isDir && e.path === underDir) ||
     list.find((e) => !e.isDir && e.name === q) ||
-    // skills: ?file=cursor/foo matches path …/cursor/foo/SKILL.md
+    // Backward compatibility for older skills/cursor/foo URLs.
     list.find(
       (e) =>
         !e.isDir &&

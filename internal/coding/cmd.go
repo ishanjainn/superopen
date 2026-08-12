@@ -8,7 +8,7 @@
 //	so coding launch    <claude|cursor|codex>
 //
 // All children share the resolved config from internal/config and the
-// OTLP exporter from internal/codingotlp. The hook subcommand is the hot path
+// local event exporter from internal/codingotlp. The hook subcommand is the hot path
 // invoked once per agent event and follows the crash-isolation rules
 // documented in cmd/so (crash-isolation / hard timeout).
 package coding

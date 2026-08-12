@@ -130,9 +130,9 @@ func TestEnsureTitleRefreshesOpenCodePlaceholder(t *testing.T) {
 	doc := `{"info":{"id":"` + id + `","title":"Repo scan request"}}`
 	_ = os.WriteFile(filepath.Join(dir, id+".json"), []byte(doc), 0o644)
 	meta := &Meta{
-		ID:    id,
+		ID:     id,
 		Vendor: "opencode",
-		Title: "New session - 2026-08-07T16:57:04.810Z",
+		Title:  "New session - 2026-08-07T16:57:04.810Z",
 	}
 	EnsureTitle(meta, nil)
 	if meta.Title != "Repo scan request" {

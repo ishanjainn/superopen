@@ -19,8 +19,8 @@ func TestWriteReadSessionSideRef(t *testing.T) {
 	run(t, root, "git", "commit", "-m", "init")
 
 	sha, err := WriteSession(root, "sess-1", map[string][]byte{
-		"meta.json":        []byte(`{"id":"sess-1"}`),
-		"transcript.jsonl": []byte("{\"role\":\"user\"}\n"),
+		"session.json": []byte(`{"id":"sess-1"}`),
+		"events.jsonl": []byte("{\"role\":\"user\"}\n"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -28,7 +28,7 @@ func TestWriteReadSessionSideRef(t *testing.T) {
 	if sha == "" {
 		t.Fatal("empty commit sha")
 	}
-	meta, err := ReadFile(root, "sess-1", "meta.json")
+	meta, err := ReadFile(root, "sess-1", "session.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,11 +41,11 @@ func TestWriteReadSessionSideRef(t *testing.T) {
 	}
 	// Second write appends parent commit (CAS).
 	if _, err := WriteSession(root, "sess-1", map[string][]byte{
-		"meta.json": []byte(`{"id":"sess-1","v":2}`),
+		"session.json": []byte(`{"id":"sess-1","v":2}`),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	meta, _ = ReadFile(root, "sess-1", "meta.json")
+	meta, _ = ReadFile(root, "sess-1", "session.json")
 	if string(meta) != `{"id":"sess-1","v":2}` {
 		t.Fatalf("meta after update=%s", meta)
 	}

@@ -1,7 +1,6 @@
 package seed
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,12 +17,13 @@ import (
 type SeedOptions struct {
 	TemplateRoot string
 	Profile      discover.Profile
-	// Force regenerates discovery-driven files (guardrails, evals, discovery.json, agent brief).
+	// Force regenerates the durable guardrail and evaluation policy files.
 	Force bool
 }
 
-// Seed writes native AGENTS.md / vendor rules / vendor skills plus .so runtime templates.
+// Seed writes shared AGENTS.md plus the three durable v2 policy files.
 func Seed(paths harness.Paths, opts SeedOptions) error {
+	cleanupObsoleteRuntimeArtifacts(paths)
 	p := opts.Profile
 	replacements := map[string]string{
 		"{{STRUCTURE}}": p.Structure,
@@ -48,31 +48,6 @@ func Seed(paths harness.Paths, opts SeedOptions) error {
 		return err
 	}
 
-	coding := readTpl("rules/coding.md")
-	if coding == "" {
-		coding = "# Coding rules\n\n- Prefer `so graph query` and `AGENTS.md` before broad Grep\n"
-	}
-	if codingPath, err := nativedocs.RulePath(paths, "coding"); err == nil {
-		if opts.Force {
-			_ = os.MkdirAll(filepath.Dir(codingPath), 0o755)
-			_ = os.WriteFile(codingPath, []byte(coding), 0o644)
-		} else if _, err := os.Stat(codingPath); err != nil {
-			_ = os.MkdirAll(filepath.Dir(codingPath), 0o755)
-			_ = os.WriteFile(codingPath, []byte(coding), 0o644)
-		}
-	}
-
-	for _, name := range []string{"create-api", "debugging", "testing"} {
-		body := readTpl("skills/" + name + ".md")
-		if body == "" {
-			body = "# " + name + "\n"
-		}
-		_ = nativedocs.WriteSkillCreateOnly(paths, name, body)
-		if opts.Force {
-			_ = os.WriteFile(paths.SkillSKILL(name), []byte(strings.TrimSpace(body)+"\n"), 0o644)
-		}
-	}
-
 	if err := seedGuardrails(paths, p, opts.TemplateRoot, opts.Force); err != nil {
 		return err
 	}
@@ -80,80 +55,39 @@ func Seed(paths harness.Paths, opts SeedOptions) error {
 		return err
 	}
 
-	rulesRel := harness.RelFromRepo(paths.RepoRoot, paths.RulesDir)
-	skillsRel := harness.RelFromRepo(paths.RepoRoot, paths.SkillsDir)
-	brief := fmt.Sprintf(`# Superopen agent brief
-
-Prefer AGENTS.md (and nested */AGENTS.md), existing vendor rules/skills dirs, and so graph query.
-
-- Graph: .so/graph/graph.json - query with `+"`so graph query`"+` (local, regenerable)
-- Knowledge: AGENTS.md
-- Rules: %s (%s)
-- Skills: %s/<name>/SKILL.md (%s)
-- Guardrails: .so/guardrails/guardrails.yaml
-- Active Context: .so/memory/active-context.md (SessionStart inject)
-`, rulesRel, harness.KindForRulesDir(paths.RulesDir), skillsRel, harness.KindForSkillsDir(paths.SkillsDir))
-	if len(p.Agents) > 0 {
-		brief += "\n## Existing agent instructions discovered\n\n"
-		for _, a := range p.Agents {
-			brief += fmt.Sprintf("- %s (%s)\n", a.Path, a.Kind)
-		}
-	}
-	if opts.Force {
-		_ = os.WriteFile(paths.AgentBrief, []byte(brief), 0o644)
-	} else if _, err := os.Stat(paths.AgentBrief); err != nil {
-		_ = os.WriteFile(paths.AgentBrief, []byte(brief), 0o644)
-	}
-
-	if _, err := os.Stat(paths.EvalsHistory); err != nil {
-		_ = os.WriteFile(paths.EvalsHistory, []byte("[]\n"), 0o644)
-	}
-	if _, err := os.Stat(paths.PendingRecs); err != nil {
-		_ = os.WriteFile(paths.PendingRecs, []byte("[]\n"), 0o644)
-	}
-	if _, err := os.Stat(paths.RecsHistory); err != nil {
-		_ = os.WriteFile(paths.RecsHistory, []byte("[]\n"), 0o644)
-	}
-	if _, err := os.Stat(paths.Lessons); err != nil {
-		_ = os.WriteFile(paths.Lessons, []byte("# Lessons\n\nApproved recommendations land here over time.\n"), 0o644)
-	}
-	_ = os.MkdirAll(filepath.Join(paths.MemoryDir, "history"), 0o755)
-	_ = os.MkdirAll(paths.AuditDir, 0o755)
-	if _, err := os.Stat(paths.SessionsIndex); err != nil {
-		_ = os.WriteFile(paths.SessionsIndex, []byte("[]\n"), 0o644)
-	}
-
-	if data, err := json.MarshalIndent(p, "", "  "); err == nil {
-		_ = os.WriteFile(filepath.Join(paths.Root, "discovery.json"), data, 0o644)
-	}
 	_ = seedSOGitignore(paths, opts.TemplateRoot)
 	return nil
 }
 
-const defaultSOGitignore = `# Superopen - tracked under .so/: config, guardrails, discovery, AGENT.md.
-# Everything regenerable or machine-local is ignored so feature branches stay clean.
+// cleanupObsoleteRuntimeArtifacts removes coordination files from pre-v2
+// hooks. Review ownership now lives in sessions/<id>/session.json, and small
+// throttles live in the consolidated OS runtime state.
+func cleanupObsoleteRuntimeArtifacts(paths harness.Paths) {
+	for _, path := range []string{
+		filepath.Join(paths.Root, "finalize-pending"),
+		filepath.Join(paths.MemoryDir, "approval-mismatch-at"),
+		filepath.Join(paths.MemoryDir, "idle-sweep-at"),
+		filepath.Join(paths.MemoryDir, "pending-harvest.json"),
+		filepath.Join(paths.MemoryDir, "last-refresh.json"),
+	} {
+		_ = os.Remove(path)
+	}
+	for _, path := range []string{
+		filepath.Join(paths.Root, "run"),
+		filepath.Join(paths.GraphDir, "cache"),
+	} {
+		_ = os.RemoveAll(path)
+	}
+}
 
-# Local telemetry / sessions / traces
-traces/
-sessions/
-audit/
-run/
-session-state/
-port/
-ui-prefs.json
-finalize-pending
+const defaultSOGitignore = `# Superopen tracking policy: configuration below is committed; generated graph, session, memory, and audit state stays local.
+# Updated by so init when the tracking policy changes; everything ignored below is derived or machine-local.
 
-# Regenerable graph + viz (agents still query local graph.json)
+# Local graph, sessions, memory, and audit history
 graph/
-viz/
-
-# Memory packs and harvest ledgers (durable guidance goes to AGENTS.md / .agents/)
+sessions/
 memory/
-
-# Eval run history + recommendation pending state (applied changes land in native docs)
-evals/history.json
-recommendations/pending.json
-recommendations/history.json
+audit/
 `
 
 func seedSOGitignore(paths harness.Paths, templateRoot string) error {
@@ -223,6 +157,7 @@ func seedGuardrails(paths harness.Paths, p discover.Profile, templateRoot string
 		Rules:          dedupeRules(rules),
 		Approval:       def.Approval,
 		RedactOutput:   def.RedactOutput,
+		DeniedTools:    def.DeniedTools,
 		DeniedCommands: def.DeniedCommands,
 		SensitivePaths: def.SensitivePaths,
 	}
@@ -230,6 +165,9 @@ func seedGuardrails(paths harness.Paths, p discover.Profile, templateRoot string
 	if data, err := os.ReadFile(filepath.Join(templateRoot, "guardrails", "guardrails.yaml")); err == nil {
 		var tmpl guardrails.File
 		if yaml.Unmarshal(data, &tmpl) == nil {
+			if tmpl.DeniedTools != nil {
+				out.DeniedTools = tmpl.DeniedTools
+			}
 			if len(tmpl.DeniedCommands) > 0 {
 				out.DeniedCommands = tmpl.DeniedCommands
 			}
@@ -249,7 +187,7 @@ func seedGuardrails(paths harness.Paths, p discover.Profile, templateRoot string
 	if err != nil {
 		return err
 	}
-	header := "# Generated by so init - advisory rules + enforcement.\n# Edit freely; so sync will not overwrite this file.\n"
+	header := "# Superopen guardrails. These are shared project safety rules enforced at coding-agent hook boundaries.\n# Authoritative project policy updated by project maintainers; so sync will not overwrite this file.\n"
 	return os.WriteFile(paths.GuardrailsFile, append([]byte(header), data...), 0o644)
 }
 
@@ -283,7 +221,8 @@ func seedEvals(paths harness.Paths, p discover.Profile, force bool) error {
 	}
 
 	var b strings.Builder
-	b.WriteString("# Generated by so init from graph + existing agent instruction files.\n")
+	b.WriteString("# Superopen evaluation policy. This defines how completed coding sessions are scored and which reviewer backends may be used.\n")
+	b.WriteString("# Authoritative project policy updated by project maintainers and so init from graph plus agent instructions.\n")
 	b.WriteString("checks:\n")
 	seen := map[string]bool{}
 	for _, c := range checks {

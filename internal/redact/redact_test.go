@@ -112,16 +112,6 @@ func TestStringFullCatchesGenericPasswords(t *testing.T) {
 	}
 }
 
-func TestForCaptureSelector(t *testing.T) {
-	if got := ForCapture("metadata_only")("password=secret_value_123"); got == "password="+Replacement {
-		// Tier 1 alone should NOT match this generic password pattern.
-		t.Errorf("metadata_only mode unexpectedly applied tier 2: %q", got)
-	}
-	if got := ForCapture("full")("password=secret_value_123"); !strings.Contains(got, Replacement) {
-		t.Errorf("full mode should have redacted: %q", got)
-	}
-}
-
 func TestEmptyString(t *testing.T) {
 	if got := String(""); got != "" {
 		t.Errorf("String(%q) = %q", "", got)

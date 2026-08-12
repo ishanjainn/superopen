@@ -12,8 +12,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/artifactmeta"
 	"github.com/ishanjainn/superopen/internal/harness"
-	"github.com/ishanjainn/superopen/internal/redact"
+	"github.com/ishanjainn/superopen/internal/session"
 )
 
 // Meta describes one checkpoint.
@@ -24,6 +25,11 @@ type Meta struct {
 	Label            string    `json:"label,omitempty"`
 	TranscriptOffset int64     `json:"transcript_offset,omitempty"`
 	Files            []string  `json:"files"`
+}
+
+type manifest struct {
+	About       artifactmeta.About `json:"_about"`
+	Checkpoints []Meta             `json:"checkpoints"`
 }
 
 // Store manages checkpoints for sessions in one harness.
@@ -82,13 +88,11 @@ func (s *Store) Create(sessionID, repoRoot, label string, relFiles []string, tra
 		if err != nil {
 			continue
 		}
-		// Redact secrets before persisting snapshot bytes.
-		text := redact.String(string(data))
 		dst := filepath.Join(filesDir, rel)
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			continue
 		}
-		if err := os.WriteFile(dst, []byte(text), 0o644); err != nil {
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
 			continue
 		}
 		saved = append(saved, rel)
@@ -102,8 +106,9 @@ func (s *Store) Create(sessionID, repoRoot, label string, relFiles []string, tra
 		TranscriptOffset: transcriptOffset,
 		Files:            saved,
 	}
-	b, _ := json.MarshalIndent(m, "", "  ")
-	if err := os.WriteFile(filepath.Join(base, "meta.json"), b, 0o644); err != nil {
+	list, _ := s.readManifest(sessionID)
+	list.Checkpoints = append(list.Checkpoints, m)
+	if err := s.writeManifest(sessionID, list); err != nil {
 		return Meta{}, err
 	}
 	return m, nil
@@ -154,30 +159,28 @@ func (s *Store) List(sessionID string) ([]Meta, error) {
 		}
 		return nil, err
 	}
-	var out []Meta
-	for _, e := range ents {
-		if !e.IsDir() {
-			continue
-		}
-		m, err := s.Get(sessionID, e.Name())
-		if err != nil {
-			continue
-		}
-		out = append(out, m)
+	_ = ents
+	mf, err := s.readManifest(sessionID)
+	if err != nil {
+		return nil, err
 	}
+	out := mf.Checkpoints
 	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
 	return out, nil
 }
 
 // Get loads checkpoint meta by id (string or int).
 func (s *Store) Get(sessionID, id string) (Meta, error) {
-	path := filepath.Join(s.dir(sessionID), id, "meta.json")
-	data, err := os.ReadFile(path)
+	mf, err := s.readManifest(sessionID)
 	if err != nil {
 		return Meta{}, err
 	}
-	var m Meta
-	return m, json.Unmarshal(data, &m)
+	for _, m := range mf.Checkpoints {
+		if strconv.Itoa(m.ID) == id {
+			return m, nil
+		}
+	}
+	return Meta{}, fmt.Errorf("checkpoint %s not found", id)
 }
 
 // Restore writes checkpoint files back into repoRoot (overwrites).
@@ -214,19 +217,9 @@ func (s *Store) Restore(sessionID, id, repoRoot string) error {
 
 // CreateFromFootprint snapshots edited files recorded in session footprint.
 func (s *Store) CreateFromFootprint(sessionID, repoRoot, label string) (Meta, error) {
-	fpPath := filepath.Join(s.Paths.SessionDir(sessionID), "footprint.json")
-	data, err := os.ReadFile(fpPath)
+	fp, err := session.NewStore(s.Paths).GetFootprint(sessionID)
 	if err != nil {
 		return Meta{}, fmt.Errorf("footprint: %w", err)
-	}
-	var fp struct {
-		Files []struct {
-			Path  string `json:"path"`
-			State string `json:"state"`
-		} `json:"files"`
-	}
-	if err := json.Unmarshal(data, &fp); err != nil {
-		return Meta{}, err
 	}
 	var rels []string
 	for _, f := range fp.Files {
@@ -235,4 +228,23 @@ func (s *Store) CreateFromFootprint(sessionID, repoRoot, label string) (Meta, er
 		}
 	}
 	return s.Create(sessionID, repoRoot, label, rels, 0)
+}
+
+func (s *Store) readManifest(sessionID string) (manifest, error) {
+	var mf manifest
+	data, err := os.ReadFile(filepath.Join(s.dir(sessionID), "manifest.json"))
+	if err != nil {
+		return mf, err
+	}
+	err = json.Unmarshal(data, &mf)
+	return mf, err
+}
+
+func (s *Store) writeManifest(sessionID string, mf manifest) error {
+	mf.About = artifactmeta.About{Purpose: "Lists exact restorable file snapshots captured during this session.", Authority: "checkpoint metadata", UpdatedBy: "checkpoint creation"}
+	b, err := json.MarshalIndent(mf, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(s.dir(sessionID), "manifest.json"), append(b, '\n'), 0o644)
 }

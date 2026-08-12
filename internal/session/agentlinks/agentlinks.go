@@ -19,8 +19,7 @@ import (
 	"time"
 )
 
-const fileName = "agent-links.json"
-const pendingFileName = "pending-spawns.json"
+const fileName = "index.json"
 
 // pendingTTL is how long an unclaimed subagentStart can be matched to
 // the next orphan child session that hooks in without a parent id.
@@ -43,7 +42,10 @@ type Entry struct {
 }
 
 type fileDoc struct {
-	Links map[string]Entry `json:"links"`
+	About    json.RawMessage  `json:"_about,omitempty"`
+	Sessions json.RawMessage  `json:"sessions,omitempty"`
+	Links    map[string]Entry `json:"links,omitempty"`
+	Pending  []PendingSpawn   `json:"pending_spawns,omitempty"`
 }
 
 // PendingSpawn records a parent that just emitted subagentStart /
@@ -139,7 +141,7 @@ func findRepoRoot(start string) (string, error) {
 }
 
 // ExtractAgentID pulls an agent id from Task/Agent tool output text
-//.
+// .
 func ExtractAgentID(blobs ...string) string {
 	for _, blob := range blobs {
 		blob = strings.TrimSpace(blob)
@@ -488,6 +490,12 @@ func saveLocked(sessionsDir string, doc fileDoc) error {
 	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
 		return err
 	}
+	if len(doc.About) == 0 {
+		doc.About = json.RawMessage(`{"purpose":"Rebuildable catalog of sessions, parent-child links, pending reviews, and the latest session for each vendor.","authority":"derived from session.json files with temporary coordination state","updated_by":"session ingestion and review workers"}`)
+	}
+	if len(doc.Sessions) == 0 {
+		doc.Sessions = json.RawMessage(`[]`)
+	}
 	raw, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return err
@@ -500,7 +508,7 @@ func saveLocked(sessionsDir string, doc fileDoc) error {
 }
 
 func pendingPath(sessionsDir string) string {
-	return filepath.Join(sessionsDir, pendingFileName)
+	return Path(sessionsDir)
 }
 
 func loadPendingLocked(sessionsDir string) (pendingDoc, error) {
@@ -508,18 +516,20 @@ func loadPendingLocked(sessionsDir string) (pendingDoc, error) {
 	if err != nil {
 		return pendingDoc{}, err
 	}
-	var doc pendingDoc
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	var idx fileDoc
+	if err := json.Unmarshal(raw, &idx); err != nil {
 		return pendingDoc{}, err
 	}
-	return doc, nil
+	return pendingDoc{Pending: idx.Pending}, nil
 }
 
 func savePendingLocked(sessionsDir string, doc pendingDoc) error {
 	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
 		return err
 	}
-	raw, err := json.MarshalIndent(doc, "", "  ")
+	idx, _ := loadLocked(sessionsDir)
+	idx.Pending = doc.Pending
+	raw, err := json.MarshalIndent(idx, "", "  ")
 	if err != nil {
 		return err
 	}

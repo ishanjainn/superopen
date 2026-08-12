@@ -5,6 +5,7 @@ import {
   deletePreferenceItem,
   deleteProjectItem,
   listLessons,
+  listPatterns,
   listPreferenceItems,
   listProjectSections,
   readActivePack,
@@ -38,6 +39,9 @@ export async function GET(req: Request) {
   return runWithProjectAsync(project, async () => {
     if (op === "lessons") {
       return NextResponse.json(listLessons());
+    }
+    if (op === "patterns") {
+      return NextResponse.json(listPatterns());
     }
     if (op === "active") {
       return NextResponse.json({ text: readActivePack() });

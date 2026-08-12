@@ -1,7 +1,8 @@
-# Coding-agent OTLP helpers
+# Coding-agent telemetry helpers
 
-Internal OpenTelemetry bootstrap used by `so coding hook` to emit coding-agent
-session spans/metrics. **Not** a general OpenAI/Anthropic/vLLM instrumentation SDK.
+Internal OpenTelemetry span bootstrap used by `so coding hook` to persist
+coding-agent session events locally. It contains no network exporter. **Not** a
+general OpenAI/Anthropic/vLLM instrumentation SDK.
 
 ## Layout
 

@@ -39,8 +39,8 @@ func TestCreateRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) == fakeSecret {
-		t.Fatal("expected redaction in checkpoint snapshot")
+	if string(data) != fakeSecret {
+		t.Fatal("checkpoint must preserve exact source bytes")
 	}
 	_ = os.WriteFile(src, []byte("changed"), 0o644)
 	if err := cs.Restore("s1", "1", repo); err != nil {

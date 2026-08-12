@@ -3,10 +3,13 @@ package inject
 import (
 	_ "embed"
 	"fmt"
-	"github.com/ishanjainn/superopen/internal/config"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	"github.com/ishanjainn/superopen/internal/config"
 )
 
 //go:embed skill.md
@@ -22,7 +25,9 @@ type InstallOptions struct {
 	// ProjectRoot installs into the repo (./.agents/skills/so, .cursor, …). Empty = skip project.
 	ProjectRoot string
 	// Global installs into the user's home agent skill dirs (~/.agents/skills/so, …).
-	Global bool
+	Global       bool
+	Vendors      []string
+	SharedAgents bool
 }
 
 // InstallResult lists paths written.
@@ -48,7 +53,7 @@ func Brief() string {
 		"- For codebase questions, run `so graph query \"<question>\"` when `.so/graph/graph.json` exists.",
 		"- Read `AGENTS.md` (and nested `*/AGENTS.md`), project rules, and matching skills for the task.",
 		"- When updating guidance: edit existing rule/skill files in the dirs this repo already uses; prune obsolete lines instead of only appending.",
-		"- Read `.so/memory/active-context.md` when present (session memory pack shared across coding agents).",
+		"- Read `.so/memory/context.md` when present (generated session context shared across coding agents).",
 	}
 	cfg := config.Default()
 	if root := os.Getenv("SUPEROPEN_ROOT"); root != "" {
@@ -61,7 +66,7 @@ func Brief() string {
 		}
 	}
 	if cfg.InjectRulesEnabled() {
-		lines = append(lines, "- Obey `.so/guardrails/guardrails.yaml`.")
+		lines = append(lines, "- Obey `.so/guardrails.yaml`.")
 	}
 	lines = append(lines,
 		"- Do not dump the entire `.so/` directory into context - load only what the task needs.",
@@ -149,20 +154,23 @@ func InstallSkills(opts InstallOptions) (InstallResult, error) {
 		if err != nil {
 			return out, err
 		}
-		paths, err := writeSkillBundle(home, skillBody, true)
+		paths, err := writeSkillBundleFor(home, skillBody, opts.Vendors, opts.SharedAgents, true)
 		if err != nil {
 			return out, err
 		}
 		out.Paths = append(out.Paths, paths...)
 	}
 	if opts.ProjectRoot != "" {
-		paths, err := writeSkillBundle(opts.ProjectRoot, skillBody, false)
+		paths, err := writeSkillBundleFor(opts.ProjectRoot, skillBody, opts.Vendors, opts.SharedAgents, false)
 		if err != nil {
 			return out, err
 		}
 		out.Paths = append(out.Paths, paths...)
 	}
 	if len(out.Paths) == 0 {
+		if opts.Global || opts.ProjectRoot != "" {
+			return out, nil
+		}
 		return out, fmt.Errorf("nothing to install - pass --global and/or --project")
 	}
 	return out, nil
@@ -176,23 +184,31 @@ func Apply(repoRoot string) error {
 	if err := upsertFile(filepath.Join(repoRoot, "AGENTS.md"), block); err != nil {
 		return err
 	}
-	if err := upsertFile(filepath.Join(repoRoot, "CLAUDE.md"), block); err != nil {
+	cfg, _ := config.Load(filepath.Join(repoRoot, ".so", "config.yaml"))
+	vendors := cfg.Vendors.Enabled
+	if len(vendors) == 0 {
+		vendors = DetectVendors(repoRoot)
+	}
+	for _, vendor := range vendors {
+		switch strings.ToLower(vendor) {
+		case "claude", "claude-code":
+			if err := upsertFile(filepath.Join(repoRoot, "CLAUDE.md"), block); err != nil {
+				return err
+			}
+		case "cursor":
+			mdc := "---\ndescription: Superopen always-on context. Prefer AGENTS.md, Cursor rules/skills, and so graph query.\nalwaysApply: true\n---\n\n" + Brief()
+			if err := writeFileIfChanged(filepath.Join(repoRoot, ".cursor", "rules", "superopen.mdc"), []byte(mdc)); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := InstallSkills(InstallOptions{ProjectRoot: repoRoot, Vendors: vendors, SharedAgents: cfg.Vendors.SharedAgents}); err != nil {
 		return err
 	}
-
-	cursorDir := filepath.Join(repoRoot, ".cursor", "rules")
-	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
-		return err
+	if cfg.Vendors.SharedAgents {
+		return installHarnessSkillsIndex(repoRoot)
 	}
-	mdc := "---\ndescription: Superopen always-on context. Prefer AGENTS.md, existing vendor rules/skills, and so graph query.\nalwaysApply: true\n---\n\n" + Brief()
-	if err := writeFileIfChanged(filepath.Join(cursorDir, "superopen.mdc"), []byte(mdc)); err != nil {
-		return err
-	}
-
-	if _, err := InstallSkills(InstallOptions{ProjectRoot: repoRoot}); err != nil {
-		return err
-	}
-	return installHarnessSkillsIndex(repoRoot)
+	return nil
 }
 
 func skillMarkdown(repoRoot string) string {
@@ -203,27 +219,50 @@ func skillMarkdown(repoRoot string) string {
 }
 
 func writeSkillBundle(root, skillBody string, globalHome bool) ([]string, error) {
+	return writeSkillBundleFor(root, skillBody, DetectVendors(root), false, globalHome)
+}
+
+func writeSkillBundleFor(root, skillBody string, vendors []string, sharedAgents, globalHome bool) ([]string, error) {
 	var written []string
-	// Shared Agent Skills locations + vendor-native discovery paths so /so
-	// (or equivalent skill load) works for every supported coding agent.
-	skillTargets := []string{
-		filepath.Join(root, ".agents", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".claude", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".cursor", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".codex", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".gemini", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".opencode", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".github", "skills", "so", "SKILL.md"), // Copilot CLI project skills
-		filepath.Join(root, ".pi", "skills", "so", "SKILL.md"),
+	var skillTargets []string
+	if sharedAgents {
+		skillTargets = append(skillTargets, filepath.Join(root, ".agents", "skills", "so", "SKILL.md"))
 	}
-	if globalHome {
-		skillTargets = append(skillTargets,
-			filepath.Join(root, ".config", "so", "SKILL.md"),
-			filepath.Join(root, ".config", "opencode", "skills", "so", "SKILL.md"),
-			filepath.Join(root, ".gemini", "skills", "so", "SKILL.md"),
-			filepath.Join(root, ".copilot", "skills", "so", "SKILL.md"),
-			filepath.Join(root, ".pi", "agent", "skills", "so", "SKILL.md"),
-		)
+	for _, vendor := range vendors {
+		var rel string
+		switch strings.ToLower(strings.TrimSpace(vendor)) {
+		case "claude", "claude-code":
+			rel = filepath.Join(".claude", "skills")
+		case "cursor":
+			rel = filepath.Join(".cursor", "skills")
+		case "codex":
+			rel = filepath.Join(".codex", "skills")
+		case "gemini":
+			rel = filepath.Join(".gemini", "skills")
+		case "opencode":
+			if globalHome {
+				rel = filepath.Join(".config", "opencode", "skills")
+			} else {
+				rel = filepath.Join(".opencode", "skills")
+			}
+		case "copilot", "copilot-cli":
+			if globalHome {
+				rel = filepath.Join(".copilot", "skills")
+			} else {
+				rel = filepath.Join(".github", "skills")
+			}
+		case "pi":
+			if globalHome {
+				rel = filepath.Join(".pi", "agent", "skills")
+			} else {
+				rel = filepath.Join(".pi", "skills")
+			}
+		case "agents":
+			rel = filepath.Join(".agents", "skills")
+		}
+		if rel != "" {
+			skillTargets = append(skillTargets, filepath.Join(root, rel, "so", "SKILL.md"))
+		}
 	}
 	seen := map[string]bool{}
 	for _, path := range skillTargets {
@@ -241,6 +280,97 @@ func writeSkillBundle(root, skillBody string, globalHome bool) ([]string, error)
 	}
 
 	return written, nil
+}
+
+// DetectVendors returns only coding agents that are visibly installed or have
+// an existing native project directory. Shared .agents is never auto-detected.
+func DetectVendors(root string) []string {
+	type probe struct{ name, bin, dir string }
+	probes := []probe{{"claude-code", "claude", ".claude"}, {"cursor", "cursor", ".cursor"}, {"codex", "codex", ".codex"}, {"gemini", "gemini", ".gemini"}, {"opencode", "opencode", ".opencode"}, {"copilot-cli", "copilot", filepath.Join(".github", "skills")}, {"pi", "pi", ".pi"}}
+	var out []string
+	for _, p := range probes {
+		_, binErr := exec.LookPath(p.bin)
+		_, dirErr := os.Stat(filepath.Join(root, p.dir))
+		installed := binErr == nil || dirErr == nil
+		// GUI installs do not always put their CLI on the terminal PATH. Native
+		// app/config locations are therefore also reliable detection signals.
+		if !installed && (p.name == "codex" || p.name == "cursor") {
+			installed = vendorHomeOrAppExists(p.name)
+		}
+		if installed {
+			out = append(out, p.name)
+		}
+	}
+	return out
+}
+
+func vendorHomeOrAppExists(vendor string) bool {
+	home, _ := os.UserHomeDir()
+	paths := vendorInstallCandidates(vendor, runtime.GOOS, home, os.Getenv)
+	for _, path := range paths {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func vendorInstallCandidates(vendor, goos, home string, getenv func(string) string) []string {
+	var paths []string
+	if home != "" {
+		switch vendor {
+		case "codex":
+			paths = append(paths, filepath.Join(home, ".codex"))
+		case "cursor":
+			paths = append(paths, filepath.Join(home, ".cursor"))
+		}
+	}
+	switch goos {
+	case "darwin":
+		app := "Codex.app"
+		if vendor == "cursor" {
+			app = "Cursor.app"
+		}
+		paths = append(paths, filepath.Join("/Applications", app))
+		if home != "" {
+			paths = append(paths, filepath.Join(home, "Applications", app))
+			if vendor == "cursor" {
+				paths = append(paths, filepath.Join(home, "Library", "Application Support", "Cursor"))
+			}
+		}
+	case "windows":
+		local, roaming := getenv("LOCALAPPDATA"), getenv("APPDATA")
+		if vendor == "cursor" {
+			paths = append(paths,
+				filepath.Join(local, "Programs", "cursor", "Cursor.exe"),
+				filepath.Join(local, "Cursor", "Cursor.exe"),
+				filepath.Join(roaming, "Cursor"),
+			)
+		} else if vendor == "codex" {
+			paths = append(paths,
+				filepath.Join(local, "Programs", "Codex", "Codex.exe"),
+				filepath.Join(local, "Codex", "Codex.exe"),
+				filepath.Join(roaming, "Codex"),
+			)
+		}
+	default: // Linux and other Unix desktops.
+		if vendor == "cursor" {
+			paths = append(paths, "/opt/Cursor/cursor", "/usr/share/applications/cursor.desktop")
+			if home != "" {
+				paths = append(paths,
+					filepath.Join(home, ".config", "Cursor"),
+					filepath.Join(home, ".local", "share", "applications", "cursor.desktop"),
+				)
+			}
+		}
+	}
+	var clean []string
+	for _, path := range paths {
+		if strings.TrimSpace(path) != "" && path != "." {
+			clean = append(clean, path)
+		}
+	}
+	return clean
 }
 
 func installHarnessSkillsIndex(repoRoot string) error {
@@ -334,6 +464,42 @@ func Status(repoRoot string) map[string]bool {
 			strings.Contains(string(data), "Superopen") ||
 			strings.Contains(string(data), "name: so") ||
 			strings.Contains(string(data), "/so")
+	}
+	return out
+}
+
+// StatusFor checks only the shared files and configured vendor integrations.
+// Optional .agents and unconfigured vendors must not make doctor fail.
+func StatusFor(repoRoot string, vendors []string, sharedAgents bool) map[string]bool {
+	checks := map[string]string{"AGENTS.md": filepath.Join(repoRoot, "AGENTS.md")}
+	if sharedAgents {
+		checks["skill-agents"] = filepath.Join(repoRoot, ".agents", "skills", "so", "SKILL.md")
+	}
+	for _, vendor := range vendors {
+		switch strings.ToLower(strings.TrimSpace(vendor)) {
+		case "claude", "claude-code":
+			checks["CLAUDE.md"] = filepath.Join(repoRoot, "CLAUDE.md")
+			checks["skill-claude"] = filepath.Join(repoRoot, ".claude", "skills", "so", "SKILL.md")
+		case "cursor":
+			checks["cursor-rule"] = filepath.Join(repoRoot, ".cursor", "rules", "superopen.mdc")
+			checks["skill-cursor"] = filepath.Join(repoRoot, ".cursor", "skills", "so", "SKILL.md")
+		case "codex":
+			checks["skill-codex"] = filepath.Join(repoRoot, ".codex", "skills", "so", "SKILL.md")
+		case "gemini":
+			checks["skill-gemini"] = filepath.Join(repoRoot, ".gemini", "skills", "so", "SKILL.md")
+		case "opencode":
+			checks["skill-opencode"] = filepath.Join(repoRoot, ".opencode", "skills", "so", "SKILL.md")
+		case "copilot", "copilot-cli":
+			checks["skill-copilot"] = filepath.Join(repoRoot, ".github", "skills", "so", "SKILL.md")
+		case "pi":
+			checks["skill-pi"] = filepath.Join(repoRoot, ".pi", "skills", "so", "SKILL.md")
+		}
+	}
+	out := make(map[string]bool, len(checks))
+	for name, path := range checks {
+		data, err := os.ReadFile(path)
+		out[name] = err == nil && (strings.Contains(string(data), startMarker) ||
+			strings.Contains(string(data), "Superopen") || strings.Contains(string(data), "name: so") || strings.Contains(string(data), "/so"))
 	}
 	return out
 }

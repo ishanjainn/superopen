@@ -9,7 +9,6 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/projects"
-	"github.com/ishanjainn/superopen/internal/tracestore"
 )
 
 // CommitRef is a git commit attributed to a session.
@@ -29,11 +28,11 @@ type PRRef struct {
 
 // AttributionSummary is agent-vs-human line contribution at commit time.
 type AttributionSummary struct {
-	AgentPercent   float64 `json:"agent_percent"`
-	AgentLines     int     `json:"agent_lines"`
-	HumanLines     int     `json:"human_lines"`
-	TotalChanged   int     `json:"total_changed"`
-	Display        string  `json:"display,omitempty"` // e.g. "73% agent (146/200 lines)"
+	AgentPercent float64 `json:"agent_percent"`
+	AgentLines   int     `json:"agent_lines"`
+	HumanLines   int     `json:"human_lines"`
+	TotalChanged int     `json:"total_changed"`
+	Display      string  `json:"display,omitempty"` // e.g. "73% agent (146/200 lines)"
 }
 
 // Filter selects sessions across backends.
@@ -222,59 +221,5 @@ func metaHasPR(m Meta, needle string) bool {
 	return false
 }
 
-// Composite merges local disk with an optional remote backend (paid).
-type Composite struct {
-	Local  Backend
-	Remote Backend // may be nil; when set, results are merged
-}
-
-func (c *Composite) List(ctx context.Context, filter Filter) ([]ListItem, error) {
-	local, err := c.Local.List(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	if c.Remote == nil {
-		return local, nil
-	}
-	remote, err := c.Remote.List(ctx, filter)
-	if err != nil {
-		return local, nil // degrade gracefully
-	}
-	seen := map[string]bool{}
-	var out []ListItem
-	for _, it := range local {
-		key := it.ProjectID + "/" + it.ID
-		seen[key] = true
-		out = append(out, it)
-	}
-	for _, it := range remote {
-		key := it.ProjectID + "/" + it.ID
-		if seen[key] {
-			continue
-		}
-		out = append(out, it)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].StartedAt.After(out[j].StartedAt)
-	})
-	return out, nil
-}
-
-func (c *Composite) Get(ctx context.Context, projectID, sessionID string) (Meta, error) {
-	m, err := c.Local.Get(ctx, projectID, sessionID)
-	if err == nil {
-		return m, nil
-	}
-	if c.Remote == nil {
-		return Meta{}, err
-	}
-	return c.Remote.Get(ctx, projectID, sessionID)
-}
-
-func (c *Composite) StoreFor(projectID string) (*Store, harness.Paths, error) {
-	return c.Local.StoreFor(projectID)
-}
-
 // Ensure ListItem embeds enriched Meta fields - ProjectID on ListItem via Meta.
 var _ Backend = (*LocalMulti)(nil)
-var _ = tracestore.Span{}

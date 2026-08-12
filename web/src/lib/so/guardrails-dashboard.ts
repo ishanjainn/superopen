@@ -23,7 +23,7 @@ export type GuardrailsDashboard = {
   series: { date: string; denials: number; triggers: number; passes: number }[];
   guards: {
     id: string;
-    kind: "command" | "path" | "advisory";
+    kind: "tool" | "command" | "path" | "advisory";
     label: string;
     detail: string;
     triggers: number;
@@ -51,7 +51,7 @@ function dayKey(iso: string): string {
 }
 
 function loadConfig(): GuardrailsDoc | null {
-  const p = soPath("guardrails", "guardrails.yaml");
+  const p = soPath("guardrails.yaml");
   if (!fileExists(p)) return null;
   try {
     return parseGuardrailsDoc(readText(p));
@@ -130,7 +130,9 @@ export function listGuardrailsDashboard(): GuardrailsDashboard {
   }).length;
 
   const hard_stops =
-    (config?.denied_commands.length || 0) + (config?.sensitive_paths.length || 0);
+    (config?.denied_tools.length || 0) +
+    (config?.denied_commands.length || 0) +
+    (config?.sensitive_paths.length || 0);
   const advisory = config?.rules.length || 0;
 
   const byDay = new Map<
@@ -182,6 +184,19 @@ export function listGuardrailsDashboard(): GuardrailsDashboard {
       .reduce((s, [, n]) => s + n, 0);
 
   const guards: GuardrailsDashboard["guards"] = [];
+  for (const tool of config?.denied_tools || []) {
+    guards.push({
+      id: `tool:${tool}`,
+      kind: "tool",
+      label: tool,
+      detail: "Denied at PreToolUse / beforeTool",
+      triggers: matchCount(tool, triggerByKey),
+      denials: matchCount(tool, denialByKey),
+      passes: matchCount(tool, passByKey),
+      last_at: lastByKey.get(tool),
+      trend: trendByKey.get(tool) || [],
+    });
+  }
   for (const c of config?.denied_commands || []) {
     guards.push({
       id: `command:${c}`,

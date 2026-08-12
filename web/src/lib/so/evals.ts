@@ -15,7 +15,7 @@ export type EvalRun = {
   badge: EvalBadge;
   notes: string[];
   dimensions?: Record<string, number>;
-  source: "history" | "eval.json" | "report.json";
+  source: "session.json";
   title?: string;
   vendor?: string;
   tokens?: number;
@@ -96,40 +96,12 @@ type StoredEval = {
   evidence_status?: "sufficient" | "insufficient";
 };
 
-type StoredReport = {
-  session?: { id?: string };
-  judge?: { generatedAt?: string; cli?: string };
-  taskSummary?: string;
-  narrative?: string;
-  dimensions?: { name?: string; verdict?: string; findings?: Finding[] }[];
-  rubric?: {
-    tasks?: {
-      title?: string;
-      criteria?: {
-        title?: string;
-        verdict?: string;
-        findings?: Finding[];
-      }[];
-    }[];
-  };
-};
-
-type Finding = {
-  claim?: string;
-  severity?: string;
-  evidenceSeqs?: number[];
-};
-
 function readJSON<T>(path: string): T | null {
   try {
     return JSON.parse(readText(path)) as T;
   } catch {
     return null;
   }
-}
-
-function readMeta(sessionId: string): SessionMeta | null {
-  return readJSON<SessionMeta>(join(soPath("sessions"), sessionId, "meta.json"));
 }
 
 function sessionTitle(meta: SessionMeta | null, fallback: string): string {
@@ -226,95 +198,8 @@ function failurePointsFromEval(
   return out;
 }
 
-function failurePointsFromReport(report: StoredReport): EvalFailurePoint[] {
-  const out: EvalFailurePoint[] = [];
-  for (const dim of report.dimensions || []) {
-    for (const f of dim.findings || []) {
-      const sev = String(f.severity || "").toLowerCase();
-      if (sev !== "problem" && sev !== "warning") continue;
-      const seqs = f.evidenceSeqs || [];
-      out.push({
-        label: f.claim || `${dim.name} ${sev}`,
-        severity: sev === "problem" ? "problem" : "warning",
-        seq: seqs[0],
-        detail: dim.name,
-      });
-    }
-    const v = String(dim.verdict || "").toLowerCase();
-    if ((v === "problem" || v === "warning") && !(dim.findings || []).length) {
-      out.push({
-        label: `Dimension ${dim.name}: ${v}`,
-        severity: v === "problem" ? "problem" : "warning",
-        detail: dim.name,
-      });
-    }
-  }
-  for (const task of report.rubric?.tasks || []) {
-    for (const c of task.criteria || []) {
-      const v = String(c.verdict || "").toLowerCase();
-      if (v !== "problem" && v !== "warning") continue;
-      for (const f of c.findings || []) {
-        const seqs = f.evidenceSeqs || [];
-        out.push({
-          label: `${task.title || "Task"} · ${c.title || f.claim || v}`,
-          severity: v === "problem" ? "problem" : "warning",
-          seq: seqs[0],
-          detail: f.claim,
-        });
-      }
-      if (!(c.findings || []).length) {
-        out.push({
-          label: `${task.title || "Task"} · ${c.title || v}`,
-          severity: v === "problem" ? "problem" : "warning",
-        });
-      }
-    }
-  }
-  return out;
-}
-
-function reportBadge(report: StoredReport, failures: EvalFailurePoint[]): EvalBadge {
-  if (failures.some((f) => f.severity === "problem")) return "poor";
-  if (failures.some((f) => f.severity === "warning")) return "ok";
-  const dims = report.dimensions || [];
-  if (dims.length && dims.every((d) => String(d.verdict).toLowerCase() === "good")) {
-    return "good";
-  }
-  return "ok";
-}
-
 function loadHistoryRuns(): EvalRun[] {
-  const path = soPath("evals", "history.json");
-  if (!fileExists(path)) return [];
-  const hist = readJSON<StoredEval[]>(path);
-  if (!Array.isArray(hist)) return [];
-  return hist
-    .filter((r) => r && r.session_id)
-    .map((r, i) => {
-      const sid = String(r.session_id);
-      const meta = readMeta(sid);
-      const notes = Array.isArray(r.notes) ? r.notes.map(String) : [];
-      const evidence = evidenceStatus(r.evidence_status, notes);
-      const at = String(r.at || "");
-      return {
-        id: `history:${sid}:${r.at || i}`,
-        session_id: sid,
-        at,
-        score: typeof r.score === "number" ? r.score : undefined,
-        badge: normalizeBadge(r.badge, r.score, evidence),
-        notes,
-        dimensions: r.dimensions,
-        source: "history" as const,
-        title: sessionTitle(meta, sid),
-        vendor: meta?.vendor,
-        tokens: Number(meta?.tokens || 0) || undefined,
-        cost_usd: Number(meta?.cost_usd || 0) || undefined,
-        evidence_status: evidence,
-        session_status: meta?.status,
-        scope: evaluationScope(meta, at),
-        failure_points: failurePointsFromEval(notes, r.dimensions, evidence),
-      };
-    });
+  return [];
 }
 
 function loadSessionArtifactRuns(): EvalRun[] {
@@ -329,12 +214,12 @@ function loadSessionArtifactRuns(): EvalRun[] {
     } catch {
       continue;
     }
-    const meta = readJSON<SessionMeta>(join(sessionPath, "meta.json"));
+    const meta = readJSON<SessionMeta>(join(sessionPath, "session.json"));
     const sid = String(meta?.id || name);
 
-    const evalPath = join(sessionPath, "eval.json");
-    if (fileExists(evalPath)) {
-      const r = readJSON<StoredEval>(evalPath);
+		const doc = readJSON<{ evaluation?: StoredEval }>(join(sessionPath, "session.json"));
+		if (doc?.evaluation) {
+			const r = doc.evaluation;
       if (r) {
         const notes = Array.isArray(r.notes) ? r.notes.map(String) : [];
         const evidence = evidenceStatus(r.evidence_status, notes);
@@ -351,7 +236,7 @@ function loadSessionArtifactRuns(): EvalRun[] {
           ),
           notes,
           dimensions: r.dimensions,
-          source: "eval.json",
+          source: "session.json",
           title: sessionTitle(meta, sid),
           vendor: meta?.vendor,
           tokens: Number(meta?.tokens || 0) || undefined,
@@ -360,34 +245,6 @@ function loadSessionArtifactRuns(): EvalRun[] {
           session_status: meta?.status,
           scope: evaluationScope(meta, at),
           failure_points: failurePointsFromEval(notes, r.dimensions, evidence),
-        });
-      }
-    }
-
-    const reportPath = join(sessionPath, "report.json");
-    if (fileExists(reportPath)) {
-      const report = readJSON<StoredReport>(reportPath);
-      if (report) {
-        const failures = failurePointsFromReport(report);
-        out.push({
-          id: `report:${sid}`,
-          session_id: sid,
-          at: String(report.judge?.generatedAt || ""),
-          badge: reportBadge(report, failures),
-          notes: [
-            report.taskSummary,
-            report.narrative ? report.narrative.slice(0, 160) : "",
-            report.judge?.cli ? `judge:${report.judge.cli}` : "",
-          ].filter(Boolean) as string[],
-          source: "report.json",
-          evidence_status: "sufficient",
-          session_status: meta?.status,
-          scope: evaluationScope(meta, String(report.judge?.generatedAt || "")),
-          title: sessionTitle(meta, sid),
-          vendor: meta?.vendor,
-          tokens: Number(meta?.tokens || 0) || undefined,
-          cost_usd: Number(meta?.cost_usd || 0) || undefined,
-          failure_points: failures,
         });
       }
     }
@@ -400,8 +257,7 @@ export function listEvalsDashboard(): EvalsDashboard {
   const historyRuns = loadHistoryRuns();
   const artifactRuns = loadSessionArtifactRuns();
   const bySession = new Map<string, EvalRun>();
-  const rank = (s: EvalRun["source"]) =>
-    s === "report.json" ? 3 : s === "eval.json" ? 2 : 1;
+  const rank = (_s: EvalRun["source"]) => 1;
 
   for (const run of [...historyRuns, ...artifactRuns]) {
     const prev = bySession.get(run.session_id);
@@ -420,15 +276,7 @@ export function listEvalsDashboard(): EvalsDashboard {
     String(b.at || "").localeCompare(String(a.at || ""))
   );
 
-  // eval.json mirrors the latest history entry, so do not count that artifact
-  // twice. Reports are separate judge executions and remain distinct.
-  const executions = [...historyRuns];
-  for (const artifact of artifactRuns) {
-    const duplicatedHistory = artifact.source === "eval.json" && historyRuns.some(
-      (run) => run.session_id === artifact.session_id && run.at === artifact.at
-    );
-    if (!duplicatedHistory) executions.push(artifact);
-  }
+  const executions = [...artifactRuns];
   executions.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
 
   const summary = {
@@ -509,7 +357,7 @@ function latestEvaluationTarget(currentRuns: EvalRun[]): EvalsDashboard["evaluat
   let latest: SessionMeta | null = null;
   for (const name of readdirSync(dir)) {
     if (name.startsWith(".") || name.endsWith(".json")) continue;
-    const meta = readJSON<SessionMeta>(join(dir, name, "meta.json"));
+    const meta = readJSON<SessionMeta>(join(dir, name, "session.json"));
     if (!meta) continue;
     if (!latest) {
       latest = meta;
@@ -644,7 +492,7 @@ function buildEvaluatorStats(runs: EvalRun[]) {
     void at;
   };
 
-  // Configured checks from configs.yaml
+  // Configured checks from evals.yaml
   const cfgPath = evalsConfigPath();
   let checks: string[] = [];
   let agentRules: string[] = [];
@@ -725,5 +573,5 @@ function buildEvaluatorStats(runs: EvalRun[]) {
 }
 
 function evalsConfigPath(): string {
-  return join(soRoot(), "evals", "configs.yaml");
+  return join(soRoot(), "evals.yaml");
 }

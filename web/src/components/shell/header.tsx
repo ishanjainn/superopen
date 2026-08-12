@@ -179,7 +179,6 @@ export function HeaderContextRow() {
       }));
     return [
       { value: "", label: currentLabel },
-      { value: "all", label: "All projects" },
       ...others,
     ];
   }, [projects, currentSlug]);

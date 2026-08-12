@@ -14,6 +14,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/inject"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/projects"
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 type Check struct {
@@ -40,8 +41,14 @@ func Run(repoRoot string) []Check {
 	_, err = os.Stat(paths.GraphJSON)
 	checks = append(checks, Check{Name: "graph", OK: err == nil, Detail: paths.GraphJSON})
 
-	_, err = os.Stat(paths.Citymap)
-	checks = append(checks, Check{Name: "citymap", OK: err == nil, Detail: paths.Citymap})
+	for name, path := range map[string]string{
+		"graph_html":  paths.GraphHTML,
+		"graph_state": paths.GraphState,
+		"corpus":      paths.GraphCorpus,
+	} {
+		_, statErr := os.Stat(path)
+		checks = append(checks, Check{Name: name, OK: statErr == nil, Detail: path})
+	}
 
 	if _, err := exec.LookPath("graphify"); err == nil {
 		checks = append(checks, Check{Name: "graphify", OK: true, Detail: "on PATH"})
@@ -85,15 +92,16 @@ func Run(repoRoot string) []Check {
 	for name, ok := range coding.Status(repoRoot, cfg.Observability.Vendors) {
 		checks = append(checks, Check{Name: "hooks:" + name, OK: ok, Detail: ""})
 	}
-	for name, ok := range inject.Status(repoRoot) {
+	for name, ok := range inject.StatusFor(repoRoot, cfg.Vendors.Enabled, cfg.Vendors.SharedAgents) {
 		checks = append(checks, Check{Name: "inject:" + name, OK: ok, Detail: ""})
 	}
 
 	// Memory pack
 	mem := memory.NewStore(paths)
-	_ = mem.Ensure()
 	memSt := mem.Status()
-	if memSt.PrefsStub || memSt.ProjectsStub {
+	if _, err := os.Stat(paths.Lessons); os.IsNotExist(err) {
+		checks = append(checks, Check{Name: "memory", OK: false, Detail: "missing memory/state.json - run so sync"})
+	} else if memSt.PrefsStub || memSt.ProjectsStub {
 		checks = append(checks, Check{
 			Name: "memory", OK: true, Warn: true,
 			Detail: fmt.Sprintf("%s - stub prefs/projects (run so sync or edit Memory → Prefs)", paths.MemoryDir),
@@ -102,14 +110,16 @@ func Run(repoRoot string) []Check {
 		detail := fmt.Sprintf("%s lessons=%d semantic=%d active=%dB", paths.MemoryDir, memSt.LessonCount, memSt.SemanticCount, memSt.ActiveBytes)
 		checks = append(checks, Check{Name: "memory", OK: true, Detail: detail})
 	}
-	if memSt.ActiveBytes == 0 {
-		checks = append(checks, Check{Name: "memory_active", OK: true, Warn: true, Detail: "active-context.md empty - so memory refresh"})
+	if _, err := os.Stat(paths.MemoryActive); os.IsNotExist(err) {
+		checks = append(checks, Check{Name: "memory_active", OK: false, Detail: "missing memory/context.md - run so sync"})
+	} else if memSt.ActiveBytes == 0 {
+		checks = append(checks, Check{Name: "memory_active", OK: true, Warn: true, Detail: "context.md is empty - so memory refresh"})
 	} else {
 		checks = append(checks, Check{Name: "memory_active", OK: true, Detail: fmt.Sprintf("%s (%d bytes)", memSt.ActivePath, memSt.ActiveBytes)})
 	}
 
 	// Guardrails (advisory rules + enforcement in one file)
-	gf := filepath.Join(paths.GuardrailsDir, "guardrails.yaml")
+	gf := paths.GuardrailsFile
 	if _, err := os.Stat(gf); err == nil {
 		if !cfg.GuardrailsEnabled() {
 			checks = append(checks, Check{Name: "guardrails", OK: true, Warn: true, Detail: "enforcement disabled - set guardrails.enabled: true or SUPEROPEN_GUARDRAILS=on (" + gf + ")"})
@@ -120,25 +130,27 @@ func Run(repoRoot string) []Check {
 		checks = append(checks, Check{Name: "guardrails", OK: false, Detail: "missing guardrails.yaml - run so sync"})
 	}
 
-	// Audit log dir
-	if _, err := os.Stat(paths.AuditDir); err == nil {
-		checks = append(checks, Check{Name: "audit", OK: true, Detail: paths.AuditDir})
+	// Repository audit history is an eager, self-described stream.
+	if _, err := os.Stat(paths.AuditEvents); err == nil {
+		checks = append(checks, Check{Name: "audit", OK: true, Detail: paths.AuditEvents})
 	} else {
-		checks = append(checks, Check{Name: "audit", OK: false, Detail: "missing .so/audit"})
+		checks = append(checks, Check{Name: "audit", OK: false, Detail: "missing audit/events.jsonl - run so sync"})
 	}
 
-	// Retrieve index
-	idx := filepath.Join(paths.GraphDir, "retrieve_index.json")
+	// Rebuildable corpus index.
+	idx := paths.GraphCorpus
 	if _, err := os.Stat(idx); err == nil {
-		checks = append(checks, Check{Name: "retrieve_index", OK: true, Detail: idx})
+		checks = append(checks, Check{Name: "corpus", OK: true, Detail: idx})
 	} else {
-		checks = append(checks, Check{Name: "retrieve_index", OK: false, Detail: "run so sync to build corpus index"})
+		checks = append(checks, Check{Name: "corpus", OK: false, Detail: "run so sync to build corpus index"})
 	}
 
-	// Port ledger (only report when present; empty is normal)
-	ledger := filepath.Join(paths.Root, "port", "ledger.json")
-	if _, err := os.Stat(ledger); err == nil {
-		checks = append(checks, Check{Name: "port_ledger", OK: true, Detail: ledger})
+	// Port ledger is machine-local runtime state, not harness content.
+	if runtimeDir, runtimeErr := userpaths.RuntimeDir(repoRoot); runtimeErr == nil {
+		ledger := filepath.Join(runtimeDir, "port", "ledger.json")
+		if _, err := os.Stat(ledger); err == nil {
+			checks = append(checks, Check{Name: "port_ledger", OK: true, Detail: ledger})
+		}
 	}
 
 	// Project registry

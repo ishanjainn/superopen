@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "fs";
-import { fileExists, readText } from "./nodeio";
+import { fileExists, readJSONFile, readText } from "./nodeio";
 import { join } from "path";
 import { soPath } from "./root";
 import {
@@ -23,37 +23,71 @@ export type Lesson = {
   created_at?: string;
 };
 
-function lessonsPath() {
-  return join(soPath("memory"), "lessons.jsonl");
+export type MemoryPattern = {
+  fingerprint: string;
+  vendor: string;
+  kind: string;
+  change_kind?: string;
+  target_type?: string;
+  target_path?: string;
+  summary: string;
+  evidence?: string[];
+  occurrences: number;
+  session_ids?: string[];
+  verified_sessions?: string[];
+  confidence?: number;
+  explicit_workflow?: boolean;
+  status: string;
+  first_observed_at?: string;
+  last_observed_at?: string;
+};
+
+type MemoryState = {
+	_about: { purpose: string; authority: string; updated_by: string };
+	lessons?: Lesson[];
+	preferences?: string;
+	projects?: string;
+	semantic?: unknown[];
+	episodic?: unknown[];
+	history?: string[];
+	patterns?: MemoryPattern[];
+};
+
+function statePath() { return join(soPath("memory"), "state.json"); }
+
+function loadState(): MemoryState {
+	return readJSONFile<MemoryState>(statePath()) || {
+		_about: {
+			purpose: "Consolidated lessons, preferences, project notes, harvest cursor, and memory refresh state.",
+			authority: "local durable memory state",
+			updated_by: "session review and memory consolidation",
+		},
+		lessons: [], preferences: "", projects: "",
+	};
+}
+
+function saveState(state: MemoryState) {
+	ensureMemoryDirs();
+	writeFileSync(statePath(), JSON.stringify(state, null, 2) + "\n", "utf8");
 }
 
 function writeLessons(lessons: Lesson[]) {
   ensureMemoryDirs();
-  const body = lessons.map((l) => JSON.stringify(l)).join("\n");
-  writeFileSync(lessonsPath(), body ? body + "\n" : "", "utf8");
+	const state = loadState(); state.lessons = lessons; saveState(state);
 }
 
 function ensureMemoryDirs() {
   const dir = soPath("memory");
   if (!fileExists(dir)) mkdirSync(dir, { recursive: true });
-  const hist = join(dir, "history");
-  if (!fileExists(hist)) mkdirSync(hist, { recursive: true });
 }
 
 export function listLessons(): Lesson[] {
   ensureMemoryDirs();
-  const p = lessonsPath();
-  if (!fileExists(p)) return [];
-  const out: Lesson[] = [];
-  for (const line of readText(p).split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      out.push(JSON.parse(line) as Lesson);
-    } catch {
-      /* skip */
-    }
-  }
-  return out;
+	return loadState().lessons || [];
+}
+
+export function listPatterns(): MemoryPattern[] {
+  return loadState().patterns || [];
 }
 
 export function deleteLessonLocal(id: string): void {
@@ -143,20 +177,23 @@ export function deleteProjectItem(sectionId: string, id: string): ProjectSection
 }
 
 export function readActivePack(): string {
-  const p = join(soPath("memory"), "active-context.md");
+	const p = join(soPath("memory"), "context.md");
   if (!fileExists(p)) return "";
   return readText(p);
 }
 
 export function readMarkdown(name: string): string {
-  const p = join(soPath("memory"), name);
-  if (!fileExists(p)) return "";
-  return readText(p);
+	const state = loadState();
+	if (name === "preferences.md") return state.preferences || "";
+	if (name === "projects.md") return state.projects || "";
+	return "";
 }
 
 export function writeMarkdown(name: string, body: string) {
-  ensureMemoryDirs();
-  writeFileSync(join(soPath("memory"), name), body, "utf8");
+	const state = loadState();
+	if (name === "preferences.md") state.preferences = body;
+	if (name === "projects.md") state.projects = body;
+	saveState(state);
 }
 
 export function isStubMarkdown(content: string): boolean {

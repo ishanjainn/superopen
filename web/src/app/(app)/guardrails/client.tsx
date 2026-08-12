@@ -104,7 +104,7 @@ function GuardrailsDashboardView({
     setError("");
     try {
       const params = new URLSearchParams();
-      if (projectId && projectId !== "all") params.set("project", projectId);
+      if (projectId) params.set("project", projectId);
       const r = await fetch(`/api/guardrails/dashboard?${params.toString()}`);
       if (!r.ok) throw new Error(await r.text());
       setData((await r.json()) as GuardrailsDashboard);

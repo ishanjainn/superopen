@@ -86,7 +86,7 @@ export function FileContentView({
   );
 }
 
-type GuardRowKind = "command" | "path" | "advisory";
+type GuardRowKind = "tool" | "command" | "path" | "advisory";
 type GuardRowMode = "enforced" | "advisory";
 
 type GuardRow = {
@@ -102,6 +102,18 @@ type GuardRow = {
 
 function buildGuardRows(doc: GuardrailsDoc): GuardRow[] {
   const rows: GuardRow[] = [];
+  doc.denied_tools.forEach((tool, i) => {
+    rows.push({
+      key: `tool-${i}-${tool}`,
+      kind: "tool",
+      mode: "enforced",
+      id: tool,
+      severity: "deny",
+      source: "hooks",
+      detail: "Denied at PreToolUse / beforeTool",
+      itemKey: tool,
+    });
+  });
   doc.denied_commands.forEach((c, i) => {
     rows.push({
       key: `cmd-${i}-${c}`,
@@ -307,7 +319,9 @@ function GuardrailsDocument({
 
 function KindBadge({ kind }: { kind: GuardRowKind }) {
   const label =
-    kind === "command"
+    kind === "tool"
+      ? "Tool"
+      : kind === "command"
       ? "Command"
       : kind === "path"
         ? "Path"

@@ -9,10 +9,9 @@ describe("evaluation dashboard aggregation", () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "so-evals-"));
     const so = join(root, ".so");
-    mkdirSync(join(so, "evals"), { recursive: true });
     mkdirSync(join(so, "sessions", "session-1"), { recursive: true });
     writeFileSync(
-      join(so, "sessions", "session-1", "meta.json"),
+      join(so, "sessions", "session-1", "session.json"),
       JSON.stringify({
         id: "session-1",
         title: "One session",
@@ -21,28 +20,19 @@ describe("evaluation dashboard aggregation", () => {
         ended_at: "2026-08-07T02:30:00Z",
         tokens: 100,
         cost_usd: 0.01,
+        evaluation: {
+          session_id: "session-1",
+          at: "2026-08-07T03:00:00Z",
+          score: 0.2,
+          badge: "poor",
+          dimensions: { scope: 0 },
+          notes: ["No tool activity recorded; insufficient signal to score."],
+        },
       })
     );
     writeFileSync(
-      join(so, "evals", "configs.yaml"),
+      join(so, "evals.yaml"),
       "checks:\n  - web_test\nagent_rules: []\n"
-    );
-    const history = [
-      "2026-08-07T01:00:00Z",
-      "2026-08-07T02:00:00Z",
-      "2026-08-07T03:00:00Z",
-    ].map((at) => ({
-      session_id: "session-1",
-      at,
-      score: 0.2,
-      badge: "poor",
-      dimensions: { scope: 0 },
-      notes: ["No tool activity recorded; insufficient signal to score."],
-    }));
-    writeFileSync(join(so, "evals", "history.json"), JSON.stringify(history));
-    writeFileSync(
-      join(so, "sessions", "session-1", "eval.json"),
-      JSON.stringify(history[2])
     );
     vi.stubEnv("SUPEROPEN_ROOT", root);
     vi.resetModules();
@@ -58,18 +48,14 @@ describe("evaluation dashboard aggregation", () => {
     const { listEvalsDashboard } = await import("./evals");
     const dashboard = listEvalsDashboard();
 
-    expect(dashboard.summary.executions).toBe(3);
+    expect(dashboard.summary.executions).toBe(1);
     expect(dashboard.summary.total).toBe(1);
     expect(dashboard.summary.unknown).toBe(1);
     expect(dashboard.summary.poor).toBe(0);
     expect(dashboard.summary.pass_rate).toBeNull();
-    expect(dashboard.runs).toHaveLength(3);
+    expect(dashboard.runs).toHaveLength(1);
     expect(dashboard.runs.every((run) => run.badge === "unknown")).toBe(true);
-    expect(dashboard.runs.map((run) => run.scope)).toEqual([
-      "complete",
-      "snapshot",
-      "snapshot",
-    ]);
+    expect(dashboard.runs.map((run) => run.scope)).toEqual(["complete"]);
     expect(dashboard.evaluation_target).toMatchObject({
       status: "ended",
       whole_chat_evaluated: true,

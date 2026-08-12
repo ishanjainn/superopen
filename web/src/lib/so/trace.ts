@@ -1,7 +1,6 @@
 import { readdirSync, statSync } from "fs";
 import { fileExists, readText } from "./nodeio";
 import { join, relative } from "path";
-import { homedir } from "os";
 import type { CityMap } from "./citymap";
 import { sessionKey } from "./citymap";
 import { repoRoot, soPath } from "./root";
@@ -146,12 +145,13 @@ function footprintEvents(
   cwd: string,
   startedAt?: string
 ): TraceEvent[] {
-  const fpPath = join(sessionDir, "footprint.json");
+  const fpPath = join(sessionDir, "session.json");
   if (!fileExists(fpPath)) return [];
   try {
-    const fp = JSON.parse(readText(fpPath)) as {
-      files?: { path: string; state?: string; count?: number }[];
+    const doc = JSON.parse(readText(fpPath)) as {
+      footprint?: { files?: { path: string; state?: string; count?: number }[] };
     };
+		const fp = doc.footprint || {};
     return (fp.files || []).map((f, i) => {
       let touch: Touch = "hit";
       let tool = "Glob";
@@ -296,100 +296,10 @@ export function parseCodexRolloutLines(lines: string[], cwd: string): ParsedSpan
   return { events, marks };
 }
 
-function codexRolloutEvents(session: MapSessionMeta, cwd: string): ParsedSpans {
-  if (session.harness.toLowerCase() !== "codex") return { events: [], marks: [] };
-  const started = new Date(session.startedAt || Date.now());
-  if (Number.isNaN(started.getTime())) return { events: [], marks: [] };
-  const root = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "sessions");
-  for (const delta of [-1, 0, 1]) {
-    const date = new Date(started.getTime() + delta * 86400000);
-    const dir = join(
-      root,
-      String(date.getUTCFullYear()),
-      String(date.getUTCMonth() + 1).padStart(2, "0"),
-      String(date.getUTCDate()).padStart(2, "0")
-    );
-    if (!fileExists(dir)) continue;
-    try {
-      const name = readdirSync(dir).find(
-        (candidate) => candidate.endsWith(".jsonl") && candidate.includes(session.id)
-      );
-      if (name) return parseCodexRolloutLines(readText(join(dir, name)).split("\n"), cwd);
-    } catch {
-      /* fall through to hook-derived traces */
-    }
-  }
-  return { events: [], marks: [] };
-}
-
-function mergeParsedSpans(...sources: ParsedSpans[]): ParsedSpans {
-  const events: TraceEvent[] = [];
-  const marks: TraceMark[] = [];
-  const eventKeys = new Set<string>();
-  const markKeys = new Set<string>();
-  for (const source of sources) {
-    for (const event of source.events) {
-      const key = JSON.stringify([
-        event.ts,
-        event.tool,
-        event.action,
-        event.summary,
-        event.targets.map((target) => [target.path, target.touch]),
-      ]);
-      if (eventKeys.has(key)) continue;
-      eventKeys.add(key);
-      events.push(event);
-    }
-    for (const mark of source.marks) {
-      const key = JSON.stringify([mark.seq, mark.type, mark.note]);
-      if (markKeys.has(key)) continue;
-      markKeys.add(key);
-      marks.push(mark);
-    }
-  }
-  events.sort((a, b) => String(a.ts || "").localeCompare(String(b.ts || "")));
-  return { events, marks };
-}
-
 function parseTranscriptEvents(sessionDir: string, cwd: string): ParsedSpans {
-  const tPath = join(sessionDir, "transcript.jsonl");
+  const tPath = join(sessionDir, "events.jsonl");
   if (!fileExists(tPath)) return { events: [], marks: [] };
   return parseSpanLines(readText(tPath).split("\n"), cwd);
-}
-
-function parseLiveTraceEvents(sessionId: string, cwd: string): ParsedSpans {
-  const tracesDir = soPath("traces");
-  if (!fileExists(tracesDir)) return { events: [], marks: [] };
-  const lines: string[] = [];
-  for (const name of readdirSync(tracesDir)) {
-    if (!name.endsWith(".jsonl")) continue;
-    try {
-      lines.push(...readText(join(tracesDir, name)).split("\n"));
-    } catch {
-      /* skip */
-    }
-  }
-  const filtered: string[] = [];
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    try {
-      const sp = JSON.parse(line) as Span & {
-        session_id?: string;
-        attributes?: Record<string, string>;
-      };
-      const attrs = sp.attributes || {};
-      const ids = [
-        sp.session_id,
-        attrs["coding_agent.session.id"],
-        attrs["coding_agent.session_id"],
-        attrs["gen_ai.conversation.id"],
-      ];
-      if (ids.includes(sessionId)) filtered.push(line);
-    } catch {
-      /* skip */
-    }
-  }
-  return parseSpanLines(filtered, cwd);
 }
 
 function markSeq(events: TraceEvent[]): number {
@@ -613,7 +523,7 @@ export function listMapSessions(): MapSessionMeta[] {
     } catch {
       continue;
     }
-    const metaPath = join(sessionDir, "meta.json");
+    const metaPath = join(sessionDir, "session.json");
     if (!fileExists(metaPath)) continue;
     try {
       const meta = JSON.parse(readText(metaPath)) as SessionMeta;
@@ -674,7 +584,7 @@ function resolveNestedMapSession(selector: string): MapSessionMeta | null {
     } catch {
       continue;
     }
-    const metaPath = join(sessionDir, "meta.json");
+    const metaPath = join(sessionDir, "session.json");
     if (!fileExists(metaPath)) continue;
     try {
       const meta = JSON.parse(readText(metaPath)) as SessionMeta;
@@ -726,7 +636,7 @@ function subagentMarksFromChildren(parentId: string, eventCount: number): TraceM
     if (name === "index.json" || name.startsWith(".") || name === parentId) continue;
     try {
       const meta = JSON.parse(
-        readText(join(dir, name, "meta.json"))
+        readText(join(dir, name, "session.json"))
       ) as Record<string, unknown>;
       if (String(meta.parent_id || "") !== parentId) continue;
       const title =
@@ -747,13 +657,7 @@ function subagentMarksFromChildren(parentId: string, eventCount: number): TraceM
 /** Build map Trace from a Superopen session directory. */
 export function buildTrace(session: MapSessionMeta, city: CityMap): Trace {
   const cwd = session.cwd || repoRoot();
-  const rollout = codexRolloutEvents(session, cwd);
-  let parsed = rollout.events.length > 0
-    ? rollout
-    : mergeParsedSpans(
-        parseTranscriptEvents(session.path, cwd),
-        parseLiveTraceEvents(session.id, cwd)
-      );
+  let parsed = parseTranscriptEvents(session.path, cwd);
   if (parsed.events.length === 0) {
     parsed = {
       events: footprintEvents(session.path, cwd, session.startedAt),

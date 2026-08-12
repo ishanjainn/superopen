@@ -22,6 +22,30 @@ func TestHtmlHasGraphifyCommunities(t *testing.T) {
 	}
 }
 
+func TestQueryRemovesGraphifyRepositoryCache(t *testing.T) {
+	repo := t.TempDir()
+	graphDir := filepath.Join(repo, ".so", "graph")
+	cache := filepath.Join(graphDir, "cache")
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, "last_query_stamp"), []byte("legacy"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(graphDir, "graph.json"), []byte(`{"nodes":[],"edges":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	if _, err := Query(repo, "anything"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(cache); !os.IsNotExist(err) {
+		t.Fatalf("Graphify query cache remained in .so: %v", err)
+	}
+}
+
 func TestEnsureGraphifyCommunitySidecars(t *testing.T) {
 	dir := t.TempDir()
 	g := map[string]any{

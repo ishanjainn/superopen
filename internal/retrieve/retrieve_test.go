@@ -94,7 +94,7 @@ func TestRebuildIndexesAllVendorGuidance(t *testing.T) {
 	if n < 5 {
 		t.Fatalf("expected multi-file index, got %d", n)
 	}
-	data, err := os.ReadFile(filepath.Join(paths.GraphDir, "retrieve_index.json"))
+	data, err := os.ReadFile(paths.GraphCorpus)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { basename, dirname, join } from "path";
 import { gitRemoteURL, repoSlug } from "./git";
@@ -301,6 +301,15 @@ export type Recommendation = {
   decision_reason?: string;
   decision_actor?: "human" | "agent" | "system" | string;
   decision_at?: string;
+  vendor?: string;
+  target_type?: string;
+  change_kind?: string;
+  confidence?: number;
+  verified?: boolean;
+  explicit_workflow?: boolean;
+  occurrence_count?: number;
+  auto_apply_after?: number;
+  auto_apply_reason?: string;
   [key: string]: unknown;
 };
 
@@ -313,22 +322,25 @@ export type RecommendationsDashboard = {
   items: Recommendation[];
 };
 
-function pendingPath() {
-  return soPath("recommendations", "pending.json");
-}
-
-function historyPath() {
-  return soPath("recommendations", "history.json");
-}
-
-function readRecFile(path: string): Recommendation[] {
-  if (!fileExists(path)) return [];
-  try {
-    const raw = readJSONFile<unknown>(path);
-    return Array.isArray(raw) ? raw : [];
-  } catch {
-    return [];
+function readSessionRecommendations(): Recommendation[] {
+  const dir = soPath("sessions");
+  if (!fileExists(dir)) return [];
+  const out: Recommendation[] = [];
+  for (const name of readdirSync(dir)) {
+    try {
+      if (!statSync(join(dir, name)).isDirectory()) continue;
+      const doc = readJSONFile<{ recommendations?: Recommendation[] }>(
+        join(dir, name, "session.json")
+      );
+      if (!Array.isArray(doc?.recommendations)) continue;
+      for (const rec of doc.recommendations) {
+        out.push({ ...rec, session_id: rec.session_id || name });
+      }
+    } catch {
+      // Concurrent materialization is retried on the next request.
+    }
   }
+  return out;
 }
 
 /** Stable cross-session key - mirrors Go recommend.FingerprintKey. */
@@ -355,7 +367,7 @@ export function fingerprintKey(
     p.includes("/.github/instructions/")
   ) {
     p = `rules/${p.split("/").pop()}`;
-  } else if (p.endsWith("guardrails.yaml")) p = "guardrails/guardrails.yaml";
+  } else if (p.endsWith("guardrails.yaml")) p = "guardrails.yaml";
   const t = String(recType || "").toLowerCase().trim();
   const k = String(kind || "").toLowerCase().trim();
   return k ? `${t}|${p}|${k}` : `${t}|${p}`;
@@ -394,12 +406,13 @@ function ensureFingerprint(r: Recommendation): string {
  * guardrail proposal from different sessions) into one row.
  */
 function compactPendingRecommendations(): Recommendation[] {
-  const pending = readRecFile(pendingPath()).map((r) => ({
+  const pending = readSessionRecommendations()
+    .filter((r) => !r.status || r.status === "pending" || r.status === "stale")
+    .map((r) => ({
     ...r,
     status: r.status || "pending",
   }));
   const byFp = new Map<string, Recommendation>();
-  let changed = false;
 
   for (const r of pending) {
     const fp = ensureFingerprint(r);
@@ -415,10 +428,8 @@ function compactPendingRecommendations(): Recommendation[] {
           r.session_id ? [r.session_id] : []
         ),
       });
-      if (status === "stale") changed = true;
       continue;
     }
-    changed = true;
     byFp.set(fp, {
       ...prev,
       ...r,
@@ -442,12 +453,7 @@ function compactPendingRecommendations(): Recommendation[] {
     });
   }
 
-  const compacted = Array.from(byFp.values());
-  if (changed || compacted.length !== pending.length) {
-    mkdirSync(dirname(pendingPath()), { recursive: true });
-    writeFileSync(pendingPath(), JSON.stringify(compacted, null, 2));
-  }
-  return compacted;
+  return Array.from(byFp.values());
 }
 
 export function listRecommendations(): Recommendation[] {
@@ -458,7 +464,9 @@ export function listRecommendations(): Recommendation[] {
 }
 
 function listRecommendationHistory(): Recommendation[] {
-  return readRecFile(historyPath());
+  return readSessionRecommendations().filter(
+    (r) => Boolean(r.status) && r.status !== "pending" && r.status !== "stale"
+  );
 }
 
 /** Pending + history (newest first). Pending wins if the same id appears twice. */

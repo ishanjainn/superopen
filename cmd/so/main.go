@@ -32,6 +32,7 @@ import (
 	initcmd "github.com/ishanjainn/superopen/internal/initcmd"
 	"github.com/ishanjainn/superopen/internal/inject"
 	"github.com/ishanjainn/superopen/internal/llm"
+	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/nativedocs"
 	"github.com/ishanjainn/superopen/internal/otlp"
 	"github.com/ishanjainn/superopen/internal/projects"
@@ -54,7 +55,7 @@ func main() {
 		Short: "Superopen - Open source Agent Harness Engineering",
 		Long: `Superopen CLI (AXI: compact text by default; --json / --full for agents).
 
-  go install ./cmd/so && so install   # CLI + /so skill for coding agents
+  go install ./cmd/so && so install   # CLI + skills/hooks for coding agents
   so init                            # bootstrap .so/ in this repo
   so                                 # status snapshot (content-first)
   so --help                          # full command list`,
@@ -66,11 +67,11 @@ func main() {
 	root.Version = version.Display()
 	root.SetVersionTemplate("so {{.Version}}\n")
 	root.AddCommand(
-		cmdInstall(), cmdUninstall(), cmdInit(), cmdApplyUpgrade(), cmdSync(), cmdRefresh(), cmdDev(), cmdGraph(), cmdSessions(),
+		cmdInstall(), cmdUninstall(), cmdInit(), cmdUpgradeBrief(), cmdApplyUpgrade(), cmdSync(), cmdRefresh(), cmdDev(), cmdGraph(), cmdSessions(),
 		cmdEval(), cmdRecommend(), cmdDoctor(), cmdSkill(), cmdGuard(), cmdKnowledge(), cmdHarvest(),
 		cmdQuery(), coding.NewCmd(),
 		cmdProjects(), cmdStatus(), cmdCheckpoint(), cmdBlame(), cmdWhy(),
-		cmdGitHook(), cmdLogin(), cmdLogout(),
+		cmdGitHook(),
 		cmdMemory(), cmdLearn(), cmdAudit(), cmdOpen(), cmdRetrieve(),
 		version.NewCmd(),
 	)
@@ -89,24 +90,27 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		o.Empty("harness")
 		return nil
 	}
-	st := session.NewStateStore(paths)
-	active, _ := st.ListActive()
-	backend := session.NewLocalMulti(root, paths)
-	list, _ := backend.List(cmd.Context(), session.Filter{ProjectID: "all"})
+	list, _ := session.NewLocalMulti(root, paths).List(cmd.Context(), session.Filter{ProjectID: root})
+	active := 0
+	for _, item := range list {
+		if item.Status == session.StatusActive {
+			active++
+		}
+	}
 	_, graphOK := os.Stat(paths.GraphJSON)
 	_, guardOK := os.Stat(paths.GuardrailsFile)
 	data := map[string]any{
 		"repo":            root,
 		"harness":         paths.Root,
 		"sessions":        len(list),
-		"active_sessions": len(active),
+		"active_sessions": active,
 		"graph":           graphOK == nil,
 		"guardrails":      guardOK == nil,
 	}
 	o.Next("so sessions list", `so graph query "how does X work?"`, "so doctor")
 	return o.HumanOrJSON("status", func() {
 		fmt.Fprintf(o.W, "harness  %s\n", paths.Root)
-		fmt.Fprintf(o.W, "sessions  %d  active=%d\n", len(list), len(active))
+		fmt.Fprintf(o.W, "sessions  %d  active=%d\n", len(list), active)
 		fmt.Fprintf(o.W, "graph  %v  guardrails  %v\n", graphOK == nil, guardOK == nil)
 	}, data)
 }
@@ -128,13 +132,14 @@ func applyTracesDir(root string, paths *harness.Paths, cfg config.Config) {
 }
 
 func cmdInstall() *cobra.Command {
-	var global, project bool
+	var global, project, sharedAgents bool
+	var vendors []string
 	c := &cobra.Command{
 		Use:   "install",
-		Short: "Register /so skill with coding agents (run after installing the CLI)",
-		Long: `Registers the /so skill for Claude Code, Cursor, Codex, Gemini, OpenCode,
-Copilot CLI, Pi, and shared Agent Skills - same role as graphify install after
-installing the graphify CLI.
+		Short: "Install /so skills and coding-agent hooks (run after installing the CLI)",
+		Long: `Installs the /so skill for detected coding agents plus repeatable
+--vendor selections. The default/global install also registers each selected
+vendor's telemetry hooks or plugin. Shared Agent Skills requires --shared-agents.
 
 Default: install globally into your home directory AND into the current git project.
 This does NOT create .so/ or build a graph - run so init for that.
@@ -144,30 +149,28 @@ Also best-effort ensures the graphify CLI is on PATH (used later by so init / so
 			if !global && !project {
 				global, project = true, true
 			}
-			opts := inject.InstallOptions{Global: global}
+			vendors = append(inject.DetectVendors(repoRoot()), vendors...)
+			opts := inject.InstallOptions{Global: global, Vendors: vendors, SharedAgents: sharedAgents}
 			if project {
 				if root := repoRoot(); root != "" {
 					opts.ProjectRoot = root
 				}
 			}
-			// Force refresh so upgrades rewrite skill files
-			if global && project {
-				res, err := inject.EnsureSkills(true)
-				if err != nil {
-					return err
-				}
-				fmt.Println("Registered /so skill:")
-				for _, p := range res.Paths {
-					fmt.Println(" ", p)
-				}
-			} else {
-				res, err := inject.InstallSkills(opts)
-				if err != nil {
-					return err
-				}
-				fmt.Println("Registered /so skill:")
-				for _, p := range res.Paths {
-					fmt.Println(" ", p)
+			res, err := inject.InstallSkills(opts)
+			if err != nil {
+				return err
+			}
+			fmt.Println("Registered /so skill:")
+			for _, p := range res.Paths {
+				fmt.Println(" ", p)
+			}
+			if global {
+				selected := uniqueVendorNames(vendors)
+				if len(selected) > 0 {
+					if err := coding.Install(repoRoot(), selected); err != nil {
+						return fmt.Errorf("install coding-agent hooks: %w", err)
+					}
+					fmt.Println("Installed coding-agent hooks/plugins for:", strings.Join(selected, ", "))
 				}
 			}
 			ensureGraphifyy()
@@ -178,9 +181,31 @@ Also best-effort ensures the graphify CLI is on PATH (used later by so init / so
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&global, "global", false, "Install into ~/.agents, ~/.claude, ~/.cursor, ~/.codex")
+	c.Flags().BoolVar(&global, "global", false, "Install skills and hooks/plugins into detected/named vendor homes")
 	c.Flags().BoolVar(&project, "project", false, "Install into the current repository only")
+	c.Flags().StringSliceVar(&vendors, "vendor", nil, "Install only detected plus named vendor integrations")
+	c.Flags().BoolVar(&sharedAgents, "shared-agents", false, "Also install the optional shared .agents skill")
 	return c
+}
+
+func uniqueVendorNames(vendors []string) []string {
+	seen := make(map[string]bool, len(vendors))
+	out := make([]string, 0, len(vendors))
+	for _, vendor := range vendors {
+		vendor = strings.ToLower(strings.TrimSpace(vendor))
+		switch vendor {
+		case "claude":
+			vendor = "claude-code"
+		case "copilot":
+			vendor = "copilot-cli"
+		}
+		if vendor == "" || vendor == "agents" || seen[vendor] {
+			continue
+		}
+		seen[vendor] = true
+		out = append(out, vendor)
+	}
+	return out
 }
 
 func cmdUninstall() *cobra.Command {
@@ -193,7 +218,7 @@ func cmdUninstall() *cobra.Command {
 Removes:
   - /so skills (Cursor, Claude, Codex, Agent Skills) - user-global and this repo
   - Project injectors (AGENTS.md / CLAUDE.md markers, .cursor/rules/superopen.mdc)
-  - Coding-agent OTLP hooks (all vendors, purged)
+  - Coding-agent telemetry hooks (all vendors, purged)
   - .so/ harness in the current repo (unless --keep-harness)
   - The so binary itself (unless --keep-binary)
 
@@ -272,7 +297,8 @@ func ensureGraphifyy() {
 }
 
 func cmdInit() *cobra.Command {
-	var codeOnly, force, useLLM, noLLM bool
+	var codeOnly, force, useLLM, noLLM, sharedAgents bool
+	var vendors []string
 	c := &cobra.Command{
 		Use:   "init",
 		Short: "Bootstrap .so/ harness, graph, o11y hooks, and injectors",
@@ -288,11 +314,13 @@ func cmdInit() *cobra.Command {
 				}
 			}
 			rep, err := initcmd.Run(initcmd.Options{
-				RepoRoot: repoRoot(),
-				CodeOnly: codeOnly,
-				Force:    force,
-				UseLLM:   useLLM,
-				NoLLM:    noLLM,
+				RepoRoot:     repoRoot(),
+				CodeOnly:     codeOnly,
+				Force:        force,
+				UseLLM:       useLLM,
+				NoLLM:        noLLM,
+				Vendors:      vendors,
+				SharedAgents: sharedAgents,
 			})
 			if err != nil {
 				return err
@@ -318,7 +346,27 @@ func cmdInit() *cobra.Command {
 	c.Flags().BoolVar(&force, "force", false, "Overwrite existing docs/guardrails/evals with fresh heuristic seed")
 	c.Flags().BoolVar(&useLLM, "llm", false, "Require headless API-key LLM upgrade (fails without a configured LLM)")
 	c.Flags().BoolVar(&noLLM, "no-llm", false, "Skip API-key LLM upgrade (default path for /so init in assistants)")
+	c.Flags().StringSliceVar(&vendors, "vendor", nil, "Enable a vendor integration in addition to detected vendors")
+	c.Flags().BoolVar(&sharedAgents, "shared-agents", false, "Opt in to the shared .agents skill tree")
 	return c
+}
+
+func cmdUpgradeBrief() *cobra.Command {
+	return &cobra.Command{
+		Use: "upgrade-brief", Short: "Print the assistant harness-upgrade prompt without creating a file",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root := repoRoot()
+			paths := harness.Resolve(root)
+			if !paths.Exists() {
+				return fmt.Errorf("run so init first")
+			}
+			profile := discover.BuildProfile(root, paths, "", "")
+			fmt.Print(seed.UpgradeSystemPrompt)
+			fmt.Print("\nRepository profile:\n\n")
+			fmt.Println(seed.BuildUpgradePrompt(profile))
+			return nil
+		},
+	}
 }
 
 func cmdApplyUpgrade() *cobra.Command {
@@ -350,18 +398,11 @@ func cmdApplyUpgrade() *cobra.Command {
 			if len(bytes.TrimSpace(raw)) == 0 {
 				return fmt.Errorf("apply-upgrade: empty JSON (write a file and pass its path, or pipe/heredoc JSON on stdin)")
 			}
-			data, err := os.ReadFile(filepath.Join(paths.Root, "discovery.json"))
-			if err != nil {
-				return fmt.Errorf("discovery.json: %w", err)
-			}
-			var profile discover.Profile
-			if err := json.Unmarshal(data, &profile); err != nil {
-				return err
-			}
+			profile := discover.BuildProfile(root, paths, "", "")
 			if err := seed.ApplyUpgradeJSON(paths, profile, string(raw)); err != nil {
 				return err
 			}
-			fmt.Println("Applied harness upgrade → AGENTS.md, .so/guardrails/, .so/evals/")
+			fmt.Println("Applied harness upgrade → AGENTS.md, .so/guardrails.yaml, .so/evals.yaml")
 			return nil
 		},
 	}
@@ -378,11 +419,16 @@ func stdinRedirected() bool {
 func cmdSync() *cobra.Command {
 	var semantic bool
 	var skipGraph bool
+	var vendors []string
+	var sharedAgents bool
 	c := &cobra.Command{
 		Use:   "sync",
-		Short: "Refresh injectors, hooks, graph, and citymap after harness edits",
+		Short: "Refresh enabled integrations, graph, and corpus after harness edits",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := sync.Run(sync.Options{RepoRoot: repoRoot(), Semantic: semantic, SkipGraph: skipGraph}); err != nil {
+			if err := sync.Run(sync.Options{
+				RepoRoot: repoRoot(), Semantic: semantic, SkipGraph: skipGraph,
+				Vendors: vendors, SharedAgents: sharedAgents, SetSharedAgents: cmd.Flags().Changed("shared-agents"),
+			}); err != nil {
 				return err
 			}
 			return out().HumanOrJSON("result", func() {
@@ -392,6 +438,8 @@ func cmdSync() *cobra.Command {
 	}
 	c.Flags().BoolVar(&semantic, "semantic", false, "Force docs/semantic graph rebuild")
 	c.Flags().BoolVar(&skipGraph, "skip-graph", false, "Skip graph rebuild (still refreshes retrieve index + inject)")
+	c.Flags().StringArrayVar(&vendors, "vendor", nil, "Enable one vendor integration (repeatable)")
+	c.Flags().BoolVar(&sharedAgents, "shared-agents", false, "Opt in to the shared .agents integration")
 	return c
 }
 
@@ -427,7 +475,7 @@ func cmdGraph() *cobra.Command {
 			cfg, _ := config.Load(paths.Config)
 			_ = graph.EnsureTool()
 			onlyCode := codeOnly || !cfg.Graph.Semantic
-			res, err := graph.Build(root, paths, onlyCode, cfg.Graph.SemanticBackend)
+			res, err := graph.RefreshAtomic(root, paths, onlyCode, cfg.Graph.SemanticBackend)
 			if err != nil {
 				return err
 			}
@@ -436,7 +484,7 @@ func cmdGraph() *cobra.Command {
 				html = "graph.html"
 			}
 			fmt.Printf("Wrote %s (%d nodes, %d edges, %s, %s)\n", res.Path, res.NodeCount, res.EdgeCount, res.Source, html)
-			return viz.BuildCitymap(root, paths)
+			return nil
 		},
 	}
 	rebuild.Flags().BoolVar(&codeOnly, "code-only", false, "AST-only extract (skip semantic LLM pass)")
@@ -486,7 +534,7 @@ func cmdSessions() *cobra.Command {
 			root := repoRoot()
 			paths := harness.Resolve(root)
 			backend := session.NewLocalMulti(root, paths)
-			list, err := backend.List(cmd.Context(), session.Filter{ProjectID: "all"})
+			list, err := backend.List(cmd.Context(), session.Filter{ProjectID: root})
 			if err != nil {
 				return axi.Err(err)
 			}
@@ -658,7 +706,15 @@ func cmdRecommend() *cobra.Command {
 			}
 			return out().HumanOrJSON("recommendations", func() {
 				for _, r := range recs {
-					fmt.Printf("%s  [%s] %s\n", r.ID, r.Type, r.Title)
+					progress := ""
+					if r.AutoApplyAfter > 0 {
+						progress = fmt.Sprintf("  %d/%d", r.OccurrenceCount, r.AutoApplyAfter)
+					}
+					verified := ""
+					if r.Verified {
+						verified = " verified"
+					}
+					fmt.Printf("%s  [%s/%s] %s%s%s  %s\n", r.ID, r.Vendor, r.Type, r.Title, progress, verified, r.ProposedPath)
 				}
 			}, recs)
 		},
@@ -756,25 +812,34 @@ func cmdDoctor() *cobra.Command {
 
 func cmdSkill() *cobra.Command {
 	c := &cobra.Command{Use: "skill", Short: "Manage skills"}
-	c.AddCommand(&cobra.Command{
+	var vendor string
+	add := &cobra.Command{
 		Use:  "add [name]",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			paths := harness.Resolve(repoRoot())
-			body := fmt.Sprintf("# %s\n\nDescribe the workflow steps here.\n", args[0])
-			if err := os.MkdirAll(filepath.Join(paths.SkillsDir, args[0]), 0o755); err != nil {
-				return err
+			selected := harness.NormalizeVendorKind(vendor)
+			if selected == "" {
+				if cfg, err := config.Load(paths.Config); err == nil && len(cfg.Vendors.Enabled) == 1 {
+					selected = harness.NormalizeVendorKind(cfg.Vendors.Enabled[0])
+				}
 			}
-			return os.WriteFile(paths.SkillSKILL(args[0]), []byte(body), 0o644)
+			if selected == "" {
+				return fmt.Errorf("--vendor is required unless exactly one vendor is enabled")
+			}
+			body := fmt.Sprintf("# %s\n\nDescribe the workflow steps here.\n", args[0])
+			return nativedocs.WriteSkillCreateOnly(paths, args[0], body, nativedocs.WriteOpts{Vendor: selected})
 		},
-	})
+	}
+	add.Flags().StringVar(&vendor, "vendor", "", "Vendor-owned skill tree to update")
+	c.AddCommand(add)
 	return c
 }
 
 func cmdGuard() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "guard",
-		Short: "Show .so/guardrails/guardrails.yaml (advisory + enforcement)",
+		Short: "Show .so/guardrails.yaml (advisory + enforcement)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o := out()
 			paths := harness.Resolve(repoRoot())
@@ -842,7 +907,7 @@ type finalizeOpts struct {
 	SkipTrackedMutations bool
 }
 
-func finalizeSession(root, sessionID string, opts ...finalizeOpts) error {
+func finalizeSession(root, sessionID string, opts ...finalizeOpts) (retErr error) {
 	var o finalizeOpts
 	if len(opts) > 0 {
 		o = opts[0]
@@ -874,9 +939,6 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) error {
 
 	latestID := strings.TrimSpace(sessionID)
 	if latestID == "" {
-		latestID = harvest.ConsumeFinalizePending(paths)
-	}
-	if latestID == "" {
 		var latestTime int64
 		for id, ss := range bySession {
 			for _, sp := range ss {
@@ -893,6 +955,7 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) error {
 	}
 	sess := session.NewStore(paths)
 	if existing, existingErr := sess.Get(latestID); existingErr == nil && existing.Status == session.StatusEnded && existing.EndedAt != nil {
+		doc, _ := sess.ReadDocument(latestID)
 		latestSpan := time.Time{}
 		for _, sp := range ss {
 			at := time.Unix(0, sp.EndTimeUnixN).UTC()
@@ -903,7 +966,7 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) error {
 				latestSpan = at
 			}
 		}
-		if !latestSpan.After(*existing.EndedAt) {
+		if !latestSpan.After(*existing.EndedAt) && doc.Review.Status == "complete" {
 			fmt.Printf("Session %s is already finalized; no new evaluation was created\n", latestID)
 			return nil
 		}
@@ -925,17 +988,60 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) error {
 		meta.ProjectID = p.ID
 	}
 	_ = sess.UpdateMeta(meta)
+	releaseReview, claimed := sess.ClaimReview(latestID, "finalize")
+	if !claimed {
+		fmt.Printf("Session %s review is already running\n", latestID)
+		return nil
+	}
+	defer func() {
+		releaseReview()
+		if retErr != nil {
+			now := time.Now().UTC()
+			_ = sess.WriteDocument(latestID, func(d *session.Document) {
+				d.Review.Status = "failed"
+				d.Review.CompletedAt = &now
+				d.Review.Error = retErr.Error()
+			})
+		}
+	}()
+	// Sessions that edited repository files refresh Graphify in this detached
+	// finalize/review cycle. No-change sessions keep the current graph.
+	if fp, err := sess.GetFootprint(latestID); err == nil {
+		changed := false
+		for _, f := range fp.Files {
+			if f.State == "edited" {
+				changed = true
+				break
+			}
+		}
+		if changed {
+			_, _ = graph.RefreshAtomic(root, paths, !cfg.Graph.Semantic, cfg.Graph.SemanticBackend)
+		}
+	}
 	// Snapshot edited files as a restorable checkpoint on finalize.
 	_, _ = checkpoint.NewStore(paths).CreateFromFootprint(latestID, root, "finalize")
 	_ = session.NewStateStore(paths).End(latestID)
 	if _, err := viz.BuildReplayFromSpans(paths, latestID, ss); err != nil {
 		return err
 	}
-	client := llm.NewBestCompleter(cfg)
+	client := llm.NewVendorCompleter(cfg, meta.Vendor)
 	if cfg.Evals.OnSessionEnd || cfg.Evals.Auto {
 		ev, err := eval.Run(paths, cfg, latestID, ss, client)
 		if err != nil {
 			return err
+		}
+		if cfg.MemoryEnabled() {
+			mem := memory.NewStore(paths)
+			_ = recommend.RecordFindings(paths, latestID, meta.Vendor, ev.Findings)
+			for _, lesson := range ev.Memory.Lessons {
+				_ = mem.AddLesson(memory.Lesson{Text: lesson, Scope: "workspace", Confidence: 0.8, SourceSession: latestID}, memory.ModePersistent)
+			}
+			if strings.TrimSpace(ev.Memory.Preference) != "" {
+				_ = mem.AppendPreferenceText(ev.Memory.Preference)
+			}
+			if strings.TrimSpace(ev.Memory.ProjectNote) != "" {
+				_ = mem.AppendProjectNote(ev.Memory.ProjectNote)
+			}
 		}
 		if cfg.Recommendations.Auto {
 			recs, _ := recommend.Generate(paths, latestID, ev, client)
@@ -946,8 +1052,12 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) error {
 					if !cfg.AllowsAutoApplyTier(tier) {
 						continue
 					}
+					allowed, reason := recommend.ShouldAutoApply(paths, r)
+					if !allowed {
+						continue
+					}
 					if err := recommend.Apply(paths, r.ID, recommend.Decision{
-						Reason: "Automatically applied because its recommendation tier is enabled in auto_apply_tiers.",
+						Reason: "Automatically applied: " + reason + ".",
 						Actor:  "system",
 					}); err == nil {
 						appliedAny = true
@@ -962,7 +1072,17 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) error {
 	mineOnFinalize(paths, latestID, cfg)
 	_, _ = harvest.Run(paths, cfg, latestID, harvest.TriggerFinalize, harvest.RunOpts{
 		SkipNativeDocs: o.SkipTrackedMutations,
+		LocalOnly:      cfg.Evals.OnSessionEnd || cfg.Evals.Auto,
 	})
+	if doc, err := sess.ReadDocument(latestID); err == nil && doc.Review.Status != "complete" {
+		now := time.Now().UTC()
+		_ = sess.WriteDocument(latestID, func(d *session.Document) {
+			d.Review.Status = "complete"
+			d.Review.Backend = "memory-only"
+			d.Review.CompletedAt = &now
+			d.Review.Error = ""
+		})
+	}
 	_, _ = gitruntime.SnapshotSessionDir(root, paths.SessionDir(latestID), latestID)
 	fmt.Printf("Finalized session %s (%s)\n", meta.ID, meta.EvalBadge)
 	return nil
@@ -1057,8 +1177,8 @@ func demoSession(root string) error {
 	spans := []tracestore.Span{
 		{TraceID: id, SpanID: "1", Name: "coding_agent.prompt", StartTimeUnixN: now, EndTimeUnixN: now + 1e6, SessionID: id, Attributes: map[string]string{"coding_agent.vendor": "claude-code", "gen_ai.prompt": "Add health check endpoint", "gen_ai.request.model": "claude-sonnet", "gen_ai.usage.total_tokens": "1200"}},
 		{TraceID: id, SpanID: "2", Name: "coding_agent.search", StartTimeUnixN: now + 2e6, SessionID: id, Attributes: map[string]string{"coding_agent.vendor": "claude-code", "coding_agent.file_path": "cmd/so/main.go"}},
-		{TraceID: id, SpanID: "3", Name: "coding_agent.read", StartTimeUnixN: now + 3e6, SessionID: id, Attributes: map[string]string{"coding_agent.vendor": "claude-code", "coding_agent.file_path": "internal/otlp/receiver.go"}},
-		{TraceID: id, SpanID: "4", Name: "coding_agent.edit", StartTimeUnixN: now + 4e6, SessionID: id, Attributes: map[string]string{"coding_agent.vendor": "claude-code", "coding_agent.file_path": "internal/otlp/receiver.go"}},
+		{TraceID: id, SpanID: "3", Name: "coding_agent.read", StartTimeUnixN: now + 3e6, SessionID: id, Attributes: map[string]string{"coding_agent.vendor": "claude-code", "coding_agent.file_path": "internal/codingotlp/local_exporter.go"}},
+		{TraceID: id, SpanID: "4", Name: "coding_agent.edit", StartTimeUnixN: now + 4e6, SessionID: id, Attributes: map[string]string{"coding_agent.vendor": "claude-code", "coding_agent.file_path": "internal/codingotlp/local_exporter.go"}},
 		{TraceID: id, SpanID: "5", Name: "coding_agent.grep", StartTimeUnixN: now + 5e6, SessionID: id, Attributes: map[string]string{"coding_agent.vendor": "claude-code", "coding_agent.file_path": "README.md"}},
 	}
 	if err := store.Write(spans); err != nil {

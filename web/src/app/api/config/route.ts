@@ -140,7 +140,18 @@ function setYamlPath(
   return lines.join("\n");
 }
 
-const DEFAULT_YAML = `memory:
+const DEFAULT_YAML = `# Superopen project configuration. This is the authoritative source for enabled vendors, review behavior, graph refresh, retention, and feature settings.
+# Updated by project maintainers and Superopen configuration commands.
+layout_version: 2
+vendors:
+  enabled: []
+  shared_agents: false
+graph:
+  code: true
+  semantic: true
+  semantic_backend: auto
+  refresh_policy: after_changed_session
+memory:
   enabled: true
   idle_harvest_hours: 6
   backend: auto

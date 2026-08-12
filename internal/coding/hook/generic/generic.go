@@ -59,16 +59,12 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 			EndedAt:   now,
 		})
 	default:
-		if prompt != "" && in.ContentCapture != "minimal" {
-			body := prompt
-			if in.ContentCapture == "metadata_only" {
-				body = ""
-			}
+		if prompt != "" {
 			return in.Emit.EmitLLMTurn(normalize.LLMTurn{
 				SessionID: sid,
 				Vendor:    a.name,
 				Model:     model,
-				Prompt:    body,
+				Prompt:    prompt,
 			})
 		}
 		return nil

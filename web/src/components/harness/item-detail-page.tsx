@@ -12,6 +12,7 @@ import {
   parseEvaluationsDoc,
   parseGuardrailsDoc,
   removeDeniedCommand,
+  removeDeniedTool,
   removeEvaluationAgentRule,
   removeEvaluationCheck,
   removeEvaluationSource,
@@ -33,6 +34,7 @@ const FILE: Record<Domain, string> = {
 };
 
 const KIND_BLURB: Record<HarnessItemKind, string> = {
+  tool: "Hard stop: coding hooks deny matching vendor tool names before invocation.",
   command:
     "Hard stop: coding hooks deny matching shell commands at PreToolUse / beforeShell.",
   path: "Hard stop: coding hooks deny reads/writes matching this path glob.",
@@ -112,7 +114,9 @@ export function HarnessItemDetailPage({ domain }: { domain: Domain }) {
     const { kind, key } = parsed;
     let next = yaml;
     if (domain === "guardrails") {
-      if (kind === "command") {
+      if (kind === "tool") {
+        next = replaceListItem(yaml, "denied_tools", key, draft.trim());
+      } else if (kind === "command") {
         next = replaceListItem(yaml, "denied_commands", key, draft.trim());
       } else if (kind === "path") {
         next = replaceListItem(yaml, "sensitive_paths", key, draft.trim(), true);
@@ -155,7 +159,8 @@ export function HarnessItemDetailPage({ domain }: { domain: Domain }) {
     if (!confirm("Delete this item from .so/ config?")) return;
     const { kind, key } = parsed;
     let next = yaml;
-    if (kind === "command") next = removeDeniedCommand(yaml, key);
+    if (kind === "tool") next = removeDeniedTool(yaml, key);
+    else if (kind === "command") next = removeDeniedCommand(yaml, key);
     else if (kind === "path") next = removeSensitivePath(yaml, key);
     else if (kind === "advisory") next = removeGuardrailRule(yaml, key);
     else if (kind === "check") next = removeEvaluationCheck(yaml, key);
@@ -223,7 +228,7 @@ export function HarnessItemDetailPage({ domain }: { domain: Domain }) {
                 {parsed.kind.replace("_", " ")}
               </span>
               {domain === "guardrails" &&
-                (parsed.kind === "command" || parsed.kind === "path") && (
+                (parsed.kind === "tool" || parsed.kind === "command" || parsed.kind === "path") && (
                   <span className="rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-medium uppercase text-red-700">
                     Hard stop
                   </span>
@@ -272,7 +277,9 @@ export function HarnessItemDetailPage({ domain }: { domain: Domain }) {
                     ? "Rubric"
                     : parsed.kind === "check"
                       ? "Check id"
-                      : parsed.kind === "path"
+                      : parsed.kind === "tool"
+                        ? "Tool name pattern"
+                        : parsed.kind === "path"
                         ? "Path glob"
                         : parsed.kind === "command"
                           ? "Command pattern"
@@ -321,7 +328,7 @@ function hydrate(
 ) {
   if (domain === "guardrails") {
     const doc = parseGuardrailsDoc(yaml);
-    if (kind === "command" || kind === "path") {
+    if (kind === "tool" || kind === "command" || kind === "path") {
       setDraft(key);
       return;
     }

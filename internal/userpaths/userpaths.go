@@ -3,12 +3,23 @@
 package userpaths
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 )
+
+// RuntimeDir returns machine-local transient state outside the repository.
+func RuntimeDir(repoRoot string) (string, error) {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(repoRoot)))
+	return filepath.Join(base, "superopen", "runtime", fmt.Sprintf("%x", sum[:12])), nil
+}
 
 // ConfigDir returns ~/.config/superopen (Unix) or %APPDATA%\superopen (Windows).
 func ConfigDir() (string, error) {

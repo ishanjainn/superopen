@@ -87,23 +87,51 @@ function hasUserSkills(dir: string): boolean {
   return false;
 }
 
+function configuredVendorKinds(): string[] {
+	const path = join(soRoot(), "config.yaml");
+	if (!fileExists(path)) return [];
+	const raw = readText(path);
+	const vendors = raw.match(/^vendors:\s*\n([\s\S]*?)(?=^[a-zA-Z_][\w-]*:|\s*$)/m)?.[1] || "";
+	const enabled = vendors.match(/^\s{2}enabled:\s*(?:\[([^\]]*)\])?\s*\n?([\s\S]*?)(?=^\s{2}[a-zA-Z_][\w-]*:|\s*$)/m);
+	const values = [
+		...(enabled?.[1] || "").split(","),
+		...Array.from((enabled?.[2] || "").matchAll(/^\s*-\s*([^#\n]+)/gm), (m) => m[1]),
+	]
+		.map((v) => v.trim().replace(/^['"]|['"]$/g, ""))
+		.map((v) => v === "claude-code" ? "claude" : v === "copilot-cli" ? "copilot" : v)
+		.filter(Boolean);
+	return Array.from(new Set(values));
+}
+
 /** Preferred write target for new rules (mirrors Go discoverNativeRoots). */
 export function preferredRulesDirAbs(): string {
   const root = repoRoot();
-  for (const v of VENDOR_RULES) {
+	const existing = VENDOR_RULES.filter((v) => {
     const dir = join(root, ...v.rel.split("/"));
-    if (hasUserRules(dir)) return absPath(dir);
-  }
-  return absPath(join(root, ".agents", "rules"));
+		return hasUserRules(dir);
+	});
+	if (existing.length === 1) return absPath(join(root, ...existing[0].rel.split("/")));
+	const enabled = configuredVendorKinds().filter((kind) => VENDOR_RULES.some((v) => v.kind === kind));
+	if (enabled.length === 1) {
+		const match = VENDOR_RULES.find((v) => v.kind === enabled[0])!;
+		return absPath(join(root, ...match.rel.split("/")));
+	}
+	throw new Error("choose an explicit vendor rules tree; shared .agents is opt-in");
 }
 
 export function preferredSkillsDirAbs(): string {
   const root = repoRoot();
-  for (const v of VENDOR_SKILLS) {
+	const existing = VENDOR_SKILLS.filter((v) => {
     const dir = join(root, ...v.rel.split("/"));
-    if (hasUserSkills(dir)) return absPath(dir);
-  }
-  return absPath(join(root, ".agents", "skills"));
+		return hasUserSkills(dir);
+	});
+	if (existing.length === 1) return absPath(join(root, ...existing[0].rel.split("/")));
+	const enabled = configuredVendorKinds().filter((kind) => VENDOR_SKILLS.some((v) => v.kind === kind));
+	if (enabled.length === 1) {
+		const match = VENDOR_SKILLS.find((v) => v.kind === enabled[0])!;
+		return absPath(join(root, ...match.rel.split("/")));
+	}
+	throw new Error("choose an explicit vendor skills tree; shared .agents is opt-in");
 }
 
 function preferredRulesKind(): string {
@@ -133,7 +161,7 @@ function ruleExtForKind(kind: string): string {
 function collectRuleEntries(): { name: string; path: string; isDir: boolean }[] {
   const root = repoRoot();
   const entries: { name: string; path: string; isDir: boolean }[] = [];
-  const seenLogical = new Set<string>();
+  const seen = new Set<string>();
   for (const v of VENDOR_RULES) {
     const base = join(root, ...v.rel.split("/"));
     if (!existsSync(base)) continue;
@@ -159,12 +187,12 @@ function collectRuleEntries(): { name: string; path: string; isDir: boolean }[] 
           continue;
         }
         if (!isRuleFile(name)) continue;
-        const logical = `rules/${v.kind}/${childRel}`;
-        if (seenLogical.has(logical)) continue;
-        seenLogical.add(logical);
+        const repoRelativePath = `${v.rel}/${childRel}`;
+        if (seen.has(repoRelativePath)) continue;
+        seen.add(repoRelativePath);
         entries.push({
           name: `${v.kind}/${childRel}`,
-          path: logical,
+          path: repoRelativePath,
           isDir: false,
         });
       }
@@ -192,12 +220,12 @@ function collectSkillEntries(): { name: string; path: string; isDir: boolean }[]
       if (name === "so" || name === "superopen" || name.startsWith(".")) continue;
       const skillMd = join(base, name, "SKILL.md");
       if (!fileExists(skillMd)) continue;
-      const logical = `skills/${v.kind}/${name}/SKILL.md`;
-      if (seen.has(logical)) continue;
-      seen.add(logical);
+      const repoRelativePath = `${v.rel}/${name}/SKILL.md`;
+      if (seen.has(repoRelativePath)) continue;
+      seen.add(repoRelativePath);
       entries.push({
         name: `${v.kind}/${name}`,
-        path: logical,
+        path: repoRelativePath,
         isDir: false,
       });
     }
@@ -298,6 +326,31 @@ function resolveSkillsAbs(rest: string): string | null {
 function nativeAbs(rel: string): string | null {
   const cleaned = rel.replace(/^\/+/, "").replace(/\0/g, "");
   if (!cleaned || cleaned.includes("..")) return null;
+
+  // Rules use their physical vendor path in the UI too. Nested rule folders are
+  // supported, but the target must still be a rule file under a known root.
+  for (const vendor of VENDOR_RULES) {
+    const prefix = `${vendor.rel}/`;
+    if (!cleaned.startsWith(prefix)) continue;
+    const within = cleaned.slice(prefix.length);
+    if (!within || !isRuleFile(basename(within))) return null;
+    return absPath(join(repoRoot(), ...cleaned.split("/")));
+  }
+
+  // The UI exposes native skill files by their real repository-relative path
+  // (for example .codex/skills/review/SKILL.md). Only the standard one-folder
+  // Agent Skills shape is editable; loose files directly in a skills root are
+  // intentionally not treated as skills.
+  for (const vendor of VENDOR_SKILLS) {
+    const prefix = `${vendor.rel}/`;
+    if (!cleaned.startsWith(prefix)) continue;
+    const within = cleaned.slice(prefix.length).split("/");
+    if (within.length !== 2 || within[1] !== "SKILL.md" || !within[0]) {
+      return null;
+    }
+    return absPath(join(repoRoot(), ...cleaned.split("/")));
+  }
+
   const parts = cleaned.split("/");
   const top = parts[0];
   const rest = parts.slice(1).join("/");
@@ -318,11 +371,13 @@ function nativeAbs(rel: string): string | null {
     return resolveSkillsAbs(rest);
   }
   if (top === "guardrails" || top === "evals") {
-    const root = absPath(soRoot());
-    const abs = absPath(join(root, cleaned));
-    const relCheck = relative(root, abs);
-    if (relCheck.startsWith("..") || relCheck.includes(`..${sep}`)) return null;
-    return abs;
+		if (top === "guardrails" && (rest === "guardrails.yaml" || rest === "")) {
+			return absPath(join(soRoot(), "guardrails.yaml"));
+		}
+		if (top === "evals" && (rest === "configs.yaml" || rest === "")) {
+			return absPath(join(soRoot(), "evals.yaml"));
+		}
+		return null;
   }
   return null;
 }
@@ -352,6 +407,12 @@ export function listOrRead(relPath: string): {
   if (cleaned === "skills") {
     return { type: "dir", entries: collectSkillEntries() };
   }
+	if (cleaned === "guardrails") {
+		return { type: "dir", entries: [{ name: "guardrails.yaml", path: "guardrails/guardrails.yaml", isDir: false }] };
+	}
+	if (cleaned === "evals") {
+		return { type: "dir", entries: [{ name: "evals.yaml", path: "evals/configs.yaml", isDir: false }] };
+	}
 
   const resolved = nativeAbs(cleaned);
   if (!resolved || !fileExists(resolved)) return null;
@@ -391,7 +452,17 @@ function assertEditable(relPath: string): { abs: string; rel: string } {
     throw new Error("invalid path");
   }
   const top = cleaned.split("/")[0];
-  if (!(EDITABLE_ROOTS as readonly string[]).includes(top)) {
+  const nativeRule = VENDOR_RULES.some((vendor) =>
+    cleaned.startsWith(`${vendor.rel}/`)
+  );
+  const nativeSkill = VENDOR_SKILLS.some((vendor) =>
+    cleaned.startsWith(`${vendor.rel}/`)
+  );
+  if (
+    !(EDITABLE_ROOTS as readonly string[]).includes(top) &&
+    !nativeRule &&
+    !nativeSkill
+  ) {
     throw new Error(
       `only ${EDITABLE_ROOTS.join(", ")} are editable (shared harness files)`
     );
@@ -454,6 +525,12 @@ export function writeHarnessFile(
   if (created && !opts?.create) {
     throw new Error("file not found");
   }
+	if (created && rel === "guardrails/guardrails.yaml" && !body.trimStart().startsWith("#")) {
+		body = `# Superopen guardrails. These are shared project safety rules enforced at coding-agent hook boundaries.\n# Authoritative project policy updated by project maintainers; so sync will not overwrite this file.\n${body}`;
+	}
+	if (created && rel === "evals/configs.yaml" && !body.trimStart().startsWith("#")) {
+		body = `# Superopen evaluation policy. This defines how completed coding sessions are scored and which reviewer backends may be used.\n# Authoritative project policy updated by project maintainers and so init from graph plus agent instructions.\n${body}`;
+	}
   writeText(abs, body);
   return { path: rel, created };
 }
@@ -472,20 +549,27 @@ export function createHarnessFile(
       "knowledge is AGENTS.md — edit that file instead of creating siblings"
     );
   }
+	if (top === "guardrails" || top === "evals") {
+		throw new Error(`${top} has one authoritative file; edit it instead of creating siblings`);
+	}
   if (top === "rules") {
-    const kind = preferredRulesKind();
+		const requested = dir.replace(/^\/+/, "").split("/")[1];
+		const kind = VENDOR_RULES.some((v) => v.kind === requested) ? requested : preferredRulesKind();
     const ext = ruleExtForKind(kind);
     const name = sanitizeFileName(fileName, ext);
-    const rel = `rules/${kind}/${name}`;
-    const abs = nativeAbs(rel);
+    const logical = `rules/${kind}/${name}`;
+    const abs = nativeAbs(logical);
     if (abs && fileExists(abs)) throw new Error("file already exists");
+    const vendor = VENDOR_RULES.find((candidate) => candidate.kind === kind)!;
+    const rel = `${vendor.rel}/${name}`;
     const body =
       typeof bodyOverride === "string" ? bodyOverride : defaultContent(rel);
-    writeHarnessFile(rel, body, { create: true });
+    writeHarnessFile(logical, body, { create: true });
     return { path: rel, body };
   }
   if (top === "skills") {
-    const kind = preferredSkillsKind();
+		const requested = dir.replace(/^\/+/, "").split("/")[1];
+		const kind = VENDOR_SKILLS.some((v) => v.kind === requested) ? requested : preferredSkillsKind();
     let stem = fileName.trim().replace(/\\/g, "/").split("/").pop() || "";
     stem = stem.replace(/\.md$/i, "").replace(/\/SKILL$/i, "");
     if (!NAME_RE.test(stem)) {
@@ -493,12 +577,14 @@ export function createHarnessFile(
         "skill name must be alphanumeric (plus . _ -), max 121 chars"
       );
     }
-    const rel = `skills/${kind}/${stem}/SKILL.md`;
-    const abs = nativeAbs(rel);
+    const logical = `skills/${kind}/${stem}/SKILL.md`;
+    const abs = nativeAbs(logical);
     if (abs && fileExists(abs)) throw new Error("file already exists");
+    const vendor = VENDOR_SKILLS.find((candidate) => candidate.kind === kind)!;
+    const rel = `${vendor.rel}/${stem}/SKILL.md`;
     const body =
       typeof bodyOverride === "string" ? bodyOverride : defaultContent(rel);
-    writeHarnessFile(rel, body, { create: true });
+    writeHarnessFile(logical, body, { create: true });
     return { path: rel, body };
   }
   const fallbackExt = ".yaml";

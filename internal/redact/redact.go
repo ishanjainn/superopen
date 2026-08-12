@@ -142,22 +142,6 @@ func StringFull(s string) string {
 	return s
 }
 
-// ForCapture returns the appropriate redactor for the given capture mode.
-//
-//   - "minimal" / "metadata_only"  → tier 1 redaction
-//   - "full"                        → tier 1 + tier 2
-//
-// Unknown modes default to the safer tier 1 only - never weaker.
-func ForCapture(mode string) func(string) string {
-	switch mode {
-	case "full":
-		return StringFull
-	default:
-		return String
-	}
-}
-
-
 // scrubExfilURLs redacts common paste/exfil hosts when redact_output guardrails are on.
 func scrubExfilURLs(s string) string {
 	hosts := []string{

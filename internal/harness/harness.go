@@ -20,6 +20,9 @@ type Paths struct {
 	GraphDir    string
 	GraphJSON   string
 	GraphReport string
+	GraphCorpus string
+	GraphHTML   string
+	GraphState  string
 
 	// Native developer guidance (not under .so/).
 	AgentsMD  string // AGENTS.md
@@ -78,30 +81,33 @@ func Resolve(repoRoot string) Paths {
 		RepoRoot:        repoRoot,
 		Root:            root,
 		Config:          filepath.Join(root, "config.yaml"),
-		AgentBrief:      filepath.Join(root, "AGENT.md"),
+		AgentBrief:      "",
 		GraphDir:        filepath.Join(root, "graph"),
 		GraphJSON:       filepath.Join(root, "graph", "graph.json"),
-		GraphReport:     filepath.Join(root, "graph", "GRAPH_REPORT.md"),
+		GraphReport:     "",
+		GraphCorpus:     filepath.Join(root, "graph", "corpus.json"),
+		GraphHTML:       filepath.Join(root, "graph", "graph.html"),
+		GraphState:      filepath.Join(root, "graph", "state.json"),
 		AgentsMD:        filepath.Join(repoRoot, "AGENTS.md"),
 		RulesDir:        rulesDir,
 		SkillsDir:       skillsDir,
-		GuardrailsDir:   filepath.Join(root, "guardrails"),
-		GuardrailsFile:  filepath.Join(root, "guardrails", "guardrails.yaml"),
-		EvalsDir:        filepath.Join(root, "evals"),
-		EvalsConfig:     filepath.Join(root, "evals", "configs.yaml"),
-		EvalsHistory:    filepath.Join(root, "evals", "history.json"),
-		TracesDir:       filepath.Join(root, "traces"),
+		GuardrailsDir:   root,
+		GuardrailsFile:  filepath.Join(root, "guardrails.yaml"),
+		EvalsDir:        root,
+		EvalsConfig:     filepath.Join(root, "evals.yaml"),
+		EvalsHistory:    filepath.Join(root, "sessions", "index.json"),
+		TracesDir:       filepath.Join(root, "sessions"),
 		SessionsDir:     filepath.Join(root, "sessions"),
 		SessionsIndex:   filepath.Join(root, "sessions", "index.json"),
-		Recommendations: filepath.Join(root, "recommendations"),
-		PendingRecs:     filepath.Join(root, "recommendations", "pending.json"),
-		RecsHistory:     filepath.Join(root, "recommendations", "history.json"),
-		VizDir:          filepath.Join(root, "viz"),
-		Citymap:         filepath.Join(root, "viz", "citymap.json"),
+		Recommendations: filepath.Join(root, "sessions"),
+		PendingRecs:     filepath.Join(root, "sessions", "index.json"),
+		RecsHistory:     filepath.Join(root, "sessions", "index.json"),
+		VizDir:          filepath.Join(root, "graph"),
+		Citymap:         filepath.Join(root, "graph", "graph.html"),
 		MemoryDir:       filepath.Join(root, "memory"),
-		Lessons:         filepath.Join(root, "memory", "lessons.md"),
-		LessonsJSONL:    filepath.Join(root, "memory", "lessons.jsonl"),
-		MemoryActive:    filepath.Join(root, "memory", "active-context.md"),
+		Lessons:         filepath.Join(root, "memory", "state.json"),
+		LessonsJSONL:    filepath.Join(root, "memory", "state.json"),
+		MemoryActive:    filepath.Join(root, "memory", "context.md"),
 		AuditDir:        filepath.Join(root, "audit"),
 		AuditEvents:     filepath.Join(root, "audit", "events.jsonl"),
 	}
@@ -113,13 +119,11 @@ func (p Paths) Exists() bool {
 	return err == nil && info.IsDir()
 }
 
-// EnsureDirs creates .so/ runtime dirs and the discovered rules/skills dirs.
+// EnsureDirs creates the complete stable v2 directory skeleton. Per-session
+// directories and checkpoints are still created only when a session exists.
 func (p Paths) EnsureDirs() error {
 	dirs := []string{
-		p.Root, p.GraphDir, p.GuardrailsDir,
-		p.EvalsDir, p.TracesDir, p.SessionsDir, p.Recommendations,
-		p.VizDir, p.MemoryDir, filepath.Join(p.MemoryDir, "history"), p.AuditDir,
-		p.RulesDir, p.SkillsDir,
+		p.Root, p.GraphDir, p.SessionsDir, p.MemoryDir, p.AuditDir,
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {

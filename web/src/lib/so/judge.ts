@@ -1,6 +1,4 @@
-import { mkdirSync, writeFileSync, unlinkSync } from "fs";
-import { fileExists, readText } from "./nodeio";
-import { join } from "path";
+import { readText, writeText } from "./nodeio";
 import { spawnSync } from "child_process";
 import { soPath } from "./root";
 import type {
@@ -25,13 +23,37 @@ type RunningJob = {
 };
 
 const running = new Map<string, RunningJob>();
+const failures = new Map<string, string>();
 
-function reportPath(sessionId: string): string {
-  return join(soPath("sessions", sessionId), "report.json");
+type SessionReviewDocument = {
+  report?: Report;
+  report_error?: string;
+  [key: string]: unknown;
+};
+
+function sessionDocument(sessionId: string): SessionReviewDocument | null {
+  try {
+    return JSON.parse(readText(soPath("sessions", sessionId, "session.json"))) as SessionReviewDocument;
+  } catch {
+    return null;
+  }
 }
 
-function errorPath(sessionId: string): string {
-  return join(soPath("sessions", sessionId), "report.error.json");
+function writeSessionReport(sessionId: string, report?: Report, error?: string): void {
+  const path = soPath("sessions", sessionId, "session.json");
+  const doc = sessionDocument(sessionId) || {
+    _about: {
+      purpose: "Materialized state, summary, footprint, review, recommendations, and replay metadata for one coding session.",
+      authority: "authoritative session state derived from events.jsonl",
+      updated_by: "session materializer and review worker",
+    },
+    id: sessionId,
+  };
+  if (report) doc.report = report;
+  else delete doc.report;
+  if (error) doc.report_error = error;
+  else delete doc.report_error;
+  writeText(path, JSON.stringify(doc, null, 2));
 }
 
 function which(cli: string): boolean {
@@ -41,15 +63,6 @@ function which(cli: string): boolean {
 
 function availableJudgeClis(): string[] {
   return JUDGE_CLIS.filter((cli) => which(cli));
-}
-
-function readJSON<T>(path: string): T | null {
-  if (!fileExists(path)) return null;
-  try {
-    return JSON.parse(readText(path)) as T;
-  } catch {
-    return null;
-  }
 }
 
 function digestTrace(trace: Trace): string {
@@ -318,18 +331,19 @@ export function getReportStatus(sessionId: string, eventCount: number): ReportSt
       judgeClis: clis,
     };
   }
-  const err = readJSON<{ error: string }>(errorPath(sessionId));
-  if (err?.error && !fileExists(reportPath(sessionId))) {
+	const doc = sessionDocument(sessionId);
+	const error = failures.get(sessionId) || doc?.report_error;
+	if (error && !doc?.report) {
     return {
       state: "failed",
       stale: false,
-      error: err.error,
+		error,
       judgeAvailable: clis.length > 0 || true,
       judgeCli: clis[0],
       judgeClis: clis.length ? clis : ["heuristic"],
     };
   }
-  const report = readJSON<Report>(reportPath(sessionId));
+	const report = doc?.report;
   if (!report) {
     return {
       state: "none",
@@ -358,23 +372,16 @@ export function startAnalyze(
   if (running.has(sessionId)) {
     return getReportStatus(sessionId, trace.events.length);
   }
-  const dir = soPath("sessions", sessionId);
-  mkdirSync(dir, { recursive: true });
-  try {
-    unlinkSync(errorPath(sessionId));
-  } catch {
-    /* ok */
-  }
+	failures.delete(sessionId);
 
   const promise = (async () => {
     try {
       const report = await runJudge(trace, choice);
-      writeFileSync(reportPath(sessionId), JSON.stringify(report, null, 2));
-    } catch (err) {
-      writeFileSync(
-        errorPath(sessionId),
-        JSON.stringify({ error: err instanceof Error ? err.message : String(err) })
-      );
+		writeSessionReport(sessionId, report);
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		failures.set(sessionId, message);
+		writeSessionReport(sessionId, undefined, message);
     } finally {
       running.delete(sessionId);
     }

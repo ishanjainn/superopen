@@ -38,19 +38,19 @@ func TestModelForCLI(t *testing.T) {
 func TestNormalizeObservabilityLocalOnly(t *testing.T) {
 	c := Default()
 	c.Observability.Exporters = []ExporterConfig{
-		{Type: "otlp_http", Endpoint: "https://example.com"},
+		{Type: "unsupported"},
 		{Type: "local_jsonl", Path: ".so/custom-traces"},
 	}
 	c.normalizeObservability()
 	if len(c.Observability.Exporters) != 1 {
 		t.Fatalf("want 1 exporter, got %#v", c.Observability.Exporters)
 	}
-	if c.Observability.Exporters[0].Type != "local_jsonl" || c.Observability.Exporters[0].Path != ".so/custom-traces" {
+	if c.Observability.Exporters[0].Type != "local_jsonl" || c.Observability.Exporters[0].Path != ".so/sessions" {
 		t.Fatalf("got %#v", c.Observability.Exporters[0])
 	}
-	c.Observability.Exporters = []ExporterConfig{{Type: "otlp_http", Endpoint: "https://x"}}
+	c.Observability.Exporters = []ExporterConfig{{Type: "unsupported"}}
 	c.normalizeObservability()
-	if c.Observability.Exporters[0].Type != "local_jsonl" || c.Observability.Exporters[0].Path != ".so/traces" {
+	if c.Observability.Exporters[0].Type != "local_jsonl" || c.Observability.Exporters[0].Path != ".so/sessions" {
 		t.Fatalf("fallback got %#v", c.Observability.Exporters[0])
 	}
 }

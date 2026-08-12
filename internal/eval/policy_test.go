@@ -2,8 +2,6 @@ package eval
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,13 +12,13 @@ import (
 
 func writeEval(t *testing.T, paths harness.Paths, id string, at time.Time) {
 	t.Helper()
-	dir := paths.SessionDir(id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	res := Result{SessionID: id, At: at, Badge: "ok", Score: 0.5}
+	data, _ := json.Marshal(res)
+	store := session.NewStore(paths)
+	if err := store.Start(session.Meta{ID: id, StartedAt: at}); err != nil {
 		t.Fatal(err)
 	}
-	res := Result{SessionID: id, At: at, Badge: "ok", Score: 0.5}
-	data, _ := json.MarshalIndent(res, "", "  ")
-	if err := os.WriteFile(filepath.Join(dir, "eval.json"), data, 0o644); err != nil {
+	if err := store.WriteDocument(id, func(d *session.Document) { d.Evaluation = data }); err != nil {
 		t.Fatal(err)
 	}
 }

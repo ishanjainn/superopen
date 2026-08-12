@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/session"
 )
 
 func TestMineTranscriptWritesLessonAndRec(t *testing.T) {
@@ -16,6 +17,7 @@ func TestMineTranscriptWritesLessonAndRec(t *testing.T) {
 	_ = os.MkdirAll(paths.SkillsDir, 0o755)
 	_ = os.MkdirAll(filepath.Dir(paths.PendingRecs), 0o755)
 	_ = os.WriteFile(filepath.Join(root, "config.yaml"), []byte("version: 1\n"), 0o644)
+	_ = session.NewStore(paths).Start(session.Meta{ID: "sess1", Vendor: "codex"})
 
 	lines := []string{
 		"please always run tests before finishing a PR",

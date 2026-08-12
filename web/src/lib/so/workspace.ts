@@ -10,9 +10,13 @@ import {
 
 export function projectIdFromRequest(req: Request): string {
   const header = req.headers.get("x-so-project");
-  if (header != null) return header.trim();
+  if (header != null) {
+    const value = header.trim();
+    return value === "all" ? "" : value;
+  }
   try {
-    return new URL(req.url).searchParams.get("project")?.trim() || "";
+    const value = new URL(req.url).searchParams.get("project")?.trim() || "";
+    return value === "all" ? "" : value;
   } catch {
     return "";
   }
@@ -21,7 +25,6 @@ export function projectIdFromRequest(req: Request): string {
 /**
  * Resolve which workspace a UI project filter maps to.
  * - "" (This repo): current SUPEROPEN_ROOT
- * - "all": current SUPEROPEN_ROOT for single-root pages (sessions lists merge separately)
  * - id: that project's so_root / repo_root
  */
 function resolveWorkspace(projectFilter: string): WorkspaceOverride & {
@@ -86,14 +89,7 @@ export function projectsForFilter(projectFilter: string): Project[] {
   const { projects } = listProjects(activeRoot);
   const filter = projectFilter.trim();
 
-  if (filter === "all") return projects.length ? projects : [{
-    id: "local",
-    name: basename(activeRoot) || "local",
-    repo_root: activeRoot,
-    so_root: join(activeRoot, ".so"),
-  }];
-
-  if (!filter) {
+  if (!filter || filter === "all") {
     const local = projects.filter((p) => p.repo_root === activeRoot);
     if (local.length) return local;
     return [

@@ -38,7 +38,7 @@ Example:
 The agent's binary must be on PATH. The plugin manifest is installed
 idempotently - running 'launch' twice is a no-op the second time.
 
---from-memory builds the shared .so/memory active-context.md pack before exec
+--from-memory builds the shared .so/memory/context.md pack before exec
 (same as so sessions start --vendor=… --no-launch).`,
 		Args:          cobra.MinimumNArgs(1),
 		SilenceUsage:  true,
@@ -47,7 +47,7 @@ idempotently - running 'launch' twice is a no-op the second time.
 			return run(cmd, args, fromMemory)
 		},
 	}
-	cmd.Flags().BoolVar(&fromMemory, "from-memory", false, "Build .so/memory active-context.md pack before launch")
+	cmd.Flags().BoolVar(&fromMemory, "from-memory", false, "Build .so/memory/context.md pack before launch")
 	return cmd
 }
 
@@ -93,7 +93,6 @@ func run(cmd *cobra.Command, args []string, fromMemory bool) error {
 	}
 	return execReplace(resolved, append([]string{bin}, rest...))
 }
-
 
 func writeMemoryPack(cmd *cobra.Command, agent string) error {
 	wd, err := os.Getwd()

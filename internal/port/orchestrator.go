@@ -32,7 +32,7 @@ type PortResult struct {
 	// DestSessionIDs are hub/resume ids written this run (last is armed for SessionStart inject).
 	DestSessionIDs []string `json:"dest_session_ids,omitempty"`
 	// ResumeArmed is true when a one-shot SessionStart inject was written for the destination.
-	ResumeArmed bool `json:"resume_armed,omitempty"`
+	ResumeArmed bool   `json:"resume_armed,omitempty"`
 	ResumeID    string `json:"resume_id,omitempty"`
 	// DroppedTurns is the total non-text turns (tool calls, results, reasoning)
 	// discarded across all ported sessions this run. Non-zero means the

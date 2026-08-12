@@ -13,7 +13,7 @@ func TestIsIndexablePath(t *testing.T) {
 		want bool
 	}{
 		{".so/graph/graph.json", false},
-		{".so/memory/active-context.md", false},
+		{".so/memory/context.md", false},
 		{".git/hooks/post-commit", false},
 		{"README.md", false},
 		{"docs/guide.md", false},

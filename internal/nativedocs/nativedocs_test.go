@@ -10,7 +10,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/nativedocs"
 )
 
-func TestUpsertRuleSyncsVendorCopies(t *testing.T) {
+func TestUpsertRuleIsolatesVendorCopies(t *testing.T) {
 	root := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(root, ".claude", "rules"), 0o755)
 	_ = os.WriteFile(filepath.Join(root, ".claude", "rules", "coding.md"), []byte("old claude\n"), 0o644)
@@ -22,14 +22,10 @@ func TestUpsertRuleSyncsVendorCopies(t *testing.T) {
 	if err := nativedocs.UpsertRule(paths, "coding", body, nativedocs.WriteOpts{Vendor: "claude-code"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{
-		filepath.Join(root, ".claude", "rules", "coding.md"),
-		filepath.Join(root, ".cursor", "rules", "coding.mdc"),
-	} {
-		data, _ := os.ReadFile(p)
-		if !strings.Contains(string(data), "Synced body") {
-			t.Fatalf("%s not synced: %s", p, data)
-		}
+	claude, _ := os.ReadFile(filepath.Join(root, ".claude", "rules", "coding.md"))
+	cursor, _ := os.ReadFile(filepath.Join(root, ".cursor", "rules", "coding.mdc"))
+	if !strings.Contains(string(claude), "Synced body") || strings.Contains(string(cursor), "Synced body") {
+		t.Fatalf("vendor isolation failed: claude=%q cursor=%q", claude, cursor)
 	}
 }
 
@@ -45,7 +41,7 @@ func TestUpsertRuleCreatesUnderSessionVendor(t *testing.T) {
 	}
 }
 
-func TestUpsertSkillSyncsAndCreates(t *testing.T) {
+func TestUpsertSkillIsolatesAndCreates(t *testing.T) {
 	root := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(root, ".codex", "skills", "deploy"), 0o755)
 	_ = os.WriteFile(filepath.Join(root, ".codex", "skills", "deploy", "SKILL.md"), []byte("old\n"), 0o644)
@@ -56,11 +52,10 @@ func TestUpsertSkillSyncsAndCreates(t *testing.T) {
 	if err := nativedocs.UpsertSkill(paths, "deploy", "# Deploy\n\nnew\n", nativedocs.WriteOpts{Vendor: "pi"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range harness.FindExistingSkills(root, "deploy") {
-		data, _ := os.ReadFile(p)
-		if !strings.Contains(string(data), "new") {
-			t.Fatalf("%s not synced", p)
-		}
+	pi, _ := os.ReadFile(filepath.Join(root, ".pi", "skills", "deploy", "SKILL.md"))
+	codex, _ := os.ReadFile(filepath.Join(root, ".codex", "skills", "deploy", "SKILL.md"))
+	if !strings.Contains(string(pi), "new") || strings.Contains(string(codex), "new") {
+		t.Fatalf("vendor isolation failed: pi=%q codex=%q", pi, codex)
 	}
 
 	if err := nativedocs.UpsertSkill(paths, "fresh", "# Fresh\n", nativedocs.WriteOpts{Vendor: "codex"}); err != nil {

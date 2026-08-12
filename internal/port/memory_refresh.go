@@ -5,7 +5,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/memory"
 )
 
-// RefreshMemoryAfterPort updates episodic memory and active-context.md after a successful port.
+// RefreshMemoryAfterPort updates episodic memory and context.md after a successful port.
 func RefreshMemoryAfterPort(repoRoot, from, to, sourceID, title string) {
 	if repoRoot == "" {
 		return

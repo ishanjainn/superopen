@@ -58,7 +58,7 @@ Run `so dev` from your terminal when you want the local session UI at `http://lo
 | Agent skills | A single `/so` skill across Claude, Cursor, Codex, Gemini, OpenCode, Copilot, Pi, and Agent Skills-compatible tools |
 | Repository understanding | A graph built before the harness is seeded, so context starts from the codebase’s real structure |
 | Shared memory | Preferences, lessons, and project context injected at session start across supported agents in the same repo |
-| Session replay | OTLP telemetry materialized into sessions and replayable as a city map in the local UI |
+| Session replay | Hook telemetry stored with each session and replayable as a city map in the local UI |
 | Evals and recommendations | Post-session scoring that proposes targeted improvements; sensitive changes can require approval |
 | Local-first workflow | `.so/` is ordinary repository data that both the CLI and UI read and write directly |
 | Agent-first CLI | Compact output, JSON envelopes, clear empty states, and useful next-step hints |
@@ -67,7 +67,7 @@ Run `so dev` from your terminal when you want the local session UI at `http://lo
 
 ```text
 agent session
-    ↓ OTLP traces
+    ↓ local hook events
 .so/sessions/<id>/
     ↓ evaluate
 recommendations
@@ -111,7 +111,7 @@ It writes skills only; it does not create a `.so/` harness. Run `/so init` (or `
 # Codex
 $so init
 
-# Shell or CI: heuristic seed and an assistant-ready upgrade brief
+# Shell or CI: compact heuristic seed
 so init --no-llm
 
 # Headless API-key upgrade, intended for CI/automation
@@ -123,9 +123,9 @@ Initialization:
 1. Creates `.so/` and its configuration.
 2. Builds the repository graph first.
 3. Reads existing instruction files such as `AGENTS.md`, `CLAUDE.md`, and Cursor rules.
-4. Seeds context, skills, rules, guardrails, and evals heuristically—offline and without an API key.
-5. Writes `.so/upgrade-brief.md` for an assistant-driven improvement pass.
-6. Builds the city map, enables configured OTLP hooks, and injects always-on project instructions.
+4. Seeds shared `AGENTS.md`, `.so/guardrails.yaml`, and `.so/evals.yaml` heuristically—offline and without an API key.
+5. Enables only detected or explicitly requested vendor integrations; `.agents` requires `--shared-agents`.
+6. Prints an assistant upgrade prompt on demand with `so upgrade-brief` without persisting an artifact.
 
 For unattended automation, configure `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `OPENAI_BASE_URL`, then run `so init --llm`. You can also set `llm.provider`, `llm.model`, and `llm.base_url` in `.so/config.yaml`.
 
@@ -150,7 +150,7 @@ The CLI is designed for agents as well as humans:
 - `--full` / `SO_FULL=1` to disable field truncation.
 - Exit codes: `0` success, `1` failure, `2` usage, `3` not found.
 
-Guardrails live in one inspectable file: `.so/guardrails/guardrails.yaml`.
+Guardrails live in one inspectable file: `.so/guardrails.yaml`.
 
 ## Evals and recommendations
 
@@ -219,9 +219,9 @@ If the binary is already gone, rebuild from a checkout and run `make build && ./
 | --- | --- |
 | `cmd/so/` | CLI entrypoint |
 | `web/` | Local Next.js UI |
-| `internal/` | Harness, OTLP, evals, coding hooks, and shared Go packages |
+| `internal/` | Harness, session telemetry, evals, coding hooks, and shared Go packages |
 | `templates/` | Seed content for project knowledge, skills, rules, guardrails, and evals |
-| `plugins/` + `sdk/` | Coding-agent hooks and their OTLP bootstrap—not a general LLM SDK |
+| `plugins/` + `sdk/` | Coding-agent hooks and their local telemetry bootstrap—not a general LLM SDK |
 
 Session 3D replay lives in `web/src/map`.
 

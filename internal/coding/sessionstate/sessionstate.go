@@ -241,9 +241,7 @@ type CodexTurnFragment struct {
 // accumulated by `PostToolUse`. The fields mirror Codex's hook payload
 // (tool_name, tool_use_id, tool_input, tool_response, tool_duration_ms,
 // status, error) plus the resolved decision (Status). Body fields are
-// gated on `full` content capture by the adapter before we ever write
-// here so the on-disk cache cannot carry tool args/results in
-// metadata_only mode.
+// secret-redacted by the adapter before being written to the local cache.
 type CodexToolRecord struct {
 	ToolName     string `json:"tool_name,omitempty"`
 	ToolUseID    string `json:"tool_use_id,omitempty"`

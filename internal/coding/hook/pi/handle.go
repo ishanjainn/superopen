@@ -14,21 +14,21 @@ import (
 )
 
 type payload struct {
-	Type        string `json:"type"`
-	Event       string `json:"event"`
-	SessionID   string `json:"session_id"`
-	SessionFile string `json:"session_file"`
-	CWD         string `json:"cwd"`
-	Prompt      string `json:"prompt"`
-	Text        string `json:"text"`
-	Thinking    string `json:"thinking"`
-	Content     any    `json:"content"`
-	Model       string `json:"model"`
-	Role        string `json:"role"`
-	ToolName    string `json:"toolName"`
-	ToolNameAlt string `json:"tool_name"`
-	ToolCallID  string `json:"toolCallId"`
-	IsError     bool   `json:"isError"`
+	Type        string          `json:"type"`
+	Event       string          `json:"event"`
+	SessionID   string          `json:"session_id"`
+	SessionFile string          `json:"session_file"`
+	CWD         string          `json:"cwd"`
+	Prompt      string          `json:"prompt"`
+	Text        string          `json:"text"`
+	Thinking    string          `json:"thinking"`
+	Content     any             `json:"content"`
+	Model       string          `json:"model"`
+	Role        string          `json:"role"`
+	ToolName    string          `json:"toolName"`
+	ToolNameAlt string          `json:"tool_name"`
+	ToolCallID  string          `json:"toolCallId"`
+	IsError     bool            `json:"isError"`
 	Input       json.RawMessage `json:"input"`
 	Args        json.RawMessage `json:"args"`
 	Result      string          `json:"result"`

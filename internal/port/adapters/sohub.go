@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/artifactmeta"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/port"
 	"github.com/ishanjainn/superopen/internal/session"
@@ -84,23 +85,24 @@ func (s SOHubExport) Write(ps port.PortableSession, opts port.WriteOptions) (por
 	_ = store.Start(meta)
 	dir := paths.SessionDir(destID)
 	_ = os.MkdirAll(dir, 0o755)
-	tf, err := os.Create(filepath.Join(dir, "transcript.jsonl"))
+	tf, err := os.Create(filepath.Join(dir, "events.jsonl"))
 	if err != nil {
 		return port.ExportResult{}, err
 	}
 	enc := json.NewEncoder(tf)
+	_ = enc.Encode(artifactmeta.JSONLManifest{
+		Type: "superopen.file_manifest", Purpose: "Normalized prompts, responses, tool calls, file activity, usage, lifecycle, and audit events for this session.",
+		Authority: "authoritative session event stream", UpdatedBy: "vendor telemetry adapter",
+	})
 	for _, t := range ps.Turns {
 		_ = enc.Encode(map[string]any{"role": t.Role, "text": t.Text, "timestamp": t.Timestamp, "model": t.Model})
 	}
 	_ = tf.Close()
 	prov, _ := json.Marshal(map[string]any{
-		"sourceHarness": ps.SourceHarness, "sourceSessionId": ps.SourceSessionID, "sourcePath": ps.SourcePath,
+		"source_harness": ps.SourceHarness, "source_session_id": ps.SourceSessionID, "source_path": ps.SourcePath,
+		"working_state": ps.WorkingState, "dropped_turns": ps.DroppedTurns,
 	})
-	_ = os.WriteFile(filepath.Join(dir, "port-provenance.json"), prov, 0o644)
-	// Working state (files/commands recovered from dropped tool calls) has no
-	// home in transcript.jsonl's role/text shape, so it rides a sidecar file.
-	// CursorImport.Parse reads it back on hub round-trip.
-	writeWorkingStateSidecar(dir, ps)
+	_ = store.WriteDocument(destID, func(d *session.Document) { d.Port = prov })
 	_ = store.UpdateMeta(meta)
 	return port.ExportResult{DestSessionID: destID}, nil
 }

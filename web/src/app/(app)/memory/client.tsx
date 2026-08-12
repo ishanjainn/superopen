@@ -17,7 +17,12 @@ import { cn } from "@/lib/utils";
 import { useSoftPoll } from "@/hooks/use-soft-poll";
 
 type Lesson = { id: string; text: string; created_at?: string };
-type Section = "active" | "lessons" | "prefs" | "projects";
+type Pattern = {
+  fingerprint: string; vendor: string; kind: string; summary: string;
+  occurrences: number; status: string; confidence?: number; target_path?: string;
+  verified_sessions?: string[]; session_ids?: string[];
+};
+type Section = "active" | "lessons" | "patterns" | "prefs" | "projects";
 type Pack = { text?: string };
 
 const SECTIONS: { id: Section; label: string; hint: string }[] = [
@@ -30,6 +35,11 @@ const SECTIONS: { id: Section; label: string; hint: string }[] = [
     id: "lessons",
     label: "Lessons",
     hint: "Corrections learned from sessions",
+  },
+  {
+    id: "patterns",
+    label: "Review patterns",
+    hint: "Evidence accumulated across sessions",
   },
   {
     id: "prefs",
@@ -51,6 +61,7 @@ const VERB_OPTIONS = MEMORY_VERBS.map((v) => ({
 export default function MemoryPage() {
   const [section, setSection] = useState<Section>("active");
   const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [patterns, setPatterns] = useState<Pattern[]>([]);
   const [prefItems, setPrefItems] = useState<MemoryLine[]>([]);
   const [projectSections, setProjectSections] = useState<ProjectSection[]>([]);
   const [pack, setPack] = useState<Pack | null>(null);
@@ -76,6 +87,12 @@ export default function MemoryPage() {
     const r = await fetch("/api/memory?op=preferences");
     const j = await r.json();
     setPrefItems(Array.isArray(j.items) ? j.items : []);
+  }
+
+  async function loadPatterns() {
+    const r = await fetch("/api/memory?op=patterns");
+    const data = await r.json();
+    setPatterns(Array.isArray(data) ? data : []);
   }
 
   async function loadProjects() {
@@ -108,6 +125,7 @@ export default function MemoryPage() {
     setQ("");
     if (section === "active") void loadActive();
     if (section === "lessons") void loadLessons();
+    if (section === "patterns") void loadPatterns();
     if (section === "prefs") void loadPrefs();
     if (section === "projects") void loadProjects();
   }, [section]);
@@ -115,6 +133,7 @@ export default function MemoryPage() {
   const softRefresh = useCallback(() => {
     if (section === "active") void loadActive();
     if (section === "lessons") void loadLessons();
+    if (section === "patterns") void loadPatterns();
     if (section === "prefs") void loadPrefs();
     if (section === "projects") void loadProjects();
   }, [section]);
@@ -493,6 +512,29 @@ export default function MemoryPage() {
                     };
                   })}
                 />
+              </div>
+            )}
+
+            {section === "patterns" && (
+              <div className="min-h-0 flex-1 overflow-auto p-4">
+                <div className="space-y-3">
+                  {patterns.length === 0 && (
+                    <p className="text-sm text-neutral-500">No repeated review patterns yet.</p>
+                  )}
+                  {patterns.map((pattern) => (
+                    <article key={`${pattern.vendor}:${pattern.fingerprint}`} className="rounded-lg border border-neutral-200 p-4">
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-500">
+                        <span className="font-semibold uppercase tracking-wide">{pattern.kind}</span>
+                        <span>{pattern.vendor}</span>
+                        <span>{pattern.occurrences} supporting session{pattern.occurrences === 1 ? "" : "s"}</span>
+                        <span>{pattern.verified_sessions?.length || 0} verified</span>
+                        <span>{pattern.status}</span>
+                      </div>
+                      <p className="mt-2 text-sm text-neutral-800">{pattern.summary}</p>
+                      {pattern.target_path && <p className="mt-2 font-mono text-[11px] text-neutral-500">{pattern.target_path}</p>}
+                    </article>
+                  ))}
+                </div>
               </div>
             )}
 

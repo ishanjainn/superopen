@@ -1,17 +1,13 @@
 package retention_test
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/audit"
 	"github.com/ishanjainn/superopen/internal/config"
-	"github.com/ishanjainn/superopen/internal/eval"
 	"github.com/ishanjainn/superopen/internal/harness"
-	"github.com/ishanjainn/superopen/internal/recommend"
+	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/retention"
 	"github.com/ishanjainn/superopen/internal/session"
 )
@@ -51,25 +47,11 @@ func TestPruneEmptyAndExpired(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hist := []eval.Result{
-		{SessionID: "a", At: old, Badge: "ok"},
-		{SessionID: "b", At: time.Now().UTC(), Badge: "good"},
-	}
-	hdata, _ := json.MarshalIndent(hist, "", "  ")
-	_ = os.WriteFile(paths.EvalsHistory, hdata, 0o644)
-
 	_ = audit.Append(paths, audit.Event{At: old, Action: "deny", Detail: "old"})
 	_ = audit.Append(paths, audit.Event{At: time.Now().UTC(), Action: "allow", Detail: "new"})
-
-	_ = recommend.SavePending(paths, []recommend.Recommendation{
-		{ID: "old-rec", Title: "old", Status: "pending", CreatedAt: old},
-		{ID: "new-rec", Title: "new", Status: "pending", CreatedAt: time.Now().UTC()},
-	})
-
-	oldTrace := filepath.Join(paths.TracesDir, old.Format("2006-01-02")+".jsonl")
-	_ = os.WriteFile(oldTrace, []byte("{}\n"), 0o644)
-	newTrace := filepath.Join(paths.TracesDir, time.Now().UTC().Format("2006-01-02")+".jsonl")
-	_ = os.WriteFile(newTrace, []byte("{}\n"), 0o644)
+	mem := memory.NewStore(paths)
+	_, _ = mem.UpsertPattern(memory.Pattern{Fingerprint: "pattern-retention", Vendor: "codex", Kind: "workflow", Summary: "Retain aggregate evidence."}, "expired", true)
+	_, _ = mem.UpsertPattern(memory.Pattern{Fingerprint: "pattern-retention", Vendor: "codex", Kind: "workflow", Summary: "Retain aggregate evidence."}, "keep-recent", false)
 
 	cfg := config.Default()
 	cfg.Retention.Days = 7
@@ -92,7 +74,11 @@ func TestPruneEmptyAndExpired(t *testing.T) {
 	if _, err := ss.Get("expired"); err == nil {
 		t.Fatal("expired should be deleted")
 	}
-	if rep.EvalHistory < 1 || rep.AuditEvents < 1 || rep.Recommendations < 1 || rep.TraceFiles < 1 {
-		t.Fatalf("expected history/audit/recs/trace prune, got %+v", rep)
+	if rep.AuditEvents < 1 {
+		t.Fatalf("expected old system audit event prune, got %+v", rep)
+	}
+	patterns, err := mem.ListPatterns()
+	if err != nil || len(patterns) != 1 || patterns[0].Occurrences != 2 || len(patterns[0].SessionIDs) != 1 || patterns[0].SessionIDs[0] != "keep-recent" {
+		t.Fatalf("retention should remove expired references but keep aggregate counts: %+v err=%v", patterns, err)
 	}
 }

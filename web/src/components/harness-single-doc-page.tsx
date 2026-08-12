@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  appendDeniedTool,
   appendDeniedCommand,
   appendEvaluationAgentRule,
   appendEvaluationCheck,
@@ -186,6 +187,9 @@ export function HarnessSingleDocPage({
                   <GuardrailComposer
                     busy={saving}
                     onCancel={() => setComposerOpen(false)}
+                    onAddDeniedTool={(pattern) =>
+                      void applyMutation(appendDeniedTool(content, pattern))
+                    }
                     onAddDenyCommand={(pattern) =>
                       void applyMutation(appendDeniedCommand(content, pattern))
                     }
@@ -262,12 +266,14 @@ function EmptySetup({
 function GuardrailComposer({
   busy,
   onCancel,
+  onAddDeniedTool,
   onAddDenyCommand,
   onAddSensitivePath,
   onAddAdvisory,
 }: {
   busy: boolean;
   onCancel: () => void;
+  onAddDeniedTool: (pattern: string) => void;
   onAddDenyCommand: (pattern: string) => void;
   onAddSensitivePath: (pattern: string) => void;
   onAddAdvisory: (rule: {
@@ -292,6 +298,11 @@ function GuardrailComposer({
       <div className="flex flex-wrap gap-1.5">
         {(
           [
+            {
+              value: "deny_tool" as const,
+              label: "Deny tool",
+              hint: "Hook",
+            },
             {
               value: "deny_command" as const,
               label: "Deny command",
@@ -332,6 +343,26 @@ function GuardrailComposer({
           </button>
         ))}
       </div>
+
+      {kind === "deny_tool" && (
+        <>
+          <label className="block space-y-1">
+            <span className="text-[11px] text-neutral-500">
+              Vendor tool-name pattern to deny (`*` wildcards supported)
+            </span>
+            <input
+              autoFocus
+              className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 font-mono text-sm outline-none focus:border-neutral-400"
+              placeholder="e.g. mcp__production__delete_*"
+              value={pattern}
+              onChange={(e) => setPattern(e.target.value)}
+            />
+          </label>
+          <p className="text-[11px] text-neutral-400">
+            Saved under <span className="font-mono">denied_tools</span> and enforced at the next pre-tool hook.
+          </p>
+        </>
+      )}
 
       {kind === "deny_command" && (
         <>
@@ -431,6 +462,8 @@ function GuardrailComposer({
                 severity,
                 source: "ui",
               });
+            } else if (kind === "deny_tool") {
+              onAddDeniedTool(pattern.trim());
             } else if (kind === "sensitive_path") {
               onAddSensitivePath(pattern.trim());
             } else {
@@ -440,7 +473,9 @@ function GuardrailComposer({
         >
           {busy
             ? "Adding…"
-            : kind === "deny_command"
+            : kind === "deny_tool"
+              ? "Add tool denial"
+              : kind === "deny_command"
               ? "Add denial"
               : kind === "sensitive_path"
                 ? "Add path"

@@ -1,10 +1,12 @@
 package eval
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/session"
 	"github.com/ishanjainn/superopen/internal/tracestore"
 )
 
@@ -64,11 +66,11 @@ func TestRunMarksMissingActivityEvidenceUnknown(t *testing.T) {
 
 func TestHotAreasFromFiles(t *testing.T) {
 	files := map[string]bool{
-		"internal/recommend/recommend.go": true,
+		"internal/recommend/recommend.go":      true,
 		"internal/recommend/recommend_test.go": true,
-		"internal/recommend/merge.go":     true,
-		"internal/eval/eval.go":           true,
-		"cmd/so/main.go":                  true,
+		"internal/recommend/merge.go":          true,
+		"internal/eval/eval.go":                true,
+		"cmd/so/main.go":                       true,
 	}
 	got := hotAreasFromFiles(files)
 	if len(got) == 0 || got[0] != "internal/recommend" {
@@ -88,5 +90,32 @@ func TestGuidanceArea(t *testing.T) {
 		if got := guidanceArea(in); got != want {
 			t.Fatalf("guidanceArea(%q)=%q want %q", in, got, want)
 		}
+	}
+}
+
+func TestRunPersistsSessionReviewEvidence(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	_ = paths.EnsureDirs()
+	ss := session.NewStore(paths)
+	_ = ss.Start(session.Meta{ID: "reviewed", Vendor: "codex"})
+	spans := []tracestore.Span{
+		{Name: "coding_agent.llm.turn", SpanID: "prompt-1", SessionID: "reviewed", Attributes: map[string]string{"gen_ai.prompt": "Always run focused tests after changing this package."}},
+		{Name: "coding_agent.tool.call", SpanID: "edit-1", SessionID: "reviewed", Attributes: map[string]string{"gen_ai.tool.name": "apply_patch"}},
+		{Name: "coding_agent.tool.call", SpanID: "test-1", SessionID: "reviewed", Attributes: map[string]string{"gen_ai.tool.name": "Bash", "gen_ai.tool.call.arguments": `{"cmd":"go test ./internal/eval"}`}},
+	}
+	res, err := Run(paths, config.Config{Evals: config.EvalsConfig{Backend: "heuristics"}}, "reviewed", spans, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) == 0 || !res.Findings[0].ExplicitWorkflow {
+		t.Fatalf("durable correction finding missing: %+v", res.Findings)
+	}
+	doc, err := ss.ReadDocument("reviewed")
+	if err != nil || len(doc.Review.Findings) == 0 {
+		t.Fatalf("session evidence not persisted: %+v err=%v", doc.Review, err)
+	}
+	if len(doc.Evaluation) == 0 || strings.Contains(string(doc.Evaluation), "Always run focused") {
+		t.Fatalf("evaluation should exist without duplicating prompt text: %s", doc.Evaluation)
 	}
 }

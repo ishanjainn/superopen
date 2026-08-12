@@ -62,6 +62,7 @@ func (e *recordingEmitter) EmitGitPullRequest(p normalize.GitPullRequest) error 
 func withIsolatedCache(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
+	t.Chdir(dir)
 	t.Setenv("XDG_CACHE_HOME", dir)
 	if home := os.Getenv("HOME"); home != "" {
 		t.Setenv("HOME", dir)
@@ -387,4 +388,3 @@ func TestCursorStopAccumulatesIntoSessionEnd(t *testing.T) {
 		t.Errorf("CostUSD = %v, want %v", got.CostUSD, wantCost)
 	}
 }
-

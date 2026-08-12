@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,7 +16,8 @@ import (
 	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/port"
-	"github.com/ishanjainn/superopen/internal/retention"
+	"github.com/ishanjainn/superopen/internal/runtimestate"
+	"github.com/ishanjainn/superopen/internal/session"
 )
 
 // maybeInjectMemory injects Active Context and any pending Port resume on SessionStart.
@@ -37,7 +38,8 @@ func maybeInjectMemory(vendor, event, sessionID, cwd string) {
 	if cfg, err := config.Load(paths.Config); err == nil {
 		memoryOn = cfg.MemoryEnabled()
 	}
-	if !memoryOn && portExtra == "" {
+	reviewExtra := session.NewStore(paths).PreviousReviewContext(vendor, sessionID)
+	if !memoryOn && portExtra == "" && reviewExtra == "" {
 		return
 	}
 
@@ -58,6 +60,14 @@ func maybeInjectMemory(vendor, event, sessionID, cwd string) {
 			packText = packText + "\n\n## Ported conversation resume\n\n" + portExtra
 		} else {
 			packText = "## Ported conversation resume\n\n" + portExtra
+		}
+		charCount = len(packText)
+	}
+	if reviewExtra != "" {
+		if packText != "" {
+			packText += "\n\n" + reviewExtra
+		} else {
+			packText = reviewExtra
 		}
 		charCount = len(packText)
 	}
@@ -115,24 +125,11 @@ func maybeHarvestOnSessionEnd(vendor, event, sessionID, cwd string) {
 	if !paths.Exists() {
 		return
 	}
-	cfg, err := config.Load(paths.Config)
-	if err != nil {
-		cfg = config.Default()
-	}
-
 	if isSessionStartEvent(event) {
-		flushed := harvest.FlushPending(paths, cfg, sessionID)
-		_, _ = retention.Prune(paths, cfg)
-		// Codex/Stop-only vendors get SessionEnd parity here: harvest already
-		// ran in FlushPending; kick detached finalize+eval+recommend per id.
-		for _, r := range flushed {
-			if r.SessionID == "" || r.SessionID == sessionID {
-				continue
-			}
-			if r.Skipped && (r.Reason == "empty_summary" || r.Reason == "no_session") {
-				continue
-			}
-			scheduleFinalize(root, r.SessionID)
+		// A new same-vendor session only schedules the immediately preceding
+		// pending review. The hook never waits for evaluation or backlog work.
+		if previous := harvest.PendingVendor(paths, sessionID, vendor); previous != "" {
+			scheduleFinalize(root, previous)
 		}
 		return
 	}
@@ -141,12 +138,8 @@ func maybeHarvestOnSessionEnd(vendor, event, sessionID, cwd string) {
 		if sessionID == "" {
 			return
 		}
-		_ = harvest.ClearPending(paths, sessionID)
-		_, _ = harvest.Run(paths, cfg, sessionID, harvest.TriggerSessionEnd)
-		_ = harvest.MarkFinalizePending(paths, sessionID)
-		_, _ = harvest.IdleSweep(paths, cfg)
-		// Detached post-session pipeline: eval → recommend → auto-apply.
-		// Must not block the agent SessionEnd hook (fire-and-forget).
+		_ = harvest.MarkPending(paths, sessionID, vendor)
+		// Detached post-session pipeline: materialize → graph → review → apply.
 		scheduleFinalize(root, sessionID)
 		return
 	}
@@ -154,13 +147,10 @@ func maybeHarvestOnSessionEnd(vendor, event, sessionID, cwd string) {
 	// Vendors without a real session-end hook (Codex Stop, and any Stop-only adapter).
 	if isTurnBoundaryHarvestEvent(vendor, event) {
 		if sessionID != "" {
-			_ = harvest.MarkPending(paths, sessionID)
-			_, _ = harvest.RunDebounced(paths, cfg, sessionID, harvest.TriggerTurnEnd)
-			_ = harvest.MarkFinalizePending(paths, sessionID)
+			_ = harvest.MarkPending(paths, sessionID, vendor)
 		}
-		_, _ = harvest.IdleSweep(paths, cfg)
-		// Do NOT finalize on Stop — that would close every Codex turn.
-		// Finalize runs when the next SessionStart FlushPending completes.
+		// Stop is only a marker. Finalize runs on explicit close, idle handling,
+		// or the next different same-vendor SessionStart.
 	}
 }
 
@@ -219,14 +209,14 @@ func maybeEnforceGuardrails(vendor, event string, payload []byte, cwd string) bo
 	if err != nil {
 		return false
 	}
-	cmd, path := extractToolTargets(payload)
-	dec, matcher, deny := decideGuardrail(eng, cmd, path)
+	tool, cmd, path := extractToolTargets(payload)
+	dec, matcher, deny := decideGuardrail(eng, tool, cmd, path)
 	if !deny {
 		return false
 	}
 	_ = audit.Append(paths, audit.Event{
 		Action: "deny", Type: "policy", Key: dec.Rule, Detail: dec.Reason,
-		Vendor: vendor, Attrs: map[string]string{"matcher": matcher, "command": truncate(cmd, 120), "path": truncate(path, 120)},
+		Vendor: vendor, Attrs: map[string]string{"matcher": matcher, "tool": truncate(tool, 120), "command": truncate(cmd, 120), "path": truncate(path, 120)},
 	})
 	writeDeny(vendor, event, dec)
 	return true
@@ -234,9 +224,15 @@ func maybeEnforceGuardrails(vendor, event string, payload []byte, cwd string) bo
 
 // decideGuardrail evaluates command/path against guardrails.
 // Empty targets never deny (avoids zero-value Decision{Allow:false} false positives).
-func decideGuardrail(eng guardrails.Engine, cmd, path string) (dec guardrails.Decision, matcher string, deny bool) {
-	if cmd == "" && path == "" {
+func decideGuardrail(eng guardrails.Engine, tool, cmd, path string) (dec guardrails.Decision, matcher string, deny bool) {
+	if tool == "" && cmd == "" && path == "" {
 		return guardrails.Decision{Allow: true}, "", false
+	}
+	if tool != "" {
+		dec = eng.CheckTool(tool)
+		if !dec.Allow {
+			return dec, "tool", true
+		}
 	}
 	if cmd != "" {
 		dec = eng.CheckCommand(cmd)
@@ -267,8 +263,8 @@ func writeDeny(vendor, event string, dec guardrails.Decision) {
 	case vendor == "cursor":
 		// Cursor shell/file hooks: permission:"deny"
 		_ = writeHookJSON(map[string]any{
-			"permission": "deny",
-			"userMessage": reason,
+			"permission":   "deny",
+			"userMessage":  reason,
 			"agentMessage": reason,
 		})
 	default:
@@ -301,10 +297,18 @@ func isToolGateEvent(event string) bool {
 	}
 }
 
-func extractToolTargets(payload []byte) (cmd, path string) {
+var nestedToolCallRE = regexp.MustCompile(`tools\.([A-Za-z0-9_]+)\s*\(`)
+
+func extractToolTargets(payload []byte) (tool, cmd, path string) {
 	var m map[string]any
 	if json.Unmarshal(payload, &m) != nil {
-		return "", ""
+		return "", "", ""
+	}
+	for _, key := range []string{"tool_name", "toolName", "tool", "name"} {
+		if value, ok := m[key].(string); ok && strings.TrimSpace(value) != "" {
+			tool = value
+			break
+		}
 	}
 	// Common shapes across vendors
 	if v, ok := m["tool_input"].(map[string]any); ok {
@@ -316,6 +320,13 @@ func extractToolTargets(payload []byte) (cmd, path string) {
 		}
 		if p, ok := v["path"].(string); ok && path == "" {
 			path = p
+		}
+		// Codex code mode exposes nested tools through a generic exec hook.
+		// Recover the actual callable name so denied_tools can enforce it.
+		if code, ok := v["code"].(string); ok {
+			if match := nestedToolCallRE.FindStringSubmatch(code); len(match) == 2 {
+				tool = match[1]
+			}
 		}
 	}
 	if c, ok := m["command"].(string); ok && cmd == "" {
@@ -331,7 +342,7 @@ func extractToolTargets(payload []byte) (cmd, path string) {
 	if p, ok := m["command"].(string); ok && cmd == "" {
 		cmd = p
 	}
-	return cmd, path
+	return tool, cmd, path
 }
 
 func findRepoRoot(cwd string) string {
@@ -377,21 +388,10 @@ func maybeAuditApproval(vendor, event, permissionMode, sessionID, cwd string) {
 	if key == "||"+ceiling || strings.Trim(key, "|") == ceiling {
 		key = vendor + "|" + mode + "|" + ceiling
 	}
-	debounceFile := filepath.Join(paths.MemoryDir, "approval-mismatch-at")
-	if data, err := os.ReadFile(debounceFile); err == nil {
-		lines := strings.Split(string(data), "\n")
-		for _, line := range lines {
-			parts := strings.SplitN(strings.TrimSpace(line), "\t", 2)
-			if len(parts) != 2 || parts[0] != key {
-				continue
-			}
-			if t, err := time.Parse(time.RFC3339, parts[1]); err == nil && time.Since(t) < time.Hour {
-				return
-			}
-		}
+	record, err := runtimestate.TouchIfStale(root, "approval_mismatch:"+key, time.Hour)
+	if err != nil || !record {
+		return
 	}
-	_ = os.MkdirAll(paths.MemoryDir, 0o755)
-	_ = os.WriteFile(debounceFile, []byte(key+"\t"+time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644)
 
 	_ = audit.Append(paths, audit.Event{
 		Action:  "conflict_skip",
@@ -402,4 +402,3 @@ func maybeAuditApproval(vendor, event, permissionMode, sessionID, cwd string) {
 		Attrs:   map[string]string{"session_mode": mode, "policy_ceiling": ceiling, "event": event},
 	})
 }
-

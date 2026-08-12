@@ -9,19 +9,12 @@ import (
 func TestWriteSkillBundle_ProjectVendors(t *testing.T) {
 	root := t.TempDir()
 	body := "# /so\ntest skill\n"
-	written, err := writeSkillBundle(root, body, false)
+	written, err := writeSkillBundleFor(root, body, []string{"codex"}, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
-		filepath.Join(root, ".agents", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".claude", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".cursor", "skills", "so", "SKILL.md"),
 		filepath.Join(root, ".codex", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".gemini", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".opencode", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".github", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".pi", "skills", "so", "SKILL.md"),
 	}
 	if len(written) != len(want) {
 		t.Fatalf("wrote %d paths, want %d: %v", len(written), len(want), written)
@@ -40,12 +33,11 @@ func TestWriteSkillBundle_ProjectVendors(t *testing.T) {
 func TestWriteSkillBundle_GlobalVendors(t *testing.T) {
 	home := t.TempDir()
 	body := "# /so\nglobal\n"
-	written, err := writeSkillBundle(home, body, true)
+	written, err := writeSkillBundleFor(home, body, []string{"opencode", "copilot-cli", "pi", "gemini"}, false, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	extra := []string{
-		filepath.Join(home, ".config", "so", "SKILL.md"),
 		filepath.Join(home, ".config", "opencode", "skills", "so", "SKILL.md"),
 		filepath.Join(home, ".copilot", "skills", "so", "SKILL.md"),
 		filepath.Join(home, ".pi", "agent", "skills", "so", "SKILL.md"),

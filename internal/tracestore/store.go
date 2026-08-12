@@ -9,9 +9,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ishanjainn/superopen/internal/artifactmeta"
 )
 
-// Span is a simplified OTLP-compatible span record stored in JSONL.
+// Span is a normalized OpenTelemetry span record stored in JSONL.
 type Span struct {
 	TraceID        string            `json:"trace_id"`
 	SpanID         string            `json:"span_id"`
@@ -38,7 +40,8 @@ type QueryFilter struct {
 	Limit     int
 }
 
-// LocalJSONL stores one JSON object per line under dir/YYYY-MM-DD.jsonl.
+// LocalJSONL stores normalized spans in <sessions>/<id>/events.jsonl. Events
+// without a resolvable session id are held lazily in sessions/inbox.jsonl.
 type LocalJSONL struct {
 	Dir string
 	mu  sync.Mutex
@@ -54,41 +57,142 @@ func (s *LocalJSONL) Write(spans []Span) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
-		return err
-	}
-	day := time.Now().UTC().Format("2006-01-02")
-	path := filepath.Join(s.Dir, day+".jsonl")
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
+	byPath := map[string][]Span{}
+	resolvedByTrace := map[string]string{}
 	for _, sp := range spans {
-		if err := enc.Encode(sp); err != nil {
+		sid := storedSessionID(sp)
+		path := filepath.Join(s.Dir, "inbox.jsonl")
+		if sid != "" {
+			path = filepath.Join(s.Dir, safeID(sid), "events.jsonl")
+			if sp.TraceID != "" {
+				resolvedByTrace[sp.TraceID] = sid
+			}
+		}
+		byPath[path] = append(byPath[path], sp)
+	}
+	for path, group := range byPath {
+		about := artifactmeta.About{Purpose: "Temporary event spool for telemetry whose session ID has not been resolved.", Authority: "temporary", UpdatedBy: "telemetry ingestion"}
+		if filepath.Base(path) == "events.jsonl" {
+			about = artifactmeta.About{Purpose: "Normalized prompts, responses, tool calls, file activity, usage, lifecycle, and audit events for this session.", Authority: "authoritative session event stream", UpdatedBy: "vendor telemetry adapter"}
+		}
+		if err := artifactmeta.EnsureJSONL(path, about); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		enc := json.NewEncoder(f)
+		for _, sp := range group {
+			if err := enc.Encode(sp); err != nil {
+				_ = f.Close()
+				return err
+			}
+		}
+		if err := f.Close(); err != nil {
 			return err
 		}
 	}
-	return nil
+	return s.resolveInbox(resolvedByTrace)
+}
+
+func (s *LocalJSONL) resolveInbox(resolvedByTrace map[string]string) error {
+	if len(resolvedByTrace) == 0 {
+		return nil
+	}
+	inbox := filepath.Join(s.Dir, "inbox.jsonl")
+	f, err := os.Open(inbox)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var remaining []Span
+	move := map[string][]Span{}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		var sp Span
+		if json.Unmarshal(sc.Bytes(), &sp) != nil || sp.Name == "" {
+			continue // file manifest
+		}
+		if sid := resolvedByTrace[sp.TraceID]; sid != "" {
+			sp.SessionID = sid
+			move[sid] = append(move[sid], sp)
+		} else {
+			remaining = append(remaining, sp)
+		}
+	}
+	closeErr := f.Close()
+	if sc.Err() != nil {
+		return sc.Err()
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	for sid, group := range move {
+		path := filepath.Join(s.Dir, safeID(sid), "events.jsonl")
+		if err := artifactmeta.EnsureJSONL(path, artifactmeta.About{Purpose: "Normalized prompts, responses, tool calls, file activity, usage, lifecycle, and audit events for this session.", Authority: "authoritative session event stream", UpdatedBy: "vendor telemetry adapter"}); err != nil {
+			return err
+		}
+		out, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		enc := json.NewEncoder(out)
+		for _, sp := range group {
+			if err := enc.Encode(sp); err != nil {
+				_ = out.Close()
+				return err
+			}
+		}
+		if err := out.Close(); err != nil {
+			return err
+		}
+	}
+	if len(remaining) == 0 {
+		return os.Remove(inbox)
+	}
+	tmp := inbox + ".tmp"
+	_ = os.Remove(tmp)
+	if err := artifactmeta.EnsureJSONL(tmp, artifactmeta.About{Purpose: "Temporary event spool for telemetry whose session ID has not been resolved.", Authority: "temporary", UpdatedBy: "telemetry ingestion"}); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(tmp, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(out)
+	for _, sp := range remaining {
+		if err := enc.Encode(sp); err != nil {
+			_ = out.Close()
+			return err
+		}
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, inbox)
 }
 
 func (s *LocalJSONL) Query(filter QueryFilter) ([]Span, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	entries, err := os.ReadDir(s.Dir)
-	if err != nil {
+	if _, err := os.Stat(s.Dir); err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	var out []Span
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
-			continue
+	var files []string
+	_ = filepath.WalkDir(s.Dir, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && (d.Name() == "events.jsonl" || d.Name() == "inbox.jsonl") {
+			files = append(files, path)
 		}
-		path := filepath.Join(s.Dir, e.Name())
+		return nil
+	})
+	for _, path := range files {
 		f, err := os.Open(path)
 		if err != nil {
 			return nil, err
@@ -141,6 +245,28 @@ func (s *LocalJSONL) Query(filter QueryFilter) ([]Span, error) {
 	return out, nil
 }
 
+func storedSessionID(sp Span) string {
+	if strings.TrimSpace(sp.SessionID) != "" {
+		return strings.TrimSpace(sp.SessionID)
+	}
+	for _, k := range []string{"gen_ai.conversation.id", "coding_agent.session.id", "coding_agent.session_id"} {
+		if v := strings.TrimSpace(sp.Attributes[k]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func safeID(id string) string {
+	id = strings.TrimSpace(id)
+	id = strings.ReplaceAll(id, "/", "_")
+	id = strings.ReplaceAll(id, "\\", "_")
+	if id == "." || id == ".." || id == "" {
+		return "unknown"
+	}
+	return id
+}
+
 func (s *LocalJSONL) SessionCost(sessionID string) (int64, float64, error) {
 	spans, err := s.Query(QueryFilter{SessionID: sessionID})
 	if err != nil {
@@ -166,33 +292,4 @@ func (s *LocalJSONL) SessionCost(sessionID string) (int64, float64, error) {
 		}
 	}
 	return tokens, cost, nil
-}
-
-// Fanout writes to multiple stores (local + future remote OTLP).
-type Fanout struct {
-	Stores []Store
-}
-
-func (f *Fanout) Write(spans []Span) error {
-	var first error
-	for _, s := range f.Stores {
-		if err := s.Write(spans); err != nil && first == nil {
-			first = err
-		}
-	}
-	return first
-}
-
-func (f *Fanout) Query(filter QueryFilter) ([]Span, error) {
-	if len(f.Stores) == 0 {
-		return nil, nil
-	}
-	return f.Stores[0].Query(filter)
-}
-
-func (f *Fanout) SessionCost(sessionID string) (int64, float64, error) {
-	if len(f.Stores) == 0 {
-		return 0, 0, nil
-	}
-	return f.Stores[0].SessionCost(sessionID)
 }

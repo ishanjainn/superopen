@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ishanjainn/superopen/internal/audit"
 	"github.com/ishanjainn/superopen/internal/coding"
 	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/discover"
-	"github.com/ishanjainn/superopen/internal/seed"
 	"github.com/ishanjainn/superopen/internal/githooks"
 	"github.com/ishanjainn/superopen/internal/graph"
 	"github.com/ishanjainn/superopen/internal/harness"
@@ -17,7 +17,9 @@ import (
 	"github.com/ishanjainn/superopen/internal/llm"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/projects"
-	"github.com/ishanjainn/superopen/internal/viz"
+	"github.com/ishanjainn/superopen/internal/retrieve"
+	"github.com/ishanjainn/superopen/internal/seed"
+	"github.com/ishanjainn/superopen/internal/session"
 )
 
 type Options struct {
@@ -29,6 +31,8 @@ type Options struct {
 	TemplateRoot string
 	SkipHooks    bool
 	SkipInject   bool
+	Vendors      []string
+	SharedAgents bool
 }
 
 type Report struct {
@@ -56,6 +60,19 @@ func Run(opts Options) (Report, error) {
 	if err := paths.EnsureDirs(); err != nil {
 		return Report{}, err
 	}
+	if err := session.NewStore(paths).Ensure(); err != nil {
+		return Report{}, fmt.Errorf("sessions layout: %w", err)
+	}
+	mem := memory.NewStore(paths)
+	if err := mem.Ensure(); err != nil {
+		return Report{}, fmt.Errorf("memory layout: %w", err)
+	}
+	if _, err := mem.RefreshActive(""); err != nil {
+		return Report{}, fmt.Errorf("memory context: %w", err)
+	}
+	if err := audit.Ensure(paths); err != nil {
+		return Report{}, fmt.Errorf("audit layout: %w", err)
+	}
 
 	cfg, err := config.Load(paths.Config)
 	if err != nil {
@@ -66,6 +83,14 @@ func Run(opts Options) (Report, error) {
 	}
 	if opts.CodeOnly {
 		cfg.Graph.Semantic = false
+	}
+	enabled := append([]string{}, inject.DetectVendors(root)...)
+	enabled = append(enabled, opts.Vendors...)
+	cfg.Vendors.Enabled = uniqueStrings(enabled)
+	cfg.Vendors.SharedAgents = opts.SharedAgents || cfg.Vendors.SharedAgents
+	cfg.Observability.Vendors = append([]string{}, cfg.Vendors.Enabled...)
+	if err := config.Save(paths.Config, cfg); err != nil {
+		return Report{}, err
 	}
 
 	// 1) Graph first - install Graphify if needed, then build (JSON + HTML for UI).
@@ -96,7 +121,7 @@ func Run(opts Options) (Report, error) {
 	if opts.TemplateRoot == "" {
 		opts.TemplateRoot = findTemplates()
 	}
-	fmt.Println("→ seeding docs, guardrails, evals, and memory…")
+	fmt.Println("→ seeding shared docs, guardrails, and evals…")
 	if err := seed.Seed(paths, seed.SeedOptions{
 		TemplateRoot: opts.TemplateRoot,
 		Profile:      profile,
@@ -104,19 +129,16 @@ func Run(opts Options) (Report, error) {
 	}); err != nil {
 		return Report{}, err
 	}
-	mem := memory.NewStore(paths)
-	if err := mem.Ensure(); err != nil {
-		return Report{}, fmt.Errorf("memory: %w", err)
+	// Seeding changes documentation only, so rebuild the corpus without
+	// repeating the source graph build.
+	if _, err := retrieve.Rebuild(root, paths); err != nil {
+		return Report{}, fmt.Errorf("corpus: %w", err)
 	}
-	if _, err := mem.RefreshActive(""); err != nil {
-		fmt.Printf("  warning: active-context refresh: %v\n", err)
-	} else {
-		fmt.Println("  memory: preferences/projects seeded, active-context.md ready")
-	}
-
 	// 4) LLM upgrade when key/gateway present (or --llm).
 	var up seed.UpgradeResult
-	wantLLM := !opts.NoLLM && (opts.UseLLM || cfg.HasLLM())
+	// Ambient API keys do not opt a repository into model calls. Headless/API
+	// upgrade requires --llm or an explicit project llm: configuration.
+	wantLLM := !opts.NoLLM && (opts.UseLLM || (cfg.HasExplicitLLM() && cfg.HasLLM()))
 	if wantLLM {
 		resolved := cfg.ResolveLLM()
 		fmt.Printf("→ upgrading harness with LLM (%s via %s)…\n", resolved.Provider, orEmpty(resolved.Source, resolved.BaseURL))
@@ -130,28 +152,20 @@ func Run(opts Options) (Report, error) {
 			fmt.Printf("  llm: wrote %d guardrails, %d eval checks\n", up.Rules, up.Checks)
 		} else {
 			fmt.Printf("  llm skipped: %s\n", up.Reason)
-			_ = seed.WriteUpgradeBrief(paths, profile)
 		}
 	} else {
 		up = seed.UpgradeResult{Used: false, Reason: "assistant or API key"}
-		_ = seed.WriteUpgradeBrief(paths, profile)
 		if opts.NoLLM {
-			fmt.Println("→ heuristic harness ready (--no-llm); assistant should apply upgrade via .so/upgrade-brief.md")
+			fmt.Println("→ heuristic harness ready (--no-llm); run `so upgrade-brief` to print the assistant prompt")
 		} else {
 			fmt.Println("→ heuristic harness ready (no API key)")
-			fmt.Println("  In Cursor/Claude/Codex: /so init upgrades docs with the assistant model (see .so/upgrade-brief.md)")
+			fmt.Println("  In Cursor/Claude/Codex: use `so upgrade-brief`, then pipe the JSON to `so apply-upgrade`")
 			fmt.Println("  Headless/CI: set an API key and run `so init --llm`, or `so apply-upgrade` with JSON")
 		}
 	}
 
-	if cfg.Observability.Viz.Citymap {
-		if err := viz.BuildCitymap(root, paths); err != nil {
-			return Report{}, fmt.Errorf("citymap: %w", err)
-		}
-	}
-
 	if !opts.SkipHooks {
-		if err := coding.Install(root, cfg.Observability.Listen, cfg.Observability.Vendors); err != nil {
+		if err := coding.Install(root, cfg.Observability.Vendors); err != nil {
 			return Report{}, fmt.Errorf("coding hooks: %w", err)
 		}
 		soBin, _ := os.Executable()
@@ -165,6 +179,9 @@ func Run(opts Options) (Report, error) {
 			return Report{}, fmt.Errorf("inject: %w", err)
 		}
 	}
+	// Refresh once more after vendor skills and shared guidance exist so the
+	// eager context pack reflects the completed initialization.
+	_, _ = mem.RefreshActive("")
 
 	_, _ = projects.Register(root, paths.Root, "")
 
@@ -173,6 +190,19 @@ func Run(opts Options) (Report, error) {
 		Agents: len(profile.Agents), Rules: len(profile.DerivedRules),
 		LLM: up,
 	}, nil
+}
+
+func uniqueStrings(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range in {
+		v = strings.ToLower(strings.TrimSpace(v))
+		if v != "" && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func detectStructure(root string) string {

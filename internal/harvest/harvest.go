@@ -14,19 +14,17 @@ import (
 	"github.com/ishanjainn/superopen/internal/audit"
 	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/harness"
-	"github.com/ishanjainn/superopen/internal/harnessvalid"
 	"github.com/ishanjainn/superopen/internal/llm"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/nativedocs"
 	"github.com/ishanjainn/superopen/internal/retention"
+	"github.com/ishanjainn/superopen/internal/runtimestate"
 	"github.com/ishanjainn/superopen/internal/session"
 )
 
 const (
 	maxSummaryChars = 6000
 	maxSnippetChars = 2500
-	ledgerName      = "harvest-ledger.json"
-	pendingName     = "pending-harvest.json"
 	// turnEndDebounce limits Codex Stop harvests so mid-session turns
 	// don't spam the agent CLI; pending flush on SessionStart catches the rest.
 	turnEndDebounce = 15 * time.Minute
@@ -60,10 +58,6 @@ type ledgerEntry struct {
 	SourceMtime int64     `json:"source_mtime"`
 }
 
-type ledgerFile struct {
-	Entries map[string]ledgerEntry `json:"entries"`
-}
-
 // Delta is the JSON shape we ask the coding-agent CLI to return.
 // Prefer update/remove over endless append — prune superseded guidance.
 type Delta struct {
@@ -89,6 +83,10 @@ type RunOpts struct {
 	// SkipNativeDocs writes only untracked memory (lessons/prefs); leaves
 	// AGENTS.md / rules / skills untouched so git hooks stay clean.
 	SkipNativeDocs bool
+	// LocalOnly records the harvest cursor/history and refreshes context without
+	// a second reviewer call. Finalization uses this after eval already returned
+	// evaluation, recommendation, and memory results in one invocation.
+	LocalOnly bool
 }
 
 // Run harvests one session: local summary → budgeted agent CLI → apply deltas.
@@ -139,6 +137,14 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, trigger Trigg
 	if meta, err := session.NewStore(paths).Get(sessionID); err == nil {
 		vendor = meta.Vendor
 	}
+	if o.LocalOnly {
+		store := memory.NewStore(paths)
+		_ = store.AppendHistory(summary)
+		_, _ = store.BuildSessionContext(12000, "", memory.ModePersistent)
+		markHarvested(paths, sessionID, trigger, srcMtime)
+		res.Reason = "review_result"
+		return res, nil
+	}
 
 	snippets := currentSnippets(paths)
 	delta, usedAgent, err := proposeDelta(cfg, summary, snippets)
@@ -150,7 +156,10 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, trigger Trigg
 		return res, nil
 	}
 
-	applied := applyDelta(paths, delta, vendor, o.SkipNativeDocs)
+	// Harness guidance changes flow through session recommendations so they are
+	// evidence-linked, vendor-scoped, current-file validated, and reversible.
+	// Harvest owns memory consolidation only; it never mutates live guidance.
+	applied := applyDelta(paths, delta, vendor, true)
 	_, _ = memory.NewStore(paths).Consolidate(summary, llm.NewMemoryCompleter(cfg))
 	applied++
 
@@ -168,15 +177,13 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, trigger Trigg
 // IdleSweep harvests sessions with no activity for cfg idle hours.
 // Throttled to at most once per hour per harness (safe to call from Codex Stop).
 func IdleSweep(paths harness.Paths, cfg config.Config) ([]Result, error) {
-	throttle := filepath.Join(paths.MemoryDir, "idle-sweep-at")
-	if data, err := os.ReadFile(throttle); err == nil {
-		if t, err := time.Parse(time.RFC3339, strings.TrimSpace(string(data))); err == nil {
-			if time.Since(t) < time.Hour {
-				return nil, nil
-			}
-		}
+	run, err := runtimestate.TouchIfStale(paths.RepoRoot, "idle_sweep", time.Hour)
+	if err != nil {
+		return nil, err
 	}
-	_ = os.WriteFile(throttle, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644)
+	if !run {
+		return nil, nil
+	}
 
 	_, _ = retention.Prune(paths, cfg)
 
@@ -208,50 +215,17 @@ func IdleSweep(paths harness.Paths, cfg config.Config) ([]Result, error) {
 	return out, nil
 }
 
-type pendingFile struct {
-	Sessions map[string]time.Time `json:"sessions"`
-}
-
-func pendingPath(paths harness.Paths) string {
-	return filepath.Join(paths.MemoryDir, pendingName)
-}
-
-func loadPending(paths harness.Paths) map[string]time.Time {
-	out := map[string]time.Time{}
-	data, err := os.ReadFile(pendingPath(paths))
-	if err != nil {
-		return out
-	}
-	var f pendingFile
-	if json.Unmarshal(data, &f) != nil || f.Sessions == nil {
-		return out
-	}
-	return f.Sessions
-}
-
-func savePending(paths harness.Paths, sessions map[string]time.Time) error {
-	if err := os.MkdirAll(paths.MemoryDir, 0o755); err != nil {
-		return err
-	}
-	if sessions == nil {
-		sessions = map[string]time.Time{}
-	}
-	data, err := json.MarshalIndent(pendingFile{Sessions: sessions}, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(pendingPath(paths), append(data, '\n'), 0o644)
-}
-
 // MarkPending records a session that still needs SessionEnd-equivalent harvest
 // (Codex Stop and similar turn-boundary vendors).
-func MarkPending(paths harness.Paths, sessionID string) error {
+func MarkPending(paths harness.Paths, sessionID, vendor string) error {
 	if sessionID == "" {
 		return nil
 	}
-	m := loadPending(paths)
-	m[sessionID] = time.Now().UTC()
-	return savePending(paths, m)
+	store := session.NewStore(paths)
+	if _, err := store.Get(sessionID); err != nil {
+		_ = store.Start(session.Meta{ID: sessionID, Vendor: vendor, StartedAt: time.Now().UTC()})
+	}
+	return store.WriteDocument(sessionID, func(d *session.Document) { d.Review.Status = "pending"; d.Review.Trigger = string(TriggerTurnEnd) })
 }
 
 // ClearPending drops a session from the pending set after a successful end harvest.
@@ -259,66 +233,63 @@ func ClearPending(paths harness.Paths, sessionID string) error {
 	if sessionID == "" {
 		return nil
 	}
-	m := loadPending(paths)
-	if _, ok := m[sessionID]; !ok {
-		return nil
-	}
-	delete(m, sessionID)
-	return savePending(paths, m)
-}
-
-const finalizePendingName = "finalize-pending"
-
-// MarkFinalizePending records which session the next `so sessions finalize`
-// (no args) should materialize - set by SessionEnd / Stop coding hooks.
-func MarkFinalizePending(paths harness.Paths, sessionID string) error {
-	if sessionID == "" {
-		return nil
-	}
-	p := filepath.Join(paths.Root, finalizePendingName)
-	return os.WriteFile(p, []byte(sessionID+"\n"), 0o644)
-}
-
-// ConsumeFinalizePending returns and clears the pending finalize session id.
-func ConsumeFinalizePending(paths harness.Paths) string {
-	p := filepath.Join(paths.Root, finalizePendingName)
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return ""
-	}
-	_ = os.Remove(p)
-	return strings.TrimSpace(string(data))
+	return session.NewStore(paths).WriteDocument(sessionID, func(d *session.Document) {
+		if d.Review.Status == "pending" {
+			d.Review.Status = ""
+		}
+	})
 }
 
 // FlushPending harvests every pending session except exceptID (usually the
 // session that just started). Gives Codex/Stop-only vendors SessionEnd parity
 // when the next coding session begins.
 func FlushPending(paths harness.Paths, cfg config.Config, exceptID string) []Result {
-	m := loadPending(paths)
-	if len(m) == 0 {
-		return nil
-	}
-	var out []Result
-	remaining := map[string]time.Time{}
-	for id, at := range m {
-		if id == "" || id == exceptID {
-			if id != "" {
-				remaining[id] = at
-			}
+	return FlushPendingVendor(paths, cfg, exceptID, "")
+}
+
+// FlushPendingVendor processes only the immediately preceding unreviewed
+// session owned by the vendor starting a new chat.
+func FlushPendingVendor(paths harness.Paths, cfg config.Config, exceptID, vendor string) []Result {
+	store := session.NewStore(paths)
+	entries, _ := store.List()
+	for _, m := range entries {
+		if m.ID == "" || m.ID == exceptID {
 			continue
 		}
-		r, err := Run(paths, cfg, id, TriggerSessionEnd)
-		if err != nil {
-			r.Reason = err.Error()
-			remaining[id] = at
-		} else if r.Skipped && (r.Reason == "empty_summary" || r.Reason == "no_session") {
-			remaining[id] = at
+		if vendor != "" && harness.NormalizeVendorKind(m.Vendor) != harness.NormalizeVendorKind(vendor) {
+			continue
 		}
-		// success or nothing_new / already applied → drop from pending
-		out = append(out, r)
+		d, err := store.ReadDocument(m.ID)
+		if err != nil || d.Review.Status != "pending" {
+			continue
+		}
+		r, runErr := Run(paths, cfg, m.ID, TriggerSessionEnd)
+		if runErr != nil {
+			r.Reason = runErr.Error()
+		} else {
+			_ = ClearPending(paths, m.ID)
+		}
+		return []Result{r}
 	}
-	_ = savePending(paths, remaining)
-	return out
+	return nil
+}
+
+// PendingVendor returns only the immediately preceding pending session for a
+// vendor. It performs no review work, so SessionStart can remain non-blocking.
+func PendingVendor(paths harness.Paths, exceptID, vendor string) string {
+	store := session.NewStore(paths)
+	entries, _ := store.List()
+	for _, m := range entries {
+		if m.ID == "" || m.ID == exceptID || harness.NormalizeVendorKind(m.Vendor) != harness.NormalizeVendorKind(vendor) {
+			continue
+		}
+		d, err := store.ReadDocument(m.ID)
+		if err == nil && (d.Review.Status == "pending" || d.Review.Status == "failed") {
+			return m.ID
+		}
+		return ""
+	}
+	return ""
 }
 
 // RunDebounced is Run for turn-end triggers (debounce lives inside Run).
@@ -331,13 +302,13 @@ func RunDebounced(paths harness.Paths, cfg config.Config, sessionID string, trig
 
 func summarizeLocal(paths harness.Paths, sessionID string) string {
 	var b strings.Builder
-	metaPath := filepath.Join(paths.SessionDir(sessionID), "meta.json")
+	metaPath := filepath.Join(paths.SessionDir(sessionID), "session.json")
 	if data, err := os.ReadFile(metaPath); err == nil {
 		b.WriteString("## Meta\n")
 		b.Write(data)
 		b.WriteString("\n")
 	}
-	transcript := filepath.Join(paths.SessionDir(sessionID), "transcript.jsonl")
+	transcript := filepath.Join(paths.SessionDir(sessionID), "events.jsonl")
 	if data, err := os.ReadFile(transcript); err == nil {
 		b.WriteString("## Transcript (truncated)\n")
 		b.WriteString(truncateRunes(extractTextTurns(string(data)), maxSummaryChars))
@@ -380,8 +351,7 @@ func extractTextTurns(jsonl string) string {
 func currentSnippets(paths harness.Paths) string {
 	var b strings.Builder
 	files := []string{
-		filepath.Join(paths.MemoryDir, "preferences.md"),
-		filepath.Join(paths.MemoryDir, "projects.md"),
+		filepath.Join(paths.MemoryDir, "state.json"),
 		paths.AgentsMD,
 	}
 	if codingPath, err := nativedocs.RulePath(paths, "coding"); err == nil {
@@ -411,8 +381,8 @@ Return ONLY compact JSON:
 Rules:
 - Prefer empty fields. Do not keep appending forever — use knowledge_remove / rules_remove / skills_remove when guidance is obsolete or wrong.
 - knowledge keys are AGENTS.md locations: "" or omit for root; "internal/pkg" for nested internal/pkg/AGENTS.md (create only when that area needs local guidance).
-- rules_* write into existing vendor rules copies of that stem (keep Cursor/Claude/… in sync); if none exist, create under the session's vendor rules tree.
-- skills_* same for skills trees; never touch the so skill. AGENTS.md knowledge_* is always shared.
+- rules_* and skills_* write only to the session vendor's native tree; never copy guidance across vendors and never touch the so skill.
+- AGENTS.md knowledge_* is always shared.
 - lessons only for durable always/never/prefer; need_recs true only for a concrete harness gap.`
 	user := "SESSION SUMMARY (local extract, truncated):\n" + summary + "\n\nCURRENT SNIPPETS:\n" + snippets
 
@@ -460,20 +430,12 @@ func applyDelta(paths harness.Paths, d Delta, vendor string, skipNativeDocs bool
 		}
 	}
 	if s := strings.TrimSpace(d.PrefsAppend); s != "" {
-		p := filepath.Join(paths.MemoryDir, "preferences.md")
-		existing, _ := os.ReadFile(p)
-		updated := harnessvalid.AppendPreferencesBullet(string(existing), s)
-		if harnessvalid.ValidatePreferences(updated) == nil {
-			_ = os.WriteFile(p, []byte(updated), 0o644)
+		if store.AppendPreferenceText(s) == nil {
 			n++
 		}
 	}
 	if s := strings.TrimSpace(d.ProjectsNote); s != "" {
-		p := filepath.Join(paths.MemoryDir, "projects.md")
-		existing, _ := os.ReadFile(p)
-		updated := harnessvalid.AppendToProjectsSection(string(existing), "Notes", s)
-		if harnessvalid.ValidateProjects(updated) == nil {
-			_ = os.WriteFile(p, []byte(updated), 0o644)
+		if store.AppendProjectNote(s) == nil {
 			n++
 		}
 	}
@@ -561,7 +523,7 @@ func appendFile(path, extra string) {
 
 func sessionSourceMtime(paths harness.Paths, sessionID string) int64 {
 	best := int64(0)
-	for _, name := range []string{"meta.json", "transcript.jsonl"} {
+	for _, name := range []string{"session.json", "events.jsonl"} {
 		info, err := os.Stat(filepath.Join(paths.SessionDir(sessionID), name))
 		if err != nil {
 			continue
@@ -574,29 +536,26 @@ func sessionSourceMtime(paths harness.Paths, sessionID string) int64 {
 }
 
 func loadLedger(paths harness.Paths) map[string]ledgerEntry {
-	data, err := os.ReadFile(filepath.Join(paths.MemoryDir, ledgerName))
-	if err != nil {
-		return map[string]ledgerEntry{}
+	out := map[string]ledgerEntry{}
+	store := session.NewStore(paths)
+	metas, _ := store.List()
+	for _, m := range metas {
+		d, err := store.ReadDocument(m.ID)
+		if err != nil || d.Review.HarvestedAt == nil {
+			continue
+		}
+		out[m.ID] = ledgerEntry{SessionID: m.ID, HarvestedAt: *d.Review.HarvestedAt, Trigger: Trigger(d.Review.HarvestTrigger), SourceMtime: d.Review.HarvestedSourceMtime}
 	}
-	var lf ledgerFile
-	if json.Unmarshal(data, &lf) != nil || lf.Entries == nil {
-		return map[string]ledgerEntry{}
-	}
-	return lf.Entries
+	return out
 }
 
 func markHarvested(paths harness.Paths, sessionID string, trigger Trigger, mtime int64) {
-	entries := loadLedger(paths)
-	entries[sessionID] = ledgerEntry{
-		SessionID:   sessionID,
-		HarvestedAt: time.Now().UTC(),
-		Trigger:     trigger,
-		SourceMtime: mtime,
-	}
-	lf := ledgerFile{Entries: entries}
-	data, _ := json.MarshalIndent(lf, "", "  ")
-	_ = os.MkdirAll(paths.MemoryDir, 0o755)
-	_ = os.WriteFile(filepath.Join(paths.MemoryDir, ledgerName), data, 0o644)
+	now := time.Now().UTC()
+	_ = session.NewStore(paths).WriteDocument(sessionID, func(d *session.Document) {
+		d.Review.HarvestedAt = &now
+		d.Review.HarvestedSourceMtime = mtime
+		d.Review.HarvestTrigger = string(trigger)
+	})
 }
 
 func truncateRunes(s string, max int) string {

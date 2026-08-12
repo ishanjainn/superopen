@@ -13,21 +13,21 @@ type rec struct {
 	tools    []normalize.ToolCall
 }
 
-func (r *rec) EmitSession(s normalize.Session) error                 { r.sessions = append(r.sessions, s); return nil }
-func (r *rec) EmitToolCall(t normalize.ToolCall) error               { r.tools = append(r.tools, t); return nil }
-func (r *rec) EmitLLMTurn(t normalize.LLMTurn) error                 { r.turns = append(r.turns, t); return nil }
-func (r *rec) EmitEvent(normalize.EventEmission) error               { return nil }
-func (r *rec) EmitEditDecision(normalize.EditDecision) error         { return nil }
-func (r *rec) EmitSubagent(normalize.Subagent) error                 { return nil }
-func (r *rec) EmitGitCommit(normalize.GitCommit) error               { return nil }
-func (r *rec) EmitGitPullRequest(normalize.GitPullRequest) error     { return nil }
+func (r *rec) EmitSession(s normalize.Session) error             { r.sessions = append(r.sessions, s); return nil }
+func (r *rec) EmitToolCall(t normalize.ToolCall) error           { r.tools = append(r.tools, t); return nil }
+func (r *rec) EmitLLMTurn(t normalize.LLMTurn) error             { r.turns = append(r.turns, t); return nil }
+func (r *rec) EmitEvent(normalize.EventEmission) error           { return nil }
+func (r *rec) EmitEditDecision(normalize.EditDecision) error     { return nil }
+func (r *rec) EmitSubagent(normalize.Subagent) error             { return nil }
+func (r *rec) EmitGitCommit(normalize.GitCommit) error           { return nil }
+func (r *rec) EmitGitPullRequest(normalize.GitPullRequest) error { return nil }
 
 func TestOpenCodeMessageUsagePrefersHostCost(t *testing.T) {
 	em := &rec{}
 	cost := 0.0123
 	payload, _ := json.Marshal(map[string]any{
 		"session_id": "s1", "role": "assistant", "text": "hi",
-		"model": "claude-sonnet-4",
+		"model":  "claude-sonnet-4",
 		"tokens": map[string]any{"input": 100, "output": 20, "cache": map[string]any{"read": 50, "write": 10}},
 		"cost":   cost,
 	})

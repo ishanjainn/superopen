@@ -33,6 +33,10 @@ type NestedSession = {
   is_subagent?: boolean;
   parent_id?: string;
 };
+type ReviewFinding = {
+  fingerprint: string; kind: string; summary: string; vendor: string;
+  confidence?: number; verified?: boolean; evidence?: string[];
+};
 
 const MapView = dynamic(() => import("@/map"), {
   ssr: false,
@@ -81,6 +85,7 @@ function SessionDetailInner() {
   const [footprint, setFootprint] = useState<any>(null);
   const [checkpoints, setCheckpoints] = useState<RestoreCheckpoint[]>([]);
   const [subagents, setSubagents] = useState<NestedSession[]>([]);
+  const [findings, setFindings] = useState<ReviewFinding[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -110,6 +115,7 @@ function SessionDetailInner() {
       setFootprint(data.footprint || null);
       setCheckpoints(Array.isArray(data.checkpoints) ? data.checkpoints : []);
       setSubagents(Array.isArray(data.subagents) ? data.subagents : []);
+      setFindings(Array.isArray(data.findings) ? data.findings : []);
       setError("");
     } catch (e: any) {
       setError(String(e.message || e));
@@ -252,6 +258,24 @@ function SessionDetailInner() {
                 parent session
               </Link>
             </div>
+          )}
+          {findings.length > 0 && (
+            <details className="shrink-0 border-b border-neutral-200 bg-neutral-50 px-4 py-2">
+              <summary className="cursor-pointer text-xs font-medium text-neutral-700">
+                Review evidence · {findings.length} finding{findings.length === 1 ? "" : "s"}
+              </summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {findings.map((finding) => (
+                  <div key={finding.fingerprint} className="rounded border border-neutral-200 bg-white p-2 text-xs">
+                    <div className="flex gap-2 text-[10px] uppercase tracking-wide text-neutral-500">
+                      <span>{finding.kind}</span><span>{finding.vendor}</span>
+                      {finding.verified && <span>verified</span>}
+                    </div>
+                    <p className="mt-1 text-neutral-700">{finding.summary}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
           <div className="min-h-0 flex-1">
             <SessionTimeline

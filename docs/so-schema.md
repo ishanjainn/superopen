@@ -1,137 +1,84 @@
-# Superopen schema (CLI ↔ UI parity)
+# Superopen schema (layout v2)
 
-<p align="center">
-  <img src="../web/public/brand-mark.png" alt="SO shield" width="72" />
-  <img src="../web/public/brand-wordmark.png" alt="SUPEROPEN" width="280" />
-</p>
+Superopen keeps shared policy compact and separates vendor-owned guidance. Runtime files under `.so/` are ordinary, inspectable files; generated and machine-local state is ignored by Git.
 
+## Native guidance
 
-Guidance lives in native developer paths. Regenerable / machine-local runtime
-lives under `.so/` and is gitignored. Both the Go CLI (`so`) and the TypeScript UI
-(Next.js App Router) read/write these paths. Heavy algorithms use `so … --json`.
-
-## Native guidance (tracked on the feature branch)
-
-| Path | Role |
-|------|------|
-| `AGENTS.md` | Knowledge / agent instructions (root + nested `dir/AGENTS.md`). Wandering evals with a hot package propose creating that package’s `AGENTS.md`; otherwise they amend root. Rec `why` always states problem → change → next-session benefit. |
-| Rules | **Index/UI:** all vendor trees. **Writes:** update-in-place across every existing stem copy (keep in sync); if none, create under the session vendor’s rules dir; else preferred fallback. |
-| Skills | **Index/UI:** all vendor trees. **Writes:** same sync/create policy as rules. `/so` skill is reserved. |
-| Retrieve | Session-vendor weighted: matching vendor rules/skills boosted; other vendors down-weighted; `AGENTS.md` always shared/high. |
-| `CLAUDE.md` | Brief inject only (Superopen markers) |
-
-## Runtime under `.so/` (mostly untracked)
-
-**Write** lessons/prefs → **Store** under `.so/memory/` → **Inject** as `active-context.md` on every SessionStart.
-
-Session port (`so sessions port`) moves chat text between agents; after a successful port Superopen refreshes the same ACTIVE pack so the destination agent gets prefs/lessons plus continuity. Port is not a second memory system.
-
-| Path | Role | Tracked? |
-|------|------|----------|
-| `config.yaml` | Harness config | yes |
-| `discovery.json` | Init profile snapshot | yes (rarely changes) |
-| `AGENT.md` | Short agent brief | yes |
-| `guardrails/guardrails.yaml` | Enforcement + advisory | yes |
-| `evals/configs.yaml` | Eval check config | yes |
-| `evals/history.json` | Eval run history | no |
-| `sessions/` | Local working cache of materialized sessions | no (also mirrored to `refs/so/sessions/<id>`) |
-| `traces/` | Local OTLP export | no |
-| `memory/**` | Packs, lessons, harvest ledgers | no |
-| `graph/**` | Structural graph (local rebuild) | no |
-| `viz/**` | Citymap / HTML viz | no |
-| `recommendations/pending.json` | Pending harness updates | no |
-| `recommendations/history.json` | Applied / dismissed / reverted | no |
-| `audit/events.jsonl` | Append-only SEL audit trail | no |
-| `port/ledger.json` | Session port idempotency ledger | no |
-
-## Version-control policy
-
-Commit **native docs** (`AGENTS.md`, discovered rules/skills trees) and stable
-`.so/` config (config, guardrails, evals configs, discovery, AGENT.md).
-
-Do **not** commit regenerable Superopen runtime: graph, memory packs, sessions,
-traces, eval history, or recommendation pending/history. Agents still use
-`so graph query` against a local `.so/graph/graph.json` rebuilt by `so sync` /
-hooks after HEAD moves.
-
-The generated `.so/.gitignore` excludes that runtime so feature branches stay
-clean after commit. Harvest that learns durable guidance writes native docs
-(intentional `git status` dirt until the user commits).
-
-Hooks (`post-commit`, `post-merge`, `post-checkout`) finalize sessions and rebuild
-**untracked** runtime only; injectors are byte-idempotent. Session blobs are also
-written to git side refs `refs/so/sessions/<id>` (no checkout). Live session state
-lives under `.git/so-sessions/`. `pre-push` fast-forwards those refs (never force).
-`SO-Session:` trailers on user commits link work to the active session.
-
-Do not commit secrets or information your team is not authorized to share.
-
-## AXI output (`so … --json` / `--full`)
-
-Agent eXperience Interface: compact text by default, machine JSON on demand.
-
-| Flag / env | Effect |
+| Path | Ownership |
 |---|---|
-| `--json` / `SO_JSON=1` | JSON envelope on stdout (errors on stderr) |
-| `--full` / `SO_FULL=1` | Do not truncate long fields |
+| `AGENTS.md` and nested `*/AGENTS.md` | Shared. Superopen changes only its managed learned sections. |
+| `.claude`, `.codex`, `.cursor`, `.gemini`, `.opencode`, `.github`, `.pi` | Owned by that vendor. A session may update only its own vendor tree. |
+| `.agents` | Shared opt-in only: `--shared-agents`, `--vendor agents`, or `vendors.shared_agents: true`. |
 
-```json
-{ "ok": true, "kind": "sessions", "count": 1, "items": […], "next": ["so doctor"] }
+`so init` and `so install` enable detected vendors plus repeatable `--vendor` flags. `so sync` refreshes enabled plumbing and never copies guidance between vendors.
+
+## Compact `.so` layout
+
+```text
+.so/
+├── .gitignore
+├── config.yaml
+├── guardrails.yaml
+├── evals.yaml
+├── graph/
+│   ├── graph.json
+│   ├── corpus.json
+│   ├── graph.html
+│   └── state.json
+├── audit/
+│   └── events.jsonl                 # repository-level audit history
+├── sessions/
+│   ├── index.json
+│   ├── inbox.jsonl                   # lazy unresolved telemetry
+│   └── <session-id>/
+│       ├── events.jsonl
+│       ├── session.json
+│       └── checkpoints/              # lazy
+│           └── manifest.json
+└── memory/
+    ├── context.md
+    └── state.json
 ```
 
-Errors:
+Every Superopen-created file says why it exists, its authority, and its updater:
 
-```json
-{ "ok": false, "code": 1, "error": "…", "hint": "so sync" }
-```
+- YAML and `.gitignore` use a leading `#` description.
+- JSON uses a top-level `_about` object.
+- JSONL begins with a `superopen.file_manifest` record.
+- HTML and Markdown use a leading HTML comment.
+- Checkpoint payloads retain exact source bytes; `checkpoints/manifest.json` documents them.
 
-Exit codes: `0` ok · `1` fail · `2` usage · `3` not found.
+Committed policy is limited to `.so/config.yaml`, `.so/guardrails.yaml`, and `.so/evals.yaml`. Graph, audit, session, and memory data stays local and rebuildable where applicable. The stable directories and their root files are created by `so init`; only unresolved telemetry, per-session directories, and checkpoints are event-driven. Graphify caches, server PID/locks, and port ledgers live in OS cache/runtime directories. Small debounce and sweep timestamps share one self-described OS-cache `runtime/state.json`; Superopen does not create `finalize-pending`, `pending-harvest.json`, `approval-mismatch-at`, or `idle-sweep-at`. UI preferences live in browser local storage. `so dev` only serves these files; graph refreshes run after changed sessions or through explicit CLI commands.
 
-Bare `so` prints a content-first status snapshot (not only help).
+Fresh configuration does not advertise an API provider or model. Reviews use the same vendor's sealed CLI when possible, then another configured sealed CLI, then heuristics. The optional `llm:` section is written only when a maintainer explicitly configures an API or compatible local backend.
 
-## Parity matrix (Phase 1+)
+`.so/guardrails.yaml` is the one authoritative safety policy. `denied_tools`, `denied_commands`, and `sensitive_paths` are enforced at supported pre-tool hook boundaries; `rules` remains advisory guidance. Tool-name patterns support `*` wildcards and use the names reported by vendor hooks.
 
-| Capability | CLI | UI |
-|------------|-----|-----|
-| Memory CRUD / search / active-context | `so memory *` (Write→Store→Inject) | `/memory` (Active Context → Lessons → Prefs → Projects) |
-| Active Context inject | SessionStart when `memory.enabled` | Memory → Active Context |
-| Learn lesson | `so learn add` | Memory → Lessons |
-| Retrieve corpus | `so retrieve` / `so graph query` | Graph search + `/api/retrieve` |
-| Knowledge | `so knowledge` / `AGENTS.md` | `/knowledge` |
-| Rules | Discovered vendor rules dir | `/rules` |
-| Skills | Discovered vendor skills `<name>/SKILL.md` | `/skills` |
-| Guardrails | `so guard` / `so guard show\|check` | `/guardrails` |
-| Audit | `so audit list` | Settings → Audit Trail |
-| Session harvest | `so harvest run\|idle` | (automatic on session end) |
-| Session port | `so sessions detect\|port\|verify` | Sessions → Port |
-| Open UI | `so open memory` | - |
+## Session lifecycle
 
-## Observability (local)
+Telemetry writes full secret-redacted local events directly to `<session-id>/events.jsonl`; there is no reduced-content capture setting. `session.json` materializes metadata, footprint, evaluation, recommendations, replay, port provenance, review state, and compact evidence references. Repository-level audit events live separately in `audit/events.jsonl`; session-associated audit events stay in that session's `events.jsonl`.
 
-Edit `.so/config.yaml` only - the UI shows values as read-only:
+On a true SessionEnd, Superopen atomically marks review pending and launches a detached worker. Stop-only vendors are finalized by explicit close, idle handling, or when a different session ID starts for the same vendor. Startup checks only the immediately preceding same-vendor session, injects its completed review or a short pending notice, and never blocks or processes older backlog.
+
+One review claim prevents duplicate end/start workers. The reviewer prefers the same vendor's sealed CLI and records the actual backend or heuristic fallback in `session.json`. The same review classifies corrections, recurring workflows, failures, successful verification, and guidance gaps. Durable counters and redacted summaries are consolidated into `memory/state.json`; proposed bodies remain only in recommendation records. Soft recommendations may update the originating vendor's existing rules/skills and managed shared `AGENTS.md` sections. New skills remain visible after their first supporting session and auto-create only after three same-vendor sessions with successful verification, or an explicit durable user workflow. Removals, restructures, guardrails, and evaluation-policy changes always require approval.
+
+If a session edited source files, the worker builds Graphify and the corpus in a temporary directory, validates the described JSON/HTML plus query behavior, then atomically swaps the graph. Failures preserve the previous valid graph. Documentation-only changes rebuild `graph/corpus.json` without repeating the source graph.
+
+## Observability
+
+The only local exporter target is the unified session store:
 
 ```yaml
 observability:
-  listen: http://127.0.0.1:4318
   exporters:
     - type: local_jsonl
-      path: .so/traces
+      path: .so/sessions
 ```
 
-Only `local_jsonl` is supported. Other exporter types are ignored by the CLI.
+Coding-agent hooks write this file store directly. `so dev` and the web UI
+only read it; neither starts nor requires a telemetry receiver. Network
+telemetry export is unavailable.
 
-## Session porting
+## AXI output
 
-Hub-and-spoke session porting (`internal/port/`):
-
-```bash
-so sessions detect
-so sessions port --from claude --to codex --preview
-so sessions port --from claude --to so --id <session-id>
-so sessions verify --from claude --sample 3
-```
-
-Harness IDs: `claude`, `codex`, `opencode`, `cursor`, `pi`, `so`. Text turns only in v1
-(tools/thinking dropped). Ledger: `.so/port/ledger.json`. Cursor export writes a
-first-class resume pack under `.cursor/so-port/<id>/` plus hub mirror; resume with
-`so sessions resume --vendor=cursor --id=…`. Pi writes `~/.pi/agent/sessions/so-port/`.
+Use `so --json …` (or `SO_JSON=1`) for a JSON envelope and `--full` (or `SO_FULL=1`) to disable truncation. Bare `so` prints a compact status snapshot.

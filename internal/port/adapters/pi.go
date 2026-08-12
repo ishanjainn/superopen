@@ -62,9 +62,9 @@ func peekPi(path string) (title, cwd string, updated int64) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	var (
-		infoTitle   string
-		sawInfo     bool
-		firstUser   string
+		infoTitle string
+		sawInfo   bool
+		firstUser string
 	)
 	for sc.Scan() {
 		var row map[string]any
@@ -217,7 +217,7 @@ func (PiExport) Write(ps port.PortableSession, opts port.WriteOptions) (port.Exp
 		_ = enc.Encode(map[string]any{
 			"type": "message", "id": fmt.Sprintf("msg_%d", i), "timestamp": ts,
 			"message": map[string]any{
-				"role": t.Role,
+				"role":    t.Role,
 				"content": []map[string]any{{"type": "text", "text": t.Text}},
 			},
 		})

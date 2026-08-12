@@ -22,6 +22,7 @@ import type {
   SidebarSection,
 } from "@/types/sidebar";
 import { useSidebarLayout } from "./sidebar-layout-context";
+import { setUIPref } from "@/lib/ui-prefs";
 
 const SECONDARY_PANEL_WIDTH = "min(20rem, calc(100vw - 4rem))";
 
@@ -244,13 +245,9 @@ export default function Sidebar() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  useEffect(() => {
-    fetch("/api/ui/prefs", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: "recent_route", value: pathname }),
-    }).catch(() => undefined);
-  }, [pathname]);
+	useEffect(() => {
+		setUIPref("recent_route", pathname);
+	}, [pathname]);
 
   return (
     <aside

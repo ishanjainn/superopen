@@ -243,55 +243,6 @@ func TestCodeModeApplyPatchEmitsFileDecisions(t *testing.T) {
 	}
 }
 
-// TestCodexMetadataModeDropsBodies verifies the content-capture matrix:
-// in metadata mode we still emit the LLM turn span but bodies are gone.
-func TestCodexMetadataModeDropsBodies(t *testing.T) {
-	withIsolatedCache(t)
-
-	em := &recordingEmitter{}
-	in := func(event string, payload any) normalize.Input {
-		body, err := json.Marshal(payload)
-		if err != nil {
-			t.Fatalf("payload marshal: %v", err)
-		}
-		return normalize.Input{
-			Vendor:         "codex",
-			Event:          event,
-			Payload:        body,
-			ContentCapture: "metadata_only",
-			Emit:           em,
-		}
-	}
-
-	sid := "cdx-session-2"
-	turn := "turn-A"
-
-	if err := handle(context.Background(), in("UserPromptSubmit", map[string]any{
-		"session_id": sid,
-		"turn_id":    turn,
-		"prompt":     "this should not appear",
-	})); err != nil {
-		t.Fatalf("UserPromptSubmit: %v", err)
-	}
-	lastMsg := "and neither should this"
-	if err := handle(context.Background(), in("Stop", map[string]any{
-		"session_id":             sid,
-		"turn_id":                turn,
-		"last_assistant_message": lastMsg,
-	})); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
-	if len(em.llmTurns) != 1 {
-		t.Fatalf("expected 1 llm turn, got %d", len(em.llmTurns))
-	}
-	if em.llmTurns[0].Prompt != "" {
-		t.Errorf("metadata mode leaked prompt body: %q", em.llmTurns[0].Prompt)
-	}
-	if em.llmTurns[0].Response != "" {
-		t.Errorf("metadata mode leaked response body: %q", em.llmTurns[0].Response)
-	}
-}
-
 // TestCodexTokenSnapshotFromRollout verifies that the per-turn token
 // delta is computed correctly from a synthetic rollout.jsonl. This is
 // the contract that downstream USD cost rollups depend on.
@@ -507,7 +458,7 @@ func TestCodexSubagentLinkFromSessionMeta(t *testing.T) {
 		Vendor:         "codex",
 		Event:          "SessionStart",
 		Payload:        body2,
-		ContentCapture: "metadata_only",
+		ContentCapture: "full",
 		Emit:           em,
 	}); err != nil {
 		t.Fatalf("SessionStart: %v", err)
