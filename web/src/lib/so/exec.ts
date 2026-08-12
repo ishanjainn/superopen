@@ -19,7 +19,7 @@ export type SoJSON<T> = {
  */
 export async function soJSON<T = unknown>(
   args: string[],
-  opts?: { cwd?: string; timeoutMs?: number }
+  opts?: { cwd?: string; timeoutMs?: number },
 ): Promise<SoJSON<T>> {
   const cwd = opts?.cwd ?? repoCwd();
   const bin = soBinary();
@@ -58,7 +58,11 @@ export async function soJSON<T = unknown>(
   try {
     return JSON.parse(raw) as SoJSON<T>;
   } catch {
-    return { schema: 1, ok: false, error: `invalid JSON from so: ${raw.slice(0, 200)}` };
+    return {
+      schema: 1,
+      ok: false,
+      error: `invalid JSON from so: ${raw.slice(0, 200)}`,
+    };
   }
 }
 
@@ -66,10 +70,24 @@ export function soBinary(): string {
   const configured = process.env.SUPEROPEN_SO_BIN?.trim();
   if (configured) return configured;
   const candidates = [
-    join(homedir(), "go", "bin", process.platform === "win32" ? "so.exe" : "so"),
+    process.env.GOBIN
+      ? join(process.env.GOBIN, process.platform === "win32" ? "so.exe" : "so")
+      : "",
+    join(
+      homedir(),
+      "go",
+      "bin",
+      process.platform === "win32" ? "so.exe" : "so",
+    ),
+    join(
+      homedir(),
+      ".superopen",
+      "bin",
+      process.platform === "win32" ? "so.exe" : "so",
+    ),
     "/opt/homebrew/bin/so",
     "/usr/local/bin/so",
-  ];
+  ].filter(Boolean);
   return candidates.find(fileExists) || "so";
 }
 

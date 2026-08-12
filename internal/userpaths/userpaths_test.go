@@ -1,6 +1,7 @@
 package userpaths_test
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -30,6 +31,38 @@ func TestConfigAndDataDirs(t *testing.T) {
 	}
 	if !strings.HasSuffix(filepath.ToSlash(mp), "codex-marketplace") {
 		t.Fatalf("marketplace %q", mp)
+	}
+}
+
+func TestVendorHomeOverrides(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
+	t.Setenv("COPILOT_HOME", filepath.Join(root, "copilot"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "data"))
+
+	tests := []struct {
+		name string
+		got  func() (string, error)
+		want string
+	}{
+		{"codex", userpaths.CodexHome, filepath.Join(root, "codex")},
+		{"copilot", userpaths.CopilotHome, filepath.Join(root, "copilot")},
+		{"opencode config", userpaths.OpenCodeConfigDir, filepath.Join(root, "config", "opencode")},
+		{"opencode data", userpaths.OpenCodeDataDir, filepath.Join(root, "data", "opencode")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.got()
+			if err != nil || got != tt.want {
+				t.Fatalf("got %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+
+	// Ensure the test does not accidentally depend on inherited values.
+	if os.Getenv("CODEX_HOME") == "" {
+		t.Fatal("CODEX_HOME override was not installed")
 	}
 }
 

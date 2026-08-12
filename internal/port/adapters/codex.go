@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/port"
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 type CodexImport struct{}
@@ -17,8 +18,8 @@ type CodexImport struct{}
 func (CodexImport) Harness() port.HarnessID { return port.HarnessCodex }
 
 func codexRoot() string {
-	if v := os.Getenv("CODEX_HOME"); v != "" {
-		return v
+	if root, err := userpaths.CodexHome(); err == nil {
+		return root
 	}
 	return filepath.Join(home(), ".codex")
 }

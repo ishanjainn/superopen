@@ -1,0 +1,20 @@
+{
+  "name": "superopen",
+  "interface": {
+    "displayName": "Superopen"
+  },
+  "plugins": [
+    {
+      "name": "superopen",
+      "source": {
+        "source": "local",
+        "path": "./plugins/superopen"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

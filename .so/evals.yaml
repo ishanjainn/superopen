@@ -1,0 +1,16 @@
+# Superopen evaluation policy. This defines how completed coding sessions are scored and which reviewer backends may be used.
+# Authoritative project policy updated by project maintainers and so init from graph plus agent instructions.
+checks:
+  - tests
+  - lint
+  - scope
+  - retries
+  - harness_usage
+  - go_build
+
+# Rules mirrored from agent markdown (for LLM judge context)
+agent_rules:
+  - "Prefer Conventional Commit titles, for example feat: add project prune or"
+
+sources:
+  - /Users/ishanjain/work/superopen/CONTRIBUTING.md

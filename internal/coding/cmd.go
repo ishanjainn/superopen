@@ -25,7 +25,7 @@ import (
 func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "coding",
-		Short: "Coding-agent observability (Claude Code, Cursor, Codex)",
+		Short: "Coding-agent observability (Claude, Cursor, Codex, Gemini, OpenCode, Copilot, Pi)",
 		Long: `Send telemetry from AI coding agents into Superopen.
 
 Three install paths land at the same plugin manifests under plugins/:

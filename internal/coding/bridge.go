@@ -76,11 +76,13 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 			out["gemini"] = e == nil && strings.Contains(string(data), "coding hook --vendor=gemini")
 		case "opencode":
 			// Host loads ~/.config/opencode/plugins (not ~/.opencode/plugins).
-			_, e := os.Stat(filepath.Join(home, ".config", "opencode", "plugins", "superopen.ts"))
+			base, _ := userpaths.OpenCodeConfigDir()
+			_, e := os.Stat(filepath.Join(base, "plugins", "superopen.ts"))
 			out["opencode"] = e == nil
 		case "copilot-cli", "copilot":
 			// Copilot CLI: ~/.copilot/hooks (not ~/.github/hooks).
-			data, e := os.ReadFile(filepath.Join(home, ".copilot", "hooks", "superopen.json"))
+			base, _ := userpaths.CopilotHome()
+			data, e := os.ReadFile(filepath.Join(base, "hooks", "superopen.json"))
 			out["copilot-cli"] = e == nil && strings.Contains(string(data), "coding hook --vendor=copilot")
 		case "pi":
 			// Host loads ~/.pi/agent/extensions (not ~/.pi/extensions).

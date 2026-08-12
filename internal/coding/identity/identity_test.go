@@ -48,7 +48,9 @@ func TestResolveForVendor_MalformedJSONReturnsEmpty(t *testing.T) {
 func TestResolveForVendor_CodexExtractsEmailFromJWT(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	if err := os.MkdirAll(filepath.Join(tmp, ".codex"), 0o700); err != nil {
+	codexHome := filepath.Join(tmp, "custom-codex")
+	t.Setenv("CODEX_HOME", codexHome)
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	// Pre-built JWT with payload {"email":"jwt@example.com","sub":"x"}. The
@@ -57,7 +59,7 @@ func TestResolveForVendor_CodexExtractsEmailFromJWT(t *testing.T) {
 		"eyJlbWFpbCI6Imp3dEBleGFtcGxlLmNvbSIsInN1YiI6IngifQ." +
 		"sig"
 	body := `{"tokens":{"id_token":"` + jwt + `"}}`
-	if err := os.WriteFile(filepath.Join(tmp, ".codex", "auth.json"), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got := ResolveForVendor("codex"); got != "jwt@example.com" {

@@ -68,6 +68,63 @@ func CodexMarketplaceDir() (string, error) {
 	return filepath.Join(base, "codex-marketplace"), nil
 }
 
+// CodexHome returns the host's Codex configuration root. CODEX_HOME is
+// authoritative when set; otherwise Codex uses ~/.codex on every platform.
+func CodexHome() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("CODEX_HOME")); configured != "" {
+		return filepath.Clean(configured), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home directory: %w", err)
+	}
+	return filepath.Join(home, ".codex"), nil
+}
+
+// CopilotHome returns the GitHub Copilot CLI configuration root. The CLI's
+// documented COPILOT_HOME override applies to hooks and skills alike.
+func CopilotHome() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("COPILOT_HOME")); configured != "" {
+		return filepath.Clean(configured), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home directory: %w", err)
+	}
+	return filepath.Join(home, ".copilot"), nil
+}
+
+// OpenCodeConfigDir returns OpenCode's global configuration directory.
+// OpenCode documents ~/.config/opencode and honors XDG_CONFIG_HOME.
+func OpenCodeConfigDir() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); configured != "" {
+		return filepath.Join(configured, "opencode"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "opencode"), nil
+}
+
+// OpenCodeDataDir returns the directory containing OpenCode's local database.
+// Native Windows uses LocalAppData; WSL follows the Unix/XDG branch.
+func OpenCodeDataDir() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); configured != "" {
+		return filepath.Join(configured, "opencode"), nil
+	}
+	if runtime.GOOS == "windows" {
+		if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
+			return filepath.Join(local, "opencode"), nil
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home directory: %w", err)
+	}
+	return filepath.Join(home, ".local", "share", "opencode"), nil
+}
+
 // ShellPath rewrites a path for POSIX sh hooks (Git for Windows).
 func ShellPath(p string) string {
 	p = filepath.Clean(p)

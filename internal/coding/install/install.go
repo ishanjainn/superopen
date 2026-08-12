@@ -33,7 +33,11 @@ Vendors:
   claude-code   Plugin under ~/.claude/plugins/superopen/ + 'claude plugin install'
   cursor        Hook entries merged into ~/.cursor/hooks.json (user scope)
   codex         Marketplace + 'codex plugin add superopen@superopen'
-  all           shorthand for all three
+  gemini        Hooks merged into ~/.gemini/settings.json
+  opencode      Plugin under the OpenCode/XDG config directory
+  copilot-cli   Hooks under COPILOT_HOME (default ~/.copilot)
+  pi            Extension under ~/.pi/agent/extensions
+  all           shorthand for every supported vendor
 
 The 'so' binary itself must be on PATH. Install via Homebrew, the
 prebuilt binaries on GitHub Releases, the curl|sh installer, or
@@ -45,7 +49,7 @@ prebuilt binaries on GitHub Releases, the curl|sh installer, or
 		},
 	}
 
-	cmd.Flags().StringVar(&vendor, "vendor", "", "Vendor (claude-code | cursor | codex | all)")
+	cmd.Flags().StringVar(&vendor, "vendor", "", "Vendor (claude-code | cursor | codex | gemini | opencode | copilot-cli | pi | all)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would be written without modifying any files")
 	_ = cmd.MarkFlagRequired("vendor")
 

@@ -74,13 +74,17 @@ export function humanizePromptPreview(raw?: string): string {
       }
       if (Array.isArray(msg?.parts)) {
         const joined = msg.parts
-          .map((p: { content?: string; text?: string }) => p?.content || p?.text || "")
+          .map(
+            (p: { content?: string; text?: string }) =>
+              p?.content || p?.text || "",
+          )
           .filter(Boolean)
           .join("\n")
           .trim();
         if (joined) return joined;
       }
-      if (typeof msg?.text === "string" && msg.text.trim()) return msg.text.trim();
+      if (typeof msg?.text === "string" && msg.text.trim())
+        return msg.text.trim();
     }
   } catch {
     /* keep raw */
@@ -97,7 +101,10 @@ function displayTitle(meta: SessionMeta): string {
 }
 
 /** OpenCode defaults to "New session - <iso>"; treat as empty until AI renames. */
-export function isPlaceholderTitle(title?: string, sessionId?: string): boolean {
+export function isPlaceholderTitle(
+  title?: string,
+  sessionId?: string,
+): boolean {
   const t = String(title || "").trim();
   if (!t) return true;
   if (sessionId && t === String(sessionId).trim()) return true;
@@ -105,15 +112,28 @@ export function isPlaceholderTitle(title?: string, sessionId?: string): boolean 
   return false;
 }
 
-let openCodeTitleCache: { mtimeMs: number; size: number; titles: Map<string, string> } | null =
-  null;
+let openCodeTitleCache: {
+  mtimeMs: number;
+  size: number;
+  titles: Map<string, string>;
+} | null = null;
 
 function openCodeDBPath(): string {
   const env = String(process.env.OPENCODE_DB || "").trim();
   if (env) return env;
   const xdg = String(process.env.XDG_DATA_HOME || "").trim();
   if (xdg) return join(xdg, "opencode", "opencode.db");
+  if (process.platform === "win32") {
+    const local = String(process.env.LOCALAPPDATA || "").trim();
+    if (local) return join(local, "opencode", "opencode.db");
+  }
   return join(homedir(), ".local", "share", "opencode", "opencode.db");
+}
+
+function codexHome(): string {
+  return (
+    String(process.env.CODEX_HOME || "").trim() || join(homedir(), ".codex")
+  );
 }
 
 function loadOpenCodeTitles(): Map<string, string> {
@@ -137,15 +157,23 @@ function loadOpenCodeTitles(): Map<string, string> {
     // Prefer CLI sqlite3 (no native dep); schema is `session` (fallback `sessions`).
     let raw = "";
     try {
-      raw = execFileSync("sqlite3", ["-json", db, "SELECT id, title FROM session;"], {
-        encoding: "utf8",
-        timeout: 2000,
-      });
+      raw = execFileSync(
+        "sqlite3",
+        ["-json", db, "SELECT id, title FROM session;"],
+        {
+          encoding: "utf8",
+          timeout: 2000,
+        },
+      );
     } catch {
-      raw = execFileSync("sqlite3", ["-json", db, "SELECT id, title FROM sessions;"], {
-        encoding: "utf8",
-        timeout: 2000,
-      });
+      raw = execFileSync(
+        "sqlite3",
+        ["-json", db, "SELECT id, title FROM sessions;"],
+        {
+          encoding: "utf8",
+          timeout: 2000,
+        },
+      );
     }
     const rows = JSON.parse(raw || "[]") as { id?: string; title?: string }[];
     for (const row of rows) {
@@ -186,7 +214,9 @@ const UUID_RE =
 
 function loadAgentLinks(sessionsDir: string): Record<string, string> {
   const path = join(sessionsDir, "index.json");
-  const doc = readJSON<{ links?: Record<string, { parent_id?: string }> }>(path);
+  const doc = readJSON<{ links?: Record<string, { parent_id?: string }> }>(
+    path,
+  );
   const out: Record<string, string> = {};
   for (const [child, entry] of Object.entries(doc?.links || {})) {
     const parent = String(entry?.parent_id || "").trim();
@@ -218,9 +248,9 @@ function discoverCursorParent(childId: string): string {
 
 function clearAgentLink(sessionsDir: string, childId: string) {
   const path = join(sessionsDir, "index.json");
-  const existing = readJSON<{ links: Record<string, { parent_id: string; source?: string }> }>(
-    path
-  );
+  const existing = readJSON<{
+    links: Record<string, { parent_id: string; source?: string }>;
+  }>(path);
   if (!existing?.links?.[childId]) return;
   delete existing.links[childId];
   try {
@@ -230,14 +260,21 @@ function clearAgentLink(sessionsDir: string, childId: string) {
   }
 }
 
-function clearFalseNesting(sessionPath: string, sessionsDir: string, meta: SessionMeta) {
+function clearFalseNesting(
+  sessionPath: string,
+  sessionsDir: string,
+  meta: SessionMeta,
+) {
   const id = String(meta.id || "");
   clearAgentLink(sessionsDir, id);
   if (!meta.parent_id && !meta.is_subagent) return;
   meta.parent_id = undefined;
   meta.is_subagent = false;
   try {
-    writeFileSync(join(sessionPath, "session.json"), JSON.stringify(meta, null, 2));
+    writeFileSync(
+      join(sessionPath, "session.json"),
+      JSON.stringify(meta, null, 2),
+    );
   } catch {
     /* best-effort */
   }
@@ -255,20 +292,23 @@ function parentIsEmptyStub(sessionsDir: string, parentId: string): boolean {
     checkpoints: stats.checkpoints,
     turns: stats.turns,
     files: [],
-    prompt_preview: humanizePromptPreview(meta.prompt_preview) || meta.prompt_preview,
+    prompt_preview:
+      humanizePromptPreview(meta.prompt_preview) || meta.prompt_preview,
   });
 }
 
 function persistAgentLink(
   sessionsDir: string,
   childId: string,
-  parentId: string
+  parentId: string,
 ) {
   const path = join(sessionsDir, "index.json");
   let doc: { links: Record<string, { parent_id: string; source?: string }> } = {
     _about: {
-      purpose: "Rebuildable catalog of sessions, parent-child links, pending reviews, and the latest session for each vendor.",
-      authority: "derived from session.json files with temporary coordination state",
+      purpose:
+        "Rebuildable catalog of sessions, parent-child links, pending reviews, and the latest session for each vendor.",
+      authority:
+        "derived from session.json files with temporary coordination state",
       updated_by: "session ingestion and review workers",
     },
     sessions: [],
@@ -288,13 +328,16 @@ function persistAgentLink(
 function repairSubagentMeta(
   sessionPath: string,
   meta: SessionMeta,
-  parentId: string
+  parentId: string,
 ) {
   if (meta.parent_id === parentId && meta.is_subagent) return;
   meta.parent_id = parentId;
   meta.is_subagent = true;
   try {
-    writeFileSync(join(sessionPath, "session.json"), JSON.stringify(meta, null, 2));
+    writeFileSync(
+      join(sessionPath, "session.json"),
+      JSON.stringify(meta, null, 2),
+    );
   } catch {
     /* best-effort */
   }
@@ -304,7 +347,10 @@ function repairOrphanSubagentFlag(sessionPath: string, meta: SessionMeta) {
   if (!meta.is_subagent || meta.parent_id) return;
   meta.is_subagent = false;
   try {
-    writeFileSync(join(sessionPath, "session.json"), JSON.stringify(meta, null, 2));
+    writeFileSync(
+      join(sessionPath, "session.json"),
+      JSON.stringify(meta, null, 2),
+    );
   } catch {
     /* best-effort */
   }
@@ -314,7 +360,7 @@ function repairOrphanSubagentFlag(sessionPath: string, meta: SessionMeta) {
 export function isNestedSubagentSession(
   meta: SessionMeta,
   sessionsDir: string,
-  links?: Record<string, string>
+  links?: Record<string, string>,
 ): boolean {
   const linkMap = links || loadAgentLinks(sessionsDir);
   return isNestedSubagent(meta, linkMap, sessionsDir);
@@ -324,7 +370,7 @@ export function isNestedSubagentSession(
 function isNestedSubagent(
   meta: SessionMeta,
   links: Record<string, string>,
-  sessionsDir: string
+  sessionsDir: string,
 ): boolean {
   const id = String(meta.id || "");
   const sessionPath = join(sessionsDir, id);
@@ -385,12 +431,17 @@ export type RestoreCheckpoint = {
   files?: string[];
 };
 
-function listCheckpoints(sessionPath: string, sessionId: string): RestoreCheckpoint[] {
+function listCheckpoints(
+  sessionPath: string,
+  sessionId: string,
+): RestoreCheckpoint[] {
   const dir = join(sessionPath, "checkpoints");
   if (!fileExists(dir)) return [];
-	const manifest = readJSON<{ checkpoints?: RestoreCheckpoint[] }>(join(dir, "manifest.json"));
-	const out = [...(manifest?.checkpoints || [])];
-	for (const meta of out) if (!meta.session_id) meta.session_id = sessionId;
+  const manifest = readJSON<{ checkpoints?: RestoreCheckpoint[] }>(
+    join(dir, "manifest.json"),
+  );
+  const out = [...(manifest?.checkpoints || [])];
+  for (const meta of out) if (!meta.session_id) meta.session_id = sessionId;
   out.sort((a, b) => b.id - a.id);
   return out;
 }
@@ -461,12 +512,12 @@ export function mergeTraceSpans(...groups: TraceSpan[][]): TraceSpan[] {
   return Array.from(merged.values()).sort(
     (a, b) =>
       Number(a.start_time_unix_nano || a.timestamp || 0) -
-      Number(b.start_time_unix_nano || b.timestamp || 0)
+      Number(b.start_time_unix_nano || b.timestamp || 0),
   );
 }
 
 function codexRolloutUpdatedAt(sessionId: string): number {
-  const base = join(homedir(), ".codex", "sessions");
+  const base = join(codexHome(), "sessions");
   const now = new Date();
   for (const offset of [0, -1]) {
     const day = new Date(now);
@@ -475,12 +526,12 @@ function codexRolloutUpdatedAt(sessionId: string): number {
       base,
       String(day.getUTCFullYear()),
       String(day.getUTCMonth() + 1).padStart(2, "0"),
-      String(day.getUTCDate()).padStart(2, "0")
+      String(day.getUTCDate()).padStart(2, "0"),
     );
     if (!fileExists(dir)) continue;
     try {
       const name = readdirSync(dir).find(
-        (entry) => entry.includes(sessionId) && entry.endsWith(".jsonl")
+        (entry) => entry.includes(sessionId) && entry.endsWith(".jsonl"),
       );
       if (name) return statSync(join(dir, name)).mtimeMs;
     } catch {
@@ -492,11 +543,9 @@ function codexRolloutUpdatedAt(sessionId: string): number {
 
 function enrichSessionStats(
   sessionPath: string,
-  meta: SessionMeta
+  meta: SessionMeta,
 ): { turns: number; checkpoints: number } {
-  const spans = mergeTraceSpans(
-    loadTranscriptSpans(sessionPath)
-  );
+  const spans = mergeTraceSpans(loadTranscriptSpans(sessionPath));
   return {
     turns: countTurnsFromSpans(spans),
     checkpoints: countCheckpointDirs(sessionPath),
@@ -516,12 +565,12 @@ function spanSessionIDs(sp: TraceSpan): string[] {
 /** session id → gen_ai.user.name from file-backed session streams. */
 function loadUserMap(soDir: string): Map<string, string> {
   const out = new Map<string, string>();
-	const sessionsDir = join(soDir, "sessions");
-	if (!fileExists(sessionsDir)) return out;
-	for (const name of readdirSync(sessionsDir)) {
-		const meta = readJSON<SessionMeta>(join(sessionsDir, name, "session.json"));
-		if (meta?.id && meta.user) out.set(meta.id, String(meta.user));
-	}
+  const sessionsDir = join(soDir, "sessions");
+  if (!fileExists(sessionsDir)) return out;
+  for (const name of readdirSync(sessionsDir)) {
+    const meta = readJSON<SessionMeta>(join(sessionsDir, name, "session.json"));
+    if (meta?.id && meta.user) out.set(meta.id, String(meta.user));
+  }
   return out;
 }
 
@@ -583,7 +632,7 @@ function matchToolName(name: string, needle: string): boolean {
 function matchSpansContent(
   spans: TraceSpan[],
   needle: string,
-  mode: "any" | "file" | "tool"
+  mode: "any" | "file" | "tool",
 ): string {
   for (const sp of spans) {
     const attrs = sp.attributes || {};
@@ -640,9 +689,7 @@ function loadSessionSpans(item: ListItem): TraceSpan[] {
   const so = item.so_root;
   if (!so || !item.id) return [];
   const sessionPath = join(so, "sessions", item.id);
-  return mergeTraceSpans(
-    loadTranscriptSpans(sessionPath)
-  );
+  return mergeTraceSpans(loadTranscriptSpans(sessionPath));
 }
 
 /**
@@ -652,13 +699,14 @@ function loadSessionSpans(item: ListItem): TraceSpan[] {
 function matchSessionContent(
   item: ListItem,
   needle: string,
-  mode: "any" | "file" | "tool"
+  mode: "any" | "file" | "tool",
 ): string {
   if (!needle) return "ok";
 
   if (mode === "any") {
     if ((item.title || "").toLowerCase().includes(needle)) return "title";
-    if ((item.prompt_preview || "").toLowerCase().includes(needle)) return "prompt";
+    if ((item.prompt_preview || "").toLowerCase().includes(needle))
+      return "prompt";
     if ((item.id || "").toLowerCase().includes(needle)) return "id";
     if ((item.vendor || "").toLowerCase().includes(needle)) return "vendor";
     if ((item.model || "").toLowerCase().includes(needle)) return "model";
@@ -700,8 +748,10 @@ function listSessionsInSo(soDir: string, projectId: string): ListItem[] {
     if (meta.id === "unknown" || name === "unknown") continue;
     // Subagents are not top-level sessions - they nest under the parent chat.
     if (isNestedSubagent(meta, links, dir)) continue;
-		const sessionDoc = readJSON<{ footprint?: { files?: { path: string }[] } }>(join(sessionPath, "session.json"));
-		const footprint = sessionDoc?.footprint;
+    const sessionDoc = readJSON<{ footprint?: { files?: { path: string }[] } }>(
+      join(sessionPath, "session.json"),
+    );
+    const footprint = sessionDoc?.footprint;
     const files = (footprint?.files || []).map((f) => f.path).filter(Boolean);
     const title = displayTitle(meta);
     const user =
@@ -711,7 +761,8 @@ function listSessionsInSo(soDir: string, projectId: string): ListItem[] {
       ...meta,
       user,
       title,
-      prompt_preview: humanizePromptPreview(meta.prompt_preview) || meta.prompt_preview,
+      prompt_preview:
+        humanizePromptPreview(meta.prompt_preview) || meta.prompt_preview,
       project_id: projectId,
       so_root: soDir,
       checkpoints: stats.checkpoints,
@@ -726,7 +777,11 @@ function listSessionsInSo(soDir: string, projectId: string): ListItem[] {
 
 /** Opened chat with no turns/work - hide from UI (matches Go session.IsEmptyListItem). */
 function isEmptySession(item: ListItem): boolean {
-  if ((item.turns || 0) > 0 || Number(item.tokens || 0) > 0 || (item.checkpoints || 0) > 0) {
+  if (
+    (item.turns || 0) > 0 ||
+    Number(item.tokens || 0) > 0 ||
+    (item.checkpoints || 0) > 0
+  ) {
     return false;
   }
   if ((item.files || []).length > 0) return false;
@@ -750,8 +805,8 @@ function collectAllSessions(projectFilter = ""): ListItem[] {
   }
   items.sort((a, b) =>
     String(b.started_at || b.ended_at || "").localeCompare(
-      String(a.started_at || a.ended_at || "")
-    )
+      String(a.started_at || a.ended_at || ""),
+    ),
   );
   return items;
 }
@@ -771,7 +826,9 @@ function facetsFrom(items: ListItem[]): SessionQueryFacets {
   return {
     users: Array.from(users).sort((a, b) => a.localeCompare(b)),
     agents: Array.from(agents).sort((a, b) => a.localeCompare(b)),
-    files: Array.from(files).sort((a, b) => a.localeCompare(b)).slice(0, 40),
+    files: Array.from(files)
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, 40),
   };
 }
 
@@ -779,11 +836,11 @@ function applySessionQuery(items: ListItem[], q: string): ListItem[] {
   const parsed = parseSessionQuery(q);
   const hasFilter = Boolean(
     parsed.text ||
-      parsed.user ||
-      parsed.agent ||
-      parsed.model ||
-      parsed.file ||
-      parsed.tool
+    parsed.user ||
+    parsed.agent ||
+    parsed.model ||
+    parsed.file ||
+    parsed.tool,
   );
   if (!hasFilter) return items;
   const needle = parsed.text.toLowerCase();
@@ -792,7 +849,8 @@ function applySessionQuery(items: ListItem[], q: string): ListItem[] {
   const out: ListItem[] = [];
   for (const item of items) {
     if (parsed.user && !userMatches(item.user, parsed.user)) continue;
-    if (parsed.agent && !vendorMatchesAgent(item.vendor, parsed.agent)) continue;
+    if (parsed.agent && !vendorMatchesAgent(item.vendor, parsed.agent))
+      continue;
     if (parsed.model) {
       const m = (item.model || "").toLowerCase();
       if (!m.includes(parsed.model.toLowerCase())) continue;
@@ -824,7 +882,10 @@ export function listSessions(q = "", projectFilter = ""): ListItem[] {
 }
 
 /** Sessions list + facet values for search autocomplete. */
-export function listSessionsPage(q = "", projectFilter = ""): SessionsListResult {
+export function listSessionsPage(
+  q = "",
+  projectFilter = "",
+): SessionsListResult {
   const all = collectAllSessions(projectFilter);
   return {
     sessions: applySessionQuery(all, q),
@@ -864,23 +925,27 @@ export function getSessionDetail(id: string, projectFilter = "") {
       meta.user = users.get(id) || undefined;
     }
 
-		const sessionDoc = readJSON<{ footprint?: unknown; evaluation?: unknown; review?: { findings?: unknown[] } }>(join(sessionPath, "session.json"));
-		const footprint = sessionDoc?.footprint;
+    const sessionDoc = readJSON<{
+      footprint?: unknown;
+      evaluation?: unknown;
+      review?: { findings?: unknown[] };
+    }>(join(sessionPath, "session.json"));
+    const footprint = sessionDoc?.footprint;
     // Hooks append directly to this file, including during active chats.
     const transcript = loadTranscriptSpans(sessionPath);
     const rolloutUpdatedAt = codexRolloutUpdatedAt(id);
     const recordedEnd = meta.ended_at ? new Date(meta.ended_at).getTime() : 0;
-    if (
-      meta.status === "ended" &&
-      rolloutUpdatedAt > recordedEnd + 15_000
-    ) {
+    if (meta.status === "ended" && rolloutUpdatedAt > recordedEnd + 15_000) {
       // Older Codex hooks treated every assistant Stop as chat closure. A
       // rollout that keeps advancing proves the chat is active; repair the
       // stale materialized status so evaluations are labeled snapshots.
       meta.status = "active";
       meta.ended_at = undefined;
       try {
-        writeFileSync(join(sessionPath, "session.json"), JSON.stringify(meta, null, 2));
+        writeFileSync(
+          join(sessionPath, "session.json"),
+          JSON.stringify(meta, null, 2),
+        );
       } catch {
         // The response can still report the corrected in-memory status.
       }
@@ -890,9 +955,10 @@ export function getSessionDetail(id: string, projectFilter = "") {
     const links = loadAgentLinks(sessionsDir);
     if (fileExists(sessionsDir)) {
       for (const name of readdirSync(sessionsDir)) {
-        if (name === "index.json" || name.startsWith(".") || name === id) continue;
+        if (name === "index.json" || name.startsWith(".") || name === id)
+          continue;
         const childMeta = readJSON<SessionMeta>(
-          join(sessionsDir, name, "session.json")
+          join(sessionsDir, name, "session.json"),
         );
         if (!childMeta) continue;
         if (!childMeta.id) childMeta.id = name;
@@ -916,12 +982,12 @@ export function getSessionDetail(id: string, projectFilter = "") {
         }
       }
       subagents.sort((a, b) =>
-        String(b.started_at || "").localeCompare(String(a.started_at || ""))
+        String(b.started_at || "").localeCompare(String(a.started_at || "")),
       );
     }
 
     const stats = enrichSessionStats(sessionPath, meta);
-		const evalResult = sessionDoc?.evaluation || null;
+    const evalResult = sessionDoc?.evaluation || null;
     return {
       meta,
       transcript,
@@ -930,7 +996,9 @@ export function getSessionDetail(id: string, projectFilter = "") {
       // Replay lives in Map / `so sessions` CLI - not duplicated in Chat.
       replay: undefined,
       eval: evalResult,
-      findings: Array.isArray(sessionDoc?.review?.findings) ? sessionDoc.review.findings : [],
+      findings: Array.isArray(sessionDoc?.review?.findings)
+        ? sessionDoc.review.findings
+        : [],
       subagents,
     };
   }

@@ -72,6 +72,8 @@ func TestStatusForIgnoresDisabledOptionalIntegrations(t *testing.T) {
 func TestVendorInstallCandidatesCoverDesktopPlatforms(t *testing.T) {
 	env := func(key string) string {
 		switch key {
+		case "CODEX_HOME":
+			return `/custom/codex`
 		case "LOCALAPPDATA":
 			return `C:\Users\me\AppData\Local`
 		case "APPDATA":
@@ -79,6 +81,9 @@ func TestVendorInstallCandidatesCoverDesktopPlatforms(t *testing.T) {
 		default:
 			return ""
 		}
+	}
+	if got := strings.Join(vendorInstallCandidates("codex", "windows", `/home/me`, env), "\n"); !strings.Contains(got, `/custom/codex`) {
+		t.Fatalf("Codex candidates do not honor CODEX_HOME: %s", got)
 	}
 	cases := []struct {
 		vendor, goos, needle string

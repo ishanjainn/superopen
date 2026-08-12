@@ -66,6 +66,16 @@ func DefaultPolicy() Policy {
 			"wget *| sh",
 			"wget *| bash",
 			"chmod -R 777 /",
+			"remove-item -recurse -force c:\\*",
+			"remove-item -r -fo c:\\*",
+			"rd /s /q c:\\*",
+			"rmdir /s /q c:\\*",
+			"del /s /q c:\\*",
+			"format c:*",
+			"clear-disk *",
+			"initialize-disk *",
+			"iwr *| iex",
+			"irm *| iex",
 		},
 		// Narrow by default: only Superopen audit trail.
 		// Broader secret-path blocks are opt-in via editing guardrails.yaml.
@@ -222,6 +232,9 @@ func normalizePath(p string) string {
 	}
 	// lexical only - collapse .. without resolving symlinks
 	p = filepath.Clean(p)
+	// Hook payloads may contain Windows paths even when Superopen is running
+	// through WSL or Git Bash. Use one separator form for policy matching.
+	p = strings.ReplaceAll(p, `\`, "/")
 	// collapse leading //
 	for strings.HasPrefix(p, "//") {
 		p = "/" + strings.TrimLeft(p, "/")

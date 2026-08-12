@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -1201,10 +1202,21 @@ func demoSession(root string) error {
 }
 
 func findWebDir(repoRoot string) string {
-	candidates := []string{
+	candidates := []string{}
+	if configured := strings.TrimSpace(os.Getenv("SUPEROPEN_WEB_DIR")); configured != "" {
+		candidates = append(candidates, configured)
+	}
+	if executable, err := os.Executable(); err == nil {
+		executableDir := filepath.Dir(executable)
+		candidates = append(candidates,
+			filepath.Join(executableDir, "web"),
+			filepath.Join(executableDir, "..", "share", "superopen", "web"),
+		)
+	}
+	candidates = append(candidates,
 		filepath.Join(repoRoot, "superopen", "web"),
 		filepath.Join(repoRoot, "web"),
-	}
+	)
 	if wd, err := os.Getwd(); err == nil {
 		candidates = append([]string{
 			filepath.Join(wd, "superopen", "web"),
@@ -1219,17 +1231,30 @@ func findWebDir(repoRoot string) string {
 	return ""
 }
 
+func npmCommand(args ...string) *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		// npm is distributed as npm.cmd on Windows and cannot be launched
+		// directly with CreateProcess on every supported Go/Windows version.
+		return exec.Command("cmd.exe", append([]string{"/d", "/s", "/c", "npm.cmd"}, args...)...)
+	}
+	return exec.Command("npm", args...)
+}
+
 func startNextUI(repoRoot string, uiPort int) (*exec.Cmd, string, error) {
 	webDir := findWebDir(repoRoot)
 	if webDir == "" {
 		return nil, "", fmt.Errorf("superopen/web not found")
 	}
-	if _, err := exec.LookPath("npm"); err != nil {
+	npmName := "npm"
+	if runtime.GOOS == "windows" {
+		npmName = "npm.cmd"
+	}
+	if _, err := exec.LookPath(npmName); err != nil {
 		return nil, "", fmt.Errorf("npm not on PATH")
 	}
 	if _, err := os.Stat(filepath.Join(webDir, "node_modules")); err != nil {
 		fmt.Println("Installing web UI dependencies (npm install --ignore-scripts)…")
-		install := exec.Command("npm", "install", "--ignore-scripts")
+		install := npmCommand("install", "--ignore-scripts")
 		install.Dir = webDir
 		install.Stdout = os.Stdout
 		install.Stderr = os.Stderr
@@ -1240,7 +1265,7 @@ func startNextUI(repoRoot string, uiPort int) (*exec.Cmd, string, error) {
 
 	url := fmt.Sprintf("http://127.0.0.1:%d", uiPort)
 	// Light local path: Next.js Turbopack dev via `npm run dev` (package.json).
-	cmd := exec.Command("npm", "run", "dev", "--", "-p", fmt.Sprintf("%d", uiPort), "-H", "127.0.0.1")
+	cmd := npmCommand("run", "dev", "--", "-p", fmt.Sprintf("%d", uiPort), "-H", "127.0.0.1")
 	cmd.Dir = webDir
 	soBin, _ := os.Executable()
 	cmd.Env = append(os.Environ(),

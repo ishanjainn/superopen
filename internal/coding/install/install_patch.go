@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/userpaths"
@@ -185,9 +186,14 @@ func resolveCodexBin() (string, error) {
 		"/Applications/Codex.app/Contents/Resources/codex",
 	}
 	if home, err := os.UserHomeDir(); err == nil {
+		codexName := "codex"
+		if runtime.GOOS == "windows" {
+			codexName = "codex.exe"
+		}
+		codexHome, _ := userpaths.CodexHome()
 		fallbacks = append(fallbacks,
 			filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex"),
-			filepath.Join(home, ".codex", "bin", "codex"),
+			filepath.Join(codexHome, "bin", codexName),
 		)
 		if local := os.Getenv("LOCALAPPDATA"); local != "" {
 			fallbacks = append(fallbacks,
@@ -201,7 +207,7 @@ func resolveCodexBin() (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("codex binary not found on PATH or at the standard Codex.app location")
+	return "", fmt.Errorf("codex binary not found on PATH or in a standard Codex installation")
 }
 
 func extractEmbeddedDir(src, dest, soBin string) error {

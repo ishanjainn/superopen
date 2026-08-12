@@ -36,4 +36,9 @@ func TestInstallCommandRegistersCodexHooks(t *testing.T) {
 	if !strings.Contains(string(body), "coding hook --vendor=codex") {
 		t.Fatalf("Codex hook manifest does not invoke Superopen: %s", body)
 	}
+
+	marketplace := filepath.Join(home, ".local", "share", "superopen", "codex-marketplace", ".agents", "plugins", "marketplace.json")
+	if _, err := os.Stat(marketplace); err != nil {
+		t.Fatalf("Codex marketplace manifest was not installed: %v", err)
+	}
 }

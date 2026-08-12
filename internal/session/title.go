@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/llm"
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 // DisplayName returns the best human label for a session.
@@ -159,11 +160,11 @@ var codexTitleCache struct {
 }
 
 func lookupCodexThreadName(sessionID string) string {
-	home, err := os.UserHomeDir()
+	home, err := userpaths.CodexHome()
 	if err != nil {
 		return ""
 	}
-	path := filepath.Join(home, ".codex", "session_index.jsonl")
+	path := filepath.Join(home, "session_index.jsonl")
 	info, err := os.Stat(path)
 	if err != nil {
 		return ""

@@ -5,6 +5,7 @@
 package uninstall
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -32,6 +33,20 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 	// other tools' entries.
 	if vendor == "cursor" {
 		return uninstallCursorHooks(dryRun)
+	}
+	if vendor == "gemini" {
+		path, pathErr := vendorDestRoot(vendor)
+		if pathErr != nil {
+			return nil, []string{pathErr.Error()}
+		}
+		touched, stripErr := stripGeminiHooks(path, dryRun)
+		if touched != "" {
+			removed = append(removed, touched)
+		}
+		if stripErr != nil {
+			errs = append(errs, stripErr.Error())
+		}
+		return removed, errs
 	}
 
 	dest, err := vendorDestRoot(vendor)
@@ -202,14 +217,103 @@ func vendorDestRoot(vendor string) (string, error) {
 	case "gemini":
 		return filepath.Join(home, ".gemini", "settings.json"), nil
 	case "opencode":
-		return filepath.Join(home, ".config", "opencode", "plugins", "superopen.ts"), nil
+		base, err := userpaths.OpenCodeConfigDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(base, "plugins", "superopen.ts"), nil
 	case "copilot-cli":
-		return filepath.Join(home, ".copilot", "hooks", "superopen.json"), nil
+		base, err := userpaths.CopilotHome()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(base, "hooks", "superopen.json"), nil
 	case "pi":
 		return filepath.Join(home, ".pi", "agent", "extensions", "superopen"), nil
 	default:
 		return "", fmt.Errorf("unknown vendor %q", vendor)
 	}
+}
+
+// stripGeminiHooks removes only Superopen-owned commands from the shared
+// Gemini settings file. User themes, models, MCP servers, and foreign hooks
+// must survive uninstall.
+func stripGeminiHooks(path string, dryRun bool) (string, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return "", fmt.Errorf("parse %s: %w (leaving the file untouched)", path, err)
+	}
+	hooks, ok := doc["hooks"].(map[string]any)
+	if !ok {
+		return "", nil
+	}
+	changed := false
+	for event, rawGroups := range hooks {
+		groups, ok := rawGroups.([]any)
+		if !ok {
+			continue
+		}
+		keptGroups := make([]any, 0, len(groups))
+		for _, rawGroup := range groups {
+			group, ok := rawGroup.(map[string]any)
+			if !ok {
+				keptGroups = append(keptGroups, rawGroup)
+				continue
+			}
+			entries, ok := group["hooks"].([]any)
+			if !ok {
+				keptGroups = append(keptGroups, rawGroup)
+				continue
+			}
+			keptEntries := make([]any, 0, len(entries))
+			for _, rawEntry := range entries {
+				entry, _ := rawEntry.(map[string]any)
+				command, _ := entry["command"].(string)
+				if strings.Contains(command, "coding hook --vendor=gemini") || strings.Contains(command, "sessions finalize") {
+					changed = true
+					continue
+				}
+				keptEntries = append(keptEntries, rawEntry)
+			}
+			if len(keptEntries) > 0 {
+				clone := make(map[string]any, len(group))
+				for key, value := range group {
+					clone[key] = value
+				}
+				clone["hooks"] = keptEntries
+				keptGroups = append(keptGroups, clone)
+			}
+		}
+		if len(keptGroups) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = keptGroups
+		}
+	}
+	if !changed {
+		return "", nil
+	}
+	if dryRun {
+		return path, nil
+	}
+	if len(hooks) == 0 {
+		delete(doc, "hooks")
+	}
+	if len(doc) == 0 {
+		return path, os.Remove(path)
+	}
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return path, err
+	}
+	return path, os.WriteFile(path, append(out, '\n'), 0o644)
 }
 
 // legacyVendorPaths are older install locations that never matched host

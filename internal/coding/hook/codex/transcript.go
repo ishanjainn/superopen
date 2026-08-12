@@ -27,6 +27,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 // maxTranscriptScan caps how many bytes of one rollout we'll read.
@@ -507,7 +509,7 @@ func findRolloutForSession(sessionID string) string {
 	if sessionID == "" {
 		return ""
 	}
-	home, err := os.UserHomeDir()
+	home, err := userpaths.CodexHome()
 	if err != nil {
 		return ""
 	}
@@ -516,8 +518,8 @@ func findRolloutForSession(sessionID string) string {
 	// days is still cheap.
 	now := time.Now().UTC()
 	candidates := []string{
-		filepath.Join(home, ".codex", "sessions", now.Format("2006/01/02")),
-		filepath.Join(home, ".codex", "sessions", now.AddDate(0, 0, -1).Format("2006/01/02")),
+		filepath.Join(home, "sessions", now.Format("2006/01/02")),
+		filepath.Join(home, "sessions", now.AddDate(0, 0, -1).Format("2006/01/02")),
 	}
 	for _, dir := range candidates {
 		if path := scanRolloutDirForSession(dir, sessionID); path != "" {

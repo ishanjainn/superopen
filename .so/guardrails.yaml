@@ -1,0 +1,39 @@
+# Superopen guardrails. These are shared project safety rules enforced at coding-agent hook boundaries.
+# Authoritative project policy updated by project maintainers; so sync will not overwrite this file.
+rules:
+    - id: no-secrets
+      description: Never commit secrets, API keys, or credentials
+      severity: block
+    - id: no-generated
+      description: Never edit generated files (dist/, vendor/, *.generated.*)
+      severity: block
+    - id: run-tests
+      description: Always run relevant tests before finishing
+      severity: warn
+    - id: respect-formatting
+      description: Respect project formatting and lint rules
+      severity: warn
+    - id: avoid-unrelated
+      description: Avoid changing unrelated code
+      severity: warn
+    - id: from-agents-1
+      description: 'Prefer Conventional Commit titles, for example feat: add project prune or'
+      severity: warn
+      source: agent-md
+approval: interactive
+denied_tools: []
+denied_commands:
+    - rm -rf /
+    - rm -rf /*
+    - mkfs*
+    - dd if=/dev/zero*
+    - ':(){ :|:& };:'
+    - curl *| sh
+    - curl *| bash
+    - wget *| sh
+    - wget *| bash
+    - chmod -R 777 /
+sensitive_paths:
+    - '**/.so/sessions/**'
+    - '**/.so/audit/**'
+redact_output: true

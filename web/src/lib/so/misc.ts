@@ -21,13 +21,13 @@ function enrich(p: Project): Project {
   const remote = p.remote_url || gitRemoteURL(p.repo_root) || undefined;
   const slug = remote
     ? repoSlug(p.repo_root)
-    : p.slug || p.name || p.repo_root.split("/").pop() || p.id;
+    : p.slug || p.name || basename(p.repo_root) || p.id;
   const missing = !fileExists(p.repo_root);
   return {
     ...p,
     remote_url: remote,
     slug,
-    name: p.name || slug.split("/").pop() || p.id,
+    name: p.name || slug.split("/").pop() || basename(p.repo_root) || p.id,
     missing,
   };
 }
@@ -37,7 +37,8 @@ function projectsFile(): string {
   if (xdg) return join(xdg, "superopen", "projects.json");
   // Match Go internal/projects: Windows → %APPDATA%\superopen
   if (process.platform === "win32") {
-    const appdata = process.env.APPDATA || join(homedir(), "AppData", "Roaming");
+    const appdata =
+      process.env.APPDATA || join(homedir(), "AppData", "Roaming");
     return join(appdata, "superopen", "projects.json");
   }
   return join(homedir(), ".config", "superopen", "projects.json");
@@ -49,7 +50,7 @@ export function listProjects(activeRoot = processRepoRoot()): {
 } {
   const active: Project = enrich({
     id: "local",
-    name: activeRoot.split("/").pop() || "local",
+    name: basename(activeRoot) || "local",
     repo_root: activeRoot,
     so_root: join(activeRoot, ".so"),
   });
@@ -63,9 +64,9 @@ export function listProjects(activeRoot = processRepoRoot()): {
       active_id?: string;
       active_project_id?: string;
     };
-    const projects = (Array.isArray(raw.projects) ? raw.projects : [active]).map(
-      enrich
-    );
+    const projects = (
+      Array.isArray(raw.projects) ? raw.projects : [active]
+    ).map(enrich);
     const activeKey = raw.active_project_id || raw.active_id || "";
     const found =
       projects.find((x) => x.id === activeKey) ||
@@ -120,9 +121,9 @@ function writeProjectsFile(data: ProjectsFile) {
         active_project_id: data.active_project_id || "",
       },
       null,
-      2
+      2,
     ) + "\n",
-    "utf8"
+    "utf8",
   );
 }
 
@@ -147,7 +148,7 @@ function safePurgeSO(soDir: string): void {
 /** Unregister a project; with purgeSO also delete its .so directory. */
 export function removeProject(
   idOrRoot: string,
-  purgeSO = false
+  purgeSO = false,
 ): RemoveProjectResult {
   const data = readProjectsFile();
   const idx = data.projects.findIndex((p) => matchesProject(p, idOrRoot));
@@ -330,7 +331,7 @@ function readSessionRecommendations(): Recommendation[] {
     try {
       if (!statSync(join(dir, name)).isDirectory()) continue;
       const doc = readJSONFile<{ recommendations?: Recommendation[] }>(
-        join(dir, name, "session.json")
+        join(dir, name, "session.json"),
       );
       if (!Array.isArray(doc?.recommendations)) continue;
       for (const rec of doc.recommendations) {
@@ -347,20 +348,27 @@ function readSessionRecommendations(): Recommendation[] {
 export function fingerprintKey(
   recType: string,
   proposedPath: string,
-  kind = ""
+  kind = "",
 ): string {
   let p = String(proposedPath || "").replace(/\\/g, "/");
   const soIdx = p.lastIndexOf("/.so/");
   if (soIdx >= 0) p = p.slice(soIdx + 5);
-  else if (p.includes("/.agents/skills/") || /\/\.(claude|cursor|gemini|opencode|codex|github|pi)\/skills\//.test(p)) {
+  else if (
+    p.includes("/.agents/skills/") ||
+    /\/\.(claude|cursor|gemini|opencode|codex|github|pi)\/skills\//.test(p)
+  ) {
     const parts = p.split("/");
     const i = parts.lastIndexOf("skills");
     p = i >= 0 ? `skills/${parts[i + 1]}` : `skills/${parts.pop()}`;
   } else if (p.includes("/skills/")) {
     const parts = p.split("/");
     const base = parts[parts.length - 1];
-    p = base === "SKILL.md" ? `skills/${parts[parts.length - 2]}` : `skills/${base}`;
-  } else if (p.endsWith("/AGENTS.md") || p.endsWith("AGENTS.md")) p = "AGENTS.md";
+    p =
+      base === "SKILL.md"
+        ? `skills/${parts[parts.length - 2]}`
+        : `skills/${base}`;
+  } else if (p.endsWith("/AGENTS.md") || p.endsWith("AGENTS.md"))
+    p = "AGENTS.md";
   else if (
     p.includes("/.agents/rules/") ||
     /\/\.(cursor|claude|gemini|codex|opencode|pi)\/rules\//.test(p) ||
@@ -368,8 +376,12 @@ export function fingerprintKey(
   ) {
     p = `rules/${p.split("/").pop()}`;
   } else if (p.endsWith("guardrails.yaml")) p = "guardrails.yaml";
-  const t = String(recType || "").toLowerCase().trim();
-  const k = String(kind || "").toLowerCase().trim();
+  const t = String(recType || "")
+    .toLowerCase()
+    .trim();
+  const k = String(kind || "")
+    .toLowerCase()
+    .trim();
   return k ? `${t}|${p}|${k}` : `${t}|${p}`;
 }
 
@@ -409,9 +421,9 @@ function compactPendingRecommendations(): Recommendation[] {
   const pending = readSessionRecommendations()
     .filter((r) => !r.status || r.status === "pending" || r.status === "stale")
     .map((r) => ({
-    ...r,
-    status: r.status || "pending",
-  }));
+      ...r,
+      status: r.status || "pending",
+    }));
   const byFp = new Map<string, Recommendation>();
 
   for (const r of pending) {
@@ -425,7 +437,7 @@ function compactPendingRecommendations(): Recommendation[] {
         status: status === "stale" ? "pending" : status,
         related_sessions: mergeSessions(
           r.related_sessions,
-          r.session_id ? [r.session_id] : []
+          r.session_id ? [r.session_id] : [],
         ),
       });
       continue;
@@ -441,10 +453,10 @@ function compactPendingRecommendations(): Recommendation[] {
         prev.related_sessions,
         r.related_sessions,
         prev.session_id ? [prev.session_id] : [],
-        r.session_id ? [r.session_id] : []
+        r.session_id ? [r.session_id] : [],
       ),
       evidence: Array.from(
-        new Set([...(prev.evidence || []), ...(r.evidence || [])])
+        new Set([...(prev.evidence || []), ...(r.evidence || [])]),
       ).slice(0, 10),
       title: r.title || prev.title,
       rationale: r.rationale || prev.rationale,
@@ -465,7 +477,7 @@ export function listRecommendations(): Recommendation[] {
 
 function listRecommendationHistory(): Recommendation[] {
   return readSessionRecommendations().filter(
-    (r) => Boolean(r.status) && r.status !== "pending" && r.status !== "stale"
+    (r) => Boolean(r.status) && r.status !== "pending" && r.status !== "stale",
   );
 }
 
@@ -486,7 +498,7 @@ function listAllRecommendations(): Recommendation[] {
     byId.set(r.id, { ...r, status: r.status || "pending" });
   }
   return Array.from(byId.values()).sort((a, b) =>
-    String(b.created_at || "").localeCompare(String(a.created_at || ""))
+    String(b.created_at || "").localeCompare(String(a.created_at || "")),
   );
 }
 

@@ -1,0 +1,7 @@
+# Superopen tracking policy: configuration below is committed; generated graph, session, memory, and audit state stays local.
+# Updated by so init when the tracking policy changes; everything ignored below is derived or machine-local.
+
+graph/
+sessions/
+memory/
+audit/

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/config"
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 //go:embed skill.md
@@ -229,6 +230,12 @@ func writeSkillBundleFor(root, skillBody string, vendors []string, sharedAgents,
 		skillTargets = append(skillTargets, filepath.Join(root, ".agents", "skills", "so", "SKILL.md"))
 	}
 	for _, vendor := range vendors {
+		if globalHome {
+			if target := globalSkillTarget(strings.ToLower(strings.TrimSpace(vendor)), root); target != "" {
+				skillTargets = append(skillTargets, target)
+				continue
+			}
+		}
 		var rel string
 		switch strings.ToLower(strings.TrimSpace(vendor)) {
 		case "claude", "claude-code":
@@ -282,6 +289,33 @@ func writeSkillBundleFor(root, skillBody string, vendors []string, sharedAgents,
 	return written, nil
 }
 
+func globalSkillTarget(vendor, fallbackHome string) string {
+	switch vendor {
+	case "codex":
+		if strings.TrimSpace(os.Getenv("CODEX_HOME")) != "" {
+			if base, err := userpaths.CodexHome(); err == nil {
+				return filepath.Join(base, "skills", "so", "SKILL.md")
+			}
+		}
+		return filepath.Join(fallbackHome, ".codex", "skills", "so", "SKILL.md")
+	case "opencode":
+		if strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")) != "" {
+			if base, err := userpaths.OpenCodeConfigDir(); err == nil {
+				return filepath.Join(base, "skills", "so", "SKILL.md")
+			}
+		}
+		return filepath.Join(fallbackHome, ".config", "opencode", "skills", "so", "SKILL.md")
+	case "copilot", "copilot-cli":
+		if strings.TrimSpace(os.Getenv("COPILOT_HOME")) != "" {
+			if base, err := userpaths.CopilotHome(); err == nil {
+				return filepath.Join(base, "skills", "so", "SKILL.md")
+			}
+		}
+		return filepath.Join(fallbackHome, ".copilot", "skills", "so", "SKILL.md")
+	}
+	return ""
+}
+
 // DetectVendors returns only coding agents that are visibly installed or have
 // an existing native project directory. Shared .agents is never auto-detected.
 func DetectVendors(root string) []string {
@@ -320,6 +354,9 @@ func vendorInstallCandidates(vendor, goos, home string, getenv func(string) stri
 	if home != "" {
 		switch vendor {
 		case "codex":
+			if configured := strings.TrimSpace(getenv("CODEX_HOME")); configured != "" {
+				paths = append(paths, configured)
+			}
 			paths = append(paths, filepath.Join(home, ".codex"))
 		case "cursor":
 			paths = append(paths, filepath.Join(home, ".cursor"))

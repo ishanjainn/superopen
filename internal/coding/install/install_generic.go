@@ -5,11 +5,14 @@ package install
 // OpenCode/Pi TypeScript plugins, Copilot CLI hooks).
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
@@ -21,36 +24,26 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	q := strconv.Quote
-
 	var path string
 	var body string
 
 	switch vendor {
 	case "gemini":
 		path = filepath.Join(home, ".gemini", "settings.json")
-		body = fmt.Sprintf(`{
-  "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": %s}]}],
-    "SessionEnd": [{"hooks": [
-      {"type": "command", "command": %s},
-      {"type": "command", "command": %s, "timeout": 5}
-    ]}],
-    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": %s}]}],
-    "PreToolUse": [{"hooks": [{"type": "command", "command": %s}]}]
-  }
-}
-`, q(soBin+" coding hook --vendor=gemini --event=SessionStart"),
-			q(soBin+" coding hook --vendor=gemini --event=SessionEnd"),
-			q(soBin+" sessions finalize --detach"),
-			q(soBin+" coding hook --vendor=gemini --event=UserPromptSubmit"),
-			q(soBin+" coding hook --vendor=gemini --event=PreToolUse"))
+		if dryRun {
+			return []string{path}, nil
+		}
+		return installGeminiHooks(path, soBin)
 
 	case "opencode":
 		// OpenCode auto-loads ~/.config/opencode/plugins/*.ts
 		// https://opencode.ai/docs/plugins/
 		// Host event model: OpenCode plugin events (session.*, message.*, tool.*).
-		path = filepath.Join(home, ".config", "opencode", "plugins", "superopen.ts")
+		base, pathErr := userpaths.OpenCodeConfigDir()
+		if pathErr != nil {
+			return nil, pathErr
+		}
+		path = filepath.Join(base, "plugins", "superopen.ts")
 		raw, readErr := marketplaceFS.ReadFile("marketplace/plugins/opencode/superopen.ts")
 		if readErr != nil {
 			return nil, fmt.Errorf("read embedded opencode plugin: %w", readErr)
@@ -71,35 +64,15 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
 	case "copilot-cli":
 		// Copilot CLI loads ~/.copilot/hooks/*.json,
 		// not ~/.github/hooks (cloud-agent style).
-		path = filepath.Join(home, ".copilot", "hooks", "superopen.json")
-		body = fmt.Sprintf(`{
-  "hooks": {
-    "sessionStart": [{"type": "command", "command": %s}],
-    "sessionEnd": [
-      {"type": "command", "command": %s},
-      {"type": "command", "command": %s}
-    ],
-    "userPromptSubmitted": [{"type": "command", "command": %s}],
-    "preToolUse": [{"type": "command", "command": %s}],
-    "postToolUse": [{"type": "command", "command": %s}],
-    "postToolUseFailure": [{"type": "command", "command": %s}],
-    "errorOccurred": [{"type": "command", "command": %s}],
-    "agentStop": [
-      {"type": "command", "command": %s},
-      {"type": "command", "command": %s}
-    ]
-  }
-}
-`, q(soBin+" coding hook --vendor=copilot-cli --event=sessionStart"),
-			q(soBin+" coding hook --vendor=copilot-cli --event=sessionEnd"),
-			q(soBin+" sessions finalize --detach"),
-			q(soBin+" coding hook --vendor=copilot-cli --event=userPromptSubmitted"),
-			q(soBin+" coding hook --vendor=copilot-cli --event=preToolUse"),
-			q(soBin+" coding hook --vendor=copilot-cli --event=postToolUse"),
-			q(soBin+" coding hook --vendor=copilot-cli --event=postToolUseFailure"),
-			q(soBin+" coding hook --vendor=copilot-cli --event=errorOccurred"),
-			q(soBin+" coding hook --vendor=copilot-cli --event=agentStop"),
-			q(soBin+" sessions finalize --detach"))
+		base, pathErr := userpaths.CopilotHome()
+		if pathErr != nil {
+			return nil, pathErr
+		}
+		path = filepath.Join(base, "hooks", "superopen.json")
+		body, err = copilotManifest(soBin)
+		if err != nil {
+			return nil, err
+		}
 
 	default:
 		return nil, fmt.Errorf("unsupported generic vendor %q", vendor)
@@ -124,6 +97,140 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
 		}
 	}
 	return written, nil
+}
+
+func hookCommand(soBin, args string) string {
+	return shellQuote(soBin) + " " + args
+}
+
+func copilotManifest(soBin string) (string, error) {
+	hook := func(args string) map[string]any {
+		posixPath := userpaths.ShellPath(soBin)
+		bash := posixQuote(posixPath) + " " + args
+		powershell := "& '" + strings.ReplaceAll(soBin, "'", "''") + "' " + args
+		return map[string]any{
+			"type": "command", "bash": bash, "powershell": powershell, "timeoutSec": 5,
+		}
+	}
+	doc := map[string]any{
+		"version": 1,
+		"hooks": map[string]any{
+			"sessionStart":        []any{hook("coding hook --vendor=copilot-cli --event=sessionStart")},
+			"sessionEnd":          []any{hook("coding hook --vendor=copilot-cli --event=sessionEnd"), hook("sessions finalize --detach")},
+			"userPromptSubmitted": []any{hook("coding hook --vendor=copilot-cli --event=userPromptSubmitted")},
+			"preToolUse":          []any{hook("coding hook --vendor=copilot-cli --event=preToolUse")},
+			"postToolUse":         []any{hook("coding hook --vendor=copilot-cli --event=postToolUse")},
+			"postToolUseFailure":  []any{hook("coding hook --vendor=copilot-cli --event=postToolUseFailure")},
+			"errorOccurred":       []any{hook("coding hook --vendor=copilot-cli --event=errorOccurred")},
+			"agentStop":           []any{hook("coding hook --vendor=copilot-cli --event=agentStop"), hook("sessions finalize --detach")},
+		},
+	}
+	body, err := json.MarshalIndent(doc, "", "  ")
+	return string(append(body, '\n')), err
+}
+
+func posixQuote(value string) string {
+	if value != "" && !strings.ContainsAny(value, " \t\n'\"\\$`") {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+func installGeminiHooks(path, soBin string) ([]string, error) {
+	doc := map[string]any{}
+	if previous, err := os.ReadFile(path); err == nil && len(previous) > 0 {
+		if err := json.Unmarshal(previous, &doc); err != nil {
+			return nil, fmt.Errorf("parse existing %s: %w (refusing to overwrite invalid JSON)", path, err)
+		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	hooks, _ := doc["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+	for event, commands := range geminiCommands(soBin) {
+		existing, _ := hooks[event].([]any)
+		existing = stripOwnedGeminiGroups(existing)
+		entries := make([]any, 0, len(commands))
+		for _, command := range commands {
+			entry := map[string]any{"type": "command", "command": command, "timeout": 5000}
+			entries = append(entries, entry)
+		}
+		existing = append(existing, map[string]any{"hooks": entries, "sequential": true})
+		hooks[event] = existing
+	}
+	// Remove obsolete Superopen event groups written by older releases.
+	for _, event := range []string{"UserPromptSubmit", "PreToolUse"} {
+		if groups, ok := hooks[event].([]any); ok {
+			groups = stripOwnedGeminiGroups(groups)
+			if len(groups) == 0 {
+				delete(hooks, event)
+			} else {
+				hooks[event] = groups
+			}
+		}
+	}
+	doc["hooks"] = hooks
+	body, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, append(body, '\n'), 0o644); err != nil {
+		return nil, err
+	}
+	return []string{path}, nil
+}
+
+func geminiCommands(soBin string) map[string][]string {
+	command := func(event string) string {
+		return hookCommand(soBin, "coding hook --vendor=gemini --event="+event)
+	}
+	return map[string][]string{
+		"SessionStart": {command("SessionStart")},
+		"SessionEnd":   {command("SessionEnd"), hookCommand(soBin, "sessions finalize --detach")},
+		"BeforeAgent":  {command("BeforeAgent")},
+		"AfterAgent":   {command("AfterAgent")},
+		"BeforeTool":   {command("BeforeTool")},
+		"AfterTool":    {command("AfterTool")},
+	}
+}
+
+func stripOwnedGeminiGroups(groups []any) []any {
+	out := make([]any, 0, len(groups))
+	for _, rawGroup := range groups {
+		group, ok := rawGroup.(map[string]any)
+		if !ok {
+			out = append(out, rawGroup)
+			continue
+		}
+		entries, ok := group["hooks"].([]any)
+		if !ok {
+			out = append(out, rawGroup)
+			continue
+		}
+		kept := make([]any, 0, len(entries))
+		for _, rawEntry := range entries {
+			entry, _ := rawEntry.(map[string]any)
+			command, _ := entry["command"].(string)
+			if strings.Contains(command, "coding hook --vendor=gemini") || strings.Contains(command, "sessions finalize") {
+				continue
+			}
+			kept = append(kept, rawEntry)
+		}
+		if len(kept) > 0 {
+			clone := make(map[string]any, len(group))
+			for key, value := range group {
+				clone[key] = value
+			}
+			clone["hooks"] = kept
+			out = append(out, clone)
+		}
+	}
+	return out
 }
 
 // patchPluginSoBin pins the absolute so binary in TypeScript plugins that

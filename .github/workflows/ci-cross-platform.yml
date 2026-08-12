@@ -1,0 +1,78 @@
+# Superopen native platform CI. This runs the CLI and file-backed UI on Windows,
+# Linux, and macOS so successful cross-compilation is not mistaken for runtime compatibility.
+name: CI / Cross-platform
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.os }} / native tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build CLI
+        run: go build ./...
+
+      - name: Test CLI
+        run: go test -count=1 ./...
+
+      - name: Vet CLI
+        if: runner.os == 'Linux'
+        run: go vet ./...
+
+      - name: Verify command registration
+        run: go run ./cmd/so --help
+
+      - name: Install UI dependencies
+        working-directory: web
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck UI
+        working-directory: web
+        run: npm run typecheck
+
+      - name: Test UI
+        working-directory: web
+        run: npm test
+
+      - name: Build UI
+        working-directory: web
+        run: npm run build
+        env:
+          SUPEROPEN_ROOT: ${{ github.workspace }}
+
+  race:
+    name: Linux / race detector
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - run: go test -race -count=1 ./...

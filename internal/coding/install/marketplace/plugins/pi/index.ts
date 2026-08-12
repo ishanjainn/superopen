@@ -1,6 +1,6 @@
 // Superopen Pi extension.
 // Telemetry uses Superopen conventions (so coding hook → coding_agent.* / gen_ai.*).
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawn, spawnSync } from "node:child_process";
 
 function soBin(): string {
