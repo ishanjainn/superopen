@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/coding/install"
@@ -110,7 +111,13 @@ func hookBinaryAvailable(manifest, vendor string) bool {
 		return err == nil
 	}
 	info, err := os.Stat(bin)
-	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return info.Mode()&0o111 != 0
 }
 
 func removeNetworkTelemetryConfig() error {

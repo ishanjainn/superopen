@@ -134,18 +134,21 @@ func ShellPath(p string) string {
 	return p
 }
 
-// QuoteForHook quotes a binary path for hook command lines.
-// JSON manifests use strconv.Quote separately; this is for shell/cmd strings.
+// QuoteForHook quotes a binary path for hook command lines. The result is
+// spliced directly into embedded JSON hook manifests (Cursor/Claude), so on
+// Windows both backslashes and quotes must be JSON-escaped or paths like
+// `C:\Users\...` corrupt the manifest (e.g. `\U` is not a valid JSON escape).
 func QuoteForHook(p string) string {
 	if p == "" {
 		return `""`
 	}
 	if runtime.GOOS == "windows" {
-		// Prefer JSON-safe double quotes for Cursor/Claude hook JSON commands.
-		if !strings.ContainsAny(p, " \t\"") {
+		if !strings.ContainsAny(p, " \t\"\\") {
 			return p
 		}
-		return `"` + strings.ReplaceAll(p, `"`, `\"`) + `"`
+		escaped := strings.ReplaceAll(p, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		return `"` + escaped + `"`
 	}
 	if !strings.ContainsAny(p, " \t\n'\"\\$`") {
 		return p

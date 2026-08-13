@@ -44,4 +44,9 @@ Read `AGENTS.md`, `.so/guardrails.yaml`, and `docs/so-schema.md`. For behavior, 
 <!-- superopen:learned:start -->
 ## Superopen learned
 
+
+## Hot paths
+
+- Document primary services and entrypoints discovered this session.
+- Prefer `so graph query` before broad Grep when asking how an area works.
 <!-- superopen:learned:end -->
