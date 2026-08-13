@@ -33,6 +33,18 @@ recommendations:
     require_approval: true
     auto_apply_tiers:
         - soft
+mcp:
+    servers:
+        - name: context7
+          command: npx
+          args:
+            - -y
+            - '@upstash/context7-mcp@1.0.0'
+        - name: github
+          command: npx
+          args:
+            - -y
+            - '@modelcontextprotocol/server-github@2025.4.8'
 observability:
     vendors:
         - claude-code
