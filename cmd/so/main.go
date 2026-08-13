@@ -384,8 +384,8 @@ func cmdUpgradeBrief() *cobra.Command {
 func cmdApplyUpgrade() *cobra.Command {
 	return &cobra.Command{
 		Use:   "apply-upgrade [file|-]",
-		Short: "Apply assistant-produced harness JSON to AGENTS.md, guardrails, and evals",
-		Long:  "Reads upgrade JSON (from an AI assistant) and writes AGENTS.md plus .so/guardrails and .so/evals. Pass a file path OR stdin — never both (a path with a heredoc would ignore the heredoc). Use after `so init --no-llm` when running inside Cursor/Claude.",
+		Short: "Apply assistant-produced harness JSON to AGENTS.md, guardrails, evals, mcp, and skills",
+		Long:  "Reads upgrade JSON (from an AI assistant) and writes AGENTS.md plus .so/guardrails, .so/evals, optional mcp servers in .so/config.yaml, and project skills for enabled vendors. Pass a file path OR stdin — never both (a path with a heredoc would ignore the heredoc). Use after `so init --no-llm` when running inside Cursor/Claude.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
@@ -414,7 +414,7 @@ func cmdApplyUpgrade() *cobra.Command {
 			if err := seed.ApplyUpgradeJSON(paths, profile, string(raw)); err != nil {
 				return err
 			}
-			fmt.Println("Applied harness upgrade → AGENTS.md, .so/guardrails.yaml, .so/evals.yaml")
+			fmt.Println("Applied harness upgrade → AGENTS.md, .so/guardrails.yaml, .so/evals.yaml, .so/config.yaml (mcp), vendor skills")
 			return nil
 		},
 	}

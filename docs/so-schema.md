@@ -10,7 +10,7 @@ Superopen keeps shared policy compact and separates vendor-owned guidance. Runti
 | `.claude`, `.codex`, `.cursor`, `.gemini`, `.opencode`, `.github`, `.pi` | Owned by that vendor. A session may update only its own vendor tree. |
 | `.agents` | Shared opt-in only: `--shared-agents`, `--vendor agents`, or `vendors.shared_agents: true`. |
 
-`so init` and `so install` enable detected vendors plus repeatable `--vendor` flags. `so sync` refreshes enabled plumbing and never copies guidance between vendors.
+`so init` and `so install` enable detected vendors plus repeatable `--vendor` flags. `so sync` refreshes enabled plumbing and never copies **session** guidance between vendors. **Init/upgrade** is the exception: project-wide skill picks from `so apply-upgrade` fan out to every enabled vendor tree, and committed `mcp:` policy is projected into shared project MCP files.
 
 ## Compact `.so` layout
 
@@ -48,7 +48,20 @@ Every Superopen-created file says why it exists, its authority, and its updater:
 - HTML and Markdown use a leading HTML comment.
 - Checkpoint payloads retain exact source bytes; `checkpoints/manifest.json` documents them.
 
-Committed policy is limited to `.so/config.yaml`, `.so/guardrails.yaml`, and `.so/evals.yaml`. Graph, audit, session, and memory data stays local and rebuildable where applicable. The stable directories and their root files are created by `so init`; only unresolved telemetry, per-session directories, and checkpoints are event-driven. Graphify caches, server PID/locks, and port ledgers live in OS cache/runtime directories. Small debounce and sweep timestamps share one self-described OS-cache `runtime/state.json`; Superopen does not create `finalize-pending`, `pending-harvest.json`, `approval-mismatch-at`, or `idle-sweep-at`. UI preferences live in browser local storage. `so dev` only serves these files; graph refreshes run after changed sessions or through explicit CLI commands.
+Committed policy is `.so/config.yaml` (including optional `mcp.servers`), `.so/guardrails.yaml`, and `.so/evals.yaml`. Graph, audit, session, and memory data stays local and rebuildable where applicable. Applied project skills live under vendor trees (for example `.claude/skills/`, `.cursor/skills/`) and are not gitignored. Project MCP projections (repo-root `.mcp.json`, `.cursor/mcp.json`) are written by `so sync` / `so apply-upgrade` from `mcp:` in config and should be committed so teammates share the same servers. The stable directories and their root files are created by `so init`; only unresolved telemetry, per-session directories, and checkpoints are event-driven. Graphify caches, server PID/locks, and port ledgers live in OS cache/runtime directories. Small debounce and sweep timestamps share one self-described OS-cache `runtime/state.json`; Superopen does not create `finalize-pending`, `pending-harvest.json`, `approval-mismatch-at`, or `idle-sweep-at`. UI preferences live in browser local storage. `so dev` only serves these files; graph refreshes run after changed sessions or through explicit CLI commands.
+
+### MCP team policy
+
+```yaml
+# in .so/config.yaml
+mcp:
+  servers:
+    - name: context7
+      command: npx
+      args: ["-y", "@upstash/context7-mcp@1.0.0"]
+```
+
+Authoritative list is `mcp.servers` (no secrets/env). `so sync` merges those entries into project-scoped vendor files for enabled agents (never under the user home directory). Extra human-added servers in `.mcp.json` are preserved. Unpinned `@latest` packages and Memory MCP are refused. After graph build, `so upgrade-brief` lists automation candidates from stack signals; the assistant picks 1–2 MCP and 1–2 skills in upgrade JSON; `so apply-upgrade` writes them as committed policy. MCP omitted from upgrade stays for the next refresh (not a recommendation type). High-signal skills/guardrails omitted from upgrade may enqueue as ordinary pending recommendations.
 
 Fresh configuration does not advertise an API provider or model. Reviews use the same vendor's sealed CLI when possible, then another configured sealed CLI, then heuristics. The optional `llm:` section is written only when a maintainer explicitly configures an API or compatible local backend.
 

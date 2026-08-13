@@ -17,6 +17,7 @@ type Config struct {
 	Graph           GraphConfig           `yaml:"graph"`
 	Evals           EvalsConfig           `yaml:"evals"`
 	Recommendations RecommendationsConfig `yaml:"recommendations"`
+	MCP             MCPConfig             `yaml:"mcp,omitempty"`
 	Observability   ObservabilityConfig   `yaml:"observability"`
 	Memory          MemoryConfig          `yaml:"memory"`
 	Guardrails      GuardrailsConfig      `yaml:"guardrails"`
@@ -73,6 +74,19 @@ type RecommendationsConfig struct {
 	// AutoApplyTiers: soft | policy | evals | all. Empty + require_approval=true → [soft].
 	// require_approval=false → [all].
 	AutoApplyTiers []string `yaml:"auto_apply_tiers,omitempty"`
+}
+
+// MCPConfig is committed team policy for project-scoped MCP servers.
+// so sync projects these into vendor files (.mcp.json, .cursor/mcp.json).
+type MCPConfig struct {
+	Servers []MCPServer `yaml:"servers,omitempty"`
+}
+
+// MCPServer is a stdio MCP server definition without secrets/env blocks.
+type MCPServer struct {
+	Name    string   `yaml:"name"`
+	Command string   `yaml:"command"`
+	Args    []string `yaml:"args,omitempty"`
 }
 
 type ObservabilityConfig struct {

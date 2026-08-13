@@ -36,6 +36,8 @@ type Profile struct {
 	Agents       []AgentSource `json:"agents"`
 	DerivedRules []string      `json:"derived_rules"`
 	Themes       []string      `json:"themes"`
+	Signals      StackSignals  `json:"signals,omitempty"`
+	Candidates   []Candidate   `json:"candidates,omitempty"`
 }
 
 var (
@@ -344,11 +346,13 @@ func SummarizeGraph(paths harness.Paths) GraphSummary {
 func BuildProfile(repoRoot string, paths harness.Paths, stack, structure string) Profile {
 	agents := CollectAgentFiles(repoRoot)
 	g := SummarizeGraph(paths)
+	sig := DetectSignals(repoRoot)
 	p := Profile{
 		Stack:     stack,
 		Structure: structure,
 		Graph:     g,
 		Agents:    agents,
+		Signals:   sig,
 	}
 	seen := map[string]bool{}
 	for _, a := range agents {
@@ -373,7 +377,11 @@ func BuildProfile(repoRoot string, paths harness.Paths, stack, structure string)
 	if g.Languages["go"] > 0 || strings.Contains(strings.ToLower(stack), "go") {
 		p.Themes = append(p.Themes, "Go toolchain")
 	}
+	if sig.IsFrontend() {
+		p.Themes = append(p.Themes, "Frontend")
+	}
 	p.Themes = uniqueLimited(p.Themes, 15)
+	p.Candidates = CatalogCandidates(repoRoot, paths, sig, g)
 	return p
 }
 

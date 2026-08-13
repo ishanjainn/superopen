@@ -157,7 +157,11 @@ func Run(opts Options) (Report, error) {
 			return Report{}, err
 		}
 		if up.Used {
-			fmt.Printf("  llm: wrote %d guardrails, %d eval checks\n", up.Rules, up.Checks)
+			fmt.Printf("  llm: wrote %d guardrails, %d eval checks", up.Rules, up.Checks)
+			if up.MCP > 0 || up.Skills > 0 {
+				fmt.Printf(", %d mcp, %d skills", up.MCP, up.Skills)
+			}
+			fmt.Println()
 		} else {
 			fmt.Printf("  llm skipped: %s\n", up.Reason)
 		}
