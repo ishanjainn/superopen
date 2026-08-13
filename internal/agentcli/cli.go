@@ -1,4 +1,4 @@
-// Package agentcli runs Claude Code / Codex in sealed non-interactive mode.
+// Package agentcli runs coding-agent CLIs in sealed non-interactive mode.
 // Used by backend evals/recommendations - reuses the user's coding-agent
 // login without a separate API key.
 package agentcli
@@ -23,7 +23,7 @@ type Result struct {
 }
 
 // Supported lists CLIs in detection preference order.
-var Supported = []string{"claude", "codex"}
+var Supported = []string{"claude", "codex", "opencode", "pi"}
 
 // Detect returns the first supported CLI on PATH.
 func Detect() (string, error) {
@@ -107,6 +107,24 @@ func (r Runner) Run(ctx context.Context, system, user string) (Result, error) {
 		}
 		cmd = exec.CommandContext(ctx, "codex", append(args, "-")...)
 		cmd.Stdin = strings.NewReader(system + "\n\n" + user)
+	case "opencode":
+		args := opencodeRunArgs(workdir)
+		if r.Model != "" {
+			args = append(args, "--model", r.Model)
+		}
+		cmd = exec.CommandContext(ctx, "opencode", args...)
+		cmd.Stdin = strings.NewReader(system + "\n\n" + user)
+		cmd.Env = opencodeSealedEnv()
+	case "pi":
+		args := piPrintArgs()
+		if r.Model != "" {
+			args = append(args, "--model", r.Model)
+		}
+		if system != "" {
+			args = append(args, "--system-prompt", system)
+		}
+		cmd = exec.CommandContext(ctx, "pi", args...)
+		cmd.Stdin = strings.NewReader(user)
 	default:
 		return Result{}, fmt.Errorf("unsupported agent CLI %q", r.CLI)
 	}
@@ -122,14 +140,20 @@ func (r Runner) Run(ctx context.Context, system, user string) (Result, error) {
 		detail = truncateRunes(detail, 500)
 		return Result{}, fmt.Errorf("%s failed: %w: %s", r.CLI, err, detail)
 	}
-	if r.CLI == "claude" {
+	switch r.CLI {
+	case "claude":
 		return parseClaudeEnvelope(stdout.String()), nil
+	case "opencode":
+		return parseOpenCodeJSON(stdout.String()), nil
+	case "codex":
+		model := codexModel(stderr.String())
+		if model == "" {
+			model = codexModel(stdout.String())
+		}
+		return Result{Text: stdout.String(), Model: model}, nil
+	default:
+		return Result{Text: stdout.String()}, nil
 	}
-	model := codexModel(stderr.String())
-	if model == "" {
-		model = codexModel(stdout.String())
-	}
-	return Result{Text: stdout.String(), Model: model}, nil
 }
 
 func truncateRunes(s string, max int) string {
@@ -172,6 +196,38 @@ func codexExecArgs(workdir string) []string {
 	}
 }
 
+func opencodeRunArgs(workdir string) []string {
+	return []string{
+		"--pure",
+		"run",
+		"--format", "json",
+		"--dir", workdir,
+	}
+}
+
+func opencodeSealedEnv() []string {
+	return append(os.Environ(),
+		`OPENCODE_PERMISSION={"*":"deny"}`,
+		"OPENCODE_DISABLE_DEFAULT_PLUGINS=true",
+		"OPENCODE_DISABLE_CLAUDE_CODE=true",
+		"OPENCODE_DISABLE_AUTOUPDATE=true",
+	)
+}
+
+func piPrintArgs() []string {
+	return []string{
+		"--print",
+		"--no-tools",
+		"--no-session",
+		"--no-extensions",
+		"--no-skills",
+		"--no-prompt-templates",
+		"--no-themes",
+		"--no-context-files",
+		"--no-approve",
+	}
+}
+
 type claudeEnvelope struct {
 	Result     string `json:"result"`
 	ModelUsage map[string]struct {
@@ -196,6 +252,44 @@ func parseClaudeEnvelope(raw string) Result {
 		}
 	}
 	return Result{Text: envelope.Result, Model: model}
+}
+
+func parseOpenCodeJSON(raw string) Result {
+	var texts []string
+	model := ""
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var ev openCodeEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			continue
+		}
+		if ev.Type == "text" && ev.Part.Text != "" {
+			texts = append(texts, ev.Part.Text)
+		}
+		if model == "" {
+			if id := strings.TrimSpace(ev.Part.ModelID); id != "" {
+				model = id
+			} else if id := strings.TrimSpace(ev.ModelID); id != "" {
+				model = id
+			}
+		}
+	}
+	if len(texts) == 0 {
+		return Result{Text: raw}
+	}
+	return Result{Text: strings.Join(texts, "\n"), Model: model}
+}
+
+type openCodeEvent struct {
+	Type    string `json:"type"`
+	ModelID string `json:"modelID"`
+	Part    struct {
+		Text    string `json:"text"`
+		ModelID string `json:"modelID"`
+	} `json:"part"`
 }
 
 var codexModelLine = regexp.MustCompile(`(?m)^model:\s+(\S+)`)

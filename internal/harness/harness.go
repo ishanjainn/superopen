@@ -41,7 +41,6 @@ type Paths struct {
 	PendingRecs     string
 	RecsHistory     string
 	VizDir          string
-	Citymap         string
 	MemoryDir       string
 	Lessons         string
 	LessonsJSONL    string
@@ -103,7 +102,6 @@ func Resolve(repoRoot string) Paths {
 		PendingRecs:     filepath.Join(root, "sessions", "index.json"),
 		RecsHistory:     filepath.Join(root, "sessions", "index.json"),
 		VizDir:          filepath.Join(root, "graph"),
-		Citymap:         filepath.Join(root, "graph", "graph.html"),
 		MemoryDir:       filepath.Join(root, "memory"),
 		Lessons:         filepath.Join(root, "memory", "state.json"),
 		LessonsJSONL:    filepath.Join(root, "memory", "state.json"),

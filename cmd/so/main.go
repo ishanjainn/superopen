@@ -28,12 +28,10 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph"
 	"github.com/ishanjainn/superopen/internal/guardrails"
 	"github.com/ishanjainn/superopen/internal/harness"
-	"github.com/ishanjainn/superopen/internal/harnessvalid"
 	"github.com/ishanjainn/superopen/internal/harvest"
-	initcmd "github.com/ishanjainn/superopen/internal/initcmd"
+	"github.com/ishanjainn/superopen/internal/initcmd"
 	"github.com/ishanjainn/superopen/internal/inject"
 	"github.com/ishanjainn/superopen/internal/llm"
-	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/nativedocs"
 	"github.com/ishanjainn/superopen/internal/projects"
 	"github.com/ishanjainn/superopen/internal/recommend"
@@ -79,7 +77,7 @@ func main() {
 	root.Version = version.Display()
 	root.SetVersionTemplate("so {{.Version}}\n")
 	root.AddCommand(
-		cmdInstall(), cmdUninstall(), cmdInit(), cmdUpgradeBrief(), cmdApplyUpgrade(), cmdSync(), cmdRefresh(), cmdDev(), cmdGraph(), cmdSessions(),
+		cmdInstall(), cmdUninstall(), cmdInit(), cmdUpgradeBrief(), cmdApplyUpgrade(), cmdReviewBrief(), cmdApplyReview(), cmdSync(), cmdRefresh(), cmdDev(), cmdGraph(), cmdSessions(),
 		cmdEval(), cmdRecommend(), cmdDoctor(), cmdSkill(), cmdGuard(), cmdKnowledge(), cmdHarvest(),
 		cmdQuery(), coding.NewCmd(),
 		cmdProjects(), cmdStatus(), cmdCheckpoint(), cmdBlame(), cmdWhy(),
@@ -384,8 +382,8 @@ func cmdUpgradeBrief() *cobra.Command {
 func cmdApplyUpgrade() *cobra.Command {
 	return &cobra.Command{
 		Use:   "apply-upgrade [file|-]",
-		Short: "Apply assistant-produced harness JSON to AGENTS.md, guardrails, and evals",
-		Long:  "Reads upgrade JSON (from an AI assistant) and writes AGENTS.md plus .so/guardrails and .so/evals. Pass a file path OR stdin — never both (a path with a heredoc would ignore the heredoc). Use after `so init --no-llm` when running inside Cursor/Claude.",
+		Short: "Apply assistant-produced harness JSON to AGENTS.md, guardrails, evals, mcp, and skills",
+		Long:  "Reads upgrade JSON (from an AI assistant) and writes AGENTS.md plus .so/guardrails, .so/evals, optional mcp servers in .so/config.yaml, and project skills for enabled vendors. Pass a file path OR stdin — never both (a path with a heredoc would ignore the heredoc). Use after `so init --no-llm` when running inside Cursor/Claude.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
@@ -414,7 +412,7 @@ func cmdApplyUpgrade() *cobra.Command {
 			if err := seed.ApplyUpgradeJSON(paths, profile, string(raw)); err != nil {
 				return err
 			}
-			fmt.Println("Applied harness upgrade → AGENTS.md, .so/guardrails.yaml, .so/evals.yaml")
+			fmt.Println("Applied harness upgrade → AGENTS.md, .so/guardrails.yaml, .so/evals.yaml, .so/config.yaml (mcp), vendor skills")
 			return nil
 		},
 	}
@@ -587,10 +585,12 @@ func cmdSessions() *cobra.Command {
 	finalizeCmd := &cobra.Command{
 		Use:   "finalize [session-id]",
 		Short: "Materialize traces into a session (post-session pipeline)",
-		Long: `Runs eval → recommendations → optional auto-apply → harvest for a session.
+		Long: `Materializes session.json, graph, checkpoint, and replay. Review is pending until a live agent
+runs so apply-review or a sealed CLI fallback (claude, codex, opencode, pi) succeeds.
 
 Prefer agent SessionEnd / the coding hook to invoke this. Pass --detach so the
-caller (agent hooks) returns immediately while work continues in the background.`,
+caller (agent hooks) returns immediately while work continues in the background.
+Pass --no-cli to skip sealed CLI review (SessionStart materialize of a previous Codex/Pi session).`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := ""
@@ -598,24 +598,42 @@ caller (agent hooks) returns immediately while work continues in the background.
 				id = strings.TrimSpace(args[0])
 			}
 			detach, _ := cmd.Flags().GetBool("detach")
+			noCLI, _ := cmd.Flags().GetBool("no-cli")
 			if detach {
 				root := repoRoot()
-				if id == "" {
-					execx.SpawnSO(root, "sessions", "finalize")
-				} else {
-					execx.SpawnSO(root, "sessions", "finalize", id)
+				spawnArgs := []string{"sessions", "finalize"}
+				if noCLI {
+					spawnArgs = append(spawnArgs, "--no-cli")
 				}
+				if id != "" {
+					spawnArgs = append(spawnArgs, id)
+				}
+				execx.SpawnSO(root, spawnArgs...)
 				return nil
 			}
-			// Fail-soft for agent companions: never fail the hook hard.
-			if err := finalizeSession(repoRoot(), id); err != nil {
+			opts := finalizeOpts{SpawnCLIReview: !noCLI}
+			if err := finalizeSession(repoRoot(), id, opts); err != nil {
 				fmt.Fprintf(os.Stderr, "finalize: %v\n", err)
 			}
 			return nil
 		},
 	}
 	finalizeCmd.Flags().Bool("detach", false, "Return immediately; run finalize in a background process")
+	finalizeCmd.Flags().Bool("no-cli", false, "Materialize only; do not spawn sealed CLI review")
 	c.AddCommand(finalizeCmd)
+	reviewCmd := &cobra.Command{
+		Use:   "review [session-id]",
+		Short: "Run sealed CLI review for a pending session",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := ""
+			if len(args) > 0 {
+				id = strings.TrimSpace(args[0])
+			}
+			return reviewSessionCLI(repoRoot(), id, false)
+		},
+	}
+	c.AddCommand(reviewCmd)
 	c.AddCommand(&cobra.Command{
 		Use:   "refresh [session-id]",
 		Short: "Materialize current traces while keeping the session active",
@@ -680,6 +698,14 @@ func cmdEval() *cobra.Command {
 			store := tracestore.NewLocalJSONL(paths.TracesDir)
 			spans, _ := store.Query(tracestore.QueryFilter{SessionID: id})
 			client := llm.NewVendorCompleter(cfg, meta.Vendor)
+			if (client == nil || !client.Available()) && !cfg.ExplicitHeuristics() {
+				return out().HumanOrJSON("evaluation", func() {
+					fmt.Printf("Session %s has no model reviewer (live agent or sealed CLI). Run so review-brief %s from a coding agent, then so apply-review.\n", id, id)
+				}, map[string]any{
+					"session_id": id, "backend": "pending", "scope": scope,
+					"skip_reason": "no_model_reviewer",
+				})
+			}
 			res, err := eval.Run(paths, cfg, id, spans, client, eval.RunOptions{Final: meta.Status == session.StatusEnded})
 			if err != nil {
 				return err
@@ -689,7 +715,7 @@ func cmdEval() *cobra.Command {
 				backend = client.Backend()
 			}
 			generated := 0
-			if cfg.Recommendations.Auto && res.EvaluationScope == "complete" {
+			if cfg.Recommendations.Auto && res.CompleteReview && res.EvaluationScope == "complete" {
 				recs, _ := recommend.Generate(paths, id, res, client)
 				generated = len(recs)
 			}
@@ -914,9 +940,10 @@ func cmdKnowledge() *cobra.Command {
 
 type finalizeOpts struct {
 	// SkipTrackedMutations keeps the working tree clean after git hooks:
-	// generate evals/recs and memory only — no auto-apply, inject sync, or
-	// harvest writes into AGENTS.md / rules / skills.
+	// no auto-apply, inject sync, or harvest writes into AGENTS.md / rules / skills.
 	SkipTrackedMutations bool
+	// SpawnCLIReview starts a detached sealed CLI review after materialize (true SessionEnd / idle).
+	SpawnCLIReview bool
 }
 
 func finalizeSession(root, sessionID string, opts ...finalizeOpts) (retErr error) {
@@ -950,6 +977,13 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) (retErr error
 			fmt.Printf("Session %s is already finalized; no new evaluation was created\n", latestID)
 			return nil
 		}
+		if !latestSpan.After(*existing.EndedAt) && (doc.Review.Status == "pending" || doc.Review.Status == "running" || doc.Review.Status == "failed") {
+			if o.SpawnCLIReview && doc.Review.Status == "pending" {
+				maybeSpawnCLIReview(root, latestID, cfg)
+			}
+			fmt.Printf("Session %s already materialized; review %s\n", latestID, doc.Review.Status)
+			return nil
+		}
 	}
 	if !session.SpansHaveActivity(ss) {
 		_ = sess.Delete(latestID)
@@ -968,24 +1002,6 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) (retErr error
 		meta.ProjectID = p.ID
 	}
 	_ = sess.UpdateMeta(meta)
-	releaseReview, claimed := sess.ClaimReview(latestID, "finalize")
-	if !claimed {
-		fmt.Printf("Session %s review is already running\n", latestID)
-		return nil
-	}
-	defer func() {
-		releaseReview()
-		if retErr != nil {
-			now := time.Now().UTC()
-			_ = sess.WriteDocument(latestID, func(d *session.Document) {
-				d.Review.Status = "failed"
-				d.Review.CompletedAt = &now
-				d.Review.Error = retErr.Error()
-			})
-		}
-	}()
-	// Sessions that edited repository files refresh Graphify in this detached
-	// finalize/review cycle. No-change sessions keep the current graph.
 	if fp, err := sess.GetFootprint(latestID); err == nil {
 		changed := false
 		for _, f := range fp.Files {
@@ -998,73 +1014,36 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) (retErr error
 			_, _ = graph.RefreshAtomic(root, paths, !cfg.Graph.Semantic, cfg.Graph.SemanticBackend)
 		}
 	}
-	// Snapshot edited files as a restorable checkpoint on finalize.
 	_, _ = checkpoint.NewStore(paths).CreateFromFootprint(latestID, root, "finalize")
 	_ = session.NewStateStore(paths).End(latestID)
 	if _, err := viz.BuildReplayFromSpans(paths, latestID, ss); err != nil {
 		return err
 	}
-	client := llm.NewVendorCompleter(cfg, meta.Vendor)
-	if cfg.Evals.OnSessionEnd || cfg.Evals.Auto {
-		ev, err := eval.Run(paths, cfg, latestID, ss, client, eval.RunOptions{Final: true})
-		if err != nil {
-			return err
-		}
-		if cfg.MemoryEnabled() {
-			mem := memory.NewStore(paths)
-			_ = recommend.RecordFindings(paths, latestID, meta.Vendor, ev.Findings)
-			for _, lesson := range ev.Memory.Lessons {
-				_ = mem.AddLesson(memory.Lesson{Text: lesson, Scope: "workspace", Confidence: 0.8, SourceSession: latestID}, memory.ModePersistent)
-			}
-			if strings.TrimSpace(ev.Memory.Preference) != "" {
-				_ = mem.AppendPreferenceText(ev.Memory.Preference)
-			}
-			if strings.TrimSpace(ev.Memory.ProjectNote) != "" {
-				_ = mem.AppendProjectNote(ev.Memory.ProjectNote)
-			}
-		}
-		if cfg.Recommendations.Auto {
-			recs, _ := recommend.Generate(paths, latestID, ev, client)
-			if !o.SkipTrackedMutations {
-				appliedAny := false
-				for _, r := range recs {
-					tier := harnessvalid.Tier(r.Type)
-					if !cfg.AllowsAutoApplyTier(tier) {
-						continue
-					}
-					allowed, reason := recommend.ShouldAutoApply(paths, r)
-					if !allowed {
-						continue
-					}
-					if err := recommend.Apply(paths, r.ID, recommend.Decision{
-						Reason: "Automatically applied: " + reason + ".",
-						Actor:  "system",
-					}); err == nil {
-						appliedAny = true
-					}
-				}
-				if appliedAny {
-					_ = sync.Run(sync.Options{RepoRoot: root, SkipGraph: true, SkipInject: true})
-				}
-			}
-		}
-	}
-	mineOnFinalize(paths, latestID, cfg)
-	_, _ = harvest.Run(paths, cfg, latestID, harvest.TriggerFinalize, harvest.RunOpts{
-		SkipNativeDocs: o.SkipTrackedMutations,
-		LocalOnly:      cfg.Evals.OnSessionEnd || cfg.Evals.Auto,
-	})
-	if doc, err := sess.ReadDocument(latestID); err == nil && doc.Review.Status != "complete" {
-		now := time.Now().UTC()
+	doc, _ := sess.ReadDocument(latestID)
+	if doc.Review.Status != "complete" && doc.Review.Status != "running" {
 		_ = sess.WriteDocument(latestID, func(d *session.Document) {
-			d.Review.Status = "complete"
-			d.Review.Backend = "memory-only"
-			d.Review.CompletedAt = &now
+			if d.Review.Status == "complete" || d.Review.Status == "running" {
+				return
+			}
+			d.Review.Status = "pending"
+			d.Review.Trigger = "finalize"
 			d.Review.Error = ""
 		})
 	}
+	if cfg.ExplicitHeuristics() && (cfg.Evals.OnSessionEnd || cfg.Evals.Auto) {
+		ev, err := eval.Run(paths, cfg, latestID, ss, nil, eval.RunOptions{Final: true})
+		if err == nil {
+			_ = persistReviewSideEffects(root, paths, cfg, latestID, ev, o.SkipTrackedMutations)
+		}
+	} else if o.SpawnCLIReview && !o.SkipTrackedMutations {
+		maybeSpawnCLIReview(root, latestID, cfg)
+	}
+	_, _ = harvest.Run(paths, cfg, latestID, harvest.TriggerFinalize, harvest.RunOpts{
+		SkipNativeDocs: true,
+		LocalOnly:      true,
+	})
 	_, _ = gitruntime.SnapshotSessionDir(root, paths.SessionDir(latestID), latestID)
-	fmt.Printf("Finalized session %s (%s)\n", meta.ID, meta.EvalBadge)
+	fmt.Printf("Finalized session %s (review pending)\n", meta.ID)
 	return nil
 }
 

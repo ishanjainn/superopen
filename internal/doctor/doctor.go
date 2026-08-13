@@ -7,9 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ishanjainn/superopen/internal/agentcli"
 	"github.com/ishanjainn/superopen/internal/coding"
 	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/githooks"
+	"github.com/ishanjainn/superopen/internal/graph"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/inject"
 	"github.com/ishanjainn/superopen/internal/memory"
@@ -26,6 +28,7 @@ type Check struct {
 
 func Run(repoRoot string) []Check {
 	paths := harness.Resolve(repoRoot)
+	graph.SweepStaleGraphWork(paths)
 	var checks []Check
 
 	checks = append(checks, Check{Name: "harness", OK: paths.Exists(), Detail: paths.Root})
@@ -70,22 +73,23 @@ func Run(repoRoot string) []Check {
 		checks = append(checks, Check{
 			Name:   "llm",
 			OK:     true,
-			Detail: "no API key (evals.backend=auto uses agent CLI first, then API, then heuristics)",
+			Detail: "no API key (evals.backend=auto uses the next live agent, then sealed claude/codex/opencode/pi CLI; heuristics do not complete reviews)",
 		})
 	}
 
 	// Coding-agent CLIs for evals.backend=auto|agent_cli.
-	if found := detectAgentCLIs(); len(found) > 0 {
+	if found := agentcli.DetectAll(); len(found) > 0 {
 		checks = append(checks, Check{
 			Name:   "eval_agent_cli",
 			OK:     true,
-			Detail: strings.Join(found, ", ") + " (evals.backend=auto prefers these)",
+			Detail: strings.Join(found, ", ") + " (evals.backend=auto uses these on true SessionEnd / idle)",
 		})
 	} else {
 		checks = append(checks, Check{
 			Name:   "eval_agent_cli",
-			OK:     false,
-			Detail: "claude/codex not on PATH — evals.backend=auto falls back to API key or heuristics",
+			OK:     true,
+			Warn:   true,
+			Detail: "claude/codex/opencode/pi not on PATH — pending reviews wait for the next live agent (so review-brief / so apply-review)",
 		})
 	}
 
@@ -181,16 +185,6 @@ func Run(repoRoot string) []Check {
 	checks = append(checks, Check{Name: "git_hooks", OK: true, Detail: hooksDetail})
 
 	return checks
-}
-
-func detectAgentCLIs() []string {
-	var found []string
-	for _, name := range []string{"claude", "codex"} {
-		if _, err := exec.LookPath(name); err == nil {
-			found = append(found, name)
-		}
-	}
-	return found
 }
 
 func Format(checks []Check) string {

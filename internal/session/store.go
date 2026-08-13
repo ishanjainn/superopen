@@ -79,6 +79,7 @@ type ReviewState struct {
 	HarvestedSourceMtime int64           `json:"harvested_source_mtime,omitempty"`
 	HarvestTrigger       string          `json:"harvest_trigger,omitempty"`
 	Findings             []ReviewFinding `json:"findings,omitempty"`
+	MidSessionInjected   bool            `json:"mid_session_injected,omitempty"`
 }
 
 // ReviewFinding is compact, redacted evidence from one session review. It
@@ -1168,8 +1169,10 @@ func (s *Store) PreviousReviewContext(vendor, exceptID string) string {
 			continue
 		}
 		switch d.Review.Status {
-		case "pending", "running", "failed":
-			return fmt.Sprintf("## Previous %s session review\n\nReview for `%s` is pending in the background; normal work may continue.", kind, m.ID)
+		case "pending", "failed":
+			return fmt.Sprintf("## Previous %s session review\n\nSession `%s` is pending review. Run `so review-brief %s`, produce the JSON with your model, then `so apply-review %s`. Then continue the user's task. Skip if status is complete or running.", kind, m.ID, m.ID, m.ID)
+		case "running":
+			return fmt.Sprintf("## Previous %s session review\n\nReview for `%s` is running; skip `so apply-review` and continue the user's task.", kind, m.ID)
 		case "complete":
 			var ev struct {
 				Score float64  `json:"score"`
@@ -1214,17 +1217,43 @@ claimed:
 }
 
 func (s *Store) writeDocument(id string, mutate func(*Document)) error {
-	d, _ := s.ReadDocument(id)
-	d.About = sessionAbout
-	mutate(&d)
-	if d.ID == "" {
-		d.ID = id
+	return s.withDocLock(id, func() error {
+		d, _ := s.ReadDocument(id)
+		d.About = sessionAbout
+		mutate(&d)
+		if d.ID == "" {
+			d.ID = id
+		}
+		path := filepath.Join(s.Paths.SessionDir(id), "session.json")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		return writeJSON(path, d)
+	})
+}
+
+func sessionDocLockPath(repoRoot, id string) string {
+	sum := sha256.Sum256([]byte(repoRoot + "\x00doc\x00" + id))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("superopen-sessiondoc-%x.lock", sum[:12]))
+}
+
+func (s *Store) withDocLock(id string, fn func() error) error {
+	lock := sessionDocLockPath(s.Paths.RepoRoot, id)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if err := os.Mkdir(lock, 0o700); err == nil {
+			defer os.RemoveAll(lock)
+			return fn()
+		}
+		if st, err := os.Stat(lock); err == nil && time.Since(st.ModTime()) > 30*time.Second {
+			_ = os.RemoveAll(lock)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("session %s is busy", id)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
-	path := filepath.Join(s.Paths.SessionDir(id), "session.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return writeJSON(path, d)
 }
 
 func writeJSON(path string, v any) error {

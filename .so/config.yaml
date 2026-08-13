@@ -21,6 +21,10 @@ evals:
     on_session_end: true
     backend: auto
     agent_cli: auto
+    live_agent: true
+    cli_fallback: true
+    mid_session_min_edits: 3
+    mid_session_min_tools: 10
     models:
         claude: claude-sonnet-5
         codex: gpt-5.6-luna
@@ -29,6 +33,18 @@ recommendations:
     require_approval: true
     auto_apply_tiers:
         - soft
+mcp:
+    servers:
+        - name: context7
+          command: npx
+          args:
+            - -y
+            - '@upstash/context7-mcp@1.0.0'
+        - name: github
+          command: npx
+          args:
+            - -y
+            - '@modelcontextprotocol/server-github@2025.4.8'
 observability:
     vendors:
         - claude-code
@@ -42,7 +58,7 @@ observability:
         - type: local_jsonl
           path: .so/sessions
     viz:
-        citymap: false
+        session_map: false
         replay: true
 memory:
     provider: file_lessons

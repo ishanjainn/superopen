@@ -8,11 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/discover"
 	"github.com/ishanjainn/superopen/internal/guardrails"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/llm"
+	"github.com/ishanjainn/superopen/internal/mcp"
 	"github.com/ishanjainn/superopen/internal/nativedocs"
+	"github.com/ishanjainn/superopen/internal/recommend"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,6 +25,8 @@ type UpgradeResult struct {
 	Reason string // skipped reason or "ok"
 	Rules  int
 	Checks int
+	MCP    int
+	Skills int
 }
 
 type llmHarnessOut struct {
@@ -35,10 +40,23 @@ type llmHarnessOut struct {
 		AgentRules  []string `json:"agent_rules"`
 		JudgeRubric string   `json:"judge_rubric"`
 	} `json:"evals"`
-	Brief string `json:"brief,omitempty"`
+	Brief  string         `json:"brief,omitempty"`
+	MCP    []llmMCPServer `json:"mcp,omitempty"`
+	Skills []llmSkillPick `json:"skills,omitempty"`
 }
 
-const UpgradeSystemPrompt = `You are a Superopen engineer. Given a compact repository profile (graph summary + existing agent instruction excerpts), produce a high-quality Superopen seed.
+type llmMCPServer struct {
+	Name    string   `json:"name"`
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+}
+
+type llmSkillPick struct {
+	Name string `json:"name"`
+	Body string `json:"body,omitempty"`
+}
+
+const UpgradeSystemPrompt = `You are a Superopen engineer. Given a compact repository profile (graph summary + stack signals + automation candidates + existing agent instruction excerpts), produce a high-quality Superopen seed.
 
 Return ONLY valid JSON (no markdown fences) with this shape:
 {
@@ -54,7 +72,13 @@ Return ONLY valid JSON (no markdown fences) with this shape:
     "agent_rules": ["top rules for an LLM judge"],
     "judge_rubric": "short paragraph for session scoring"
   },
-  "brief": "short shared AGENTS.md learned-section guidance pointing agents at vendor-native rules/skills and so graph query"
+  "brief": "short shared AGENTS.md learned-section guidance pointing agents at vendor-native rules/skills and so graph query",
+  "mcp": [
+    {"name": "context7", "command": "npx", "args": ["-y", "@upstash/context7-mcp@1.0.0"]}
+  ],
+  "skills": [
+    {"name": "short-kebab-name", "body": "# Title\n\nRepo-specific workflow distilled from this profile.\n"}
+  ]
 }
 
 Rules for quality:
@@ -64,6 +88,12 @@ Rules for quality:
 - Include baseline: no-secrets (block), run-tests (warn), avoid-unrelated (warn).
 - checks should include stack-appropriate ones (e.g. go_build, race_patterns, sql_parameterized, pr_title_convention).
 - architecture_md and conventions_md should be useful to a coding agent in <4000 chars each.
+- From "## Automation candidates", pick the top 1-2 MCP servers that fit this repo. Omit empty arrays.
+- MCP entries must use pinned package versions (never @latest). No env blocks or secrets.
+- Never recommend Memory MCP — Superopen memory already covers cross-session recall.
+- Do not emit catalog template skills (gen-test, pr-check, frontend-design, create-migration, and similar). Include skills only when the profile reveals a concrete repo-specific workflow (exact commands, paths, review steps). Omit the array otherwise.
+- Skill bodies must be short SKILL.md markdown distilled from this repo — never a generic template.
+- Include catalog guardrail candidates (block-env-edits, block-lockfile-edits) when their evidence matches.
 `
 
 // BuildUpgradePrompt returns the user-turn profile blob for harness upgrade.
@@ -118,6 +148,8 @@ func UpgradeWithLLM(paths harness.Paths, p discover.Profile, client *llm.Client,
 		Reason: "ok",
 		Rules:  len(parsed.Guardrails.Rules),
 		Checks: len(parsed.Evals.Checks),
+		MCP:    len(parsed.MCP),
+		Skills: len(parsed.Skills),
 	}, nil
 }
 
@@ -142,6 +174,50 @@ func buildUpgradePrompt(p discover.Profile) string {
 	}
 	if len(p.Graph.SampleFiles) > 0 {
 		b.WriteString("- sample_files: " + strings.Join(p.Graph.SampleFiles, ", ") + "\n")
+	}
+	if len(p.Signals.Manifests) > 0 || len(p.Signals.Deps) > 0 || len(p.Signals.Configs) > 0 {
+		b.WriteString("\n## Stack signals\n")
+		if len(p.Signals.Manifests) > 0 {
+			b.WriteString("- manifests: " + strings.Join(p.Signals.Manifests, ", ") + "\n")
+		}
+		if len(p.Signals.Deps) > 0 {
+			deps := p.Signals.Deps
+			if len(deps) > 24 {
+				deps = deps[:24]
+			}
+			b.WriteString("- deps: " + strings.Join(deps, ", ") + "\n")
+		}
+		if len(p.Signals.Configs) > 0 {
+			b.WriteString("- configs: " + strings.Join(p.Signals.Configs, ", ") + "\n")
+		}
+		if len(p.Signals.Dirs) > 0 {
+			b.WriteString("- dirs: " + strings.Join(p.Signals.Dirs, ", ") + "\n")
+		}
+		if p.Signals.GitRemote != "" {
+			b.WriteString("- git_remote: " + p.Signals.GitRemote + "\n")
+		}
+		if p.Signals.HasEnvFiles {
+			b.WriteString("- has_env_or_credentials_files: true\n")
+		}
+		if p.Signals.HasLockfiles {
+			b.WriteString("- has_lockfiles: true\n")
+		}
+	}
+	if len(p.Candidates) > 0 {
+		b.WriteString("\n## Automation candidates (pick top 1-2 MCP)\n")
+		b.WriteString("Do not invent MCP packages outside this list unless evidence is overwhelming. Never pick Memory MCP. Do not add generic template skills.\n")
+		for _, c := range p.Candidates {
+			b.WriteString(fmt.Sprintf("- [%s] id=%s name=%s score=%d — %s\n", c.Kind, c.ID, c.Name, c.Score, c.Title))
+			if c.Rationale != "" {
+				b.WriteString("  rationale: " + c.Rationale + "\n")
+			}
+			if len(c.Evidence) > 0 {
+				b.WriteString("  evidence: " + strings.Join(c.Evidence, "; ") + "\n")
+			}
+			if c.Kind == discover.CandidateMCP && c.Command != "" {
+				b.WriteString(fmt.Sprintf("  install: command=%s args=%v\n", c.Command, c.Args))
+			}
+		}
 	}
 	b.WriteString("\n## Themes\n")
 	for _, t := range p.Themes {
@@ -174,6 +250,9 @@ func applyLLMUpgrade(paths harness.Paths, p discover.Profile, out llmHarnessOut)
 		if err := nativedocs.EnsureAgentsMD(paths, body, true); err != nil {
 			return err
 		}
+	}
+	if brief := strings.TrimSpace(out.Brief); brief != "" {
+		_ = nativedocs.AppendLearned(paths, brief)
 	}
 
 	rules := out.Guardrails.Rules
@@ -273,7 +352,176 @@ func applyLLMUpgrade(paths harness.Paths, p discover.Profile, out llmHarnessOut)
 		return err
 	}
 
+	pickedMCP, pickedSkills, err := applyAutomationPicks(paths, out)
+	if err != nil {
+		return err
+	}
+	_ = EnqueueLeftoverCandidates(paths, p, pickedMCP, pickedSkills)
 	return nil
+}
+
+func applyAutomationPicks(paths harness.Paths, out llmHarnessOut) (map[string]bool, map[string]bool, error) {
+	pickedMCP := map[string]bool{}
+	pickedSkills := map[string]bool{}
+
+	cfg, err := config.Load(paths.Config)
+	if err != nil {
+		cfg = config.Default()
+	}
+
+	var incoming []config.MCPServer
+	for _, s := range out.MCP {
+		name := strings.TrimSpace(s.Name)
+		cmd := strings.TrimSpace(s.Command)
+		if name == "" || cmd == "" {
+			continue
+		}
+		if strings.EqualFold(name, "memory") || strings.EqualFold(name, "memory-mcp") {
+			continue
+		}
+		skip := false
+		for _, a := range s.Args {
+			if strings.Contains(a, "@latest") {
+				skip = true
+				break
+			}
+		}
+		if skip {
+			continue
+		}
+		args := filterPinnedArgs(s.Args)
+		incoming = append(incoming, config.MCPServer{Name: name, Command: cmd, Args: args})
+		pickedMCP[strings.ToLower(name)] = true
+		if len(incoming) >= 2 {
+			break
+		}
+	}
+	if len(incoming) > 0 {
+		cfg.MCP.Servers = mcp.MergeServers(cfg.MCP.Servers, incoming)
+		if err := config.Save(paths.Config, cfg); err != nil {
+			return pickedMCP, pickedSkills, err
+		}
+		if err := mcp.Project(paths.RepoRoot, cfg); err != nil {
+			return pickedMCP, pickedSkills, err
+		}
+	}
+
+	vendors := enabledVendors(cfg)
+	skillCount := 0
+	for _, sk := range out.Skills {
+		name := strings.TrimSpace(sk.Name)
+		if name == "" || name == "so" || name == "superopen" {
+			continue
+		}
+		body := strings.TrimSpace(sk.Body)
+		if body == "" {
+			continue
+		}
+		for _, vendor := range vendors {
+			_ = nativedocs.UpsertSkill(paths, name, body, nativedocs.WriteOpts{Vendor: vendor})
+		}
+		pickedSkills[strings.ToLower(name)] = true
+		skillCount++
+		if skillCount >= 2 {
+			break
+		}
+	}
+	return pickedMCP, pickedSkills, nil
+}
+
+func filterPinnedArgs(args []string) []string {
+	var out []string
+	for _, a := range args {
+		a = strings.TrimSpace(a)
+		if a == "" || strings.Contains(a, "@latest") {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+func enabledVendors(cfg config.Config) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(v string) {
+		k := harness.NormalizeVendorKind(v)
+		if k == "" || seen[k] {
+			return
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	for _, v := range cfg.Vendors.Enabled {
+		add(v)
+	}
+	if len(out) == 0 {
+		for _, v := range []string{"claude", "cursor", "codex", "gemini", "opencode", "copilot", "pi"} {
+			add(v)
+		}
+	}
+	return out
+}
+
+// EnqueueLeftoverCandidates queues high-signal guardrail candidates that
+// the upgrade JSON omitted. MCP leftovers stay for the next /so init refresh.
+// Catalog template skills are not queued.
+func EnqueueLeftoverCandidates(paths harness.Paths, p discover.Profile, pickedMCP, pickedSkills map[string]bool) error {
+	_ = pickedMCP // MCP is not a recommendation type; next upgrade-brief surfaces them.
+	_ = pickedSkills
+	now := time.Now().UTC()
+	var draft []recommend.Recommendation
+	guardCount := 0
+	for _, c := range p.Candidates {
+		switch c.Kind {
+		case discover.CandidateGuardrail:
+			if guardCount >= 2 {
+				continue
+			}
+			id := c.GuardrailID
+			if id == "" {
+				id = c.Name
+			}
+			// Skip if already present in written guardrails.
+			if data, err := os.ReadFile(paths.GuardrailsFile); err == nil && strings.Contains(string(data), "id: "+id) {
+				continue
+			}
+			sev := c.Severity
+			if sev == "" {
+				sev = "warn"
+			}
+			body := fmt.Sprintf("rules:\n  - id: %s\n    description: %s\n    severity: %s\n    source: recommend\n", id, yamlQuote(c.Rationale), sev)
+			draft = append(draft, recommend.Recommendation{
+				ID:           fmt.Sprintf("rec_setup_%d_%s", now.UnixNano(), id),
+				Fingerprint:  recommend.FingerprintKey("guardrail", paths.GuardrailsFile, id),
+				SessionID:    "_system",
+				Type:         "guardrail",
+				Title:        c.Title,
+				Rationale:    c.Rationale,
+				Why:          c.Rationale,
+				Evidence:     c.Evidence,
+				ProposedPath: paths.GuardrailsFile,
+				ProposedBody: body,
+				Status:       "pending",
+				CreatedAt:    now,
+				ChangeKind:   "update",
+			})
+			guardCount++
+		}
+	}
+	if len(draft) == 0 {
+		return nil
+	}
+	_, err := recommend.MergePending(paths, draft)
+	return err
+}
+
+func mustLoadConfig(paths harness.Paths) config.Config {
+	cfg, err := config.Load(paths.Config)
+	if err != nil {
+		return config.Default()
+	}
+	return cfg
 }
 
 // ApplyUpgradeJSON applies a previously parsed LLM harness JSON payload (for tests / offline).

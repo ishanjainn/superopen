@@ -1,18 +1,18 @@
 "use client";
 
 import { AlertTriangle, ChevronLeft, ChevronRight, X } from "lucide-react";
-import { touchWord, type CityFile, type Touch, type TraceEvent } from "../types";
+import { touchWord, type SessionFile, type Touch, type TraceEvent } from "../types";
 
 interface InspectorProps {
   /** absent when nothing is selected yet - renders the teaching empty state */
-  file?: CityFile;
+  file?: SessionFile;
   touch?: Touch;
   history: TraceEvent[];
   onClose: () => void;
   onJumpTo: (seq: number) => void;
   locked?: boolean;
   /** Spatial neighbors around the selection (closest first, including current). */
-  neighbors?: CityFile[];
+  neighbors?: SessionFile[];
   onSelectNeighbor?: (path: string) => void;
 }
 

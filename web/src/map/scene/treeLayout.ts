@@ -1,4 +1,4 @@
-import type { CityFile } from "../types";
+import type { SessionFile } from "../types";
 
 // Deterministic radial tree: root at the origin, directories as branch
 // forks, files as leaf slots. Every leaf gets an equal angular share in
@@ -35,12 +35,12 @@ interface Node {
   path: string;
   depth: number;
   children: Map<string, Node>;
-  files: CityFile[];
+  files: SessionFile[];
   leafCount: number;
   angle: number;
 }
 
-export function computeTreeLayout(files: CityFile[]): TreeLayout {
+export function computeTreeLayout(files: SessionFile[]): TreeLayout {
   const root: Node = { name: "", path: "", depth: 0, children: new Map(), files: [], leafCount: 0, angle: 0 };
   const sorted = [...files].sort((a, b) => (a.path < b.path ? -1 : 1));
   for (const file of sorted) {

@@ -2,19 +2,24 @@ package hook
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ishanjainn/superopen/internal/artifactmeta"
 	"github.com/ishanjainn/superopen/internal/coding/normalize"
 	"github.com/ishanjainn/superopen/internal/coding/sessionstate"
+	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/guardrails"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/runtimestate"
+	"github.com/ishanjainn/superopen/internal/session"
+	"github.com/ishanjainn/superopen/internal/tracestore"
 )
 
 type hookMemoryEmitter struct{ events []normalize.EventEmission }
@@ -110,7 +115,7 @@ func TestDecideGuardrailPathOnlyDoesNotUseZeroValueDeny(t *testing.T) {
 func TestIsSessionEndEventParity(t *testing.T) {
 	ends := []string{
 		"SessionEnd", "sessionEnd", "session.end", "session_end",
-		"dispose", "agent_end", "session.idle", "session.deleted", "session_shutdown",
+		"dispose", "session.idle", "session.deleted", "session_shutdown",
 	}
 	for _, e := range ends {
 		if !isSessionEndEvent(e) {
@@ -126,11 +131,154 @@ func TestTurnBoundaryHarvestIsCodexClassOnly(t *testing.T) {
 	if !isTurnBoundaryHarvestEvent("codex", "Stop") {
 		t.Fatal("codex Stop should harvest at turn boundary")
 	}
+	if !isTurnBoundaryHarvestEvent("pi", "turn_end") {
+		t.Fatal("pi turn_end should harvest at turn boundary")
+	}
+	if isSessionEndEvent("turn_end") || isSessionEndEvent("agent_end") {
+		t.Fatal("turn_end/agent_end must not be session-end")
+	}
+	if !isTurnBoundaryHarvestEvent("pi", "agent_end") {
+		t.Fatal("pi agent_end should harvest at turn boundary, not close")
+	}
+	if !isTurnBoundaryHarvestEvent("copilot-cli", "agentStop") {
+		t.Fatal("copilot agentStop should be turn-end, not close")
+	}
 	if isTurnBoundaryHarvestEvent("claude-code", "Stop") {
 		t.Fatal("claude Stop must not harvest (SessionEnd does)")
 	}
 	if isTurnBoundaryHarvestEvent("cursor", "Stop") {
 		t.Fatal("cursor Stop must not harvest (sessionEnd does)")
+	}
+}
+
+func TestPiTurnEndDoesNotFinalizeAndSessionStartMaterializes(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	store := session.NewStore(paths)
+	if err := store.Start(session.Meta{ID: "pi-old", Vendor: "pi", StartedAt: time.Now().UTC().Add(-time.Hour), Status: session.StatusActive}); err != nil {
+		t.Fatal(err)
+	}
+
+	type call struct {
+		root, id string
+		noCLI    bool
+	}
+	var calls []call
+	prev := spawnFinalizeFn
+	spawnFinalizeFn = func(repoRoot, sessionID string, noCLI bool) {
+		calls = append(calls, call{repoRoot, sessionID, noCLI})
+	}
+	t.Cleanup(func() { spawnFinalizeFn = prev })
+
+	maybeHarvestOnSessionEnd("pi", "turn_end", "pi-old", root)
+	if len(calls) != 0 {
+		t.Fatalf("turn_end must not finalize, got %+v", calls)
+	}
+	doc, err := store.ReadDocument("pi-old")
+	if err != nil || doc.Review.Status != "pending" {
+		t.Fatalf("turn_end should mark pending, got %+v err=%v", doc.Review, err)
+	}
+
+	maybeHarvestOnSessionEnd("pi", "session_start", "pi-new", root)
+	if len(calls) != 1 || calls[0].id != "pi-old" || !calls[0].noCLI {
+		t.Fatalf("SessionStart must materialize previous with --no-cli, got %+v", calls)
+	}
+}
+
+func TestSessionStartReviewInjectIsShortInstruction(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	store := session.NewStore(paths)
+	if err := store.Start(session.Meta{ID: "cursor-old", Vendor: "cursor", StartedAt: time.Now().UTC().Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteDocument("cursor-old", func(d *session.Document) { d.Review.Status = "pending" }); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Start(session.Meta{ID: "cursor-new", Vendor: "cursor", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf strings.Builder
+	prev := hookJSONOutput
+	hookJSONOutput = func() io.Writer { return &buf }
+	t.Cleanup(func() { hookJSONOutput = prev })
+
+	maybeInjectMemory("cursor", "sessionStart", "cursor-new", root)
+	out := buf.String()
+	if !strings.Contains(out, "so review-brief cursor-old") || !strings.Contains(out, "so apply-review cursor-old") {
+		t.Fatalf("expected short review instruction, got %s", out)
+	}
+	if strings.Contains(out, "REDACTED SESSION TEXT") || strings.Contains(out, ReviewerSystemPromptSnippet) {
+		t.Fatal("SessionStart must not inject the full review brief")
+	}
+}
+
+const ReviewerSystemPromptSnippet = "Review one coding-agent session and return JSON only"
+
+func TestMidSessionInjectOffByDefaultAndOnceWhenEnabled(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	if cfg.MidSessionEnabled() {
+		t.Fatal("mid_session must default off")
+	}
+	if err := config.Save(paths.Config, cfg); err != nil {
+		t.Fatal(err)
+	}
+	store := session.NewStore(paths)
+	if err := store.Start(session.Meta{ID: "mid-1", Vendor: "claude-code", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	trace := tracestore.NewLocalJSONL(paths.TracesDir)
+	var spans []tracestore.Span
+	for i := 0; i < 3; i++ {
+		spans = append(spans, tracestore.Span{
+			Name: "coding_agent.edit", SessionID: "mid-1", SpanID: fmt.Sprintf("e%d", i),
+			Attributes: map[string]string{"coding_agent.file_path": "foo.go", "gen_ai.tool.name": "apply_patch"},
+		})
+	}
+	if err := trace.Write(spans); err != nil {
+		t.Fatal(err)
+	}
+	if got := midSessionReviewInject("claude-code", "mid-1", paths); got != "" {
+		t.Fatalf("mid_session off must not inject, got %q", got)
+	}
+
+	cfg.Evals.MidSession = true
+	if err := config.Save(paths.Config, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := midSessionReviewInject("claude-code", "mid-1", paths); got == "" || !strings.Contains(got, "so review-brief mid-1") {
+		t.Fatalf("enabled mid_session should inject, got %q", got)
+	}
+
+	var buf strings.Builder
+	prev := hookJSONOutput
+	hookJSONOutput = func() io.Writer { return &buf }
+	t.Cleanup(func() { hookJSONOutput = prev })
+	cached := &sessionstate.State{}
+	maybeInjectDynamicMemory("claude-code", "UserPromptSubmit", "mid-1", root, peekedContext{
+		CWD: root, Prompt: "continue the work", TurnID: "t1",
+	}, cached, &hookMemoryEmitter{})
+	if !strings.Contains(buf.String(), "so apply-review mid-1") {
+		t.Fatalf("expected mid-session inject in hook output, got %s", buf.String())
+	}
+	doc, err := store.ReadDocument("mid-1")
+	if err != nil || !doc.Review.MidSessionInjected {
+		t.Fatalf("expected MidSessionInjected, got %+v err=%v", doc.Review, err)
+	}
+	if second := midSessionReviewInject("claude-code", "mid-1", paths); second != "" {
+		t.Fatalf("mid-session inject must be once, got %q", second)
 	}
 }
 

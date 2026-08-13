@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/ishanjainn/superopen/internal/harness"
 )
 
 func TestHtmlHasGraphifyCommunities(t *testing.T) {
@@ -77,5 +80,72 @@ func TestEnsureGraphifyCommunitySidecars(t *testing.T) {
 	_ = json.Unmarshal(b, &labels)
 	if labels["1"] != "Auth" || labels["2"] != "Community 2" {
 		t.Fatalf("labels: %+v", labels)
+	}
+}
+
+func TestSweepStaleGraphWorkRemovesSiblingTempDirs(t *testing.T) {
+	repo := t.TempDir()
+	paths := harness.Resolve(repo)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	leak := filepath.Join(paths.Root, ".graph-v2-leftover")
+	if err := os.Mkdir(leak, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	prev := filepath.Join(paths.Root, "graph.previous")
+	if err := os.Mkdir(prev, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	staging := filepath.Join(paths.GraphDir, ".staging-old")
+	if err := os.Mkdir(staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	SweepStaleGraphWork(paths)
+	if _, err := os.Stat(leak); !os.IsNotExist(err) {
+		t.Fatal("expected .graph-v2-* sibling to be removed")
+	}
+	if _, err := os.Stat(prev); !os.IsNotExist(err) {
+		t.Fatal("expected graph.previous sibling to be removed")
+	}
+	if _, err := os.Stat(staging); !os.IsNotExist(err) {
+		t.Fatal("expected graph/.staging-* to be removed")
+	}
+}
+
+func TestRefreshAtomicDoesNotLeaveSiblingGraphDirs(t *testing.T) {
+	repo := t.TempDir()
+	paths := harness.Resolve(repo)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	t.Setenv("LOCALAPPDATA", cacheHome)
+	leak := filepath.Join(paths.Root, ".graph-v2-851391172")
+	if err := os.Mkdir(leak, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RefreshAtomic(repo, paths, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(leak); !os.IsNotExist(err) {
+		t.Fatal("refresh must sweep leftover .graph-v2-* siblings")
+	}
+	ents, err := os.ReadDir(paths.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), ".graph-v2-") || e.Name() == "graph.previous" || e.Name() == "graph.failed" {
+			t.Fatalf("graph work leaked beside graph/: %s", e.Name())
+		}
+	}
+	if _, err := os.Stat(paths.GraphJSON); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -2,28 +2,22 @@
 # Authoritative project policy updated by project maintainers and approved Superopen upgrades.
 checks:
   - tests
+  - lint
+  - scope
   - go_build
-  - go_vet
   - race_patterns
-  - web_tests
-  - typescript_typecheck
-  - eslint
-  - plugin_sync_drift
-  - cross_platform_paths
-  - schema_compatibility
-  - secret_scan
+  - harness_usage
   - pr_title_convention
 
 agent_rules:
-  - "Prefer so graph query and repository guidance before broad code search."
-  - "Keep changes focused and avoid unrelated edits."
-  - "Preserve the file-backed contract across CLI, web, plugins, templates, and documentation."
-  - "Add tests for behavior changes and run stack-appropriate checks."
-  - "Protect sensitive data in source, telemetry, logs, fixtures, and harness files."
-  - "Account for Linux, macOS, and Windows behavior in path, process, hook, and installer changes."
+  - "Prefer so graph query and AGENTS.md before broad code search"
+  - "Keep diffs focused; avoid unrelated refactors"
+  - "Run go test -race ./... for Go changes and web npm test/lint/typecheck for UI"
+  - "Use Conventional Commit PR titles"
+  - "Do not commit secrets or hand-edit lockfiles"
 
 judge_rubric: |
-  Score whether the session solved the stated task with a focused, evidence-backed change; respected repository architecture and the shared .so data contract; added or updated tests and documentation where warranted; ran the relevant Go, web, plugin, and cross-platform checks; and avoided secrets, unrelated churn, and unsupported claims. Reward concise graph-guided exploration and transparent reporting of validation gaps.
+  Score sessions on task completion, scope discipline, and verification. Reward use of so graph query, guardrails awareness, and running appropriate tests. Penalize secret exposure, lockfile hand-edits, unrelated diffs, and claiming done without test evidence. Soft improvements (memory, vendor rules) are fine; guardrail/eval-policy changes should stay pending for approval.
 
 sources:
   - /Users/ishanjain/work/superopen/AGENTS.md

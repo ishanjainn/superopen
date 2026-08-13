@@ -1,3 +1,4 @@
+/** Session map: in-memory repo file layout used by session replay (tree/terrain). */
 import { createHash } from "crypto";
 import { readdirSync, statSync } from "fs";
 import { dirname, extname, join, relative, sep } from "path";
@@ -20,7 +21,7 @@ const MAX_FILES = 10_000;
 const ROOT_SIZE = 120;
 const CACHE_VERSION = 2;
 
-export type CityFile = {
+export type SessionFile = {
   id: number;
   path: string;
   dir: string;
@@ -31,7 +32,7 @@ export type CityFile = {
   ghost: boolean;
 };
 
-export type CityDir = {
+export type SessionDir = {
   path: string;
   depth: number;
   rect: Rect;
@@ -39,7 +40,7 @@ export type CityDir = {
   lines: number;
 };
 
-export type CityMap = {
+export type SessionMap = {
   version: number;
   repo: {
     root: string;
@@ -48,8 +49,8 @@ export type CityMap = {
     generatedAt: string;
     truncated?: boolean;
   };
-  files: CityFile[];
-  dirs: CityDir[];
+  files: SessionFile[];
+  dirs: SessionDir[];
   layout: { algorithm: string; weight: string };
 };
 
@@ -122,7 +123,7 @@ function fileWeight(lines: number, bytes: number): number {
   return Math.sqrt(units);
 }
 
-function buildTree(files: CityFile[]): LayoutNode {
+function buildTree(files: SessionFile[]): LayoutNode {
   const root: LayoutNode = {
     name: "",
     path: "",
@@ -161,7 +162,7 @@ function sortedChildren(children: Map<string, LayoutNode>): LayoutNode[] {
   return [...children.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function computeWeight(n: LayoutNode, files: CityFile[]): number {
+function computeWeight(n: LayoutNode, files: SessionFile[]): number {
   n.weight = 0;
   n.fileCount = 0;
   n.lines = 0;
@@ -299,8 +300,8 @@ function squarify(
 function layoutNode(
   n: LayoutNode,
   rect: Rect,
-  files: CityFile[],
-  dirs: CityDir[]
+  files: SessionFile[],
+  dirs: SessionDir[]
 ) {
   if (n.path) {
     dirs.push({
@@ -354,20 +355,20 @@ function layoutNode(
   }
 }
 
-function applyTreemap(files: CityFile[]): CityDir[] {
+function applyTreemap(files: SessionFile[]): SessionDir[] {
   const root = buildTree(files);
   computeWeight(root, files);
-  const dirs: CityDir[] = [];
+  const dirs: SessionDir[] = [];
   layoutNode(root, { x: 0, z: 0, w: ROOT_SIZE, d: ROOT_SIZE }, files, dirs);
   return dirs;
 }
 
 /** Build the session map in memory; v2 never writes UI caches under .so. */
-export function getCityMap(): CityMap {
+export function getSessionMap(): SessionMap {
   const root = repoRoot();
   const listed = walkFiles(root);
   const truncated = listed.length >= MAX_FILES;
-  const files: CityFile[] = listed.map((f, id) => {
+  const files: SessionFile[] = listed.map((f, id) => {
     const dir = dirname(f.path);
     return {
       id,
@@ -387,7 +388,7 @@ export function getCityMap(): CityMap {
 
   const dirs = applyTreemap(files);
 
-  const city: CityMap = {
+  const sessionMap: SessionMap = {
     version: CACHE_VERSION,
     repo: {
       root,
@@ -403,7 +404,7 @@ export function getCityMap(): CityMap {
     },
   };
 
-  return city;
+  return sessionMap;
 }
 
 export function sessionKey(harness: string, sessionDir: string): string {

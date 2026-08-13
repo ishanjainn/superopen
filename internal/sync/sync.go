@@ -13,6 +13,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/guardrails"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/inject"
+	"github.com/ishanjainn/superopen/internal/mcp"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/projects"
 	"github.com/ishanjainn/superopen/internal/retrieve"
@@ -99,6 +100,9 @@ func Run(opts Options) error {
 	_ = guardrails.EnsureDefaults(paths)
 	_ = memory.NewStore(paths).Ensure()
 	_, _ = memory.NewStore(paths).RefreshActive("")
+	if err := mcp.Project(root, cfg); err != nil {
+		return fmt.Errorf("mcp project: %w", err)
+	}
 	if _, err := retrieve.Rebuild(root, paths); err != nil {
 		return fmt.Errorf("retrieve index: %w", err)
 	}

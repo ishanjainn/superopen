@@ -1,5 +1,8 @@
-import { readText, writeText } from "./nodeio";
+import { homedir } from "os";
+import { join } from "path";
+import { mkdirSync } from "fs";
 import { spawnSync } from "child_process";
+import { readText, writeText } from "./nodeio";
 import { soPath } from "./root";
 import type {
   JudgeChoice,
@@ -14,7 +17,7 @@ import type { Trace as LibTrace } from "./trace";
 // Judge accepts the lib Trace shape (stats as Record) from buildTrace.
 type Trace = LibTrace;
 
-const JUDGE_CLIS = ["claude", "codex"] as const;
+const JUDGE_CLIS = ["claude", "codex", "opencode", "pi"] as const;
 const PROMPT_VERSION = 1;
 
 type RunningJob = {
@@ -334,6 +337,79 @@ function runCodex(prompt: string, model: string, workdir: string): string {
   return r.stdout || r.stderr;
 }
 
+function sealedWorkdir(): string {
+  const dir = join(homedir(), ".so", "agentcli");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function parseOpenCodeJSON(raw: string): string {
+  const texts: string[] = [];
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const ev = JSON.parse(trimmed) as {
+        type?: string;
+        part?: { text?: string };
+      };
+      if (ev.type === "text" && ev.part?.text) texts.push(ev.part.text);
+    } catch {
+      // skip non-event lines
+    }
+  }
+  return texts.length ? texts.join("\n") : raw;
+}
+
+function runOpenCode(prompt: string, model: string): string {
+  const workdir = sealedWorkdir();
+  const args = ["--pure", "run", "--format", "json", "--dir", workdir];
+  if (model) args.push("--model", model);
+  const r = spawnSync("opencode", args, {
+    encoding: "utf8",
+    input: prompt,
+    cwd: workdir,
+    maxBuffer: 8 * 1024 * 1024,
+    timeout: 180_000,
+    env: {
+      ...process.env,
+      OPENCODE_PERMISSION: '{"*":"deny"}',
+      OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
+      OPENCODE_DISABLE_CLAUDE_CODE: "true",
+      OPENCODE_DISABLE_AUTOUPDATE: "true",
+    },
+  });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error(r.stderr || `opencode exited ${r.status}`);
+  return parseOpenCodeJSON(r.stdout);
+}
+
+function runPi(prompt: string, model: string): string {
+  const workdir = sealedWorkdir();
+  const args = [
+    "--print",
+    "--no-tools",
+    "--no-session",
+    "--no-extensions",
+    "--no-skills",
+    "--no-prompt-templates",
+    "--no-themes",
+    "--no-context-files",
+    "--no-approve",
+  ];
+  if (model) args.push("--model", model);
+  const r = spawnSync("pi", args, {
+    encoding: "utf8",
+    input: prompt,
+    cwd: workdir,
+    maxBuffer: 8 * 1024 * 1024,
+    timeout: 180_000,
+  });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error(r.stderr || `pi exited ${r.status}`);
+  return r.stdout || r.stderr;
+}
+
 async function runJudge(trace: Trace, choice: JudgeChoice): Promise<Report> {
   const clis = availableJudgeClis();
   const cli = clis.includes(choice.cli) ? choice.cli : clis[0];
@@ -343,10 +419,20 @@ async function runJudge(trace: Trace, choice: JudgeChoice): Promise<Report> {
   const prompt = judgePrompt(trace);
   const workdir = soPath("sessions", trace.session.id);
   try {
-    const raw =
-      cli === "codex"
-        ? runCodex(prompt, choice.model, workdir)
-        : runClaude(prompt, choice.model);
+    let raw: string;
+    switch (cli) {
+      case "codex":
+        raw = runCodex(prompt, choice.model, workdir);
+        break;
+      case "opencode":
+        raw = runOpenCode(prompt, choice.model);
+        break;
+      case "pi":
+        raw = runPi(prompt, choice.model);
+        break;
+      default:
+        raw = runClaude(prompt, choice.model);
+    }
     return normalizeReport(extractJSON(raw), trace, cli, choice.model);
   } catch (err) {
     // Fall back so the panel still shows something useful

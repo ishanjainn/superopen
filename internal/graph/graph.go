@@ -112,10 +112,15 @@ func Build(repoRoot string, paths harness.Paths, codeOnly bool, semanticBackend 
 	return buildWithGraphify(bin, prefix, repoRoot, paths, codeOnly, semanticBackend)
 }
 
-// RefreshAtomic builds a complete graph directory off to the side and swaps it
-// into place only after graph.json and required UI artifacts validate.
+// RefreshAtomic builds graph artifacts in `.so/graph/.staging-*` and copies
+// them into `.so/graph/` only after validation. Staging stays under graph/;
+// leftover `.so/.graph-v2-*` siblings from older builds are swept on entry.
 func RefreshAtomic(repoRoot string, paths harness.Paths, codeOnly bool, semanticBackend string) (Result, error) {
-	tmp, err := os.MkdirTemp(filepath.Dir(paths.GraphDir), ".graph-v2-")
+	if err := os.MkdirAll(paths.GraphDir, 0o755); err != nil {
+		return Result{}, err
+	}
+	SweepStaleGraphWork(paths)
+	tmp, err := os.MkdirTemp(paths.GraphDir, ".staging-")
 	if err != nil {
 		return Result{}, err
 	}
@@ -136,28 +141,74 @@ func RefreshAtomic(repoRoot string, paths harness.Paths, codeOnly bool, semantic
 	if err := validateGraphArtifacts(tp); err != nil {
 		return res, fmt.Errorf("graph refresh validation: %w", err)
 	}
-	backup := paths.GraphDir + ".previous"
-	_ = os.RemoveAll(backup)
-	if _, err := os.Stat(paths.GraphDir); err == nil {
-		if err := os.Rename(paths.GraphDir, backup); err != nil {
-			return res, err
-		}
-	}
-	if err := os.Rename(tmp, paths.GraphDir); err != nil {
-		_ = os.Rename(backup, paths.GraphDir)
+	if err := installGraphStaging(tmp, paths); err != nil {
 		return res, err
 	}
 	if _, err := Query(repoRoot, "superopen validation"); err != nil {
-		failed := paths.GraphDir + ".failed"
-		_ = os.RemoveAll(failed)
-		_ = os.Rename(paths.GraphDir, failed)
-		_ = os.Rename(backup, paths.GraphDir)
-		_ = os.RemoveAll(failed)
 		return res, fmt.Errorf("graph query validation: %w", err)
 	}
-	_ = os.RemoveAll(backup)
 	res.Path = paths.GraphJSON
 	return res, nil
+}
+
+// SweepStaleGraphWork removes abandoned atomic-swap directories that used to
+// live as siblings of `.so/graph/` and leftover staging dirs inside it.
+func SweepStaleGraphWork(paths harness.Paths) {
+	parent := filepath.Dir(paths.GraphDir)
+	if ents, err := os.ReadDir(parent); err == nil {
+		for _, e := range ents {
+			n := e.Name()
+			if strings.HasPrefix(n, ".graph-v2-") || n == "graph.previous" || n == "graph.failed" {
+				_ = os.RemoveAll(filepath.Join(parent, n))
+			}
+		}
+	}
+	if ents, err := os.ReadDir(paths.GraphDir); err == nil {
+		for _, e := range ents {
+			n := e.Name()
+			if strings.HasPrefix(n, ".staging-") || strings.HasSuffix(n, ".new") {
+				_ = os.RemoveAll(filepath.Join(paths.GraphDir, n))
+			}
+		}
+	}
+}
+
+func installGraphStaging(tmp string, paths harness.Paths) error {
+	for _, name := range []string{"graph.json", "corpus.json", "graph.html", "state.json"} {
+		src := filepath.Join(tmp, name)
+		if _, err := os.Stat(src); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		if err := replaceFile(src, filepath.Join(paths.GraphDir, name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func replaceFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	tmp := dst + ".new"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(dst)
+		if err2 := os.Rename(tmp, dst); err2 != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+	}
+	return nil
 }
 
 func validateGraphArtifacts(paths harness.Paths) error {

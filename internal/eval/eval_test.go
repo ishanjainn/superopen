@@ -177,6 +177,78 @@ func TestActiveSnapshotDoesNotPersistFindingsOrCompleteReview(t *testing.T) {
 	}
 }
 
+func TestAutoNilCompleterDoesNotCompleteReview(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	_ = paths.EnsureDirs()
+	ss := session.NewStore(paths)
+	_ = ss.Start(session.Meta{ID: "auto-nil", Vendor: "cursor", StartedAt: time.Now().UTC(), Status: session.StatusEnded})
+	_ = ss.WriteDocument("auto-nil", func(doc *session.Document) { doc.Review.Status = "pending" })
+	spans := []tracestore.Span{{
+		Name: "coding_agent.edit", SessionID: "auto-nil",
+		Attributes: map[string]string{"gen_ai.tool.name": "apply_patch", "coding_agent.file_path": "a.go"},
+	}}
+	res, err := Run(paths, config.Config{Evals: config.EvalsConfig{Backend: "auto"}}, "auto-nil", spans, nil, RunOptions{Final: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.CompleteReview {
+		t.Fatal("auto with no completer must not complete a review")
+	}
+	doc, err := ss.ReadDocument("auto-nil")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Review.Status == "complete" {
+		t.Fatalf("heuristics must not complete under auto: %+v", doc.Review)
+	}
+}
+
+func TestConsiderableWorkAndPendingInstruction(t *testing.T) {
+	edits := []tracestore.Span{
+		{Name: "coding_agent.edit", Attributes: map[string]string{"coding_agent.file_path": "a.go"}},
+		{Name: "coding_agent.edit", Attributes: map[string]string{"coding_agent.file_path": "b.go"}},
+		{Name: "coding_agent.edit", Attributes: map[string]string{"coding_agent.file_path": "c.go"}},
+	}
+	if !ConsiderableWork(edits, 3, 10) {
+		t.Fatal("3 edits should meet min_edits")
+	}
+	if ConsiderableWork(edits[:2], 3, 10) {
+		t.Fatal("2 edits should not meet default thresholds")
+	}
+	got := PendingReviewInstruction("cursor", "ses_1", "pending")
+	if !strings.Contains(got, "so review-brief ses_1") || strings.Contains(got, "REDACTED SESSION TEXT") {
+		t.Fatalf("instruction too large or missing brief cmd: %s", got)
+	}
+	if PendingReviewInstruction("cursor", "ses_1", "complete") != "" {
+		t.Fatal("complete should not inject apply-review")
+	}
+}
+
+func TestUnparseableModelJSONDoesNotCompleteReview(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	_ = paths.EnsureDirs()
+	ss := session.NewStore(paths)
+	_ = ss.Start(session.Meta{ID: "bad-json", Vendor: "cursor", StartedAt: time.Now().UTC(), Status: session.StatusEnded})
+	spans := []tracestore.Span{{
+		Name: "coding_agent.edit", SessionID: "bad-json",
+		Attributes: map[string]string{"gen_ai.tool.name": "apply_patch", "coding_agent.file_path": "a.go"},
+	}}
+	res, err := Run(paths, config.Config{Evals: config.EvalsConfig{Backend: "auto"}}, "bad-json", spans, staticCompleter{output: "not json"}, RunOptions{Final: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.CompleteReview || strings.HasPrefix(res.Backend, "agent_cli:") || strings.HasPrefix(res.Backend, "test") {
+		t.Fatalf("unparseable model output must not complete: %+v", res)
+	}
+	doc, err := ss.ReadDocument("bad-json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Review.Status == "complete" {
+		t.Fatalf("review completed without valid JSON: %+v", doc.Review)
+	}
+}
+
 func TestRepeatedGenericShellCallsAreNotAWorkflow(t *testing.T) {
 	var steps []string
 	for range 10 {

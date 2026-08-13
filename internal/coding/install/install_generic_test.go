@@ -113,6 +113,27 @@ func TestInstallGeminiMergesSettingsAndUsesCurrentEvents(t *testing.T) {
 	}
 }
 
+func TestCopilotAgentStopDoesNotFinalize(t *testing.T) {
+	body, err := copilotManifest("/usr/bin/so")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, `"sessionEnd"`) || !strings.Contains(body, "sessions finalize --detach") {
+		t.Fatalf("sessionEnd must detach finalize:\n%s", body)
+	}
+	idx := strings.Index(body, `"agentStop"`)
+	if idx < 0 {
+		t.Fatal("missing agentStop")
+	}
+	block := body[idx:]
+	if end := strings.Index(block, "]"); end > 0 {
+		block = block[:end]
+	}
+	if strings.Contains(block, "sessions finalize") {
+		t.Fatalf("agentStop must not run sessions finalize:\n%s", block)
+	}
+}
+
 func TestGenericVendorHonorsConfigOverrides(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -153,5 +174,23 @@ func TestGenericVendorHonorsConfigOverrides(t *testing.T) {
 		if !strings.Contains(string(body), field) {
 			t.Fatalf("Copilot hook manifest lacks %s: %s", field, body)
 		}
+	}
+	if !strings.Contains(string(body), `"agentStop"`) {
+		t.Fatalf("Copilot hook manifest missing agentStop: %s", body)
+	}
+	agentStopIdx := strings.Index(string(body), `"agentStop"`)
+	sessionEndIdx := strings.Index(string(body), `"sessionEnd"`)
+	if agentStopIdx < 0 || sessionEndIdx < 0 {
+		t.Fatal("expected sessionEnd and agentStop")
+	}
+	agentStopBlock := string(body)[agentStopIdx:]
+	if end := strings.Index(agentStopBlock, "]"); end > 0 {
+		agentStopBlock = agentStopBlock[:end]
+	}
+	if strings.Contains(agentStopBlock, "sessions finalize") {
+		t.Fatalf("Copilot agentStop must not finalize (that closes every turn): %s", agentStopBlock)
+	}
+	if !strings.Contains(string(body)[sessionEndIdx:], "sessions finalize --detach") {
+		t.Fatal("Copilot sessionEnd must still detach finalize")
 	}
 }

@@ -1,3 +1,4 @@
+// Package viz builds session map replay traces from local session telemetry.
 package viz
 
 import (

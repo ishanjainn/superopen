@@ -4,7 +4,7 @@ import {
   SessionRail,
   type SessionRailTool,
 } from "@/components/session-rail";
-import type { ActionCounts, CityMap, MetricObservability, Trace } from "../types";
+import type { ActionCounts, SessionMap, MetricObservability, Trace } from "../types";
 
 export interface ChurnEntry {
   path: string;
@@ -34,7 +34,7 @@ export interface HudSessionExtras {
 
 interface HudProps {
   trace?: Trace;
-  city?: CityMap;
+  sessionMap?: SessionMap;
   agentLabel?: string;
   view: MapSceneView;
   onViewChange: (view: MapSceneView) => void;
@@ -55,7 +55,7 @@ const CHURN_PANEL_ROWS = 8;
 
 export const Hud = memo(function Hud({
   trace,
-  city,
+  sessionMap,
   agentLabel,
   view,
   onViewChange,
@@ -79,8 +79,8 @@ export const Hud = memo(function Hud({
   const unvisitedFinal = stats
     ? Math.max(0, stats.filesInRepo - stats.fovea - stats.parafovea)
     : 0;
-  const ghostCount = city
-    ? city.files.reduce((n, file) => n + (file.ghost ? 1 : 0), 0)
+  const ghostCount = sessionMap
+    ? sessionMap.files.reduce((n, file) => n + (file.ghost ? 1 : 0), 0)
     : 0;
   const errorCount = stats ? countActions(stats.errors) : 0;
   const showReview = stats
@@ -119,7 +119,7 @@ export const Hud = memo(function Hud({
     };
   }, [churnOpen]);
 
-  if (!city) {
+  if (!sessionMap) {
     return <div className="hud" aria-hidden />;
   }
 
@@ -180,8 +180,8 @@ export const Hud = memo(function Hud({
           <div className="tb-cell tb-shrink">
             <span className="tb-label">Revision</span>
             <span className="tb-value tb-mono">
-              {city.repo.commit || "worktree"}
-              {city.repo.dirty ? (
+              {sessionMap.repo.commit || "worktree"}
+              {sessionMap.repo.dirty ? (
                 <span className="tb-dirty" title="Uncommitted changes">
                   {" "}
                   ● dirty
@@ -322,7 +322,7 @@ export const Hud = memo(function Hud({
                 <span className="tb-label">Files</span>
                 <span className="tb-value tb-mono">
                   {stats.filesInRepo}
-                  {city.repo.truncated ? (
+                  {sessionMap.repo.truncated ? (
                     <span
                       className="tb-partial"
                       data-hint="The tree holds more files than the map shows - scanning stopped at the budget"

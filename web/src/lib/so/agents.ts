@@ -4,7 +4,7 @@ import { join } from "path";
 import { soPath } from "./root";
 import { humanizePromptPreview } from "./sessions";
 import { buildTrace, resolveMapSession, type MapSessionMeta } from "./trace";
-import { getCityMap, sessionKey } from "./citymap";
+import { getSessionMap, sessionKey } from "./session_map";
 import type { AgentGraph, AgentNode, Trace } from "@/map/types";
 
 type SessionMetaFile = {
@@ -31,8 +31,8 @@ function readMeta(dir: string): SessionMetaFile | null {
 
 function eventCountFor(session: MapSessionMeta): number {
   try {
-    const city = getCityMap();
-    return buildTrace(session, city).events.length;
+    const sessionMap = getSessionMap();
+    return buildTrace(session, sessionMap).events.length;
   } catch {
     return 0;
   }
@@ -142,5 +142,5 @@ export function buildAgentTrace(rootKey: string, agentId: string): Trace | null 
   if (!node?.traceSessionKey) return null;
   const session = resolveMapSession(node.traceSessionKey);
   if (!session) return null;
-  return buildTrace(session, getCityMap()) as unknown as Trace;
+  return buildTrace(session, getSessionMap()) as unknown as Trace;
 }

@@ -28,6 +28,8 @@ The `/so` skill is registered with **`so install`** (after installing the CLI). 
 /so install                                      # (re)register this /so skill with coding agents
 /so uninstall                                    # remove skills, hooks, injectors, .so/, CLI
 /so apply-upgrade                                # apply JSON you produced (usually automatic after /so init)
+/so review-brief [session-id]                    # print pending session-review prompt (no API key)
+/so apply-review [session-id]                    # apply reviewer JSON you produced (file OR stdin, not both)
 /so harvest idle                                 # harvest long-idle sessions into memory + native docs
 /so dev                                          # open the file-backed Sessions UI
 /so sessions                                     # list sessions
@@ -60,8 +62,8 @@ so init --no-llm
 
    (Add `--force` / `--code-only` if the user passed those flags.)
 
-3. Run `so upgrade-brief` to print the system instructions and repository profile without creating a persistent artifact.
-4. **Using your own model**, produce the JSON object described in that brief (architecture_md, conventions_md, guardrails, evals, brief). Stay faithful to the profile - invent no secrets or fake paths. Do **not** reuse upgrade JSON from another project.
+3. Run `so upgrade-brief` to print the system instructions and repository profile without creating a persistent artifact. The profile includes **Automation candidates** (MCP servers and guardrails) derived from stack signals after the graph build.
+4. **Using your own model**, produce the JSON object described in that brief (`architecture_md`, `conventions_md`, `guardrails`, `evals`, `brief`, optional `mcp`, optional `skills`). Stay faithful to the profile - invent no secrets, env blocks, or fake paths. Pick the top 1–2 MCP from the candidates list; pin package versions (never `@latest`); never recommend Memory MCP (Superopen memory already covers recall). Include `skills` only when the profile shows a concrete repo-specific workflow — do not emit generic templates (`gen-test`, `pr-check`, `frontend-design`). Omit the array when there is nothing specific. Do **not** reuse upgrade JSON from another project.
 5. Apply it with **exactly one** input method (never both — the CLI errors if a path and a heredoc/stdin redirect are combined):
 
 ```bash
@@ -72,9 +74,30 @@ EOF
 
    Or write a temp file and `so apply-upgrade /tmp/so-upgrade.json` (no heredoc on that command).
 
-6. Tell the user briefly: Superopen at `.so/`, graph node/edge counts, and that **AGENTS.md**, guardrails, and evals were upgraded with the assistant model. Suggest `so doctor` or `so dev` next.
+6. Tell the user briefly: Superopen at `.so/`, graph node/edge counts, and that **AGENTS.md**, guardrails, evals, optional **mcp** (`.so/config.yaml` + projected `.mcp.json` / `.cursor/mcp.json`), and any repo-specific project skills were upgraded with the assistant model. Suggest `so doctor`, `so sync`, or `so dev` next. Leftover high-signal guardrails may appear under `so recommend list` for HITL.
 
-If `.so/` already exists and the user only wanted a refresh of context/guardrails, skip step 2’s full rebuild when possible: run `so upgrade-brief`, then steps 4-5.
+If `.so/` already exists and the user only wanted a refresh of context/guardrails/automations, skip step 2’s full rebuild when possible: run `so upgrade-brief`, then steps 4-5 (apply merges MCP servers additively).
+
+### Review - live-agent session review (no API key)
+
+If `so review-brief` (or a SessionStart / skill inject) prints a **pending** session, review it with **your** model before the user's new task:
+
+1. Run `so review-brief <session-id>` (default: previous pending same-vendor session).
+2. If it says status is `complete` or `running`, skip apply-review and continue the user's task.
+3. Using your own model, produce the JSON object from that brief (dimensions, findings with `proposed_body`, memory). Prefer empty findings over weak advice. Do **not** ask for an API key.
+4. Apply with **exactly one** input method (never both):
+
+```bash
+so apply-review <session-id> <<'EOF'
+{ ... your JSON ... }
+EOF
+```
+
+   Or `so apply-review <session-id> /tmp/so-review.json` (no heredoc on that command).
+
+5. Then continue the user's task. Soft recs may auto-apply; guardrails, eval-policy, removals, and restructures stay pending for `so recommend apply`.
+
+Skip if review status is already complete or running. Cursor often cannot consume hook `additional_context` same-turn — this skill is the reliable path.
 
 ### Bootstrap - no `.so/` yet (any `/so` task)
 
@@ -105,6 +128,8 @@ Map `/so …` arguments to the `so` CLI on PATH (or `$(go env GOPATH)/bin/so` if
 | `/so init …` | Follow **`/so init`** section above (not bare `so init` alone) |
 | `/so install …` | `so install …` |
 | `/so apply-upgrade` | `so apply-upgrade` (with JSON you produced — file **or** heredoc, not both) |
+| `/so review-brief …` | `so review-brief …` |
+| `/so apply-review …` | `so apply-review …` (JSON you produced — file **or** heredoc, not both) |
 | `/so graph` / `/so graph rebuild` | `so graph rebuild` |
 | `/so graph query "…"` / `/so query "…"` | `so graph query "…"` |
 | `/so doctor` | `so doctor` |
@@ -121,7 +146,7 @@ Map `/so …` arguments to the `so` CLI on PATH (or `$(go env GOPATH)/bin/so` if
 
 ### Headless / CI only
 
-API keys (`OPENAI_API_KEY`, etc.) are **optional and never selected from ambient environment alone**. Session evals default to **`evals.backend: auto`**: the same vendor's sealed CLI when supported, another configured Claude/Codex CLI, an explicitly configured `llm:` backend, then offline **heuristics**.
+API keys (`OPENAI_API_KEY`, etc.) are **optional and never selected from ambient environment alone**. Session evals default to **`evals.backend: auto`**: the **live coding agent** reviews first (`so review-brief` / `so apply-review` on the next same-vendor SessionStart). Sealed `claude`/`codex`/`opencode`/`pi` CLI runs only after a true chat close (or idle) if still pending. Never finish a review with heuristics while a live agent or CLI can review. Set `evals.backend: heuristics` only for explicit offline judging.
 
 ```bash
 so init --llm

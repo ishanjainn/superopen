@@ -49,6 +49,9 @@ type Result struct {
 	Reason    string  `json:"reason,omitempty"`
 	Applied   int     `json:"applied,omitempty"`
 	Recs      int     `json:"recs,omitempty"`
+	// Action is a follow-up the CLI should spawn: "finalize" (materialize an
+	// abandoned active chat) or "review" (retry sealed CLI on ended+pending).
+	Action string `json:"action,omitempty"`
 }
 
 type ledgerEntry struct {
@@ -174,7 +177,8 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, trigger Trigg
 	return res, nil
 }
 
-// IdleSweep harvests sessions with no activity for cfg idle hours.
+// IdleSweep harvests sessions with no activity for cfg idle hours and flags
+// pending reviews for sealed CLI retry. It never heuristic-completes a review.
 // Throttled to at most once per hour per harness (safe to call from Codex Stop).
 func IdleSweep(paths harness.Paths, cfg config.Config) ([]Result, error) {
 	run, err := runtimestate.TouchIfStale(paths.RepoRoot, "idle_sweep", time.Hour)
@@ -196,9 +200,6 @@ func IdleSweep(paths harness.Paths, cfg config.Config) ([]Result, error) {
 	}
 	var out []Result
 	for _, m := range metas {
-		if m.Status == session.StatusEnded || m.EndedAt != nil {
-			continue
-		}
 		last := m.StartedAt
 		if mt := sessionSourceMtime(paths, m.ID); mt > 0 {
 			last = time.Unix(mt, 0)
@@ -206,11 +207,27 @@ func IdleSweep(paths harness.Paths, cfg config.Config) ([]Result, error) {
 		if last.After(cutoff) {
 			continue
 		}
-		r, err := Run(paths, cfg, m.ID, TriggerIdle)
-		if err != nil {
-			r.Reason = err.Error()
+		doc, _ := store.ReadDocument(m.ID)
+		pendingReview := doc.Review.Status == "pending" || doc.Review.Status == "failed"
+		ended := m.Status == session.StatusEnded || m.EndedAt != nil
+		if ended && !pendingReview {
+			continue
 		}
-		out = append(out, r)
+		if !ended {
+			r, err := Run(paths, cfg, m.ID, TriggerIdle)
+			if err != nil {
+				r.Reason = err.Error()
+			}
+			r.Action = "finalize"
+			out = append(out, r)
+			continue
+		}
+		out = append(out, Result{
+			SessionID: m.ID,
+			Trigger:   TriggerIdle,
+			Action:    "review",
+			Reason:    "pending_ended",
+		})
 	}
 	return out, nil
 }
@@ -225,7 +242,13 @@ func MarkPending(paths harness.Paths, sessionID, vendor string) error {
 	if _, err := store.Get(sessionID); err != nil {
 		_ = store.Start(session.Meta{ID: sessionID, Vendor: vendor, StartedAt: time.Now().UTC()})
 	}
-	return store.WriteDocument(sessionID, func(d *session.Document) { d.Review.Status = "pending"; d.Review.Trigger = string(TriggerTurnEnd) })
+	return store.WriteDocument(sessionID, func(d *session.Document) {
+		if d.Review.Status == "complete" || d.Review.Status == "running" {
+			return
+		}
+		d.Review.Status = "pending"
+		d.Review.Trigger = string(TriggerTurnEnd)
+	})
 }
 
 // ClearPending drops a session from the pending set after a successful end harvest.

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { useThemeOptional } from "@/components/shell/theme-provider";
-import { touchWord, type CityFile, type CityMap, type Touch } from "../types";
+import { touchWord, type SessionFile, type SessionMap, type Touch } from "../types";
 import type { FilePlayback } from "../playback/reducer";
 import { DirLabelSet } from "./dirLabels";
 import {
@@ -20,8 +20,8 @@ import {
 import { fireflyTexture } from "./textures";
 import { TrailRenderer } from "./trail";
 
-interface CitySceneProps {
-  city?: CityMap;
+interface TerrainSceneProps {
+  sessionMap?: SessionMap;
   playback: FilePlayback;
   selectedPath?: string;
   onSelect: (path?: string) => void;
@@ -55,7 +55,7 @@ function attentionHeight(touch: Touch, visits: number): number {
 const LOC_MIN_H = 0.3;
 const LOC_MAX_H = 16;
 // gamma > 1 exaggerates the top end: small files stay low, big files spike, so
-// the skyline reads as a city (towers vs shacks) instead of a uniform plateau
+// the skyline reads as towers vs shacks instead of a uniform plateau
 const LOC_HEIGHT_GAMMA = 2.2;
 // normalized 0..1 position of a file by lines of code (log-scaled)
 function locFraction(lines: number, maxLog: number): number {
@@ -74,7 +74,7 @@ const LOC_RAMP: { at: number; color: THREE.Color }[] = [
   { at: 1.0, color: new THREE.Color("#ec4899") }
 ];
 
-function applyCitySceneTheme(dark: boolean) {
+function applyTerrainSceneTheme(dark: boolean) {
   colors.unvisited.set(dark ? "#404040" : "#d4d4d4");
   colors.ghost.set(dark ? "#262626" : "#e5e5e5");
   LOC_RAMP[0].color.set(dark ? "#404040" : "#d4d4d4");
@@ -99,20 +99,20 @@ interface TerrainSlot {
   color: THREE.Color;
 }
 
-export function CityScene({ city, playback, selectedPath, onSelect, onCanvasReady, locHeights }: CitySceneProps) {
+export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onCanvasReady, locHeights }: TerrainSceneProps) {
   const theme = useThemeOptional();
   const dark = theme?.resolved === "dark";
   const hostRef = useRef<HTMLDivElement | null>(null);
   const tileMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const terrainMeshRef = useRef<THREE.InstancedMesh | null>(null);
-  const filesRef = useRef<CityFile[]>([]);
+  const filesRef = useRef<SessionFile[]>([]);
   const slotsRef = useRef<TerrainSlot[]>([]);
   const heightsRef = useRef<Map<number, number>>(new Map());
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
-  const cityGroupRef = useRef<THREE.Group | null>(null);
+  const mapGroupRef = useRef<THREE.Group | null>(null);
   const trailRef = useRef<TrailRenderer | null>(null);
   const fireflyRef = useRef<THREE.Sprite | null>(null);
   const labelSetRef = useRef<DirLabelSet | null>(null);
@@ -127,12 +127,12 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
   const fitPendingRef = useRef<(() => boolean) | null>(null);
 
   const bounds = useMemo(() => {
-    if (!city || city.files.length === 0) return { cx: 0, cz: 0, size: 120, halfW: 60, halfD: 60 };
+    if (!sessionMap || sessionMap.files.length === 0) return { cx: 0, cz: 0, size: 120, halfW: 60, halfD: 60 };
     let minX = Infinity;
     let maxX = -Infinity;
     let minZ = Infinity;
     let maxZ = -Infinity;
-    for (const file of city.files) {
+    for (const file of sessionMap.files) {
       minX = Math.min(minX, file.rect.x);
       maxX = Math.max(maxX, file.rect.x + file.rect.w);
       minZ = Math.min(minZ, file.rect.z);
@@ -145,10 +145,10 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
       halfW: (maxX - minX) / 2,
       halfD: (maxZ - minZ) / 2
     };
-  }, [city]);
+  }, [sessionMap]);
 
   useEffect(() => {
-    applyCitySceneTheme(dark);
+    applyTerrainSceneTheme(dark);
   }, [dark]);
 
   useEffect(() => {
@@ -207,7 +207,7 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
-    const pickFile = (event: PointerEvent): CityFile | undefined => {
+    const pickFile = (event: PointerEvent): SessionFile | undefined => {
       if (!cameraRef.current || !rendererRef.current) return undefined;
       const rect = rendererRef.current.domElement.getBoundingClientRect();
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -360,11 +360,11 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    filesRef.current = city?.files ?? [];
+    filesRef.current = sessionMap?.files ?? [];
     slotsRef.current = [];
     heightsRef.current = new Map();
     boundsRef.current = bounds;
-    if (!city || city.files.length === 0) return;
+    if (!sessionMap || sessionMap.files.length === 0) return;
 
     const group = new THREE.Group();
     const size = bounds.size;
@@ -374,7 +374,7 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
     // Paper grid is CSS on .map-root (matches Graph). No opaque floor /
     // GridHelper so the screen-space grid reads through empty sky and ground.
 
-    const plateDirs = city.dirs.filter((dir) => dir.depth <= 3 && dir.rect.w > 0 && dir.rect.d > 0);
+    const plateDirs = sessionMap.dirs.filter((dir) => dir.depth <= 3 && dir.rect.w > 0 && dir.rect.d > 0);
     if (plateDirs.length > 0) {
       const plateGeo = new THREE.BoxGeometry(1, 1, 1);
       const plateMat = new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0 });
@@ -405,9 +405,9 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
     // flat tiles: every file exists on the map, dark until visited
     const tileGeo = new THREE.BoxGeometry(1, 1, 1);
     const tileMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0 });
-    const tiles = new THREE.InstancedMesh(tileGeo, tileMat, city.files.length);
+    const tiles = new THREE.InstancedMesh(tileGeo, tileMat, sessionMap.files.length);
     const matrix = new THREE.Matrix4();
-    for (const file of city.files) {
+    for (const file of sessionMap.files) {
       const sx = Math.max(file.rect.w, 0.45);
       const sz = Math.max(file.rect.d, 0.45);
       const x = file.rect.x + file.rect.w / 2 - bounds.cx;
@@ -425,9 +425,9 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
     const terrain = new THREE.InstancedMesh(
       attentionColumnGeometry(),
       new THREE.MeshBasicMaterial({ toneMapped: false, vertexColors: true }),
-      city.files.length
+      sessionMap.files.length
     );
-    terrain.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(city.files.length * 3), 3);
+    terrain.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(sessionMap.files.length * 3), 3);
     terrain.count = 0;
     terrain.frustumCulled = false;
     terrainMeshRef.current = terrain;
@@ -436,7 +436,7 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
     // district labels above the plain; drawn over the columns so a mountain
     // range never buries the name of the district behind it
     labelSetRef.current = new DirLabelSet(
-      city.dirs
+      sessionMap.dirs
         .filter((dir) => dir.depth >= 1 && dir.fileCount > 0 && dir.rect.w > 0 && dir.rect.d > 0)
         .map((dir) => ({
           name: dirBasename(dir.path),
@@ -470,7 +470,7 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
     trailRef.current = trail;
     group.add(trail.object);
 
-    cityGroupRef.current = group;
+    mapGroupRef.current = group;
     scene.add(group);
 
     // keep the canonical viewing direction, but pull back exactly far
@@ -504,21 +504,21 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
       fitPendingRef.current = null;
       disposeGroup(group);
       scene.remove(group);
-      cityGroupRef.current = null;
+      mapGroupRef.current = null;
       tileMeshRef.current = null;
       terrainMeshRef.current = null;
       trailRef.current = null;
       fireflyRef.current = null;
       labelSetRef.current = null;
     };
-  }, [city, bounds, dark]);
+  }, [sessionMap, bounds, dark]);
 
   // playback → terrain targets and colors
   useEffect(() => {
-    applyCitySceneTheme(dark);
+    applyTerrainSceneTheme(dark);
     const terrain = terrainMeshRef.current;
     const tiles = tileMeshRef.current;
-    if (!terrain || !tiles || !city) return;
+    if (!terrain || !tiles || !sessionMap) return;
 
     const heights = heightsRef.current;
     const slots: TerrainSlot[] = [];
@@ -526,9 +526,9 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
     // static map mode: no session drives attention, so raise every column by
     // its lines of code instead of leaving the terrain flat
     const maxLog = locHeights
-      ? Math.log2(Math.max(1, city.files.reduce((m, f) => Math.max(m, f.lines), 1)))
+      ? Math.log2(Math.max(1, sessionMap.files.reduce((m, f) => Math.max(m, f.lines), 1)))
       : 0;
-    for (const file of city.files) {
+    for (const file of sessionMap.files) {
       const touch = playback.touchByFile.get(file.id);
       const selected = file.path === selectedPath;
       tiles.setColorAt(file.id, selected ? colors.selected : baseColor(file));
@@ -562,12 +562,12 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
     if (terrain.instanceColor) terrain.instanceColor.needsUpdate = true;
     if (tiles.instanceColor) tiles.instanceColor.needsUpdate = true;
     slotsRef.current = slots;
-  }, [city, playback, selectedPath, locHeights, dark]);
+  }, [sessionMap, playback, selectedPath, locHeights, dark]);
 
   // the inspector opens over the right edge; pan the selected tile clear of it
   useEffect(() => {
-    if (!city || !selectedPath) return;
-    const file = city.files.find((f) => f.path === selectedPath);
+    if (!sessionMap || !selectedPath) return;
+    const file = sessionMap.files.find((f) => f.path === selectedPath);
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     const canvas = rendererRef.current?.domElement;
@@ -579,20 +579,20 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
     const mapSize = Math.max(bounds.halfW, bounds.halfD) * 2;
     focusOnPoint(camera, controls, world, mapSize);
     ensureVisible(camera, controls, world, canvas.clientWidth, canvas.clientHeight, INSPECTOR_RESERVED_PX);
-  }, [city, bounds, selectedPath]);
+  }, [sessionMap, bounds, selectedPath]);
 
   // trail: ballistic arcs between recent fixations + the firefly at the head
   useEffect(() => {
     const trail = trailRef.current;
-    if (!trail || !city) return;
+    if (!trail || !sessionMap) return;
 
-    // playback resolves fileId with the same path key the citymap uses, so a
+    // playback resolves fileId with the same path key the session map uses, so a
     // target still missing one has no tile to land on
     const targetFiles = playback.recentTargets
-      .map((target) => (target.fileId !== undefined ? city.files[target.fileId] : undefined))
-      .filter((file): file is CityFile => Boolean(file));
+      .map((target) => (target.fileId !== undefined ? sessionMap.files[target.fileId] : undefined))
+      .filter((file): file is SessionFile => Boolean(file));
 
-    const peakFor = (file: CityFile): number => {
+    const peakFor = (file: SessionFile): number => {
       const touch = playback.touchByFile.get(file.id);
       const visits = playback.visitsByFile.get(file.id) ?? 1;
       return touch ? attentionHeight(touch, visits) : TILE_H;
@@ -617,9 +617,9 @@ export function CityScene({ city, playback, selectedPath, onSelect, onCanvasRead
         return p;
       })
     );
-  }, [city, playback, bounds]);
+  }, [sessionMap, playback, bounds]);
 
-  return <div className="city-scene" ref={hostRef} aria-label="Attention terrain" />;
+  return <div className="session-map" ref={hostRef} aria-label="Attention terrain" />;
 }
 
 // Columns must read as phosphorescence, not paint: glow pools at the crest and
@@ -639,7 +639,7 @@ function attentionColumnGeometry(): THREE.BoxGeometry {
   return geo;
 }
 
-function baseColor(file: CityFile): THREE.Color {
+function baseColor(file: SessionFile): THREE.Color {
   if (file.ghost) return colors.ghost;
   let h = 2166136261;
   for (let i = 0; i < file.path.length; i++) {
@@ -649,7 +649,7 @@ function baseColor(file: CityFile): THREE.Color {
   return colors.unvisited.clone().offsetHSL(0, 0, jitter * 0.05);
 }
 
-function centerFor(file: CityFile, bounds: { cx: number; cz: number }): THREE.Vector3 {
+function centerFor(file: SessionFile, bounds: { cx: number; cz: number }): THREE.Vector3 {
   return new THREE.Vector3(file.rect.x + file.rect.w / 2 - bounds.cx, 0, file.rect.z + file.rect.d / 2 - bounds.cz);
 }
 

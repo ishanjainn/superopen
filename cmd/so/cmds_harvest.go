@@ -7,6 +7,7 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/axi"
 	"github.com/ishanjainn/superopen/internal/config"
+	"github.com/ishanjainn/superopen/internal/execx"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/session"
@@ -66,6 +67,17 @@ Triggers: session end, idle (≥ memory.idle_harvest_hours), or explicit finaliz
 			results, err := harvest.IdleSweep(paths, cfg)
 			if err != nil {
 				return axi.Err(err)
+			}
+			root := repoRoot()
+			for _, r := range results {
+				switch r.Action {
+				case "finalize":
+					execx.SpawnSO(root, "sessions", "finalize", r.SessionID)
+				case "review":
+					if cfg.CLIFallbackEnabled() && !cfg.ExplicitHeuristics() {
+						execx.SpawnSO(root, "sessions", "review", r.SessionID)
+					}
+				}
 			}
 			return out().HumanOrJSON("result", func() {
 				fmt.Printf("idle harvest: %d session(s)\n", len(results))

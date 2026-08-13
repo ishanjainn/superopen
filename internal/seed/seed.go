@@ -78,6 +78,14 @@ func cleanupObsoleteRuntimeArtifacts(paths harness.Paths) {
 	} {
 		_ = os.RemoveAll(path)
 	}
+	if ents, err := os.ReadDir(paths.Root); err == nil {
+		for _, e := range ents {
+			n := e.Name()
+			if strings.HasPrefix(n, ".graph-v2-") || n == "graph.previous" || n == "graph.failed" {
+				_ = os.RemoveAll(filepath.Join(paths.Root, n))
+			}
+		}
+	}
 }
 
 const defaultSOGitignore = `# Superopen tracking policy: configuration below is committed; generated graph, session, memory, and audit state stays local.
@@ -85,6 +93,9 @@ const defaultSOGitignore = `# Superopen tracking policy: configuration below is 
 
 # Local graph, sessions, memory, and audit history
 graph/
+.graph-v2-*
+graph.previous/
+graph.failed/
 sessions/
 memory/
 audit/

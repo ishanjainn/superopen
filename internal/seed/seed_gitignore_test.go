@@ -30,7 +30,7 @@ func TestSeedWritesTeamHarnessGitignore(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(data)
-	for _, want := range []string{"audit/", "graph/", "memory/", "sessions/"} {
+	for _, want := range []string{"audit/", "graph/", "memory/", "sessions/", ".graph-v2-*"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing local ignore %q in:\n%s", want, got)
 		}
@@ -78,6 +78,7 @@ func TestSeedRemovesObsoleteRuntimeMarkers(t *testing.T) {
 		filepath.Join(paths.MemoryDir, "pending-harvest.json"),
 		filepath.Join(paths.MemoryDir, "last-refresh.json"),
 		filepath.Join(paths.GraphDir, "cache", "last_query_stamp"),
+		filepath.Join(paths.Root, ".graph-v2-leftover", "x"),
 	}
 	for _, path := range legacy {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

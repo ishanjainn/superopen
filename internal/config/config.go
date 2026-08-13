@@ -17,6 +17,7 @@ type Config struct {
 	Graph           GraphConfig           `yaml:"graph"`
 	Evals           EvalsConfig           `yaml:"evals"`
 	Recommendations RecommendationsConfig `yaml:"recommendations"`
+	MCP             MCPConfig             `yaml:"mcp,omitempty"`
 	Observability   ObservabilityConfig   `yaml:"observability"`
 	Memory          MemoryConfig          `yaml:"memory"`
 	Guardrails      GuardrailsConfig      `yaml:"guardrails"`
@@ -58,12 +59,22 @@ type EvalsConfig struct {
 	// Manual `so eval --force` / Sessions UI Evaluate bypasses this.
 	ActiveCooldownHours int `yaml:"active_cooldown_hours,omitempty"`
 	// Backend: auto | agent_cli | llm_api | heuristics
-	// Default auto: sealed Claude/Codex CLI → API key → heuristics. Prefer agent
-	// judging for useful harness improvements; heuristics only when no model is available.
+	// Default auto: live agent, then sealed CLI (claude, codex, opencode, pi) on true SessionEnd/idle.
+	// Heuristics never complete a review under auto.
 	Backend string `yaml:"backend"`
-	// AgentCLI: auto | claude | codex - which sealed CLI to use for agent_cli/auto.
+	// AgentCLI: auto | claude | codex | opencode | pi - which sealed CLI to use for agent_cli/auto.
 	AgentCLI string `yaml:"agent_cli,omitempty"`
-	// Models maps CLI name → model slug for sealed backend calls (claude, codex).
+	// LiveAgent: next same-vendor SessionStart reviews the previous pending session.
+	// Nil defaults true.
+	LiveAgent *bool `yaml:"live_agent,omitempty"`
+	// CLIFallback: true SessionEnd or idle pending-ended may spawn a sealed CLI.
+	// Never Stop. Nil defaults true.
+	CLIFallback *bool `yaml:"cli_fallback,omitempty"`
+	// MidSession: once in the same open chat after considerable work. Default false.
+	MidSession         bool `yaml:"mid_session,omitempty"`
+	MidSessionMinEdits int  `yaml:"mid_session_min_edits,omitempty"`
+	MidSessionMinTools int  `yaml:"mid_session_min_tools,omitempty"`
+	// Models maps CLI name → model slug for sealed backend calls (claude, codex, opencode, pi).
 	Models map[string]string `yaml:"models,omitempty"`
 }
 
@@ -73,6 +84,19 @@ type RecommendationsConfig struct {
 	// AutoApplyTiers: soft | policy | evals | all. Empty + require_approval=true → [soft].
 	// require_approval=false → [all].
 	AutoApplyTiers []string `yaml:"auto_apply_tiers,omitempty"`
+}
+
+// MCPConfig is committed team policy for project-scoped MCP servers.
+// so sync projects these into vendor files (.mcp.json, .cursor/mcp.json).
+type MCPConfig struct {
+	Servers []MCPServer `yaml:"servers,omitempty"`
+}
+
+// MCPServer is a stdio MCP server definition without secrets/env blocks.
+type MCPServer struct {
+	Name    string   `yaml:"name"`
+	Command string   `yaml:"command"`
+	Args    []string `yaml:"args,omitempty"`
 }
 
 type ObservabilityConfig struct {
@@ -95,16 +119,15 @@ func (c Config) LocalTracesDir(repoRoot string) string {
 }
 
 type VizConfig struct {
-	Citymap bool `yaml:"citymap"`
-	Replay  bool `yaml:"replay"`
+	SessionMap bool `yaml:"session_map"`
+	Replay     bool `yaml:"replay"`
 }
 
 type MemoryConfig struct {
 	// Enabled defaults true. When on, SessionStart always injects Active Context.
 	Enabled  *bool  `yaml:"enabled,omitempty"`
 	Provider string `yaml:"provider"`
-	// Backend: auto | agent_cli | llm_api | heuristics - same semantics as evals.backend.
-	// auto prefers Claude Code / Codex CLI, else API key, else heuristics.
+	// Backend: auto | agent_cli | llm_api | heuristics - same selectors as evals.backend.
 	Backend string `yaml:"backend,omitempty"`
 	// IdleHarvestHours: harvest open sessions with no activity for this many hours (default 6).
 	IdleHarvestHours int `yaml:"idle_harvest_hours,omitempty"`
@@ -148,10 +171,15 @@ func Default() Config {
 			RefreshPolicy:   "after_changed_session",
 		},
 		Evals: EvalsConfig{
-			Auto:         true,
-			OnSessionEnd: true,
-			Backend:      "auto",
-			AgentCLI:     "auto",
+			Auto:               true,
+			OnSessionEnd:       true,
+			Backend:            "auto",
+			AgentCLI:           "auto",
+			LiveAgent:          boolPtr(true),
+			CLIFallback:        boolPtr(true),
+			MidSession:         false,
+			MidSessionMinEdits: 3,
+			MidSessionMinTools: 10,
 			Models: map[string]string{
 				"claude": "claude-sonnet-5",
 				"codex":  "gpt-5.6-luna",
@@ -167,7 +195,7 @@ func Default() Config {
 			Exporters: []ExporterConfig{
 				{Type: "local_jsonl", Path: ".so/sessions"},
 			},
-			Viz: VizConfig{Citymap: false, Replay: true},
+			Viz: VizConfig{SessionMap: false, Replay: true},
 		},
 		Memory: MemoryConfig{
 			Provider:         "file_lessons",
@@ -213,6 +241,51 @@ func (c Config) EvalsActiveCooldownHours() int {
 	return 6
 }
 
+// LiveAgentEnabled is the next-SessionStart live reviewer (default true).
+func (c Config) LiveAgentEnabled() bool {
+	if c.Evals.LiveAgent != nil {
+		return *c.Evals.LiveAgent
+	}
+	return true
+}
+
+// CLIFallbackEnabled allows sealed CLI review after a true close or idle (default true).
+func (c Config) CLIFallbackEnabled() bool {
+	if c.Evals.CLIFallback != nil {
+		return *c.Evals.CLIFallback
+	}
+	return true
+}
+
+// MidSessionEnabled is the opt-in same-chat live review (default false).
+func (c Config) MidSessionEnabled() bool { return c.Evals.MidSession }
+
+// MidSessionMinEdits is the edit threshold for mid-session review (default 3).
+func (c Config) MidSessionMinEdits() int {
+	if c.Evals.MidSessionMinEdits > 0 {
+		return c.Evals.MidSessionMinEdits
+	}
+	return 3
+}
+
+// MidSessionMinTools is the tool-call threshold for mid-session review (default 10).
+func (c Config) MidSessionMinTools() int {
+	if c.Evals.MidSessionMinTools > 0 {
+		return c.Evals.MidSessionMinTools
+	}
+	return 10
+}
+
+// ExplicitHeuristics is true when evals.backend opts into offline-only scoring.
+func (c Config) ExplicitHeuristics() bool {
+	switch strings.ToLower(strings.TrimSpace(c.Evals.Backend)) {
+	case "heuristics", "none", "off":
+		return true
+	default:
+		return false
+	}
+}
+
 // AutoApplyTiersResolved returns which recommendation tiers auto-apply on finalize.
 // require_approval=false → all. Empty tiers + approval → soft only.
 func (c Config) AutoApplyTiersResolved() []string {
@@ -246,7 +319,7 @@ func (c Config) AllowsAutoApplyTier(tier string) bool {
 	return false
 }
 
-// ModelForCLI returns the sealed-call model for claude|codex from memory.models then evals.models.
+// ModelForCLI returns the sealed-call model for a CLI from memory.models then evals.models.
 func (c Config) ModelForCLI(cli string) string {
 	cli = strings.ToLower(strings.TrimSpace(cli))
 	if cli == "" {

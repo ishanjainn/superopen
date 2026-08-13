@@ -58,7 +58,7 @@ Run `so dev` from your terminal when you want the local session UI at `http://lo
 | Agent skills | A single `/so` skill across Claude, Cursor, Codex, Gemini, OpenCode, Copilot, Pi, and Agent Skills-compatible tools |
 | Repository understanding | A graph built before the harness is seeded, so context starts from the codebase’s real structure |
 | Shared memory | Preferences, lessons, and project context injected at session start across supported agents in the same repo |
-| Session replay | Hook telemetry stored with each session and replayable as a city map in the local UI |
+| Session replay | Hook telemetry stored with each session and replayable as a session map in the local UI |
 | Evals and recommendations | Post-session scoring that proposes targeted improvements; sensitive changes can require approval |
 | Local-first workflow | `.so/` is ordinary repository data that both the CLI and UI read and write directly |
 | Agent-first CLI | Compact output, JSON envelopes, clear empty states, and useful next-step hints |
@@ -77,7 +77,7 @@ harness updates
 next agent session starts with better context
 ```
 
-Superopen can enrich evaluations with a signed-in Claude Code or Codex CLI, an API key or gateway, or offline heuristics. It falls back to heuristics when no model backend is available.
+Superopen reviews sessions with the **live coding agent** first (`so review-brief` / `so apply-review`). A signed-in `claude`, `codex`, `opencode`, or `pi` CLI is a fallback after a true SessionEnd or idle. Heuristics do not complete reviews under `evals.backend: auto`.
 
 ---
 
@@ -154,16 +154,22 @@ Guardrails live in one inspectable file: `.so/guardrails.yaml`.
 
 ## Evals and recommendations
 
-When a session ends (`so eval` or finalization), Superopen scores it and may propose harness updates.
+When a session closes, Superopen materializes it and leaves review **pending** until a model reviewer finishes. The next same-vendor SessionStart live agent runs `so review-brief` / `so apply-review`. A sealed CLI (`claude`, `codex`, `opencode`, or `pi`) may run on a true SessionEnd or idle if `evals.cli_fallback` is true.
 
 | `evals.backend` | Behavior |
 | --- | --- |
-| `auto` (default) | Claude/Codex CLI → API key → heuristics |
-| `agent_cli` | Claude Code or Codex only (`evals.agent_cli`: `auto`, `claude`, or `codex`) |
-| `llm_api` | API key or gateway only |
+| `auto` (default) | Live agent (next SessionStart) → sealed CLI on true close/idle. Heuristics do **not** complete reviews. |
+| `agent_cli` | Sealed CLI only (`evals.agent_cli`: `auto`, `claude`, `codex`, `opencode`, or `pi`) |
+| `llm_api` | Explicit API key or gateway only |
 | `heuristics` | Offline scoring only (no model tokens) |
 
-Default `auto` reuses your coding-agent login for useful eval notes and recommendations, falls back to an API key, then to free heuristics. Set `heuristics` only when you want zero judging cost.
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `evals.live_agent` | `true` | Next SessionStart reviews the previous pending same-vendor session |
+| `evals.cli_fallback` | `true` | Spawn sealed CLI after true SessionEnd or idle (never Stop) |
+| `evals.mid_session` | `false` | Once in the same open chat after considerable work (`mid_session_min_edits` 3 or `mid_session_min_tools` 10) |
+
+Set `heuristics` only when you want zero judging cost. `live_agent: false` is CLI-only (or pending if no CLI). `cli_fallback: false` waits for a live agent.
 
 ---
 
@@ -174,11 +180,13 @@ Default `auto` reuses your coding-agent login for useful eval notes and recommen
 | `so` | Harness status snapshot |
 | `so install` | Register `/so` with coding agents |
 | `so init` | Bootstrap the harness and install observability hooks |
-| `so sync` | Refresh injectors, graph, and city map |
+| `so sync` | Refresh injectors, graph, and session map |
 | `so dev` | Run the lightweight Next.js UI on `:4444` (`-d` to detach, `stop` to stop) |
 | `so graph query` | Query the repository graph |
 | `so sessions` | List, finalize, and demo sessions |
 | `so sessions port` | Port chats across Claude, Codex, OpenCode, Cursor, and `.so` |
+| `so review-brief` | Print the live-agent session-review prompt |
+| `so apply-review` | Apply live-agent reviewer JSON |
 | `so eval` | Score a session |
 | `so recommend` | List, apply, or dismiss recommendations |
 | `so memory` | Write, store, search, and inject workspace memory |

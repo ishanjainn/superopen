@@ -3,6 +3,7 @@ package inject
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -92,6 +93,20 @@ func TestCheckedInSkillCopiesMatchEmbedded(t *testing.T) {
 		}
 		if string(data) != embeddedSkillMD {
 			t.Fatalf("%s drifted from internal/inject/skill.md", rel)
+		}
+	}
+}
+
+func TestEmbeddedSkillContainsLiveAgentReview(t *testing.T) {
+	for _, needle := range []string{
+		"so review-brief",
+		"so apply-review",
+		"Do **not** ask for an API key",
+		"live coding agent",
+		"Never finish a review with heuristics",
+	} {
+		if !strings.Contains(embeddedSkillMD, needle) {
+			t.Fatalf("skill.md missing %q", needle)
 		}
 	}
 }

@@ -784,7 +784,7 @@ func (s *Store) Consolidate(sessionSummary string, completer llm.Completer) (hin
 			s.heuristicSemanticFromSummary(summary)
 		}
 		_, _ = s.BuildSessionContext(1500, "", ModePersistent)
-		return "Install/login Claude Code or Codex for richer consolidation, or set an API key.", nil
+		return "Install/login claude, codex, opencode, or pi for richer consolidation, or set an API key.", nil
 	}
 	st, _ := s.readState()
 	prefs, projects := []byte(st.Preferences), []byte(st.Projects)
