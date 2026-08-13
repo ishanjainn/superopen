@@ -334,7 +334,8 @@ func enrichRecommendation(paths harness.Paths, sessionID, vendor string, rec *Re
 }
 
 func autoApplyThreshold(recType, changeKind string) int {
-	if strings.EqualFold(recType, "skill") && strings.EqualFold(changeKind, "create") {
+	typ := strings.ToLower(strings.TrimSpace(recType))
+	if strings.EqualFold(changeKind, "create") && (typ == "skill" || typ == "rule" || typ == "rules" || typ == "docs") {
 		return 3
 	}
 	return 1
@@ -876,7 +877,7 @@ func Revert(paths harness.Paths, id string, decision Decision) error {
 }
 
 // ShouldAutoApply is the shared policy for finalization. Soft updates may be
-// applied immediately, but creating a skill requires recurrence plus verified
+// applied immediately, but creating guidance requires recurrence plus verified
 // execution; policy changes, removals, and restructures always require review.
 func ShouldAutoApply(paths harness.Paths, r Recommendation) (bool, string) {
 	change := strings.ToLower(strings.TrimSpace(r.ChangeKind))
@@ -894,20 +895,26 @@ func ShouldAutoApply(paths harness.Paths, r Recommendation) (bool, string) {
 	if harness.NormalizeVendorKind(r.Vendor) == "" {
 		return false, "recommendation has no supported originating vendor"
 	}
-	if typ == "skill" && change == "create" {
+	createsGuidance := change == "create" && (typ == "skill" || typ == "rule" || typ == "rules" || typ == "docs")
+	if createsGuidance {
 		if !r.Verified {
-			return false, "new skill workflow has not been verified"
+			return false, "new guidance workflow has not been verified"
 		}
 		if r.OccurrenceCount < 3 && !r.ExplicitWorkflow {
-			return false, fmt.Sprintf("new skill has %d of 3 supporting sessions", r.OccurrenceCount)
+			return false, fmt.Sprintf("new guidance has %d of 3 supporting sessions", r.OccurrenceCount)
 		}
-		name := skillNameFromPath(r.ProposedPath)
-		for _, existing := range harness.FindExistingSkills(paths.RepoRoot, name) {
-			if filepath.Clean(existing) != filepath.Clean(r.ProposedPath) {
-				return false, "an existing skill already covers this name"
+		if typ == "skill" {
+			name := skillNameFromPath(r.ProposedPath)
+			for _, existing := range harness.FindExistingSkills(paths.RepoRoot, name) {
+				if filepath.Clean(existing) != filepath.Clean(r.ProposedPath) {
+					return false, "an existing skill already covers this name"
+				}
 			}
 		}
-		return true, "verified workflow reached the automatic skill threshold"
+		if r.ExplicitWorkflow {
+			return true, "verified explicit workflow satisfies the automatic creation threshold"
+		}
+		return true, "verified workflow reached the automatic creation threshold"
 	}
 	return true, "validated existing guidance update"
 }

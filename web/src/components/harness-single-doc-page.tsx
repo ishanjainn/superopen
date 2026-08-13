@@ -40,7 +40,7 @@ const CONFIG: Record<
 > = {
   guardrails: {
     title: "Guardrails",
-    path: "guardrails/guardrails.yaml",
+	path: "guardrails.yaml",
     emptyTitle: "No guardrails yet",
     emptyBody:
       "Add denied commands and sensitive paths (hard stops in coding hooks), or advisory rules (soft guidance). Hooks already load this file - no reinstall after edits.",
@@ -49,7 +49,7 @@ const CONFIG: Record<
   },
   evaluations: {
     title: "Evaluations",
-    path: "evals/configs.yaml",
+	path: "evals.yaml",
     emptyTitle: "No evaluations yet",
     emptyBody:
       "Evaluations define what good sessions look like - automated checks plus agent guidance for judges.",

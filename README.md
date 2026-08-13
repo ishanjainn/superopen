@@ -235,4 +235,7 @@ Superopen is Apache-2.0 licensed; see [LICENSE](LICENSE) and [NOTICE](NOTICE). C
 | --- | --- |
 | `ci-cli.yml` | `go vet`, `go test -race`, cross-compile, plugin-sync drift checks |
 | `ci-web.yml` | TypeScript, ESLint, Vitest, Next build |
+| `ci-cross-platform.yml` | Native CLI and file-backed UI tests on Linux, macOS, and Windows |
+| `ci-automation.yml` | Workflow linting and release-automation validation |
 | `release-cli.yml` | Tagged `cli-X.Y.Z` binary release |
+| `release-packages.yml` | Coordinated package release automation |

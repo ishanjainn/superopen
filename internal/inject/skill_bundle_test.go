@@ -73,3 +73,19 @@ func TestRemoveSkillBundle_RemovesNewVendors(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckedInSkillCopiesMatchEmbedded(t *testing.T) {
+	repo := filepath.Clean(filepath.Join("..", ".."))
+	for _, rel := range []string{
+		".claude/skills/so/SKILL.md", ".cursor/skills/so/SKILL.md", ".codex/skills/so/SKILL.md",
+		".gemini/skills/so/SKILL.md", ".opencode/skills/so/SKILL.md", ".github/skills/so/SKILL.md", ".pi/skills/so/SKILL.md",
+	} {
+		data, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if string(data) != embeddedSkillMD {
+			t.Fatalf("%s drifted from internal/inject/skill.md", rel)
+		}
+	}
+}

@@ -1,6 +1,7 @@
 package tracestore_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,5 +48,26 @@ func TestInboxRemovedAfterTraceResolves(t *testing.T) {
 	got, err := s.Query(tracestore.QueryFilter{SessionID: "resolved"})
 	if err != nil || len(got) != 2 {
 		t.Fatalf("resolved events: %d (%v)", len(got), err)
+	}
+}
+
+func TestLatestSessionIDIgnoresGlobalOrdering(t *testing.T) {
+	dir := t.TempDir()
+	s := tracestore.NewLocalJSONL(dir)
+	spans := make([]tracestore.Span, 0, 5002)
+	for i := 0; i < 5001; i++ {
+		spans = append(spans, tracestore.Span{TraceID: "old-trace", SpanID: fmt.Sprintf("old-%d", i), Name: "coding_agent.tool", SessionID: "a-old", StartTimeUnixN: int64(i + 1)})
+	}
+	spans = append(spans, tracestore.Span{TraceID: "new-trace", SpanID: "new", Name: "coding_agent.llm.turn", SessionID: "z-new", StartTimeUnixN: 9000})
+	if err := s.Write(spans); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.LatestSessionID()
+	if err != nil || id != "z-new" {
+		t.Fatalf("latest=%q err=%v", id, err)
+	}
+	got, err := s.Query(tracestore.QueryFilter{SessionID: id})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("exact latest query: %d spans err=%v", len(got), err)
 	}
 }

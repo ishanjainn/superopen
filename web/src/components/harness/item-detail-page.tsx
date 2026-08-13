@@ -29,8 +29,8 @@ import { cn } from "@/lib/utils";
 type Domain = "guardrails" | "evaluations";
 
 const FILE: Record<Domain, string> = {
-  guardrails: "guardrails/guardrails.yaml",
-  evaluations: "evals/configs.yaml",
+	guardrails: "guardrails.yaml",
+	evaluations: "evals.yaml",
 };
 
 const KIND_BLURB: Record<HarnessItemKind, string> = {

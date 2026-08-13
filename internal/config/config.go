@@ -345,25 +345,21 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	var header struct {
+		LayoutVersion *int `yaml:"layout_version"`
+	}
+	if err := yaml.Unmarshal(data, &header); err != nil {
+		return Config{}, fmt.Errorf("parse config: %w", err)
+	}
+	if header.LayoutVersion == nil || *header.LayoutVersion != 2 {
+		return Config{}, fmt.Errorf("unsupported Superopen layout: expected layout_version: 2; remove .so and run so init")
+	}
 	cfg := Default()
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
-	cfg.dropLegacyImplicitLLM()
 	cfg.normalizeObservability()
 	return cfg, nil
-}
-
-// dropLegacyImplicitLLM removes the API block written by pre-v2 defaults.
-// An API backend must now be explicitly configured; the old exact values did
-// not represent user intent and caused ambient API keys to be selected.
-func (c *Config) dropLegacyImplicitLLM() {
-	if strings.EqualFold(strings.TrimSpace(c.LLM.Provider), "openai") &&
-		strings.TrimSpace(c.LLM.Model) == "gpt-4.1-mini" &&
-		strings.TrimSpace(c.LLM.APIKeyEnv) == "SUPEROPEN_LLM_API_KEY" &&
-		strings.TrimSpace(c.LLM.BaseURL) == "" {
-		c.LLM = LLMConfig{}
-	}
 }
 
 // normalizeObservability keeps a single local_jsonl file exporter. The UI

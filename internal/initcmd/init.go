@@ -57,6 +57,16 @@ func Run(opts Options) (Report, error) {
 		}
 	}
 	paths := harness.Resolve(root)
+	cfg := config.Default()
+	if _, statErr := os.Stat(paths.Config); statErr == nil {
+		var err error
+		cfg, err = config.Load(paths.Config)
+		if err != nil {
+			return Report{}, err
+		}
+	} else if !os.IsNotExist(statErr) {
+		return Report{}, statErr
+	}
 	if err := paths.EnsureDirs(); err != nil {
 		return Report{}, err
 	}
@@ -74,9 +84,7 @@ func Run(opts Options) (Report, error) {
 		return Report{}, fmt.Errorf("audit layout: %w", err)
 	}
 
-	cfg, err := config.Load(paths.Config)
-	if err != nil {
-		cfg = config.Default()
+	if _, err := os.Stat(paths.Config); os.IsNotExist(err) {
 		if err := config.Save(paths.Config, cfg); err != nil {
 			return Report{}, err
 		}

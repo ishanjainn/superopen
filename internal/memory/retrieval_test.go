@@ -76,6 +76,50 @@ func TestRetrieveEligibilityIsolationAndDeduplication(t *testing.T) {
 	}
 }
 
+func TestManualRetrieveIncludesFirstOccurrence(t *testing.T) {
+	s := retrievalStore(t)
+	p := Pattern{Fingerprint: "fp_first", Vendor: "cursor", Kind: "workflow", Summary: "Run focused authentication tests after editing authentication middleware", Keywords: []string{"authentication", "middleware", "tests"}, Confidence: .6}
+	if _, err := s.UpsertPattern(p, "s1", false); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := s.Retrieve(RetrievalQuery{Text: p.Summary, Vendor: "cursor", Mode: RetrievalManual})
+	if err != nil || len(hits) != 1 || !containsString(hits[0].Reasons, "unverified") {
+		t.Fatalf("manual first occurrence: hits=%+v err=%v", hits, err)
+	}
+	if automatic, err := s.Retrieve(RetrievalQuery{Text: p.Summary, Vendor: "cursor"}); err != nil || len(automatic) != 0 {
+		t.Fatalf("automatic first occurrence: hits=%+v err=%v", automatic, err)
+	}
+}
+
+func TestRetrieveReturnsRankedPartialHitsWhenBudgetExpires(t *testing.T) {
+	s := retrievalStore(t)
+	for _, id := range []string{"one", "two"} {
+		p := Pattern{Fingerprint: id, Vendor: "codex", Kind: "workflow", Summary: "Run focused tests for authentication", Confidence: .9, ExplicitWorkflow: true}
+		if _, err := s.UpsertPattern(p, "s-"+id, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checks := 0
+	hits, err := s.Retrieve(RetrievalQuery{Text: "focused authentication tests", Vendor: "codex", expired: func() bool {
+		checks++
+		return checks > 1
+	}})
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("partial retrieval: hits=%+v err=%v", hits, err)
+	}
+}
+
+func TestRetrieveFailsOpenForCorruptState(t *testing.T) {
+	s := retrievalStore(t)
+	if err := os.WriteFile(s.statePath(), []byte("{broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := s.Retrieve(RetrievalQuery{Text: "anything", Vendor: "codex"})
+	if err != nil || len(hits) != 0 {
+		t.Fatalf("corrupt memory must fail open: hits=%v err=%v", hits, err)
+	}
+}
+
 func TestFileRecallRequiresCurrentExactPath(t *testing.T) {
 	s := retrievalStore(t)
 	target := filepath.Join(s.Paths.RepoRoot, "internal", "auth.go")

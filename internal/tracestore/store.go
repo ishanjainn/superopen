@@ -205,23 +205,15 @@ func (s *LocalJSONL) Query(filter QueryFilter) ([]Span, error) {
 				continue
 			}
 			if filter.SessionID != "" {
-				sid := sp.SessionID
-				if sid == "" {
-					sid = sp.Attributes["gen_ai.conversation.id"]
-				}
-				if sid == "" {
-					sid = sp.Attributes["coding_agent.session.id"]
-				}
-				if sid == "" {
-					sid = sp.Attributes["coding_agent.session_id"]
-				}
+				sid := resolvedSessionID(sp)
 				// Match either the rollup conversation id or the process session id
 				// so cost/finalize still find spans stamped before conversation-first
 				// ResolveSessionID.
 				if sid != filter.SessionID &&
 					sp.Attributes["gen_ai.conversation.id"] != filter.SessionID &&
 					sp.Attributes["coding_agent.session.id"] != filter.SessionID &&
-					sp.SessionID != filter.SessionID {
+					sp.Attributes["coding_agent.session_id"] != filter.SessionID &&
+					sp.SessionID != filter.SessionID && sp.TraceID != filter.SessionID {
 					continue
 				}
 			}
@@ -243,6 +235,38 @@ func (s *LocalJSONL) Query(filter QueryFilter) ([]Span, error) {
 		}
 	}
 	return out, nil
+}
+
+// LatestSessionID returns the session owning the newest stored event without
+// applying a global result cap. Callers can then query that session exactly.
+func (s *LocalJSONL) LatestSessionID() (string, error) {
+	spans, err := s.Query(QueryFilter{})
+	if err != nil {
+		return "", err
+	}
+	var latestID string
+	var latestAt int64
+	for _, sp := range spans {
+		id := resolvedSessionID(sp)
+		if id == "" {
+			continue
+		}
+		at := sp.StartTimeUnixN
+		if sp.EndTimeUnixN > at {
+			at = sp.EndTimeUnixN
+		}
+		if latestID == "" || at > latestAt {
+			latestID, latestAt = id, at
+		}
+	}
+	return latestID, nil
+}
+
+func resolvedSessionID(sp Span) string {
+	if id := storedSessionID(sp); id != "" {
+		return id
+	}
+	return strings.TrimSpace(sp.TraceID)
 }
 
 func storedSessionID(sp Span) string {

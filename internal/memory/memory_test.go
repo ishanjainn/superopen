@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -163,5 +164,26 @@ func TestPatternsAggregateOncePerSessionAndRetentionDropsReferences(t *testing.T
 	patterns, _ := store.ListPatterns()
 	if patterns[0].Occurrences != 2 || len(patterns[0].SessionIDs) != 1 || len(patterns[0].VerifiedSessions) != 0 {
 		t.Fatalf("retention should keep count but remove references: %+v", patterns[0])
+	}
+}
+
+func TestPrunePatternsPrefersDismissedAndProtectsDurablePatterns(t *testing.T) {
+	now := time.Now().UTC()
+	st := stateFile{Patterns: make([]Pattern, 0, 1002)}
+	st.Patterns = append(st.Patterns,
+		Pattern{Fingerprint: "explicit", ExplicitWorkflow: true, Status: "dismissed", LastObservedAt: now.Add(-400 * 24 * time.Hour)},
+		Pattern{Fingerprint: "verified", VerifiedSessions: []string{"s1"}, LastObservedAt: now.Add(-400 * 24 * time.Hour)},
+		Pattern{Fingerprint: "old-dismissed", Status: "dismissed", LastObservedAt: now.Add(-10 * 24 * time.Hour)},
+	)
+	for i := 0; i < 999; i++ {
+		st.Patterns = append(st.Patterns, Pattern{Fingerprint: fmt.Sprintf("active-%04d", i), Confidence: .8, LastObservedAt: now})
+	}
+	prunePatterns(&st, now)
+	seen := map[string]bool{}
+	for _, p := range st.Patterns {
+		seen[p.Fingerprint] = true
+	}
+	if len(st.Patterns) != 1000 || seen["old-dismissed"] || !seen["explicit"] || !seen["verified"] {
+		t.Fatalf("unexpected pruning: len=%d dismissed=%v explicit=%v verified=%v", len(st.Patterns), seen["old-dismissed"], seen["explicit"], seen["verified"])
 	}
 }

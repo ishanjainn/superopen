@@ -24,6 +24,13 @@ const (
 	DefaultTurnHits   = 4
 )
 
+type RetrievalMode string
+
+const (
+	RetrievalAutomatic RetrievalMode = "automatic"
+	RetrievalManual    RetrievalMode = "manual"
+)
+
 type RetrievalQuery struct {
 	Text       string
 	Vendor     string
@@ -34,6 +41,8 @@ type RetrievalQuery struct {
 	MaxTokens  int
 	MaxResults int
 	FileOnly   bool
+	Mode       RetrievalMode
+	expired    func() bool
 }
 
 type RetrievalHit struct {
@@ -79,10 +88,7 @@ type EvidenceEvent struct {
 func (s *Store) StartupPatterns(vendor string, maxTokens int) ([]RetrievalHit, error) {
 	st, err := s.readState()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
+		return nil, nil
 	}
 	vendor = harness.NormalizeVendorKind(vendor)
 	var hits []RetrievalHit
@@ -130,19 +136,29 @@ func boolScore(v bool) float64 {
 // Retrieve performs bounded local ranking. It never invokes a model, graph
 // builder, network client, or external executable.
 func (s *Store) Retrieve(q RetrievalQuery) ([]RetrievalHit, error) {
-	deadline := time.Now().Add(40 * time.Millisecond)
+	if q.Mode == "" {
+		q.Mode = RetrievalAutomatic
+	}
+	if q.expired == nil {
+		budget := 150 * time.Millisecond
+		if q.Mode == RetrievalManual {
+			budget = 2 * time.Second
+		}
+		deadline := time.Now().Add(budget)
+		q.expired = func() bool { return time.Now().After(deadline) }
+	}
 	st, err := s.readState()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
+		return nil, nil
 	}
 	q.Vendor = harness.NormalizeVendorKind(q.Vendor)
 	if q.MaxTokens <= 0 {
 		q.MaxTokens = DefaultTurnTokens
 	}
-	if q.MaxResults <= 0 || q.MaxResults > DefaultTurnHits {
+	if q.MaxResults <= 0 {
+		q.MaxResults = DefaultTurnHits
+	}
+	if q.Mode == RetrievalAutomatic && q.MaxResults > DefaultTurnHits {
 		q.MaxResults = DefaultTurnHits
 	}
 	queryTokens := tokenSet(q.Text + " " + q.Branch + " " + q.Worktree + " " + strings.Join(q.Paths, " "))
@@ -150,8 +166,8 @@ func (s *Store) Retrieve(q RetrievalQuery) ([]RetrievalHit, error) {
 	now := time.Now().UTC()
 	var ranked []RetrievalHit
 	for _, p := range st.Patterns {
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("memory retrieval deadline exceeded")
+		if q.expired() {
+			break
 		}
 		if p.Status == "dismissed" || p.Status == "superseded" || p.Status == "obsolete" {
 			continue
@@ -159,11 +175,11 @@ func (s *Store) Retrieve(q RetrievalQuery) ([]RetrievalHit, error) {
 		if p.Scope == "" {
 			p.Scope = "vendor"
 		}
-		if p.Scope != "shared" && harness.NormalizeVendorKind(p.Vendor) != q.Vendor {
+		if p.Scope != "shared" && (q.Mode == RetrievalAutomatic || q.Vendor != "") && harness.NormalizeVendorKind(p.Vendor) != q.Vendor {
 			continue
 		}
 		eligible := p.ExplicitWorkflow || len(p.VerifiedSessions) > 0 || (p.Occurrences >= 2 && p.Confidence >= 0.70)
-		if !eligible {
+		if q.Mode == RetrievalAutomatic && !eligible {
 			continue
 		}
 		contentID := patternContentID(p)
@@ -171,7 +187,7 @@ func (s *Store) Retrieve(q RetrievalQuery) ([]RetrievalHit, error) {
 			continue
 		}
 		stale := s.patternStale(p)
-		if stale {
+		if stale && q.Mode == RetrievalAutomatic {
 			continue
 		}
 		patternText := strings.Join(append(append([]string{p.Summary, p.Applicability, p.TargetPath}, p.Keywords...), append(p.Symbols, p.ErrorSignatures...)...), " ")
@@ -203,10 +219,20 @@ func (s *Store) Retrieve(q RetrievalQuery) ([]RetrievalHit, error) {
 		if p.Contradictions > 0 {
 			score -= .35
 		}
-		if score < .55 {
+		threshold := .55
+		if q.Mode == RetrievalManual {
+			threshold = .45
+		}
+		if score < threshold {
 			continue
 		}
 		reasons := []string{}
+		if !eligible {
+			reasons = append(reasons, "unverified")
+		}
+		if stale {
+			reasons = append(reasons, "stale")
+		}
 		if textOverlap > 0 {
 			reasons = append(reasons, "prompt")
 		}
@@ -222,7 +248,7 @@ func (s *Store) Retrieve(q RetrievalQuery) ([]RetrievalHit, error) {
 		h := RetrievalHit{Fingerprint: p.Fingerprint, ContentID: contentID, Vendor: p.Vendor, Scope: p.Scope, Status: p.Status,
 			Kind: p.Kind, Summary: p.Summary, Applicability: p.Applicability, TargetPath: p.TargetPath,
 			Score: score, Reasons: reasons, Occurrences: p.Occurrences, Verified: len(p.VerifiedSessions),
-			Confidence: p.Confidence, Evidence: p.EvidenceRefs}
+			Confidence: p.Confidence, Evidence: p.EvidenceRefs, Stale: stale}
 		h.fileEvidenceQuality = evidenceQuality(p.EvidenceRefs)
 		if q.FileOnly && h.fileEvidenceQuality > 0 {
 			h.Reasons = append(h.Reasons, "modified-evidence")
@@ -242,9 +268,6 @@ func (s *Store) Retrieve(q RetrievalQuery) ([]RetrievalHit, error) {
 	var out []RetrievalHit
 	used := int64(0)
 	for _, h := range ranked {
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("memory retrieval deadline exceeded")
-		}
 		if len(out) >= q.MaxResults || used+h.EstimatedTokens > int64(q.MaxTokens) {
 			continue
 		}

@@ -68,24 +68,23 @@ func cmdMemory() *cobra.Command {
 			if len(args) == 0 {
 				return axi.Err(fmt.Errorf("provide a query or --id"))
 			}
-			if searchDetails {
-				hits, err := s.Retrieve(memory.RetrievalQuery{Text: strings.Join(args, " "), Vendor: searchVendor, MaxTokens: 4000, MaxResults: 4})
-				if err != nil {
-					return axi.Err(err)
-				}
-				return out().HumanOrJSON("result", func() {
-					for _, h := range hits {
-						fmt.Printf("[%s] score=%.2f tokens=%d reasons=%s  %s\n", h.Fingerprint, h.Score, h.EstimatedTokens, strings.Join(h.Reasons, ","), h.Summary)
-					}
-				}, hits)
-			}
-			hits, err := s.HybridSearch(strings.Join(args, " "), 20)
+			hits, err := s.Retrieve(memory.RetrievalQuery{Text: strings.Join(args, " "), Vendor: searchVendor, MaxTokens: 4000, MaxResults: 20, Mode: memory.RetrievalManual})
 			if err != nil {
 				return axi.Err(err)
 			}
 			return out().HumanOrJSON("result", func() {
 				for _, h := range hits {
-					fmt.Printf("[%s] %s  %s\n", h.Kind, h.ID, h.Snippet)
+					if searchDetails {
+						fmt.Printf("[%s] vendor=%s score=%.2f tokens=%d reasons=%s  %s\n", h.Fingerprint, h.Vendor, h.Score, h.EstimatedTokens, strings.Join(h.Reasons, ","), h.Summary)
+						continue
+					}
+					label := ""
+					if h.Stale {
+						label = " stale"
+					} else if h.Verified == 0 && h.Occurrences < 2 {
+						label = " unverified"
+					}
+					fmt.Printf("[%s] %s%s  %s\n", h.Fingerprint, h.Vendor, label, h.Summary)
 				}
 			}, hits)
 		},

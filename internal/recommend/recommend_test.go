@@ -196,6 +196,28 @@ func TestNewSkillAutoApplyRequiresThreeVerifiedSessions(t *testing.T) {
 	}
 }
 
+func TestNewRulesAndDocsUseCreationThreshold(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	for _, rec := range []Recommendation{
+		{Type: "rules", ChangeKind: "create", Vendor: "codex", ProposedPath: filepath.Join(root, ".codex", "rules", "testing.md")},
+		{Type: "docs", ChangeKind: "create", Vendor: "codex", ProposedPath: filepath.Join(root, "internal", "AGENTS.md")},
+	} {
+		rec.Verified = true
+		rec.OccurrenceCount = 1
+		if allowed, _ := ShouldAutoApply(paths, rec); allowed {
+			t.Fatalf("first occurrence auto-created %+v", rec)
+		}
+		rec.OccurrenceCount = 3
+		if allowed, reason := ShouldAutoApply(paths, rec); !allowed {
+			t.Fatalf("threshold rejected %+v: %s", rec, reason)
+		}
+		if got := autoApplyThreshold(rec.Type, rec.ChangeKind); got != 3 {
+			t.Fatalf("threshold=%d for %s", got, rec.Type)
+		}
+	}
+}
+
 func TestAutoApplyProtectsPolicySharedAgentsAndManagedSkill(t *testing.T) {
 	paths := harness.Resolve(t.TempDir())
 	cases := []Recommendation{

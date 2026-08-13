@@ -35,7 +35,6 @@ import (
 	"github.com/ishanjainn/superopen/internal/llm"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/nativedocs"
-	"github.com/ishanjainn/superopen/internal/otlp"
 	"github.com/ishanjainn/superopen/internal/projects"
 	"github.com/ishanjainn/superopen/internal/recommend"
 	"github.com/ishanjainn/superopen/internal/seed"
@@ -63,6 +62,18 @@ func main() {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE:          runRoot,
+	}
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		switch cmd.Name() {
+		case "install", "uninstall", "version", "doctor":
+			return nil
+		}
+		path := harness.Resolve(repoRoot()).Config
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return nil
+		}
+		_, err := config.Load(path)
+		return err
 	}
 	axi.Bind(root, &axiFlags)
 	root.Version = version.Display()
@@ -918,41 +929,9 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) (retErr error
 	cfg, _ := config.Load(paths.Config)
 	applyTracesDir(root, &paths, cfg)
 	store := tracestore.NewLocalJSONL(paths.TracesDir)
-	spans, err := store.Query(tracestore.QueryFilter{Limit: 5000})
+	latestID, ss, err := loadSessionSpans(store, sessionID)
 	if err != nil {
 		return err
-	}
-	if len(spans) == 0 {
-		return fmt.Errorf("no spans in TraceStore")
-	}
-	// group by session id
-	bySession := map[string][]tracestore.Span{}
-	for _, sp := range spans {
-		sid := otlp.ResolveSessionID(sp.Attributes, "")
-		if sid == "" {
-			sid = sp.SessionID
-		}
-		if sid == "" {
-			sid = sp.TraceID
-		}
-		bySession[sid] = append(bySession[sid], sp)
-	}
-
-	latestID := strings.TrimSpace(sessionID)
-	if latestID == "" {
-		var latestTime int64
-		for id, ss := range bySession {
-			for _, sp := range ss {
-				if sp.StartTimeUnixN > latestTime {
-					latestTime = sp.StartTimeUnixN
-					latestID = id
-				}
-			}
-		}
-	}
-	ss := bySession[latestID]
-	if len(ss) == 0 {
-		return fmt.Errorf("no spans for session %s", latestID)
 	}
 	sess := session.NewStore(paths)
 	if existing, existingErr := sess.Get(latestID); existingErr == nil && existing.Status == session.StatusEnded && existing.EndedAt != nil {
@@ -1098,36 +1077,9 @@ func refreshSession(root, sessionID string) error {
 	cfg, _ := config.Load(paths.Config)
 	applyTracesDir(root, &paths, cfg)
 	store := tracestore.NewLocalJSONL(paths.TracesDir)
-	spans, err := store.Query(tracestore.QueryFilter{Limit: 5000})
+	id, ss, err := loadSessionSpans(store, sessionID)
 	if err != nil {
 		return err
-	}
-	bySession := map[string][]tracestore.Span{}
-	for _, sp := range spans {
-		sid := otlp.ResolveSessionID(sp.Attributes, "")
-		if sid == "" {
-			sid = sp.SessionID
-		}
-		if sid == "" {
-			sid = sp.TraceID
-		}
-		bySession[sid] = append(bySession[sid], sp)
-	}
-	id := strings.TrimSpace(sessionID)
-	if id == "" {
-		var latest int64
-		for candidate, candidateSpans := range bySession {
-			for _, sp := range candidateSpans {
-				if sp.StartTimeUnixN > latest {
-					latest = sp.StartTimeUnixN
-					id = candidate
-				}
-			}
-		}
-	}
-	ss := bySession[id]
-	if len(ss) == 0 {
-		return fmt.Errorf("no spans for session %s", id)
 	}
 	if !session.SpansHaveActivity(ss) {
 		return nil
@@ -1158,6 +1110,28 @@ func refreshSession(root, sessionID string) error {
 	_, _ = viz.BuildReplayFromSpans(paths, id, ss)
 	fmt.Printf("Refreshed active session %s\n", id)
 	return nil
+}
+
+func loadSessionSpans(store *tracestore.LocalJSONL, requestedID string) (string, []tracestore.Span, error) {
+	id := strings.TrimSpace(requestedID)
+	var err error
+	if id == "" {
+		id, err = store.LatestSessionID()
+		if err != nil {
+			return "", nil, err
+		}
+		if id == "" {
+			return "", nil, fmt.Errorf("no spans in TraceStore")
+		}
+	}
+	spans, err := store.Query(tracestore.QueryFilter{SessionID: id})
+	if err != nil {
+		return "", nil, err
+	}
+	if len(spans) == 0 {
+		return "", nil, fmt.Errorf("no spans for session %s", id)
+	}
+	return id, spans, nil
 }
 
 // finalizeLatestSession kept as alias for callers/tests.

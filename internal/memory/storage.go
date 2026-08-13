@@ -48,16 +48,31 @@ func (s *Store) stateLockPath() string {
 
 func prunePatterns(st *stateFile, now time.Time) {
 	const maxPatterns = 1000
-	keep := st.Patterns[:0]
+	active := make([]Pattern, 0, len(st.Patterns))
+	discardable := make([]Pattern, 0)
 	for _, p := range st.Patterns {
 		protected := p.ExplicitWorkflow || p.Status == "applied" || len(p.VerifiedSessions) > 0
+		dismissed := p.Status == "dismissed" || p.Status == "superseded" || p.Status == "obsolete"
 		inactive := now.Sub(p.LastObservedAt) >= 180*24*time.Hour
+		if dismissed && !protected && inactive {
+			continue
+		}
+		if dismissed && !protected {
+			discardable = append(discardable, p)
+			continue
+		}
 		if !protected && inactive && p.Confidence < .70 && p.RetrievalCount == 0 {
 			continue
 		}
-		keep = append(keep, p)
+		active = append(active, p)
 	}
-	st.Patterns = keep
+	// Dismissed/obsolete/superseded evidence is the first class removed when
+	// compaction is needed, but it remains available until the store reaches
+	// its bound so feedback provenance is not discarded eagerly.
+	sort.SliceStable(discardable, func(i, j int) bool {
+		return discardable[i].LastObservedAt.After(discardable[j].LastObservedAt)
+	})
+	st.Patterns = append(active, discardable...)
 	if len(st.Patterns) <= maxPatterns {
 		return
 	}

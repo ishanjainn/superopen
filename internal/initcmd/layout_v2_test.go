@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/ishanjainn/superopen/internal/artifactmeta"
@@ -54,5 +55,24 @@ func TestFreshInitCreatesOnlyDescribedV2HarnessFiles(t *testing.T) {
 	cfg, err := config.Load(filepath.Join(repo, ".so", "config.yaml"))
 	if err != nil || cfg.LayoutVersion != 2 {
 		t.Fatalf("layout version: %d (%v)", cfg.LayoutVersion, err)
+	}
+}
+
+func TestInitRejectsUnsupportedLayoutWithoutAddingV2Files(t *testing.T) {
+	repo := t.TempDir()
+	soDir := filepath.Join(repo, ".so")
+	if err := os.MkdirAll(soDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(soDir, "config.yaml"), []byte("vendors: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := initcmd.Run(initcmd.Options{RepoRoot: repo, CodeOnly: true, NoLLM: true, SkipHooks: true, SkipInject: true})
+	if err == nil || !strings.Contains(err.Error(), "layout_version: 2") {
+		t.Fatalf("expected unsupported-layout error, got %v", err)
+	}
+	entries, readErr := os.ReadDir(soDir)
+	if readErr != nil || len(entries) != 1 || entries[0].Name() != "config.yaml" {
+		t.Fatalf("unsupported layout was mutated: entries=%v err=%v", entries, readErr)
 	}
 }

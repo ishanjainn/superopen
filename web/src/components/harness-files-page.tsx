@@ -50,17 +50,7 @@ function matchEntry(
   return (
     list.find((e) => !e.isDir && e.path === q) ||
     list.find((e) => !e.isDir && e.path === underDir) ||
-    list.find((e) => !e.isDir && e.name === q) ||
-    // Backward compatibility for older skills/cursor/foo URLs.
-    list.find(
-      (e) =>
-        !e.isDir &&
-        (e.path === `${underDir}/SKILL.md` || e.path.endsWith(`/${q}/SKILL.md`))
-    ) ||
-    // Unique basenames only (e.g. rules/coding.md) — never SKILL.md alone
-    (q !== "SKILL.md" && !q.includes("/")
-      ? list.find((e) => !e.isDir && e.path.endsWith("/" + q))
-      : undefined)
+	list.find((e) => !e.isDir && e.name === q)
   );
 }
 

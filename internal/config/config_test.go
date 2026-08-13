@@ -75,18 +75,15 @@ func TestDefaultConfigDoesNotAdvertiseAPIProvider(t *testing.T) {
 	}
 }
 
-func TestLoadDropsLegacyImplicitOpenAIBlock(t *testing.T) {
+func TestLoadRequiresV2Layout(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	legacy := "layout_version: 2\nllm:\n  provider: openai\n  model: gpt-4.1-mini\n  api_key_env: SUPEROPEN_LLM_API_KEY\n"
+	legacy := "llm:\n  provider: openai\n"
 	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.HasExplicitLLM() {
-		t.Fatalf("legacy generated block remained explicit: %+v", cfg.LLM)
+	_, err := config.Load(path)
+	if err == nil || !strings.Contains(err.Error(), "layout_version: 2") {
+		t.Fatalf("expected unsupported-layout error, got %v", err)
 	}
 }
 
