@@ -343,3 +343,34 @@ func TestGenerateRootAgentsWithoutHotArea(t *testing.T) {
 		t.Fatalf("expected root AGENTS.md docs rec, got %+v", recs)
 	}
 }
+
+func TestGenerateDoesNotTreatMissingDimensionsAsZero(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	_ = paths.EnsureDirs()
+	_ = session.NewStore(paths).Start(session.Meta{ID: "read-only", Vendor: "codex"})
+	recs, err := Generate(paths, "read-only", eval.Result{
+		SessionID: "read-only", EvidenceStatus: "sufficient", EvaluationScope: "complete",
+		Dimensions: map[string]float64{"exploration": 0.8, "wandering": 0.2, "harness_use": 0.9},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("missing scope/verification dimensions generated recommendations: %+v", recs)
+	}
+}
+
+func TestGenerateSkipsActiveSnapshot(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	_ = paths.EnsureDirs()
+	recs, err := Generate(paths, "active", eval.Result{
+		SessionID: "active", EvidenceStatus: "sufficient", EvaluationScope: "snapshot",
+		Dimensions: map[string]float64{"scope": 0, "harness_use": 0, "wandering": 1},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 0 {
+		t.Fatalf("snapshot generated recommendations: %+v", recs)
+	}
+}

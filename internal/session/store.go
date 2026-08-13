@@ -669,6 +669,35 @@ func VendorFromSpans(spans []tracestore.Span) string {
 	return ""
 }
 
+// StartTimeFromSpans returns the earliest plausible telemetry timestamp. Some
+// vendor hooks omit timestamps or emit zero/Unix-epoch values; those must not
+// turn an active session into a decades-long session in the UI.
+func StartTimeFromSpans(spans []tracestore.Span) time.Time {
+	now := time.Now().UTC()
+	var earliest time.Time
+	for _, sp := range spans {
+		if sp.StartTimeUnixN <= 0 {
+			continue
+		}
+		candidate := time.Unix(0, sp.StartTimeUnixN).UTC()
+		if !validSessionTime(candidate, now) {
+			continue
+		}
+		if earliest.IsZero() || candidate.Before(earliest) {
+			earliest = candidate
+		}
+	}
+	if earliest.IsZero() {
+		return now
+	}
+	return earliest
+}
+
+func validSessionTime(value, now time.Time) bool {
+	oldest := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	return !value.IsZero() && !value.Before(oldest) && !value.After(now.Add(24*time.Hour))
+}
+
 // mergeMetaSticky keeps previously detected identity fields when a later
 // Start/upsert arrives with blanks (e.g. finalize reading coding_agent.vendor
 // while spans only set coding_agent.client). Once vendor/model/user are known,
@@ -708,7 +737,7 @@ func mergeMetaSticky(existing, incoming Meta) Meta {
 	if !out.IsSubagent && existing.IsSubagent && out.ParentID != "" {
 		out.IsSubagent = true
 	}
-	if out.StartedAt.IsZero() {
+	if !validSessionTime(out.StartedAt, time.Now().UTC()) {
 		out.StartedAt = existing.StartedAt
 	}
 	if out.Tokens == 0 {
@@ -742,7 +771,7 @@ func (s *Store) Start(meta Meta) error {
 	if existing, err := s.Get(meta.ID); err == nil {
 		meta = mergeMetaSticky(existing, meta)
 	}
-	if meta.StartedAt.IsZero() {
+	if !validSessionTime(meta.StartedAt, time.Now().UTC()) {
 		meta.StartedAt = time.Now().UTC()
 	}
 	meta.Status = StatusActive
@@ -837,9 +866,6 @@ func (s *Store) UpsertActiveFromSpans(spans []tracestore.Span) {
 			meta.IsSubagent = false
 		}
 		for _, sp := range b.spans {
-			if meta.StartedAt.IsZero() && sp.StartTimeUnixN > 0 {
-				meta.StartedAt = time.Unix(0, sp.StartTimeUnixN).UTC()
-			}
 			if meta.Vendor == "" {
 				meta.Vendor = VendorFromAttrs(sp.Attributes)
 			}
@@ -884,8 +910,8 @@ func (s *Store) UpsertActiveFromSpans(spans []tracestore.Span) {
 		if IsPlaceholderTitle(meta.Title, meta.ID) {
 			EnsureTitle(&meta, nil)
 		}
-		if meta.StartedAt.IsZero() {
-			meta.StartedAt = time.Now().UTC()
+		if !validSessionTime(meta.StartedAt, time.Now().UTC()) {
+			meta.StartedAt = StartTimeFromSpans(b.spans)
 		}
 		_ = s.Start(meta)
 		// Do NOT create empty parent stubs here. Empty parents hide nested
@@ -911,10 +937,9 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 
 	meta, err := s.Get(id)
 	if err != nil {
-		meta = Meta{ID: id, StartedAt: time.Now().UTC()}
-		if len(spans) > 0 {
-			meta.StartedAt = time.Unix(0, spans[0].StartTimeUnixN).UTC()
-		}
+		meta = Meta{ID: id, StartedAt: StartTimeFromSpans(spans)}
+	} else if !validSessionTime(meta.StartedAt, time.Now().UTC()) {
+		meta.StartedAt = StartTimeFromSpans(spans)
 	}
 	// Always (re)fill empty vendor from spans — never leave "" after materialize,
 	// and never rely on a prior Start that only read coding_agent.vendor.
@@ -936,7 +961,7 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 	now := time.Now().UTC()
 	meta.Status = StatusEnded
 	meta.EndedAt = &now
-	meta.DurationMs = now.Sub(meta.StartedAt).Milliseconds()
+	meta.DurationMs = max(0, now.Sub(meta.StartedAt).Milliseconds())
 	meta.Tokens = tokens
 	meta.CostUSD = cost
 

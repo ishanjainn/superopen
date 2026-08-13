@@ -104,7 +104,7 @@ func FingerprintKey(recType, proposedPath, kind string) string {
 }
 
 func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ interface{}) ([]Recommendation, error) {
-	if evalRes.EvidenceStatus == "insufficient" {
+	if evalRes.EvidenceStatus == "insufficient" || evalRes.EvaluationScope == "snapshot" {
 		return nil, nil
 	}
 	var draft []Recommendation
@@ -158,7 +158,7 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 		skillPath = filepath.Join(skillsDir, "reduce-exploration", "SKILL.md")
 	}
 
-	if evalRes.Dimensions["wandering"] > 0.6 {
+	if wandering, applicable := evalRes.Dimensions["wandering"]; applicable && wandering > 0.6 {
 		hot := ""
 		if len(evalRes.HotAreas) > 0 {
 			hot = evalRes.HotAreas[0]
@@ -175,7 +175,7 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 					"How it helps: the next session in that package reads local guidance instead of re-grepping the whole repo, cutting tokens and wrong-file edits.",
 				RelatedSessions: nonEmpty(sessionID),
 				Evidence: []string{
-					fmt.Sprintf("wandering score %.2f", evalRes.Dimensions["wandering"]),
+					fmt.Sprintf("wandering score %.2f", wandering),
 					"hot_area=" + hot,
 				},
 				ProposedPath: nestedPath,
@@ -194,7 +194,7 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 					"How it helps: the next session starts from documented entrypoints and spends fewer tokens rediscovering structure.",
 				RelatedSessions: nonEmpty(sessionID),
 				Evidence: []string{
-					fmt.Sprintf("wandering score %.2f", evalRes.Dimensions["wandering"]),
+					fmt.Sprintf("wandering score %.2f", wandering),
 				},
 				ProposedPath: paths.AgentsMD,
 				ProposedBody: "## Hot paths\n\n- Document primary services and entrypoints discovered this session.\n- Prefer `so graph query` before broad Grep when asking how an area works.\n",
@@ -203,7 +203,7 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 			})
 		}
 	}
-	if evalRes.Dimensions["harness_use"] < 0.4 && skillPath != "" {
+	if harnessUse, applicable := evalRes.Dimensions["harness_use"]; applicable && harnessUse < 0.4 && skillPath != "" {
 		where := harness.SkillsRelForKind(vendorLabel)
 		draft = append(draft, Recommendation{
 			ID: fmt.Sprintf("rec_%d_skill", now.UnixNano()), SessionID: sessionID,
@@ -215,7 +215,7 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 				"How it helps: the next " + vendorLabel + " session can invoke that skill and jump to graph + AGENTS.md instead of broad Grep, saving tokens.",
 			RelatedSessions: nonEmpty(sessionID),
 			Evidence: []string{
-				fmt.Sprintf("harness_use score %.2f", evalRes.Dimensions["harness_use"]),
+				fmt.Sprintf("harness_use score %.2f", harnessUse),
 				"vendor=" + vendorLabel,
 			},
 			ProposedPath: skillPath,
@@ -224,7 +224,7 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 			Fingerprint: FingerprintKey("skill", skillPath, "reduce-exploration"),
 		})
 	}
-	if evalRes.Dimensions["scope"] < 0.5 {
+	if scope, applicable := evalRes.Dimensions["scope"]; applicable && scope < 0.5 {
 		guardBody := advisoryGuardrailBody("avoid-unrelated-drift", "Keep edits scoped to the requested task; avoid unrelated drive-by refactors.")
 		draft = append(draft, Recommendation{
 			ID: fmt.Sprintf("rec_%d_guard", now.UnixNano()), SessionID: sessionID,
@@ -236,7 +236,7 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 				"How it helps: the next session gets an explicit stop/warn signal before sprawling diffs, keeping PRs reviewable.",
 			RelatedSessions: nonEmpty(sessionID),
 			Evidence: []string{
-				fmt.Sprintf("scope score %.2f", evalRes.Dimensions["scope"]),
+				fmt.Sprintf("scope score %.2f", scope),
 			},
 			ProposedPath: paths.GuardrailsFile,
 			ProposedBody: guardBody,

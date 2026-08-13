@@ -679,8 +679,8 @@ func cmdEval() *cobra.Command {
 			}
 			store := tracestore.NewLocalJSONL(paths.TracesDir)
 			spans, _ := store.Query(tracestore.QueryFilter{SessionID: id})
-			client := llm.NewBestCompleter(cfg)
-			res, err := eval.Run(paths, cfg, id, spans, client)
+			client := llm.NewVendorCompleter(cfg, meta.Vendor)
+			res, err := eval.Run(paths, cfg, id, spans, client, eval.RunOptions{Final: meta.Status == session.StatusEnded})
 			if err != nil {
 				return err
 			}
@@ -689,7 +689,7 @@ func cmdEval() *cobra.Command {
 				backend = client.Backend()
 			}
 			generated := 0
-			if cfg.Recommendations.Auto {
+			if cfg.Recommendations.Auto && res.EvaluationScope == "complete" {
 				recs, _ := recommend.Generate(paths, id, res, client)
 				generated = len(recs)
 			}
@@ -956,7 +956,7 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) (retErr error
 		fmt.Printf("Skipped empty session %s (no turns/work)\n", latestID)
 		return nil
 	}
-	_ = sess.Start(session.Meta{ID: latestID, Vendor: session.VendorFromSpans(ss), StartedAt: time.Unix(0, ss[0].StartTimeUnixN).UTC()})
+	_ = sess.Start(session.Meta{ID: latestID, Vendor: session.VendorFromSpans(ss), StartedAt: session.StartTimeFromSpans(ss)})
 	tokens, cost, _ := store.SessionCost(latestID)
 	meta, err := sess.MaterializeFromSpans(latestID, ss, tokens, cost)
 	if err != nil {
@@ -1006,7 +1006,7 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) (retErr error
 	}
 	client := llm.NewVendorCompleter(cfg, meta.Vendor)
 	if cfg.Evals.OnSessionEnd || cfg.Evals.Auto {
-		ev, err := eval.Run(paths, cfg, latestID, ss, client)
+		ev, err := eval.Run(paths, cfg, latestID, ss, client, eval.RunOptions{Final: true})
 		if err != nil {
 			return err
 		}
@@ -1085,7 +1085,7 @@ func refreshSession(root, sessionID string) error {
 		return nil
 	}
 	sess := session.NewStore(paths)
-	_ = sess.Start(session.Meta{ID: id, Vendor: session.VendorFromSpans(ss), StartedAt: time.Unix(0, ss[0].StartTimeUnixN).UTC()})
+	_ = sess.Start(session.Meta{ID: id, Vendor: session.VendorFromSpans(ss), StartedAt: session.StartTimeFromSpans(ss)})
 	tokens, cost, _ := store.SessionCost(id)
 	meta, err := sess.MaterializeFromSpans(id, ss, tokens, cost)
 	if err != nil {
@@ -1093,7 +1093,7 @@ func refreshSession(root, sessionID string) error {
 	}
 	meta.Status = session.StatusActive
 	meta.EndedAt = nil
-	meta.DurationMs = time.Since(meta.StartedAt).Milliseconds()
+	meta.DurationMs = max(0, time.Since(meta.StartedAt).Milliseconds())
 	meta.RepoRoot = root
 	if p, projectErr := projects.Get(root); projectErr == nil {
 		meta.ProjectID = p.ID
@@ -1169,7 +1169,7 @@ func demoSession(root string) error {
 		return err
 	}
 	client := llm.NewBestCompleter(cfg)
-	ev, _ := eval.Run(paths, cfg, id, spans, client)
+	ev, _ := eval.Run(paths, cfg, id, spans, client, eval.RunOptions{Final: true})
 	_, _ = recommend.Generate(paths, id, ev, client)
 	fmt.Printf("Demo session %s created (badge=%s)\n", meta.ID, meta.EvalBadge)
 	return nil

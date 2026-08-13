@@ -20,20 +20,25 @@ import (
 
 // Result mirrors process dimensions + optional task notes.
 type Result struct {
-	SessionID      string             `json:"session_id"`
-	At             time.Time          `json:"at"`
-	Dimensions     map[string]float64 `json:"dimensions"`
-	Notes          []string           `json:"notes,omitempty"`
-	Score          float64            `json:"score"`
-	Badge          string             `json:"badge"`
-	EvidenceStatus string             `json:"evidence_status,omitempty"` // sufficient | insufficient
-	Backend        string             `json:"backend"`
+	SessionID       string             `json:"session_id"`
+	At              time.Time          `json:"at"`
+	Dimensions      map[string]float64 `json:"dimensions"`
+	Notes           []string           `json:"notes,omitempty"`
+	Score           float64            `json:"score"`
+	Badge           string             `json:"badge"`
+	EvidenceStatus  string             `json:"evidence_status,omitempty"` // sufficient | insufficient
+	Backend         string             `json:"backend"`
+	EvaluationScope string             `json:"evaluation_scope,omitempty"` // snapshot | complete
 	// HotAreas are repo-relative dirs that dominated file activity (for nested AGENTS.md recs).
 	HotAreas []string                `json:"hot_areas,omitempty"`
 	Verified bool                    `json:"verified,omitempty"`
 	Findings []session.ReviewFinding `json:"-"`
 	Drafts   []Draft                 `json:"-"`
 	Memory   MemoryDelta             `json:"-"`
+}
+
+type RunOptions struct {
+	Final bool
 }
 
 // Draft is recommendation content returned by the same reviewer invocation
@@ -57,15 +62,15 @@ type MemoryDelta struct {
 }
 
 type activitySignals struct {
-	reads       int
-	edits       int
-	searches    int
-	toolCalls   int
-	harnessHits int
-	files       map[string]bool
-	failedTools int
-	verified    bool
-	toolNames   []string
+	reads         int
+	edits         int
+	searches      int
+	toolCalls     int
+	harnessHits   int
+	files         map[string]bool
+	failedTools   int
+	verified      bool
+	workflowSteps []string
 }
 
 func collectActivitySignals(spans []tracestore.Span) activitySignals {
@@ -78,8 +83,8 @@ func collectActivitySignals(spans []tracestore.Span) activitySignals {
 		completedTool := strings.Contains(name, "tool.call") || strings.Contains(name, "tool.execute")
 		if completedTool {
 			s.toolCalls++
-			if toolName != "" {
-				s.toolNames = append(s.toolNames, strings.Fields(toolName)[0])
+			if step := workflowStep(toolName, arguments); step != "" {
+				s.workflowSteps = append(s.workflowSteps, step)
 			}
 			if attrs["coding_agent.tool.errored"] == "true" || strings.EqualFold(sp.Status, "error") || attrs["error.type"] != "" {
 				s.failedTools++
@@ -120,6 +125,28 @@ func collectActivitySignals(spans []tracestore.Span) activitySignals {
 		}
 	}
 	return s
+}
+
+func workflowStep(toolName, arguments string) string {
+	tool := ""
+	if fields := strings.Fields(strings.ToLower(toolName)); len(fields) > 0 {
+		tool = fields[0]
+	}
+	args := strings.ToLower(arguments)
+	if tool != "bash" && tool != "shell" && tool != "terminal" && tool != "command" {
+		return tool
+	}
+	for _, candidate := range []struct{ needle, label string }{
+		{"so graph query", "so graph query"}, {"go test", "go test"}, {"go vet", "go vet"},
+		{"npm run typecheck", "npm typecheck"}, {"npm run lint", "npm lint"}, {"npm test", "npm test"},
+		{"git diff", "git diff"}, {"git status", "git status"}, {"rg ", "search"},
+		{"sed -n", "read"}, {"apply_patch", "edit"},
+	} {
+		if strings.Contains(args, candidate.needle) {
+			return candidate.label
+		}
+	}
+	return ""
 }
 
 func isVerificationCommand(value string) bool {
@@ -246,7 +273,7 @@ func deterministicFindings(paths harness.Paths, vendor, sessionID string, spans 
 		out = append(out, newFinding(paths, vendor, "failure", "update", "rules", harness.RulesDirForVendor(paths.RepoRoot, vendor), summary, 0.65, signals.verified, false,
 			[]string{fmt.Sprintf("failed_tools=%d", signals.failedTools)}, eventIDs(spans, 4)))
 	}
-	if repeated := repeatedWorkflow(signals.toolNames); repeated != "" {
+	if repeated := repeatedWorkflow(signals.workflowSteps); repeated != "" {
 		summary := "A repeatable tool workflow appeared more than once: " + repeated + "."
 		finding := newFinding(paths, vendor, "workflow", "create", "skill", harness.SkillsDirForVendor(paths.RepoRoot, vendor), summary, 0.7, signals.verified, false,
 			[]string{"repeated workflow=" + repeated}, eventIDs(spans, 6))
@@ -269,6 +296,13 @@ func repeatedWorkflow(names []string) string {
 	for width := 4; width >= 3; width-- {
 		seen := map[string]bool{}
 		for i := 0; i+width <= len(names); i++ {
+			unique := map[string]bool{}
+			for _, name := range names[i : i+width] {
+				unique[name] = true
+			}
+			if len(unique) < 2 {
+				continue
+			}
 			seq := strings.Join(names[i:i+width], " → ")
 			if seen[seq] {
 				return seq
@@ -587,24 +621,26 @@ func clamp01(value float64) float64 {
 	return value
 }
 
-func Run(paths harness.Paths, cfg config.Config, sessionID string, spans []tracestore.Span, completer llm.Completer) (Result, error) {
+func Run(paths harness.Paths, cfg config.Config, sessionID string, spans []tracestore.Span, completer llm.Completer, opts ...RunOptions) (Result, error) {
+	meta, _ := session.NewStore(paths).Get(sessionID)
+	final := meta.Status == session.StatusEnded
+	if len(opts) > 0 && opts[0].Final {
+		final = true
+	}
+	scope := "snapshot"
+	if final {
+		scope = "complete"
+	}
 	res := Result{
-		SessionID: sessionID,
-		At:        time.Now().UTC(),
-		Dimensions: map[string]float64{
-			"exploration":  0.7,
-			"scope":        0.7,
-			"wandering":    0.3,
-			"verification": 0.5,
-			"harness_use":  0.5,
-		},
+		SessionID: sessionID, At: time.Now().UTC(), EvaluationScope: scope,
+		Dimensions: map[string]float64{},
 	}
 
 	// Deterministic signals from normalized span names, tool names, and tool
 	// arguments. Codex uses generic coding_agent.tool.call span names, so the
 	// operation must not be inferred from the span name alone.
 	signals := collectActivitySignals(spans)
-	if signals.toolCalls == 0 && signals.reads == 0 && signals.edits == 0 && signals.searches == 0 && len(signals.files) == 0 {
+	if signals.reads == 0 && signals.edits == 0 && signals.searches == 0 && len(signals.files) == 0 {
 		res.Dimensions = map[string]float64{}
 		res.Score = 0
 		res.Badge = "unknown"
@@ -613,10 +649,24 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, spans []trace
 		return persistResult(paths, res)
 	}
 	res.EvidenceStatus = "sufficient"
+	if signals.reads > 0 || signals.searches > 0 {
+		res.Dimensions["exploration"] = 0.7
+		res.Dimensions["wandering"] = 0.3
+	}
+	res.Dimensions["harness_use"] = 0.5
+	if signals.edits > 0 {
+		res.Dimensions["scope"] = 0.7
+		res.Dimensions["verification"] = 0.3
+		if signals.verified {
+			res.Dimensions["verification"] = 0.9
+		}
+	}
 	res.Verified = signals.verified
 	res.HotAreas = hotAreasFromFiles(signals.files)
 	vendor := sessionVendor(paths, sessionID, spans)
-	res.Findings = deterministicFindings(paths, vendor, sessionID, spans, signals)
+	if final {
+		res.Findings = deterministicFindings(paths, vendor, sessionID, spans, signals)
+	}
 	if signals.searches > 15 {
 		res.Dimensions["wandering"] = 0.8
 		res.Dimensions["exploration"] = 0.4
@@ -645,13 +695,13 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, spans []trace
 	res.Backend = "heuristics"
 	wantModel := backend != "heuristics" && backend != "none" && backend != "off"
 	if wantModel && completer != nil && completer.Available() {
-		summary := fmt.Sprintf("session=%s vendor=%s reads=%d edits=%d searches=%d tool_calls=%d failed_tools=%d verified=%v harness_hits=%d files=%d notes=%v\n\nREDACTED SESSION TEXT:\n%s\n\nCURRENT GUIDANCE:\n%s",
-			sessionID, harness.NormalizeVendorKind(vendor), signals.reads, signals.edits, signals.searches, signals.toolCalls, signals.failedTools, signals.verified, signals.harnessHits, len(signals.files), res.Notes,
+		summary := fmt.Sprintf("session=%s vendor=%s scope=%s reads=%d edits=%d searches=%d tool_calls=%d failed_tools=%d verified=%v harness_hits=%d files=%d notes=%v\n\nREDACTED SESSION TEXT:\n%s\n\nCURRENT GUIDANCE:\n%s",
+			sessionID, harness.NormalizeVendorKind(vendor), scope, signals.reads, signals.edits, signals.searches, signals.toolCalls, signals.failedTools, signals.verified, signals.harnessHits, len(signals.files), res.Notes,
 			truncateText(reviewText(spans), 5000), currentGuidance(paths, vendor, 5000))
 		out, err := completer.Complete(
 			`Review one coding-agent session and return JSON only:
-{"exploration":0,"scope":0,"wandering":0,"verification":0,"note":"","findings":[{"kind":"correction|workflow|failure|success|guidance_gap|simplification|product_gap","change_kind":"create|update|remove|restructure","summary":"","target_type":"skill|rules|docs|memory|guardrail|eval","target_path":"repository-relative path","confidence":0,"verified":false,"explicit_workflow":false,"evidence":["short redacted fact"],"event_ids":["span id"],"keywords":["normalized term"],"paths":["repository-relative path"],"symbols":["symbol"],"error_signatures":["stable error signature"],"applicability":"when this applies","workflow_shape":"stable action sequence without generated prose","title":"","rationale":"","proposed_body":""}],"memory":{"lessons":[],"preference":"","project_note":""}}
-Use existing guidance before proposing anything. Prefer no finding over weak advice. A removal or restructure may be recommended but must never be auto-applied. Never target another vendor, .agents, or a managed so/superopen skill. Proposed bodies must be complete and concise. Do not include prompts or tool output verbatim in evidence.`,
+{"exploration":null,"scope":null,"wandering":null,"verification":null,"note":"","findings":[{"kind":"correction|workflow|failure|success|guidance_gap|simplification|product_gap","change_kind":"create|update|remove|restructure","summary":"","target_type":"skill|rules|docs|memory|guardrail|eval","target_path":"repository-relative path","confidence":0,"verified":false,"explicit_workflow":false,"evidence":["short redacted fact"],"event_ids":["span id"],"keywords":["normalized term"],"paths":["repository-relative path"],"symbols":["symbol"],"error_signatures":["stable error signature"],"applicability":"when this applies","workflow_shape":"stable action sequence without generated prose","title":"","rationale":"","proposed_body":""}],"memory":{"lessons":[],"preference":"","project_note":""}}
+Use null for dimensions that cannot be judged from evidence. Scope and verification are null when no repository edits occurred. This is a snapshot unless scope=complete in the summary; snapshots must return no findings or memory changes. Use existing guidance before proposing anything. Prefer no finding over weak advice. Never infer a reusable workflow from repeated generic shell invocations. A removal or restructure may be recommended but must never be auto-applied. Never target another vendor, .agents, or a managed so/superopen skill. Proposed bodies must be complete and concise. Do not include prompts or tool output verbatim in evidence.`,
 			summary,
 		)
 		if err == nil {
@@ -660,6 +710,9 @@ Use existing guidance before proposing anything. Prefer no finding over weak adv
 			var parsed reviewerResult
 			if json.Unmarshal([]byte(extractJSON(out)), &parsed) == nil {
 				for _, k := range []string{"exploration", "scope", "wandering", "verification"} {
+					if _, applicable := res.Dimensions[k]; !applicable {
+						continue
+					}
 					if v := parsed.dimension(k); v >= 0 {
 						res.Dimensions[k] = v
 					}
@@ -671,9 +724,11 @@ Use existing guidance before proposing anything. Prefer no finding over weak adv
 				for i := range modelFindings {
 					modelFindings[i].EventIDs = eventIDs(spans, 6)
 				}
-				res.Findings = mergeFindings(res.Findings, modelFindings)
-				res.Drafts = drafts
-				res.Memory = parsed.Memory
+				if final {
+					res.Findings = mergeFindings(res.Findings, modelFindings)
+					res.Drafts = drafts
+					res.Memory = parsed.Memory
+				}
 			}
 		} else {
 			res.Notes = append(res.Notes, "model enrichment skipped: "+err.Error())
@@ -688,7 +743,17 @@ Use existing guidance before proposing anything. Prefer no finding over weak adv
 			sum += v
 		}
 	}
+	if len(res.Dimensions) == 0 {
+		res.Badge = "unknown"
+		res.EvidenceStatus = "insufficient"
+		return persistResult(paths, res)
+	}
 	res.Score = sum / float64(len(res.Dimensions))
+	if signals.edits == 0 {
+		res.Badge = "unknown"
+		res.Notes = append(res.Notes, "Read-only session: scope and verification are not applicable, so no edit-quality badge was produced.")
+		return persistResult(paths, res)
+	}
 	switch {
 	case res.Score >= 0.75:
 		res.Badge = "good"
@@ -708,6 +773,9 @@ func persistResult(paths harness.Paths, res Result) (Result, error) {
 	if err := ss.WriteDocument(res.SessionID, func(d *session.Document) {
 		d.Evaluation = data
 		d.EvalBadge = res.Badge
+		if res.EvaluationScope != "complete" {
+			return
+		}
 		d.Review.Findings = res.Findings
 		d.Review.Status = "complete"
 		d.Review.Backend = res.Backend

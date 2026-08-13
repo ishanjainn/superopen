@@ -3,12 +3,19 @@ package eval
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/session"
 	"github.com/ishanjainn/superopen/internal/tracestore"
 )
+
+type staticCompleter struct{ output string }
+
+func (s staticCompleter) Available() bool                      { return true }
+func (s staticCompleter) Complete(_, _ string) (string, error) { return s.output, nil }
+func (s staticCompleter) Backend() string                      { return "test-vendor" }
 
 func TestRunRecognizesCodexToolCallsAndHarnessUse(t *testing.T) {
 	paths := harness.Resolve(t.TempDir())
@@ -104,7 +111,7 @@ func TestRunPersistsSessionReviewEvidence(t *testing.T) {
 		{Name: "coding_agent.tool.call", SpanID: "edit-1", SessionID: "reviewed", Attributes: map[string]string{"gen_ai.tool.name": "apply_patch"}},
 		{Name: "coding_agent.tool.call", SpanID: "test-1", SessionID: "reviewed", Attributes: map[string]string{"gen_ai.tool.name": "Bash", "gen_ai.tool.call.arguments": `{"cmd":"go test ./internal/eval"}`}},
 	}
-	res, err := Run(paths, config.Config{Evals: config.EvalsConfig{Backend: "heuristics"}}, "reviewed", spans, nil)
+	res, err := Run(paths, config.Config{Evals: config.EvalsConfig{Backend: "heuristics"}}, "reviewed", spans, nil, RunOptions{Final: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,5 +124,67 @@ func TestRunPersistsSessionReviewEvidence(t *testing.T) {
 	}
 	if len(doc.Evaluation) == 0 || strings.Contains(string(doc.Evaluation), "Always run focused") {
 		t.Fatalf("evaluation should exist without duplicating prompt text: %s", doc.Evaluation)
+	}
+}
+
+func TestReadOnlyEvaluationDoesNotBecomePoor(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	_ = paths.EnsureDirs()
+	_ = session.NewStore(paths).Start(session.Meta{ID: "read-only", Vendor: "codex", StartedAt: time.Now().UTC()})
+	spans := []tracestore.Span{{
+		Name: "coding_agent.tool.call", SessionID: "read-only",
+		Attributes: map[string]string{
+			"gen_ai.tool.name": "Bash", "gen_ai.tool.call.arguments": `{"cmd":"sed -n '1,80p' AGENTS.md"}`,
+		},
+	}}
+	model := staticCompleter{output: `{"exploration":0,"scope":0,"wandering":0,"verification":0,"findings":[],"memory":{}}`}
+	res, err := Run(paths, config.Config{Evals: config.EvalsConfig{Backend: "auto"}}, "read-only", spans, model, RunOptions{Final: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Badge != "unknown" {
+		t.Fatalf("read-only badge=%q, want unknown", res.Badge)
+	}
+	if _, ok := res.Dimensions["scope"]; ok {
+		t.Fatalf("scope must be inapplicable for read-only evidence: %+v", res.Dimensions)
+	}
+	if _, ok := res.Dimensions["verification"]; ok {
+		t.Fatalf("verification must be inapplicable for read-only evidence: %+v", res.Dimensions)
+	}
+}
+
+func TestActiveSnapshotDoesNotPersistFindingsOrCompleteReview(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	_ = paths.EnsureDirs()
+	ss := session.NewStore(paths)
+	_ = ss.Start(session.Meta{ID: "active", Vendor: "codex", StartedAt: time.Now().UTC()})
+	_ = ss.WriteDocument("active", func(doc *session.Document) { doc.Review.Status = "pending" })
+	spans := []tracestore.Span{{Name: "coding_agent.tool.call", SessionID: "active", Attributes: map[string]string{"gen_ai.tool.name": "apply_patch"}}}
+	model := staticCompleter{output: `{"exploration":0.8,"scope":0.8,"wandering":0.1,"verification":0.8,"findings":[{"kind":"workflow","change_kind":"create","target_type":"skill","target_path":".codex/skills/x/SKILL.md","summary":"Create x","confidence":0.9,"proposed_body":"# X"}],"memory":{"lessons":["x"]}}`}
+	res, err := Run(paths, config.Config{Evals: config.EvalsConfig{Backend: "auto"}}, "active", spans, model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.EvaluationScope != "snapshot" || len(res.Findings) != 0 || len(res.Drafts) != 0 || len(res.Memory.Lessons) != 0 {
+		t.Fatalf("active evaluation mutated durable review data: %+v", res)
+	}
+	doc, err := ss.ReadDocument("active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Review.Status != "pending" || len(doc.Review.Findings) != 0 {
+		t.Fatalf("snapshot completed or populated review: %+v", doc.Review)
+	}
+}
+
+func TestRepeatedGenericShellCallsAreNotAWorkflow(t *testing.T) {
+	var steps []string
+	for range 10 {
+		if step := workflowStep("Bash", `{"cmd":"custom-command"}`); step != "" {
+			steps = append(steps, step)
+		}
+	}
+	if got := repeatedWorkflow(steps); got != "" {
+		t.Fatalf("generic shell calls produced workflow %q", got)
 	}
 }
