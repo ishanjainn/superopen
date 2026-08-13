@@ -1,9 +1,9 @@
-import type { CityFile } from "./types";
+import type { SessionFile } from "./types";
 import type { TreeLayout } from "./scene/treeLayout";
 
 const NEIGHBOR_LIMIT = 48;
 
-function centerOf(file: CityFile, layout?: TreeLayout | null): { x: number; z: number } {
+function centerOf(file: SessionFile, layout?: TreeLayout | null): { x: number; z: number } {
   if (layout) {
     const leaf = layout.leaf.get(file.id);
     if (leaf) return leaf;
@@ -19,10 +19,10 @@ function centerOf(file: CityFile, layout?: TreeLayout | null): { x: number; z: n
  * so dense clusters are easy to step through.
  */
 export function nearbyFiles(
-  files: CityFile[],
-  selected: CityFile,
+  files: SessionFile[],
+  selected: SessionFile,
   layout?: TreeLayout | null
-): CityFile[] {
+): SessionFile[] {
   const origin = centerOf(selected, layout);
   const ranked = files
     .map((file) => {

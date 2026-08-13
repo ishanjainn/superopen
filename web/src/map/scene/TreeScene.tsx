@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { useThemeOptional } from "@/components/shell/theme-provider";
-import { touchWord, type CityFile, type CityMap, type Touch } from "../types";
+import { touchWord, type SessionFile, type SessionMap, type Touch } from "../types";
 import type { FilePlayback } from "../playback/reducer";
 import { DirLabelSet } from "./dirLabels";
 import {
@@ -21,7 +21,7 @@ import { fireflyTexture, haloTexture } from "./textures";
 import { TrailRenderer } from "./trail";
 
 interface TreeSceneProps {
-  city?: CityMap;
+  sessionMap?: SessionMap;
   playback: FilePlayback;
   selectedPath?: string;
   onSelect: (path?: string) => void;
@@ -69,7 +69,7 @@ const LABEL_Y = 1.8;
 // the inspector docks on the right; selection pans the camera clear of it
 const INSPECTOR_RESERVED_PX = 348;
 
-export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasReady }: TreeSceneProps) {
+export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanvasReady }: TreeSceneProps) {
   const theme = useThemeOptional();
   const dark = theme?.resolved === "dark";
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -80,7 +80,7 @@ export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasRead
   const haloMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const edgesRef = useRef<THREE.LineSegments | null>(null);
   const edgeMetaRef = useRef<{ childPath?: string; childFileId?: number; vertexCount: number }[]>([]);
-  const filesRef = useRef<CityFile[]>([]);
+  const filesRef = useRef<SessionFile[]>([]);
   const layoutRef = useRef<TreeLayout | null>(null);
   const slotsRef = useRef<HaloSlot[]>([]);
   const radiiRef = useRef<Map<number, number>>(new Map());
@@ -101,7 +101,7 @@ export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasRead
   // background tab); resize retries it instead of leaving the camera at NaN
   const fitPendingRef = useRef<(() => boolean) | null>(null);
 
-  const layout = useMemo(() => (city && city.files.length > 0 ? computeTreeLayout(city.files) : null), [city]);
+  const layout = useMemo(() => (sessionMap && sessionMap.files.length > 0 ? computeTreeLayout(sessionMap.files) : null), [sessionMap]);
 
   useEffect(() => {
     applySceneTheme(dark);
@@ -166,13 +166,13 @@ export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasRead
     // targets, so pick whatever leaf lands closest to the pointer
     const PICK_RADIUS = 18;
     const projected = new THREE.Vector3();
-    const pickFile = (event: PointerEvent): CityFile | undefined => {
+    const pickFile = (event: PointerEvent): SessionFile | undefined => {
       const treeLayout = layoutRef.current;
       if (!treeLayout || !cameraRef.current || !rendererRef.current) return undefined;
       const rect = rendererRef.current.domElement.getBoundingClientRect();
       const px = event.clientX - rect.left;
       const py = event.clientY - rect.top;
-      let best: CityFile | undefined;
+      let best: SessionFile | undefined;
       let bestD2 = PICK_RADIUS * PICK_RADIUS;
       for (const file of filesRef.current) {
         const pos = treeLayout.leaf.get(file.id);
@@ -331,11 +331,11 @@ export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasRead
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    filesRef.current = city?.files ?? [];
+    filesRef.current = sessionMap?.files ?? [];
     layoutRef.current = layout;
     slotsRef.current = [];
     radiiRef.current = new Map();
-    if (!city || !layout) return;
+    if (!sessionMap || !layout) return;
 
     const group = new THREE.Group();
     const size = layout.radius * 2.3;
@@ -387,15 +387,15 @@ export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasRead
     // opt out of the fog; only the ground plane keeps the depth cue
     const leafGeo = new THREE.SphereGeometry(0.5, 10, 8);
     const leafMat = new THREE.MeshBasicMaterial({ toneMapped: false, fog: false });
-    const leaves = new THREE.InstancedMesh(leafGeo, leafMat, city.files.length);
-    leaves.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(city.files.length * 3), 3);
-    const ghostFiles = city.files.filter((file) => file.ghost);
+    const leaves = new THREE.InstancedMesh(leafGeo, leafMat, sessionMap.files.length);
+    leaves.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(sessionMap.files.length * 3), 3);
+    const ghostFiles = sessionMap.files.filter((file) => file.ghost);
     const ghostIndex = new Map<number, number>();
     ghostFiles.forEach((file, i) => ghostIndex.set(file.id, i));
     ghostIndexRef.current = ghostIndex;
     const matrix = new THREE.Matrix4();
     const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
-    for (const file of city.files) {
+    for (const file of sessionMap.files) {
       const pos = layout.leaf.get(file.id);
       if (!pos) continue;
       if (file.ghost) {
@@ -452,9 +452,9 @@ export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasRead
         toneMapped: false,
         fog: false
       }),
-      city.files.length
+      sessionMap.files.length
     );
-    halos.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(city.files.length * 3), 3);
+    halos.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(sessionMap.files.length * 3), 3);
     halos.count = 0;
     halos.frustumCulled = false;
     halos.raycast = () => undefined;
@@ -557,7 +557,7 @@ export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasRead
       fireflyRef.current = null;
       labelSetRef.current = null;
     };
-  }, [city, layout, dark]);
+  }, [sessionMap, layout, dark]);
 
   // playback → leaf colors, halo targets, branch tinting
   useEffect(() => {
@@ -567,7 +567,7 @@ export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasRead
     const ghostIndex = ghostIndexRef.current;
     const halos = haloMeshRef.current;
     const edges = edgesRef.current;
-    if (!leaves || !halos || !edges || !city || !layout) return;
+    if (!leaves || !halos || !edges || !sessionMap || !layout) return;
 
     const radii = radiiRef.current;
     const slots: HaloSlot[] = [];
@@ -575,7 +575,7 @@ export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasRead
     // directories on a path to a touched file - branches brighten as a
     // single neutral tone, classification stays on the leaves
     const litDirs = new Set<string>();
-    for (const file of city.files) {
+    for (const file of sessionMap.files) {
       const touch = playback.touchByFile.get(file.id);
       let leafColor = file.ghost ? colors.ghost : colors.unvisited;
       if (touch) {
@@ -627,13 +627,13 @@ export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasRead
       }
     }
     colorAttr.needsUpdate = true;
-  }, [city, layout, playback, dark]);
+  }, [sessionMap, layout, playback, dark]);
 
   // selection marker follows the selected leaf
   useEffect(() => {
     const selection = selectionRef.current;
-    if (!selection || !city || !layout) return;
-    const file = selectedPath ? city.files.find((f) => f.path === selectedPath) : undefined;
+    if (!selection || !sessionMap || !layout) return;
+    const file = selectedPath ? sessionMap.files.find((f) => f.path === selectedPath) : undefined;
     const pos = file ? layout.leaf.get(file.id) : undefined;
     if (pos) {
       selection.ring.position.set(pos.x, 0.1, pos.z);
@@ -660,18 +660,18 @@ export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasRead
       selection.ring.visible = false;
       selection.beam.visible = false;
     }
-  }, [city, layout, selectedPath]);
+  }, [sessionMap, layout, selectedPath]);
 
   // trail arcs + firefly
   useEffect(() => {
     const trail = trailRef.current;
-    if (!trail || !city || !layout) return;
+    if (!trail || !sessionMap || !layout) return;
 
-    // playback resolves fileId with the same path key the citymap uses, so a
+    // playback resolves fileId with the same path key the session map uses, so a
     // target still missing one has no leaf to land on
     const targetFiles = playback.recentTargets
-      .map((target) => (target.fileId !== undefined ? city.files[target.fileId] : undefined))
-      .filter((file): file is CityFile => Boolean(file && layout.leaf.get(file.id)));
+      .map((target) => (target.fileId !== undefined ? sessionMap.files[target.fileId] : undefined))
+      .filter((file): file is SessionFile => Boolean(file && layout.leaf.get(file.id)));
 
     const firefly = fireflyRef.current;
     if (firefly) {
@@ -691,7 +691,7 @@ export function TreeScene({ city, playback, selectedPath, onSelect, onCanvasRead
         return new THREE.Vector3(pos.x, LEAF_Y + 0.3, pos.z);
       })
     );
-  }, [city, layout, playback]);
+  }, [sessionMap, layout, playback]);
 
-  return <div className="city-scene" ref={hostRef} aria-label="Firefly tree" />;
+  return <div className="session-map" ref={hostRef} aria-label="Firefly tree" />;
 }

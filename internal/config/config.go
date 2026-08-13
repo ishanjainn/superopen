@@ -119,8 +119,8 @@ func (c Config) LocalTracesDir(repoRoot string) string {
 }
 
 type VizConfig struct {
-	Citymap bool `yaml:"citymap"`
-	Replay  bool `yaml:"replay"`
+	SessionMap bool `yaml:"session_map"`
+	Replay     bool `yaml:"replay"`
 }
 
 type MemoryConfig struct {
@@ -195,7 +195,7 @@ func Default() Config {
 			Exporters: []ExporterConfig{
 				{Type: "local_jsonl", Path: ".so/sessions"},
 			},
-			Viz: VizConfig{Citymap: false, Replay: true},
+			Viz: VizConfig{SessionMap: false, Replay: true},
 		},
 		Memory: MemoryConfig{
 			Provider:         "file_lessons",

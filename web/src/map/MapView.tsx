@@ -13,7 +13,7 @@ import {
 } from "./api";
 import { PlaybackEngine } from "./playback/reducer";
 import { TreeScene } from "./scene/TreeScene";
-import { CityScene } from "./scene/CityScene";
+import { TerrainScene } from "./scene/TerrainScene";
 import { type PanelBadge, type PanelDescriptor } from "./ui/Dock";
 import { AgentsPanel } from "./ui/AgentsPanel";
 import { Hud, type ChurnEntry, type HudSessionExtras, type HudTool } from "./ui/Hud";
@@ -24,8 +24,8 @@ import { nearbyFiles } from "./nearby";
 import { computeTreeLayout } from "./scene/treeLayout";
 import type {
   AgentGraph,
-  CityFile,
-  CityMap,
+  SessionFile,
+  SessionMap,
   JudgeChoice,
   ReportStatus,
   Trace,
@@ -60,8 +60,7 @@ function evaluateHint(badge: PanelBadge | null): string {
 }
 
 /**
- * Session map: tree / terrain replay: radial tree / terrain citymap +
- * Session replay on the citymap (timeline + spectrum HUD + dock panels).
+ * Session map: tree or terrain replay with timeline, spectrum HUD, and dock panels.
  */
 export default function MapView({
   sessionId,
@@ -72,7 +71,7 @@ export default function MapView({
   const [sessionKey, setSessionKey] = useState<string | undefined>();
   const [mainTrace, setMainTrace] = useState<Trace | undefined>();
   const [trace, setTrace] = useState<Trace | undefined>();
-  const [city, setCity] = useState<CityMap | undefined>();
+  const [sessionMap, setSessionMap] = useState<SessionMap | undefined>();
   const [currentSeq, setCurrentSeq] = useState(0);
   const [selectedPath, setSelectedPath] = useState<string | undefined>();
   const [view, setView] = useState<MapViewMode>("tree");
@@ -99,7 +98,7 @@ export default function MapView({
       setError(undefined);
       setMainTrace(undefined);
       setTrace(undefined);
-      setCity(undefined);
+      setSessionMap(undefined);
       setCurrentSeq(0);
       setSelectedPath(undefined);
       setCurrentAgentID(null);
@@ -112,7 +111,7 @@ export default function MapView({
         setSessionKey(key);
         setMainTrace(snap.trace);
         setTrace(snap.trace);
-        setCity(snap.city);
+        setSessionMap(snap.sessionMap);
         setCurrentSeq(0);
       } catch (err) {
         if (!cancelled) setError(describeError(err, "loading the map"));
@@ -176,7 +175,7 @@ export default function MapView({
     };
   }, [sessionKey, reportStatus?.state, refreshReport]);
 
-  const engine = useMemo(() => new PlaybackEngine(trace, city), [trace, city]);
+  const engine = useMemo(() => new PlaybackEngine(trace, sessionMap), [trace, sessionMap]);
   const playback = useMemo(() => engine.snapshotAt(currentSeq), [engine, currentSeq]);
 
   const touchCounts = useMemo(() => {
@@ -209,8 +208,8 @@ export default function MapView({
   }, [trace]);
 
   const selectedFile = useMemo(
-    () => city?.files.find((f) => f.path === selectedPath),
-    [city, selectedPath]
+    () => sessionMap?.files.find((f) => f.path === selectedPath),
+    [sessionMap, selectedPath]
   );
   const selectedTouch = selectedPath ? playback.touchByPath.get(selectedPath) : undefined;
   const selectedHistory = selectedPath
@@ -218,29 +217,29 @@ export default function MapView({
     : [];
 
   const treeLayout = useMemo(
-    () => (city && city.files.length > 0 && view === "tree" ? computeTreeLayout(city.files) : null),
-    [city, view]
+    () => (sessionMap && sessionMap.files.length > 0 && view === "tree" ? computeTreeLayout(sessionMap.files) : null),
+    [sessionMap, view]
   );
 
   // Freeze the neighbor ring when the user picks a file on the map. Prev/Next
   // steps within that ring - recomputing from each new selection would bounce
   // between the two closest leaves forever.
-  const [neighborRing, setNeighborRing] = useState<CityFile[]>([]);
+  const [neighborRing, setNeighborRing] = useState<SessionFile[]>([]);
 
   const rebuildNeighborRing = useCallback(
     (path: string) => {
-      if (!city) {
+      if (!sessionMap) {
         setNeighborRing([]);
         return;
       }
-      const origin = city.files.find((f) => f.path === path);
+      const origin = sessionMap.files.find((f) => f.path === path);
       if (!origin) {
         setNeighborRing([]);
         return;
       }
-      setNeighborRing(nearbyFiles(city.files, origin, treeLayout));
+      setNeighborRing(nearbyFiles(sessionMap.files, origin, treeLayout));
     },
-    [city, treeLayout]
+    [sessionMap, treeLayout]
   );
 
   const onSelect = useCallback(
@@ -262,21 +261,21 @@ export default function MapView({
     setOpenSheet("inspect");
   }, []);
 
-  // Rebuild ring if layout/city changes while a selection is active
+  // Rebuild ring if layout or session map changes while a selection is active
   useEffect(() => {
-    if (!selectedPath || !city) return;
+    if (!selectedPath || !sessionMap) return;
     setNeighborRing((prev) => {
       if (prev.length === 0) return nearbyFiles(
-        city.files,
-        city.files.find((f) => f.path === selectedPath) ?? city.files[0],
+        sessionMap.files,
+        sessionMap.files.find((f) => f.path === selectedPath) ?? sessionMap.files[0],
         treeLayout
       );
-      // Keep order; refresh CityFile object refs from current city
-      const byPath = new Map(city.files.map((f) => [f.path, f]));
-      const next = prev.map((f) => byPath.get(f.path)).filter(Boolean) as CityFile[];
+      // Keep order; refresh SessionFile object refs from the current session map
+      const byPath = new Map(sessionMap.files.map((f) => [f.path, f]));
+      const next = prev.map((f) => byPath.get(f.path)).filter(Boolean) as SessionFile[];
       return next.length >= 2 ? next : prev;
     });
-  }, [city, treeLayout]); // eslint-disable-line react-hooks/exhaustive-deps -- only refresh refs on layout/city
+  }, [sessionMap, treeLayout]); // eslint-disable-line react-hooks/exhaustive-deps -- only refresh refs on layout/session map
 
   // Keyboard Prev/Next while Inspect is open
   useEffect(() => {
@@ -493,14 +492,14 @@ export default function MapView({
           <div className="viewport">
             {view === "tree" ? (
               <TreeScene
-                city={city}
+                sessionMap={sessionMap}
                 playback={playback}
                 selectedPath={selectedPath}
                 onSelect={onSelect}
               />
             ) : (
-              <CityScene
-                city={city}
+              <TerrainScene
+                sessionMap={sessionMap}
                 playback={playback}
                 selectedPath={selectedPath}
                 onSelect={onSelect}
@@ -509,7 +508,7 @@ export default function MapView({
 
             <Hud
               trace={trace}
-              city={city}
+              sessionMap={sessionMap}
               agentLabel={agentLabel}
               view={view}
               onViewChange={setView}

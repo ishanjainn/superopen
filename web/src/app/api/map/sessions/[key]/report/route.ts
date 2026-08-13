@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCityMap } from "@/lib/so/citymap";
+import { getSessionMap } from "@/lib/so/session_map";
 import { getReportStatus } from "@/lib/so/judge";
 import { buildTrace, resolveMapSession } from "@/lib/so/trace";
 import { projectIdFromRequest, runWithProject } from "@/lib/so/workspace";
@@ -19,7 +19,7 @@ export async function GET(
     if (!session) {
       return NextResponse.json({ error: `session "${key}" not found` }, { status: 404 });
     }
-    const trace = buildTrace(session, getCityMap());
+    const trace = buildTrace(session, getSessionMap());
     return NextResponse.json(getReportStatus(session.id, trace.events.length));
   });
 }

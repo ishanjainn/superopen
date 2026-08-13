@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCityMap } from "@/lib/so/citymap";
+import { getSessionMap } from "@/lib/so/session_map";
 import { buildTrace, resolveMapSession } from "@/lib/so/trace";
 import { projectIdFromRequest, runWithProject } from "@/lib/so/workspace";
 
@@ -21,8 +21,8 @@ export async function GET(
         { status: 404 }
       );
     }
-    const city = getCityMap();
-    const trace = buildTrace(session, city);
-    return NextResponse.json({ trace, city });
+    const sessionMap = getSessionMap();
+    const trace = buildTrace(session, sessionMap);
+    return NextResponse.json({ trace, sessionMap });
   });
 }

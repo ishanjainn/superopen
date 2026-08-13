@@ -1,6 +1,6 @@
 import type {
   AgentGraph,
-  CityMap,
+  SessionMap,
   JudgeChoice,
   ReportStatus,
   SessionMeta,
@@ -48,8 +48,8 @@ export function listSessions(fresh = false): Promise<SessionMeta[]> {
   return getJSON<SessionMeta[]>(fresh ? "/api/sessions?fresh=1" : "/api/sessions");
 }
 
-export function getSessionSnapshot(key: string): Promise<{ trace: Trace; city: CityMap }> {
-  return getJSON<{ trace: Trace; city: CityMap }>(
+export function getSessionSnapshot(key: string): Promise<{ trace: Trace; sessionMap: SessionMap }> {
+  return getJSON<{ trace: Trace; sessionMap: SessionMap }>(
     `/api/sessions/${encodeURIComponent(key)}/snapshot`
   );
 }

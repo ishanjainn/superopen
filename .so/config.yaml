@@ -58,7 +58,7 @@ observability:
         - type: local_jsonl
           path: .so/sessions
     viz:
-        citymap: false
+        session_map: false
         replay: true
 memory:
     provider: file_lessons

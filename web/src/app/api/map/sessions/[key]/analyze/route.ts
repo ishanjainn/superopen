@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCityMap } from "@/lib/so/citymap";
+import { getSessionMap } from "@/lib/so/session_map";
 import { startAnalyze } from "@/lib/so/judge";
 import { buildTrace, resolveMapSession } from "@/lib/so/trace";
 import { projectIdFromRequest, runWithProject } from "@/lib/so/workspace";
@@ -26,7 +26,7 @@ export async function POST(
     if (!session) {
       return NextResponse.json({ error: `session "${key}" not found` }, { status: 404 });
     }
-    const trace = buildTrace(session, getCityMap());
+    const trace = buildTrace(session, getSessionMap());
     const status = startAnalyze(session.id, trace, {
       cli: typeof body.cli === "string" ? body.cli : "",
       model: typeof body.model === "string" ? body.model : "",

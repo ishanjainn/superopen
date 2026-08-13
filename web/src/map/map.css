@@ -136,7 +136,7 @@ html.dark .map-root {
   min-height: 0;
 }
 
-.city-scene {
+.session-map {
   position: absolute;
   inset: 0;
   z-index: 1;
@@ -147,11 +147,11 @@ html.dark .map-root {
   background: transparent;
 }
 
-.city-scene:active {
+.session-map:active {
   cursor: grabbing;
 }
 
-.city-scene canvas {
+.session-map canvas {
   display: block;
   width: 100% !important;
   height: 100% !important;

@@ -110,6 +110,28 @@ func TestLoadRequiresV2Layout(t *testing.T) {
 	}
 }
 
+func TestDefaultVizUsesSessionMap(t *testing.T) {
+	cfg := config.Default()
+	if cfg.Observability.Viz.SessionMap {
+		t.Fatal("session map viz defaults off")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, "citymap") {
+		t.Fatalf("config still names citymap:\n%s", text)
+	}
+	if !strings.Contains(text, "session_map:") {
+		t.Fatalf("config missing session_map:\n%s", text)
+	}
+}
+
 func TestGuardrailsEnabledEnv(t *testing.T) {
 	cfg := config.Default()
 	t.Setenv("SUPEROPEN_GUARDRAILS", "off")

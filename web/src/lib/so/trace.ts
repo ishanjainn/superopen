@@ -1,8 +1,8 @@
 import { readdirSync, statSync } from "fs";
 import { fileExists, readText } from "./nodeio";
 import { join, relative } from "path";
-import type { CityMap } from "./citymap";
-import { sessionKey } from "./citymap";
+import type { SessionMap } from "./session_map";
+import { sessionKey } from "./session_map";
 import { repoRoot, soPath } from "./root";
 import {
   humanizePromptPreview,
@@ -659,8 +659,8 @@ function resolveNestedMapSession(selector: string): MapSessionMeta | null {
   return null;
 }
 
-function assignFileIds(trace: Trace, city: CityMap) {
-  const byPath = new Map(city.files.map((f) => [f.path, f.id]));
+function assignFileIds(trace: Trace, sessionMap: SessionMap) {
+  const byPath = new Map(sessionMap.files.map((f) => [f.path, f.id]));
   for (const ev of trace.events) {
     for (const t of ev.targets) {
       const id = byPath.get(t.path);
@@ -702,7 +702,7 @@ function subagentMarksFromChildren(
 }
 
 /** Build map Trace from a Superopen session directory. */
-export function buildTrace(session: MapSessionMeta, city: CityMap): Trace {
+export function buildTrace(session: MapSessionMeta, sessionMap: SessionMap): Trace {
   const cwd = session.cwd || repoRoot();
   let parsed = parseTranscriptEvents(session.path, cwd);
   if (parsed.events.length === 0) {
@@ -741,8 +741,8 @@ export function buildTrace(session: MapSessionMeta, city: CityMap): Trace {
     },
     events: parsed.events,
     marks,
-    stats: emptyStats(city.files.length, parsed.events, marks),
+    stats: emptyStats(sessionMap.files.length, parsed.events, marks),
   };
-  assignFileIds(trace, city);
+  assignFileIds(trace, sessionMap);
   return trace;
 }

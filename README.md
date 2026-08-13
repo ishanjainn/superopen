@@ -58,7 +58,7 @@ Run `so dev` from your terminal when you want the local session UI at `http://lo
 | Agent skills | A single `/so` skill across Claude, Cursor, Codex, Gemini, OpenCode, Copilot, Pi, and Agent Skills-compatible tools |
 | Repository understanding | A graph built before the harness is seeded, so context starts from the codebase’s real structure |
 | Shared memory | Preferences, lessons, and project context injected at session start across supported agents in the same repo |
-| Session replay | Hook telemetry stored with each session and replayable as a city map in the local UI |
+| Session replay | Hook telemetry stored with each session and replayable as a session map in the local UI |
 | Evals and recommendations | Post-session scoring that proposes targeted improvements; sensitive changes can require approval |
 | Local-first workflow | `.so/` is ordinary repository data that both the CLI and UI read and write directly |
 | Agent-first CLI | Compact output, JSON envelopes, clear empty states, and useful next-step hints |
@@ -180,7 +180,7 @@ Set `heuristics` only when you want zero judging cost. `live_agent: false` is CL
 | `so` | Harness status snapshot |
 | `so install` | Register `/so` with coding agents |
 | `so init` | Bootstrap the harness and install observability hooks |
-| `so sync` | Refresh injectors, graph, and city map |
+| `so sync` | Refresh injectors, graph, and session map |
 | `so dev` | Run the lightweight Next.js UI on `:4444` (`-d` to detach, `stop` to stop) |
 | `so graph query` | Query the repository graph |
 | `so sessions` | List, finalize, and demo sessions |

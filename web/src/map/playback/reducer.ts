@@ -1,4 +1,4 @@
-import type { CityMap, Target, Touch, Trace, TraceEvent } from "../types";
+import type { SessionMap, Target, Touch, Trace, TraceEvent } from "../types";
 
 export const touchRank: Record<Touch, number> = {
   hit: 1,
@@ -31,9 +31,9 @@ export class PlaybackEngine {
   private readonly historyByPath = new Map<string, TraceEvent[]>();
   private readonly recentTargets: Target[] = [];
 
-  constructor(trace: Trace | undefined, city: CityMap | undefined) {
+  constructor(trace: Trace | undefined, sessionMap: SessionMap | undefined) {
     this.events = trace?.events ?? [];
-    for (const file of city?.files ?? []) {
+    for (const file of sessionMap?.files ?? []) {
       this.idByPath.set(file.path, file.id);
     }
   }

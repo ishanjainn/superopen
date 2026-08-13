@@ -78,7 +78,7 @@ export interface Rect {
   d: number;
 }
 
-export interface CityMap {
+export interface SessionMap {
   version: number;
   repo: {
     root: string;
@@ -88,15 +88,15 @@ export interface CityMap {
     /** the tree holds more files than the map shows - a scan budget cut in */
     truncated?: boolean;
   };
-  files: CityFile[];
-  dirs: CityDir[];
+  files: SessionFile[];
+  dirs: SessionDir[];
   layout: {
     algorithm: string;
     weight: string;
   };
 }
 
-export interface CityFile {
+export interface SessionFile {
   id: number;
   path: string;
   dir: string;
@@ -107,7 +107,7 @@ export interface CityFile {
   ghost: boolean;
 }
 
-export interface CityDir {
+export interface SessionDir {
   path: string;
   depth: number;
   rect: Rect;
