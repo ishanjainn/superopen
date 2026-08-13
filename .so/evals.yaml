@@ -2,28 +2,22 @@
 # Authoritative project policy updated by project maintainers and approved Superopen upgrades.
 checks:
   - tests
+  - lint
+  - scope
   - go_build
-  - go_vet
   - race_patterns
-  - web_tests
-  - typescript_typecheck
-  - eslint
-  - plugin_sync_drift
-  - cross_platform_paths
-  - schema_compatibility
-  - secret_scan
   - pr_title_convention
+  - harness_usage
 
 agent_rules:
-  - "Prefer so graph query and repository guidance before broad code search."
-  - "Keep changes focused and avoid unrelated edits."
-  - "Preserve the file-backed contract across CLI, web, plugins, templates, and documentation."
-  - "Add tests for behavior changes and run stack-appropriate checks."
-  - "Protect sensitive data in source, telemetry, logs, fixtures, and harness files."
-  - "Account for Linux, macOS, and Windows behavior in path, process, hook, and installer changes."
+  - "Prefer so graph query and AGENTS.md before broad exploration"
+  - "Run go test -race and go vet for Go changes; run web test/typecheck/lint for UI changes"
+  - "Keep diffs focused; avoid unrelated refactors"
+  - "Use Conventional Commit titles for PRs"
+  - "Do not commit secrets or hand-edit lockfiles"
 
 judge_rubric: |
-  Score whether the session solved the stated task with a focused, evidence-backed change; respected repository architecture and the shared .so data contract; added or updated tests and documentation where warranted; ran the relevant Go, web, plugin, and cross-platform checks; and avoided secrets, unrelated churn, and unsupported claims. Reward concise graph-guided exploration and transparent reporting of validation gaps.
+  Score sessions on whether the agent used Superopen harness tools (graph query, guardrails, memory) appropriately, kept scope tight, ran stack-appropriate checks, and produced conventional commits/PRs. Penalize secret exposure, lockfile hand-edits, skipped tests on behavior changes, and large unrelated diffs.
 
 sources:
   - /Users/ishanjain/work/superopen/AGENTS.md

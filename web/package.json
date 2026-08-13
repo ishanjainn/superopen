@@ -28,14 +28,14 @@
     "three": "^0.182.0"
   },
   "devDependencies": {
-    "@types/node": "20.17.19",
+    "@types/node": "20.19.43",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@types/three": "^0.181.0",
     "autoprefixer": "10.4.20",
     "eslint": "^9.39.5",
     "eslint-config-next": "16.3.0",
-    "postcss": "8.5.3",
+    "postcss": "8.5.26",
     "tailwindcss": "3.4.17",
     "typescript": "5.7.3",
     "vitest": "^4.1.10"

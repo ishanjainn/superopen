@@ -62,21 +62,40 @@ func TestProjectMergesWithoutClobber(t *testing.T) {
 	}
 }
 
+func TestProjectAllowsRepoUnderHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home")
+	}
+	dir := filepath.Join(home, ".superopen-mcp-test-"+strings.ReplaceAll(t.Name(), "/", "-"))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	cfg := config.Default()
+	cfg.Vendors.Enabled = []string{"claude", "cursor"}
+	cfg.MCP.Servers = []config.MCPServer{{Name: "context7", Command: "npx", Args: []string{"-y", "@upstash/context7-mcp@1.0.0"}}}
+	if err := mcp.Project(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".mcp.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".cursor", "mcp.json")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProjectRefusesHome(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		t.Skip("no home")
 	}
-	// Project only writes under repoRoot; simulate by using home as repoRoot —
-	// mergeFile itself checks absolute path under home for the target file.
-	// Writing ~/.mcp.json must fail.
 	cfg := config.Default()
 	cfg.Vendors.Enabled = []string{"claude"}
 	cfg.MCP.Servers = []config.MCPServer{{Name: "x", Command: "echo"}}
-	// Use a temp dir that is NOT home — Project should succeed.
-	dir := t.TempDir()
-	if err := mcp.Project(dir, cfg); err != nil {
-		t.Fatal(err)
+	if err := mcp.Project(home, cfg); err == nil {
+		t.Fatal("expected refuse when repoRoot is $HOME")
 	}
 }
 

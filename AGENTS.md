@@ -4,49 +4,94 @@ Prefer `so graph query` and this file before broad code search.
 
 ## Architecture
 
-Superopen is a local-first agent-harness platform. The Go CLI builds and manages repository knowledge, captures coding-agent telemetry, evaluates sessions, and updates a file-backed `.so/` harness. A Next.js application presents the same sessions, recommendations, memory, and 3D replay data from local files.
+Superopen is open-source **agent harness engineering**: a local-first CLI (`so`) plus web UI that builds a repository graph, injects shared context into coding agents, scores sessions, and proposes harness improvements.
 
-## Entry points and boundaries
+## Where to look first
 
-- `cmd/so/` is the CLI entry point and command dispatch layer. Keep orchestration here thin and put reusable behavior in `internal/`.
-- `internal/initcmd`, `internal/harness`, `internal/seed`, `internal/inject`, and `internal/sync` create and refresh `.so/`, native agent instructions, rules, skills, graphs, guardrails, and eval configuration.
-- `internal/coding` detects supported agents, installs hooks, normalizes vendor events, tracks runtime state, and feeds session telemetry into `internal/session` and `internal/tracestore`.
-- `internal/eval`, `internal/recommend`, `internal/improve`, `internal/learn`, and `internal/memory` implement the feedback loop from recorded sessions to scored evidence and proposed harness improvements. `internal/llm` and `internal/agentcli` provide optional model-backed evaluation; offline heuristics remain a supported fallback.
-- `internal/graph` and `internal/retrieve` provide repository graph and corpus retrieval. Query `.so/graph/graph.json` through `so graph query` before broad source searches.
-- `internal/guardrails`, `internal/audit`, `internal/redact`, and `internal/retention` enforce policy, preserve an audit trail, remove sensitive material, and manage stored data.
-- `web/` is the local Next.js UI. Routes and file-backed APIs live under `web/src/app`, reusable UI under `web/src/components`, data access under `web/src/lib/so`, and session replay under `web/src/map`.
-- `plugins/` contains vendor integration packages; `sdk/go` contains hook helpers and semantic conventions used by integrations. `templates/` is the source for generated harness content. `npm/` and release scripts package distributable integrations.
+1. `so graph query "<question>"` when `.so/graph/graph.json` exists.
+2. `AGENTS.md` and `.so/guardrails.yaml` for project policy.
+3. The package or directory that matches your task (see below).
 
-## Data flow
+## Top-level layout
 
-Coding-agent hooks emit vendor-specific events, normalization converts them to shared session records, and the trace/session stores persist them under `.so/`. Evaluation consumes those records and can create recommendations; approved changes update harness files and future injected context. The CLI and web UI operate on this shared file-backed model, so schema or path changes must be kept compatible across both surfaces.
+| Path | Role |
+|------|------|
+| `cmd/so/` | CLI entrypoint and subcommands (`init`, `graph`, `memory`, `eval`, `dev`, …) |
+| `internal/` | Core Go packages: graph, harness, memory, session telemetry, evals, guardrails, inject, seed, mcp, coding hooks |
+| `web/` | Next.js local sessions UI (`so dev` on `:4444`) |
+| `sdk/go/` | Go SDK consumed by plugins and external callers |
+| `plugins/` | Coding-agent hook integrations and marketplace sync |
+| `templates/` | Seed content for harness docs, skills, rules, guardrails |
+| `scripts/` | Install, release, and plugin-sync automation |
+| `.so/` | Per-repo harness data: graph, config, sessions, memory, evals |
 
-## Where to start
+## Internal package map (high signal)
 
-Read `AGENTS.md`, `.so/guardrails.yaml`, and `docs/so-schema.md`. For behavior, start at the relevant `cmd/so` command, follow its `internal` package, then inspect matching web API or plugin code only when the change crosses those boundaries.
+- `internal/graph` — repository graph build and query (Graphify-backed).
+- `internal/harness`, `internal/seed`, `internal/initcmd` — bootstrap and upgrade flows.
+- `internal/memory`, `internal/retrieve` — cross-session recall and corpus search.
+- `internal/session`, `internal/coding`, `internal/codingotlp` — hook telemetry and OTLP export.
+- `internal/eval`, `internal/recommend` — session scoring and harness recommendations.
+- `internal/guardrails`, `internal/inject` — policy enforcement and agent injectors.
+- `internal/mcp` — MCP server projection for agents.
+- `internal/port` — chat/session porting across vendors.
+
+## Service boundaries
+
+- **CLI** (`cmd/so` + `internal/*`) owns harness lifecycle, graph, memory, evals, and vendor hooks.
+- **Web UI** (`web/`) reads/writes `.so/` for session replay and harness inspection; no separate backend service.
+- **Plugins/SDK** wire agent runtimes to Superopen telemetry; they are not a general LLM SDK.
+
+## Data & APIs
+
+- All harness state is file-backed under `.so/` (config, graph, sessions, memory).
+- Graph data: `.so/graph/graph.json` (regenerable via `so graph`).
+- External deps: OpenTelemetry, Cobra, YAML; optional LLM backends for evals only.
 
 ## Conventions
 
-- Query the Superopen graph and read repository guidance before broad code search.
-- Keep command handlers in `cmd/so` small; place reusable logic in focused `internal` packages.
-- Preserve the local-first, file-backed contract between the CLI, `.so/` schema, vendor hooks, and web UI.
-- Follow existing Go and TypeScript naming and package patterns; format Go with `gofmt` and use the repository's configured web linting.
-- Add tests for behavior changes and update user-facing documentation when commands, schemas, configuration, or workflows change.
-- Run focused checks while iterating, then run `go test -race -count=1 ./...` and `go vet ./...` for Go or CLI changes.
-- For web changes, run `cd web && npm test && npm run typecheck && npm run lint`; include a Next build when routing or production bundling is affected.
-- After plugin changes, run `bash scripts/sync-plugins.sh` and commit intentional marketplace or generated-file drift.
-- Keep changes focused; exclude unrelated formatting, refactors, and generated artifacts.
-- Preserve cross-platform behavior for filesystem paths, process handling, and hooks on Linux, macOS, and Windows.
-- Redact sensitive values from logs, telemetry, fixtures, and checked-in harness data. Never commit credentials or secrets.
-- Use Conventional Commit pull-request titles such as `feat: add project prune` or `fix(web): restore file search`.
-- Explain the problem and solution in pull requests, link related issues when available, and complete the pull-request template accurately.
+## Workflow
+
+- Prefer `so graph query` and `AGENTS.md` before broad grep or glob exploration.
+- Keep changes focused; avoid unrelated refactors or drive-by formatting.
+- Discuss substantial changes in an issue before large PRs; small doc fixes can go straight to PR.
+
+## Go / CLI
+
+- Match existing package layout under `internal/` and `cmd/so/`.
+- Run `go test -race -count=1 ./...` and `go vet ./...` for Go changes.
+- Add `_test.go` coverage for behavior changes; use table-driven tests where the repo already does.
+- Follow existing error-handling and Cobra command patterns in sibling files.
+
+## Web UI (`web/`)
+
+- Run `npm test`, `npm run typecheck`, and `npm run lint` after UI changes.
+- Use existing component and test patterns (Vitest, TypeScript strict).
+
+## Plugins
+
+- After plugin/marketplace edits, run `bash scripts/sync-plugins.sh` and commit any drift.
+
+## Commits & PRs
+
+- Use Conventional Commit titles: `feat: …`, `fix(web): …`, `docs: …`.
+- Explain problem and solution; link related issues.
+- Include tests for behavior changes and update user-facing docs when relevant.
+- Complete the PR template honestly.
+
+## Lockfiles & generated output
+
+- Change lockfiles only via the package manager (`go mod`, `npm ci`), not by hand-editing.
+- Do not edit generated artifacts (`dist/`, `vendor/`, `*.generated.*`).
+
+## Superopen harness edits
+
+- Prune obsolete guidance instead of only appending to rules/skills.
+- After meaningful `.so/` or injector edits, run `so sync`.
 
 <!-- superopen:learned:start -->
 ## Superopen learned
 
 
-## Hot paths
-
-- Document primary services and entrypoints discovered this session.
-- Prefer `so graph query` before broad Grep when asking how an area works.
+Start with `so graph query` for codebase questions and read AGENTS.md plus `.so/guardrails.yaml`. For Go work run `go test -race -count=1` and `go vet`; for `web/` run npm test, typecheck, and lint. Use vendor-native rules/skills dirs (`.cursor/`, `.claude/`, etc.) and project skills `gen-test` / `pr-check` when relevant. After harness edits run `so sync`.
 <!-- superopen:learned:end -->

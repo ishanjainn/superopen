@@ -60,8 +60,8 @@ so init --no-llm
 
    (Add `--force` / `--code-only` if the user passed those flags.)
 
-3. Run `so upgrade-brief` to print the system instructions and repository profile without creating a persistent artifact.
-4. **Using your own model**, produce the JSON object described in that brief (architecture_md, conventions_md, guardrails, evals, brief). Stay faithful to the profile - invent no secrets or fake paths. Do **not** reuse upgrade JSON from another project.
+3. Run `so upgrade-brief` to print the system instructions and repository profile without creating a persistent artifact. The profile includes **Automation candidates** (MCP servers, skills, guardrails) derived from stack signals after the graph build.
+4. **Using your own model**, produce the JSON object described in that brief (`architecture_md`, `conventions_md`, `guardrails`, `evals`, `brief`, optional `mcp`, optional `skills`). Stay faithful to the profile - invent no secrets, env blocks, or fake paths. Pick the top 1–2 MCP and 1–2 skills from the candidates list; pin package versions (never `@latest`); never recommend Memory MCP (Superopen memory already covers recall). Do **not** reuse upgrade JSON from another project.
 5. Apply it with **exactly one** input method (never both — the CLI errors if a path and a heredoc/stdin redirect are combined):
 
 ```bash
@@ -72,9 +72,9 @@ EOF
 
    Or write a temp file and `so apply-upgrade /tmp/so-upgrade.json` (no heredoc on that command).
 
-6. Tell the user briefly: Superopen at `.so/`, graph node/edge counts, and that **AGENTS.md**, guardrails, and evals were upgraded with the assistant model. Suggest `so doctor` or `so dev` next.
+6. Tell the user briefly: Superopen at `.so/`, graph node/edge counts, and that **AGENTS.md**, guardrails, evals, optional **mcp** (`.so/config.yaml` + projected `.mcp.json` / `.cursor/mcp.json`), and project skills were upgraded with the assistant model. Suggest `so doctor`, `so sync`, or `so dev` next. Leftover high-signal skills/guardrails may appear under `so recommend list` for HITL.
 
-If `.so/` already exists and the user only wanted a refresh of context/guardrails, skip step 2’s full rebuild when possible: run `so upgrade-brief`, then steps 4-5.
+If `.so/` already exists and the user only wanted a refresh of context/guardrails/automations, skip step 2’s full rebuild when possible: run `so upgrade-brief`, then steps 4-5 (apply merges MCP servers additively).
 
 ### Bootstrap - no `.so/` yet (any `/so` task)
 

@@ -8,7 +8,6 @@ vendors:
         - codex
         - gemini
         - opencode
-        - copilot-cli
         - pi
     shared_agents: false
 graph:
@@ -29,6 +28,18 @@ recommendations:
     require_approval: true
     auto_apply_tiers:
         - soft
+mcp:
+    servers:
+        - name: context7
+          command: npx
+          args:
+            - -y
+            - '@upstash/context7-mcp@1.0.0'
+        - name: github
+          command: npx
+          args:
+            - -y
+            - '@modelcontextprotocol/server-github@2025.4.8'
 observability:
     vendors:
         - claude-code
@@ -36,7 +47,6 @@ observability:
         - codex
         - gemini
         - opencode
-        - copilot-cli
         - pi
     exporters:
         - type: local_jsonl

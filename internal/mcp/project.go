@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/config"
@@ -13,7 +14,7 @@ import (
 )
 
 // Project merges cfg.MCP.Servers into known project-scoped vendor MCP files.
-// Never writes under the user home directory.
+// Never writes user-global configs (~/.mcp.json, ~/.cursor/mcp.json).
 func Project(repoRoot string, cfg config.Config) error {
 	if len(cfg.MCP.Servers) == 0 {
 		return nil
@@ -28,7 +29,7 @@ func Project(repoRoot string, cfg config.Config) error {
 	// Always project root .mcp.json when any Claude-like agent is enabled or
 	// when no vendors are listed yet (fresh init before detect finishes).
 	if len(enabled) == 0 || enabled["claude"] || enabled["codex"] || enabled["gemini"] || enabled["opencode"] || enabled["pi"] || enabled["copilot"] {
-		if err := mergeFile(filepath.Join(repoRoot, ".mcp.json"), servers); err != nil {
+		if err := mergeFile(repoRoot, filepath.Join(repoRoot, ".mcp.json"), servers); err != nil {
 			return err
 		}
 	}
@@ -37,7 +38,7 @@ func Project(repoRoot string, cfg config.Config) error {
 		if err := os.MkdirAll(cursorDir, 0o755); err != nil {
 			return err
 		}
-		if err := mergeFile(filepath.Join(cursorDir, "mcp.json"), servers); err != nil {
+		if err := mergeFile(repoRoot, filepath.Join(cursorDir, "mcp.json"), servers); err != nil {
 			return err
 		}
 	}
@@ -85,15 +86,9 @@ func toServerMap(list []config.MCPServer) map[string]map[string]any {
 	return out
 }
 
-func mergeFile(path string, servers map[string]map[string]any) error {
-	if abs, err := filepath.Abs(path); err == nil {
-		home, _ := os.UserHomeDir()
-		if home != "" {
-			homeAbs, _ := filepath.Abs(home)
-			if homeAbs != "" && (abs == homeAbs || strings.HasPrefix(abs, homeAbs+string(os.PathSeparator))) {
-				return fmt.Errorf("refusing to write MCP config under home directory: %s", path)
-			}
-		}
+func mergeFile(repoRoot, path string, servers map[string]map[string]any) error {
+	if err := rejectUserGlobalPath(repoRoot, path); err != nil {
+		return err
 	}
 	doc := map[string]any{}
 	if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) > 0 {
@@ -130,6 +125,70 @@ func mergeFile(path string, servers map[string]map[string]any) error {
 		return err
 	}
 	return os.WriteFile(path, append(out, '\n'), 0o644)
+}
+
+// rejectUserGlobalPath blocks ~/.mcp.json and other home-scoped configs.
+// Repos that live under $HOME are allowed; using $HOME itself as the repo is not.
+// Containment uses filepath.Rel (Windows-safe, no /work vs /workother prefix bugs).
+func rejectUserGlobalPath(repoRoot, path string) error {
+	abs, err := absPath(path)
+	if err != nil {
+		return err
+	}
+	repoAbs, err := absPath(repoRoot)
+	if err != nil {
+		return err
+	}
+	homeAbs := ""
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		homeAbs, _ = absPath(home)
+	}
+	if homeAbs != "" && samePath(repoAbs, homeAbs) {
+		return fmt.Errorf("refusing to write MCP config with repo root %s", path)
+	}
+	if containedIn(repoAbs, abs) {
+		return nil
+	}
+	if homeAbs != "" && containedIn(homeAbs, abs) {
+		return fmt.Errorf("refusing to write user-global MCP config: %s", path)
+	}
+	return nil
+}
+
+func absPath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
+}
+
+func samePath(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+func containedIn(parent, child string) bool {
+	if samePath(parent, child) {
+		return true
+	}
+	if runtime.GOOS == "windows" {
+		parent = strings.ToLower(parent)
+		child = strings.ToLower(child)
+	}
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return false
+	}
+	return true
 }
 
 // MergeServers additive-merges incoming into existing by name (incoming wins on conflict).

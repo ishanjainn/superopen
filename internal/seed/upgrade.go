@@ -351,12 +351,15 @@ func applyLLMUpgrade(paths harness.Paths, p discover.Profile, out llmHarnessOut)
 		return err
 	}
 
-	pickedMCP, pickedSkills := applyAutomationPicks(paths, out)
+	pickedMCP, pickedSkills, err := applyAutomationPicks(paths, out)
+	if err != nil {
+		return err
+	}
 	_ = EnqueueLeftoverCandidates(paths, p, pickedMCP, pickedSkills)
 	return nil
 }
 
-func applyAutomationPicks(paths harness.Paths, out llmHarnessOut) (map[string]bool, map[string]bool) {
+func applyAutomationPicks(paths harness.Paths, out llmHarnessOut) (map[string]bool, map[string]bool, error) {
 	pickedMCP := map[string]bool{}
 	pickedSkills := map[string]bool{}
 
@@ -394,8 +397,12 @@ func applyAutomationPicks(paths harness.Paths, out llmHarnessOut) (map[string]bo
 	}
 	if len(incoming) > 0 {
 		cfg.MCP.Servers = mcp.MergeServers(cfg.MCP.Servers, incoming)
-		_ = config.Save(paths.Config, cfg)
-		_ = mcp.Project(paths.RepoRoot, cfg)
+		if err := config.Save(paths.Config, cfg); err != nil {
+			return pickedMCP, pickedSkills, err
+		}
+		if err := mcp.Project(paths.RepoRoot, cfg); err != nil {
+			return pickedMCP, pickedSkills, err
+		}
 	}
 
 	vendors := enabledVendors(cfg)
@@ -418,7 +425,7 @@ func applyAutomationPicks(paths harness.Paths, out llmHarnessOut) (map[string]bo
 			break
 		}
 	}
-	return pickedMCP, pickedSkills
+	return pickedMCP, pickedSkills, nil
 }
 
 func filterPinnedArgs(args []string) []string {
