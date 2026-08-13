@@ -1,13 +1,12 @@
-import { mkdirSync, writeFileSync } from "fs";
-import { fileExists, readText } from "./nodeio";
-import { join } from "path";
-import { soPath } from "./root";
+import { createHash } from "crypto";
+import { readFileSync } from "fs";
+import { fileExists, readJSONFile, readText } from "./nodeio";
+import { isAbsolute, join } from "path";
+import { repoRoot, soPath } from "./root";
 import {
   composeLessonText,
   parsePreferenceItems,
   parseProjectSections,
-  serializePreferences,
-  serializeProjects,
   type MemoryLine,
   type MemoryVerb,
   type ProjectSection,
@@ -23,49 +22,84 @@ export type Lesson = {
   created_at?: string;
 };
 
-function lessonsPath() {
-  return join(soPath("memory"), "lessons.jsonl");
-}
+export type MemoryPattern = {
+  fingerprint: string;
+  vendor: string;
+  kind: string;
+  change_kind?: string;
+  target_type?: string;
+  target_path?: string;
+  summary: string;
+  evidence?: string[];
+  occurrences: number;
+  session_ids?: string[];
+  verified_sessions?: string[];
+  confidence?: number;
+  explicit_workflow?: boolean;
+  status: string;
+  first_observed_at?: string;
+  last_observed_at?: string;
+	scope?: "vendor" | "shared";
+	applicability?: string;
+	paths?: string[];
+	symbols?: string[];
+	error_signatures?: string[];
+	retrieval_count?: number;
+	helpful_count?: number;
+	incorrect_count?: number;
+	contradiction_count?: number;
+	last_retrieved_at?: string;
+	last_verified_at?: string;
+	status_reason?: string;
+	source_sha256?: string;
+	guidance_sha256?: string;
+	freshness?: "current" | "stale" | "unanchored";
+};
 
-function writeLessons(lessons: Lesson[]) {
-  ensureMemoryDirs();
-  const body = lessons.map((l) => JSON.stringify(l)).join("\n");
-  writeFileSync(lessonsPath(), body ? body + "\n" : "", "utf8");
-}
+type MemoryState = {
+	_about: { purpose: string; authority: string; updated_by: string };
+	lessons?: Lesson[];
+	preferences?: string;
+	projects?: string;
+	semantic?: unknown[];
+	episodic?: unknown[];
+	history?: string[];
+	patterns?: MemoryPattern[];
+};
 
-function ensureMemoryDirs() {
-  const dir = soPath("memory");
-  if (!fileExists(dir)) mkdirSync(dir, { recursive: true });
-  const hist = join(dir, "history");
-  if (!fileExists(hist)) mkdirSync(hist, { recursive: true });
+function statePath() { return join(soPath("memory"), "state.json"); }
+
+function loadState(): MemoryState {
+	return readJSONFile<MemoryState>(statePath()) || {
+		_about: {
+			purpose: "Consolidated lessons, preferences, project notes, harvest cursor, and memory refresh state.",
+			authority: "local durable memory state",
+			updated_by: "session review and memory consolidation",
+		},
+		lessons: [], preferences: "", projects: "",
+	};
 }
 
 export function listLessons(): Lesson[] {
-  ensureMemoryDirs();
-  const p = lessonsPath();
-  if (!fileExists(p)) return [];
-  const out: Lesson[] = [];
-  for (const line of readText(p).split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      out.push(JSON.parse(line) as Lesson);
-    } catch {
-      /* skip */
-    }
-  }
-  return out;
+	return loadState().lessons || [];
 }
 
-export function deleteLessonLocal(id: string): void {
-  writeLessons(listLessons().filter((l) => l.id !== id));
+export function listPatterns(): MemoryPattern[] {
+	return (loadState().patterns || []).map((pattern) => {
+		const expected = pattern.status === "applied" && pattern.guidance_sha256 ? pattern.guidance_sha256 : pattern.source_sha256;
+		if (!expected) return { ...pattern, freshness: "unanchored" };
+		const target = pattern.target_path || pattern.paths?.[0];
+		if (!target) return { ...pattern, freshness: "stale" };
+		try {
+			const path = isAbsolute(target) ? target : join(repoRoot(), target);
+			const actual = createHash("sha256").update(readFileSync(path)).digest("hex");
+			return { ...pattern, freshness: actual === expected ? "current" : "stale" };
+		} catch { return { ...pattern, freshness: "stale" }; }
+	});
 }
 
 export function listPreferenceItems(): MemoryLine[] {
   return parsePreferenceItems(readMarkdown("preferences.md"));
-}
-
-function savePreferenceItems(items: MemoryLine[]): void {
-  writeMarkdown("preferences.md", serializePreferences(items));
 }
 
 export function upsertPreferenceItem(input: {
@@ -88,22 +122,16 @@ export function upsertPreferenceItem(input: {
       text,
     });
   }
-  savePreferenceItems(items);
   return items;
 }
 
 export function deletePreferenceItem(id: string): MemoryLine[] {
   const items = listPreferenceItems().filter((i) => i.id !== id);
-  savePreferenceItems(items);
   return items;
 }
 
 export function listProjectSections(): ProjectSection[] {
   return parseProjectSections(readMarkdown("projects.md"));
-}
-
-function saveProjectSections(sections: ProjectSection[]): void {
-  writeMarkdown("projects.md", serializeProjects(sections));
 }
 
 export function upsertProjectItem(input: {
@@ -129,7 +157,6 @@ export function upsertProjectItem(input: {
       text,
     });
   }
-  saveProjectSections(sections);
   return sections;
 }
 
@@ -138,25 +165,20 @@ export function deleteProjectItem(sectionId: string, id: string): ProjectSection
   const section = sections.find((s) => s.id === sectionId);
   if (!section) throw new Error("section not found");
   section.items = section.items.filter((i) => i.id !== id);
-  saveProjectSections(sections);
   return sections;
 }
 
 export function readActivePack(): string {
-  const p = join(soPath("memory"), "active-context.md");
+	const p = join(soPath("memory"), "context.md");
   if (!fileExists(p)) return "";
   return readText(p);
 }
 
 export function readMarkdown(name: string): string {
-  const p = join(soPath("memory"), name);
-  if (!fileExists(p)) return "";
-  return readText(p);
-}
-
-export function writeMarkdown(name: string, body: string) {
-  ensureMemoryDirs();
-  writeFileSync(join(soPath("memory"), name), body, "utf8");
+	const state = loadState();
+	if (name === "preferences.md") return state.preferences || "";
+	if (name === "projects.md") return state.projects || "";
+	return "";
 }
 
 export function isStubMarkdown(content: string): boolean {

@@ -14,6 +14,6 @@
 
 ## Notes
 
-- Shared memory injects on every vendor SessionStart via `.so/memory/active-context.md`.
+- Shared memory injects on every vendor SessionStart via `.so/memory/context.md`.
 - Teach durable corrections with `so memory add` or Memory → Lessons.
 - Port chats with `so sessions port` - that moves transcripts; this file stays workspace context.

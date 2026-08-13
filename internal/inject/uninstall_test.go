@@ -10,6 +10,7 @@ import (
 func TestUninstallRemovesSkillsAndInjectors(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	root := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(home, ".agents", "skills", "so"), 0o755)
 	_ = os.WriteFile(filepath.Join(home, ".agents", "skills", "so", "SKILL.md"), []byte("x"), 0o644)

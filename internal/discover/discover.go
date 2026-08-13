@@ -30,18 +30,18 @@ type GraphSummary struct {
 
 // Profile is what init uses to seed docs, guardrails, and evals.
 type Profile struct {
-	Stack       string        `json:"stack"`
-	Structure   string        `json:"structure"`
-	Graph       GraphSummary  `json:"graph"`
-	Agents      []AgentSource `json:"agents"`
-	DerivedRules []string     `json:"derived_rules"`
-	Themes      []string      `json:"themes"`
+	Stack        string        `json:"stack"`
+	Structure    string        `json:"structure"`
+	Graph        GraphSummary  `json:"graph"`
+	Agents       []AgentSource `json:"agents"`
+	DerivedRules []string      `json:"derived_rules"`
+	Themes       []string      `json:"themes"`
 }
 
 var (
-	headingRe = regexp.MustCompile(`(?m)^#{1,3}\s+(.+)$`)
-	bulletRe  = regexp.MustCompile(`(?m)^(?:\s*[-*]|\s*\d+\.)\s+(.+)$`)
-	ruleCueRe = regexp.MustCompile(`(?i)\b(never|always|must|must not|do not|don't|avoid|prefer|required|critical|forbidden|ensure)\b`)
+	headingRe  = regexp.MustCompile(`(?m)^#{1,3}\s+(.+)$`)
+	bulletRe   = regexp.MustCompile(`(?m)^(?:\s*[-*]|\s*\d+\.)\s+(.+)$`)
+	ruleCueRe  = regexp.MustCompile(`(?i)\b(never|always|must|must not|do not|don't|avoid|prefer|required|critical|forbidden|ensure)\b`)
 	themeCueRe = regexp.MustCompile(`(?i)\b(concurren|race|secret|security|sql|rate.?limit|test|lint|format|pr title|github|credential|mutex|goroutine|migration)\b`)
 )
 

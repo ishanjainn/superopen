@@ -21,7 +21,7 @@ The `/so` skill is registered with **`so install`** (after installing the CLI). 
 /so query "<question>"                           # alias for graph query
 /so knowledge                                     # show AGENTS.md + discovered rules/skills roots
 /so rules                                        # point at this repo's rules dir (Cursor or .agents)
-/so guardrails                                   # show .so/guardrails/guardrails.yaml
+/so guardrails                                   # show .so/guardrails.yaml
 /so skills                                       # list discovered non-/so skills tree
 /so doctor                                       # health check
 /so sync                                         # refresh injectors + graph after Superopen edits
@@ -29,8 +29,9 @@ The `/so` skill is registered with **`so install`** (after installing the CLI). 
 /so uninstall                                    # remove skills, hooks, injectors, .so/, CLI
 /so apply-upgrade                                # apply JSON you produced (usually automatic after /so init)
 /so harvest idle                                 # harvest long-idle sessions into memory + native docs
-/so dev                                          # open Sessions UI (+ local receiver for live UI)
+/so dev                                          # open the file-backed Sessions UI
 /so sessions                                     # list sessions
+/so memory search "<task>"                       # compact local recall; add --id to expand selected evidence
 /so eval <session-id>                            # score a session
 /so recommend list                               # pending Superopen recommendations
 /so recommend apply <id> --reason "…"          # resolve with an agent explanation
@@ -40,7 +41,7 @@ The `/so` skill is registered with **`so install`** (after installing the CLI). 
 Codex users: prefer `$so …` instead of `/so …`.
 Gemini / Copilot / OpenCode / Pi: use `/so …` (or the vendor’s skill invoke if `/so` is not bound).
 
-CLI flags for agents: `so --json …`, `so --full …` (or `SO_JSON=1` / `SO_FULL=1`). Prefer `--json` when parsing. Applying, dismissing, or reverting a recommendation requires `--reason`; explain what changed or why the recommendation is wrong. Empty results print `0 <kind>`. Guardrails are a **single** file: `.so/guardrails/guardrails.yaml`.
+CLI flags for agents: `so --json …`, `so --full …` (or `SO_JSON=1` / `SO_FULL=1`). Prefer `--json` when parsing. Applying, dismissing, or reverting a recommendation requires `--reason`; explain what changed or why the recommendation is wrong. Empty results print `0 <kind>`. Guardrails are a **single** file: `.so/guardrails.yaml`.
 
 ## What You Must Do When Invoked
 
@@ -59,7 +60,7 @@ so init --no-llm
 
    (Add `--force` / `--code-only` if the user passed those flags.)
 
-3. Read `.so/upgrade-brief.md` (written by init). It contains the system instructions + repo profile.
+3. Run `so upgrade-brief` to print the system instructions and repository profile without creating a persistent artifact.
 4. **Using your own model**, produce the JSON object described in that brief (architecture_md, conventions_md, guardrails, evals, brief). Stay faithful to the profile - invent no secrets or fake paths. Do **not** reuse upgrade JSON from another project.
 5. Apply it with **exactly one** input method (never both — the CLI errors if a path and a heredoc/stdin redirect are combined):
 
@@ -73,7 +74,7 @@ EOF
 
 6. Tell the user briefly: Superopen at `.so/`, graph node/edge counts, and that **AGENTS.md**, guardrails, and evals were upgraded with the assistant model. Suggest `so doctor` or `so dev` next.
 
-If `.so/` already exists and the user only wanted a refresh of context/guardrails, skip step 2’s full rebuild when possible: read `.so/upgrade-brief.md` (re-run `so init --no-llm` if missing), then steps 4-5.
+If `.so/` already exists and the user only wanted a refresh of context/guardrails, skip step 2’s full rebuild when possible: run `so upgrade-brief`, then steps 4-5.
 
 ### Bootstrap - no `.so/` yet (any `/so` task)
 
@@ -91,7 +92,9 @@ so graph query "<question>"
 
 Prefer that answer over Grep/Glob when it is useful. You may still open a few specific files the query surfaces.
 
-2. For conventions / review rules, read `AGENTS.md` (and nested `*/AGENTS.md`), the repo's rules dir, and `.so/guardrails/guardrails.yaml` before inventing process. When updating guidance, prune obsolete lines — do not only append.
+2. For conventions / review rules, read `AGENTS.md` (and nested `*/AGENTS.md`), the active vendor's rules dir, and `.so/guardrails.yaml` before inventing process. When updating guidance, prune obsolete lines — do not only append.
+
+3. Search memory compactly with `so memory search "<task>" --vendor <vendor>` when prior project experience may matter. Expand only a selected result with `--id <fingerprint> --vendor <vendor>`. Cursor cannot receive same-turn prompt context from its hook, so Cursor sessions should use this guided search for task-specific recall; inspect the full Session view only when compact evidence is insufficient.
 
 ### Commands → shell
 
@@ -107,17 +110,18 @@ Map `/so …` arguments to the `so` CLI on PATH (or `$(go env GOPATH)/bin/so` if
 | `/so doctor` | `so doctor` |
 | `/so sync` | `so sync` |
 | `/so dev` | `so dev` (background OK) |
-| `/so guardrails` | `so guard` or read `.so/guardrails/guardrails.yaml` |
+| `/so guardrails` | `so guard` or read `.so/guardrails.yaml` |
 | `/so skills` | list the discovered skills tree (not the reserved `/so` skill) |
 | `/so knowledge` | read `AGENTS.md` (root + nested) relevant to the task |
 | `/so rules` | summarize coding rules in the discovered rules dir |
 | `/so sessions` | `so sessions` |
+| `/so memory search …` | `so memory search …` |
 | `/so eval …` | `so eval …` |
 | `/so recommend …` | `so recommend …` |
 
 ### Headless / CI only
 
-API keys (`OPENAI_API_KEY`, etc.) are **optional**. Session evals default to **`evals.backend: auto`**: sealed **Claude Code / Codex CLI** on PATH first (useful harness improvements), then API key, then offline **heuristics**. Set `heuristics` only when you want zero judging cost.
+API keys (`OPENAI_API_KEY`, etc.) are **optional and never selected from ambient environment alone**. Session evals default to **`evals.backend: auto`**: the same vendor's sealed CLI when supported, another configured Claude/Codex CLI, an explicitly configured `llm:` backend, then offline **heuristics**.
 
 ```bash
 so init --llm

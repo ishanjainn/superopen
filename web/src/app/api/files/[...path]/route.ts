@@ -11,6 +11,14 @@ import { projectIdFromRequest, runWithProject } from "@/lib/so/workspace";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+function isGuidancePath(rel: string): boolean {
+  return (
+    /^(knowledge|rules|skills)(\/|$)/.test(rel) ||
+    /^\.(claude|cursor|agents|gemini|opencode|codex|github|pi)\/skills\//.test(rel) ||
+    /^\.(claude\/rules|cursor\/rules|agents\/rules|gemini\/rules|opencode\/rules|codex\/rules|github\/instructions|pi\/rules)\//.test(rel)
+  );
+}
+
 export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ path: string[] }> | { path: string[] } }
@@ -50,15 +58,16 @@ export async function PUT(
     return NextResponse.json({ error: "content required" }, { status: 400 });
   }
   try {
-    const result = runWithProject(project, () =>
-      writeHarnessFile(rel, content, { create: Boolean(body.create) })
-    );
-    if (/^(knowledge|rules|skills)\//.test(rel) || /^(knowledge|rules|skills)$/.test(rel)) {
-      void soJSON(["sync", "--skip-graph"], { cwd: repoCwd(), timeoutMs: 120_000 }).catch(
+    const scoped = runWithProject(project, () => ({
+      result: writeHarnessFile(rel, content, { create: Boolean(body.create) }),
+      cwd: repoCwd(),
+    }));
+    if (isGuidancePath(rel)) {
+      void soJSON(["sync", "--skip-graph"], { cwd: scoped.cwd, timeoutMs: 120_000 }).catch(
         () => undefined
       );
     }
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({ ok: true, ...scoped.result });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const status = msg.includes("not found")
@@ -91,14 +100,20 @@ export async function POST(
     return NextResponse.json({ error: "name required" }, { status: 400 });
   }
   try {
-    const result = runWithProject(project, () =>
-      createHarnessFile(
-        dir,
-        name,
-        typeof body.content === "string" ? body.content : undefined
-      )
-    );
-    return NextResponse.json({ ok: true, ...result }, { status: 201 });
+    const scoped = runWithProject(project, () => ({
+      result: createHarnessFile(
+          dir,
+          name,
+          typeof body.content === "string" ? body.content : undefined
+        ),
+      cwd: repoCwd(),
+    }));
+    if (isGuidancePath(scoped.result.path)) {
+      void soJSON(["sync", "--skip-graph"], { cwd: scoped.cwd, timeoutMs: 120_000 }).catch(
+        () => undefined
+      );
+    }
+    return NextResponse.json({ ok: true, ...scoped.result }, { status: 201 });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const status = msg.includes("already exists")
@@ -120,12 +135,16 @@ export async function DELETE(
   const rel = (params.path || []).join("/");
   const project = projectIdFromRequest(req);
   try {
-    runWithProject(project, () => deleteHarnessFile(rel));
+    const cwd = runWithProject(project, () => {
+      deleteHarnessFile(rel);
+      return repoCwd();
+    });
     if (
-      /^(knowledge|rules|skills|guardrails|evals)\//.test(rel) ||
+      isGuidancePath(rel) ||
+      /^(guardrails|evals)\//.test(rel) ||
       /^(knowledge|rules|skills|guardrails|evals)$/.test(rel)
     ) {
-      void soJSON(["sync", "--skip-graph"], { cwd: repoCwd(), timeoutMs: 120_000 }).catch(
+      void soJSON(["sync", "--skip-graph"], { cwd, timeoutMs: 120_000 }).catch(
         () => undefined
       );
     }

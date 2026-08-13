@@ -193,6 +193,15 @@ type State struct {
 	// session durations across the board.
 	SessionStartedAt time.Time `json:"session_started_at,omitempty"`
 
+	// Dynamic memory delivery stays in the OS cache so prompt hooks never
+	// rewrite repository memory or materialized session files.
+	MemorySeen       map[string]string `json:"memory_seen,omitempty"`
+	MemoryTokens     int64             `json:"memory_tokens,omitempty"`
+	LastPromptHash   string            `json:"last_prompt_hash,omitempty"`
+	MemoryTurnID     string            `json:"memory_turn_id,omitempty"`
+	MemoryTurnTokens int64             `json:"memory_turn_tokens,omitempty"`
+	RecentPaths      []string          `json:"recent_paths,omitempty"`
+
 	// LastSessionRootEmitAt is the wall-clock of the most recent
 	// `coding_agent.session` span emission. Used by Codex (which has
 	// no SessionEnd hook and would otherwise re-emit the session-
@@ -241,9 +250,7 @@ type CodexTurnFragment struct {
 // accumulated by `PostToolUse`. The fields mirror Codex's hook payload
 // (tool_name, tool_use_id, tool_input, tool_response, tool_duration_ms,
 // status, error) plus the resolved decision (Status). Body fields are
-// gated on `full` content capture by the adapter before we ever write
-// here so the on-disk cache cannot carry tool args/results in
-// metadata_only mode.
+// secret-redacted by the adapter before being written to the local cache.
 type CodexToolRecord struct {
 	ToolName     string `json:"tool_name,omitempty"`
 	ToolUseID    string `json:"tool_use_id,omitempty"`

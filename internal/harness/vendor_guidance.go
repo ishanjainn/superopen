@@ -81,23 +81,20 @@ func SkillsRelForKind(kind string) string {
 	}
 }
 
-// RulesDirForVendor returns the absolute rules dir for a session vendor.
-// Falls back to discoverNativeRoots when vendor is unknown.
+// RulesDirForVendor returns the absolute rules dir for an explicit vendor.
 func RulesDirForVendor(repoRoot, vendor string) string {
 	if rel := RulesRelForKind(NormalizeVendorKind(vendor)); rel != "" {
 		return filepath.Join(repoRoot, filepath.FromSlash(rel))
 	}
-	rules, _ := discoverNativeRoots(repoRoot)
-	return rules
+	return ""
 }
 
-// SkillsDirForVendor returns the absolute skills dir for a session vendor.
+// SkillsDirForVendor returns the absolute skills dir for an explicit vendor.
 func SkillsDirForVendor(repoRoot, vendor string) string {
 	if rel := SkillsRelForKind(NormalizeVendorKind(vendor)); rel != "" {
 		return filepath.Join(repoRoot, filepath.FromSlash(rel))
 	}
-	_, skills := discoverNativeRoots(repoRoot)
-	return skills
+	return ""
 }
 
 // RuleStem is the logical rule id (filename without vendor-specific extension).

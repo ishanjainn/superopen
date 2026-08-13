@@ -165,7 +165,6 @@ func matchAllowlist(url string, patterns []string) bool {
 	return false
 }
 
-
 // EnvAllowlist returns SplitAllowlist of SUPEROPEN_CODING_REPO_ALLOWLIST,
 // falling back to the SO_ alias.
 func EnvAllowlist() []string {

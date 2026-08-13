@@ -1,7 +1,6 @@
 package sync
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,14 +8,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/audit"
 	"github.com/ishanjainn/superopen/internal/config"
-	"github.com/ishanjainn/superopen/internal/guardrails"
 	"github.com/ishanjainn/superopen/internal/graph"
+	"github.com/ishanjainn/superopen/internal/guardrails"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/inject"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/recommend"
 	"github.com/ishanjainn/superopen/internal/retrieve"
+	"github.com/ishanjainn/superopen/internal/session"
 )
 
 // RefreshOptions controls the cheap post-pull refresh path.
@@ -25,16 +26,6 @@ type RefreshOptions struct {
 	SkipGraph  bool
 	SkipInject bool // git hooks: never rewrite tracked AGENTS.md / skills
 	Force      bool
-}
-
-type refreshMarker struct {
-	SHA       string    `json:"sha"`
-	At        time.Time `json:"at"`
-	GraphBuilt bool     `json:"graph_built,omitempty"`
-}
-
-func refreshMarkerPath(paths harness.Paths) string {
-	return filepath.Join(paths.MemoryDir, "last-refresh.json")
 }
 
 // Refresh is a lite sync for post-merge / post-checkout / so refresh after HEAD moves.
@@ -46,13 +37,17 @@ func Refresh(opts RefreshOptions) error {
 	if !paths.Exists() {
 		return fmt.Errorf("no .so/ harness found - run `so init` first")
 	}
+	_ = paths.EnsureDirs()
+	_ = session.NewStore(paths).Ensure()
+	_ = audit.Ensure(paths)
 	cfg, err := config.Load(paths.Config)
 	if err != nil {
 		cfg = config.Default()
 	}
 
 	sha := gitSHA(root)
-	marker := loadRefreshMarker(paths)
+	memoryStore := memory.NewStore(paths)
+	marker := memoryStore.LoadRefreshState()
 	sharedChanged := sharedHarnessChanged(paths, marker.At) || opts.Force
 	shaChanged := sha != "" && sha != marker.SHA
 	// A commit always changes HEAD, but Graphify's own clustering is not
@@ -62,8 +57,8 @@ func Refresh(opts RefreshOptions) error {
 	sourceChanged := shaChanged && (marker.SHA == "" || indexableFilesChanged(root, marker.SHA, sha))
 
 	_ = guardrails.EnsureDefaults(paths)
-	_ = memory.NewStore(paths).Ensure()
-	_, _ = memory.NewStore(paths).RefreshActive("")
+	_ = memoryStore.Ensure()
+	_, _ = memoryStore.RefreshActive("")
 	if !opts.SkipInject {
 		_ = inject.Apply(root)
 	}
@@ -81,9 +76,14 @@ func Refresh(opts RefreshOptions) error {
 		builtGraph = true
 	}
 
-	return saveRefreshMarker(paths, refreshMarker{
+	if err := memoryStore.SaveRefreshState(memory.RefreshState{
 		SHA: sha, At: time.Now().UTC(), GraphBuilt: builtGraph,
-	})
+	}); err != nil {
+		return err
+	}
+	// v1 used a separate marker. Remove it after the consolidated state is safe.
+	_ = os.Remove(filepath.Join(paths.MemoryDir, "last-refresh.json"))
+	return nil
 }
 
 func gitSHA(root string) string {
@@ -138,25 +138,6 @@ func indexableFilesChanged(root, fromSHA, toSHA string) bool {
 		}
 	}
 	return false
-}
-
-func loadRefreshMarker(paths harness.Paths) refreshMarker {
-	data, err := os.ReadFile(refreshMarkerPath(paths))
-	if err != nil {
-		return refreshMarker{}
-	}
-	var m refreshMarker
-	_ = json.Unmarshal(data, &m)
-	return m
-}
-
-func saveRefreshMarker(paths harness.Paths, m refreshMarker) error {
-	_ = os.MkdirAll(paths.MemoryDir, 0o755)
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(refreshMarkerPath(paths), data, 0o644)
 }
 
 func sharedHarnessChanged(paths harness.Paths, since time.Time) bool {

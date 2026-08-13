@@ -261,14 +261,16 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
       const parts = (output as { parts?: unknown[] })?.parts;
       const text = textFromParts(parts);
       if (!text || !sid) return;
-      fire("message.updated", {
+      const recallOut = fire("message.updated", {
         type: "message.updated",
         cwd: directory,
         session_id: sid,
         sessionID: sid,
         role: "user",
         text,
-      });
+      }, true);
+      const recall = parseInject(recallOut);
+      if (recall) pendingInject = recall;
     },
 
     "tool.execute.before": async (input, output) => {
@@ -299,6 +301,8 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
       );
       const deny = parseDeny(out);
       if (deny) throw new Error(deny);
+      const recall = parseInject(out);
+      if (recall) pendingInject = recall;
     },
 
     "tool.execute.after": async (input, output) => {
@@ -317,6 +321,10 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
         tool_input: (input as { args?: unknown })?.args,
         tool_result: result,
       });
+      if (pendingInject && typeof (output as { output?: unknown })?.output === "string") {
+        (output as { output: string }).output += "\n\n" + pendingInject;
+        pendingInject = null;
+      }
     },
 
     "experimental.chat.system.transform": async (_input, output) => {

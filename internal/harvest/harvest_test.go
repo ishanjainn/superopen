@@ -37,7 +37,7 @@ func TestIdleSweepSkipsRecent(t *testing.T) {
 	store := session.NewStore(paths)
 	id := "ses_recent"
 	_ = store.Start(session.Meta{ID: id, Vendor: "cursor", StartedAt: time.Now().UTC(), Status: session.StatusActive})
-	_ = os.WriteFile(filepath.Join(paths.SessionDir(id), "transcript.jsonl"), []byte(`{"role":"user","text":"hi"}`+"\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(paths.SessionDir(id), "events.jsonl"), []byte(`{"role":"user","text":"hi"}`+"\n"), 0o644)
 	cfg := config.Default()
 	cfg.Memory.IdleHarvestHours = 6
 	results, err := harvest.IdleSweep(paths, cfg)
@@ -58,8 +58,8 @@ func TestPendingHarvestFlush(t *testing.T) {
 	store := session.NewStore(paths)
 	old := "ses_old"
 	_ = store.Start(session.Meta{ID: old, Vendor: "codex", StartedAt: time.Now().Add(-time.Hour).UTC(), Status: session.StatusActive})
-	_ = os.WriteFile(filepath.Join(paths.SessionDir(old), "transcript.jsonl"), []byte(`{"role":"user","text":"learned something"}`+"\n"), 0o644)
-	if err := harvest.MarkPending(paths, old); err != nil {
+	_ = os.WriteFile(filepath.Join(paths.SessionDir(old), "events.jsonl"), []byte(`{"role":"user","text":"learned something"}`+"\n"), 0o644)
+	if err := harvest.MarkPending(paths, old, "codex"); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.Default()
@@ -68,8 +68,37 @@ func TestPendingHarvestFlush(t *testing.T) {
 		t.Fatalf("expected flush of old session, got %+v", results)
 	}
 	// pending should be cleared after successful harvest / attempt
-	if err := harvest.MarkPending(paths, old); err != nil {
+	if err := harvest.MarkPending(paths, old, "codex"); err != nil {
 		t.Fatal(err)
 	}
 	_ = harvest.ClearPending(paths, old)
+}
+
+func TestPendingVendorSelectsOnlyImmediatelyPriorSameVendor(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	_ = paths.EnsureDirs()
+	store := session.NewStore(paths)
+	now := time.Now().UTC()
+	for _, meta := range []session.Meta{
+		{ID: "codex-old", Vendor: "codex", StartedAt: now.Add(-3 * time.Hour)},
+		{ID: "claude-latest", Vendor: "claude-code", StartedAt: now.Add(-2 * time.Hour)},
+		{ID: "codex-latest", Vendor: "codex", StartedAt: now.Add(-time.Hour)},
+	} {
+		if err := store.Start(meta); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = harvest.MarkPending(paths, "codex-old", "codex")
+	_ = harvest.MarkPending(paths, "claude-latest", "claude-code")
+	_ = harvest.MarkPending(paths, "codex-latest", "codex")
+	if got := harvest.PendingVendor(paths, "codex-new", "codex"); got != "codex-latest" {
+		t.Fatalf("got %q, want latest same-vendor session", got)
+	}
+	_ = store.WriteDocument("codex-latest", func(d *session.Document) { d.Review.Status = "complete" })
+	if got := harvest.PendingVendor(paths, "codex-new", "codex"); got != "" {
+		t.Fatalf("must not process older backlog, got %q", got)
+	}
+	if got := harvest.PendingVendor(paths, "claude-new", "claude-code"); got != "claude-latest" {
+		t.Fatalf("cross-vendor selection failed: %q", got)
+	}
 }

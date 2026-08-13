@@ -17,13 +17,13 @@ import (
 
 // LineInfo is one annotated source line.
 type LineInfo struct {
-	Line       int    `json:"line"`
-	Content    string `json:"content,omitempty"`
-	CommitSHA  string `json:"commit_sha,omitempty"`
-	Author     string `json:"author,omitempty"`
-	SessionID  string `json:"session_id,omitempty"`
-	Prompt     string `json:"prompt,omitempty"`
-	Vendor     string `json:"vendor,omitempty"`
+	Line      int    `json:"line"`
+	Content   string `json:"content,omitempty"`
+	CommitSHA string `json:"commit_sha,omitempty"`
+	Author    string `json:"author,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Prompt    string `json:"prompt,omitempty"`
+	Vendor    string `json:"vendor,omitempty"`
 }
 
 // WhyResult is the answer for `so why file:line`.

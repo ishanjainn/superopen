@@ -1,11 +1,21 @@
-llm:
-    provider: openai
-    model: gpt-4.1-mini
-    api_key_env: SUPEROPEN_LLM_API_KEY
+# Superopen project configuration. This is the authoritative source for enabled vendors, review behavior, graph refresh, retention, and feature settings.
+# Updated by project maintainers and Superopen configuration commands.
+layout_version: 2
+vendors:
+    enabled:
+        - claude-code
+        - cursor
+        - codex
+        - gemini
+        - opencode
+        - copilot-cli
+        - pi
+    shared_agents: false
 graph:
     code: true
-    semantic: true
+    semantic: false
     semantic_backend: auto
+    refresh_policy: after_changed_session
 evals:
     auto: true
     on_session_end: true
@@ -28,12 +38,11 @@ observability:
         - opencode
         - copilot-cli
         - pi
-    listen: http://127.0.0.1:4318
     exporters:
         - type: local_jsonl
-          path: .so/traces
+          path: .so/sessions
     viz:
-        citymap: true
+        citymap: false
         replay: true
 memory:
     provider: file_lessons

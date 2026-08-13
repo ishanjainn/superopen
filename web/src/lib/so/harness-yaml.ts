@@ -13,11 +13,13 @@ export type GuardrailsDoc = {
   rules: GuardrailRule[];
   approval: string;
   redact_output: boolean;
+  denied_tools: string[];
   denied_commands: string[];
   sensitive_paths: string[];
 };
 
 export type GuardrailCreateKind =
+  | "deny_tool"
   | "deny_command"
   | "sensitive_path"
   | "advisory";
@@ -32,20 +34,23 @@ export function slugifyId(text: string): string {
 }
 
 export function defaultGuardrailsYaml(): string {
-  return `# Guardrails - one file for hooks + advisory guidance.
-# Enforced (hooks): denied_commands + sensitive_paths - loaded live by coding hooks.
+  return `# Superopen guardrails. These are shared project safety rules enforced at coding-agent hook boundaries.
+# Authoritative project policy updated by project maintainers; so sync will not overwrite this file.
+# Enforced (hooks): denied_tools + denied_commands + sensitive_paths - loaded live by coding hooks.
 # Advisory: rules - soft guidance injected for agents (not a hard deny).
 # so sync will not overwrite this file.
 
 approval: interactive
 redact_output: true
 
+denied_tools: []
+
 denied_commands:
   - rm -rf /
   - curl *| bash
 
 sensitive_paths:
-  - '**/.so/audit/**'
+  - '**/.so/sessions/**'
 
 rules:
   - id: no-secrets
@@ -56,7 +61,8 @@ rules:
 }
 
 export function defaultEvaluationsYaml(): string {
-  return `# Evaluations - checks and guidance used when scoring sessions.
+  return `# Superopen evaluation policy. This defines how completed coding sessions are scored and which reviewer backends may be used.
+# Authoritative project policy updated by project maintainers and so init from graph plus agent instructions.
 checks:
   - tests
   - lint
@@ -78,6 +84,7 @@ sources: []
 export function parseGuardrailsDoc(raw: string): GuardrailsDoc | null {
   if (
     !/^\s*rules\s*:/m.test(raw) &&
+    !/^\s*denied_tools\s*:/m.test(raw) &&
     !/^\s*denied_commands\s*:/m.test(raw) &&
     !/^\s*sensitive_paths\s*:/m.test(raw) &&
     !/^\s*approval\s*:/m.test(raw)
@@ -87,7 +94,8 @@ export function parseGuardrailsDoc(raw: string): GuardrailsDoc | null {
 
   const rules: GuardrailRule[] = [];
   let cur: Partial<GuardrailRule> | null = null;
-  let mode: "rules" | "denied_commands" | "sensitive_paths" | null = null;
+  let mode: "rules" | "denied_tools" | "denied_commands" | "sensitive_paths" | null = null;
+  const denied_tools: string[] = [];
   const denied_commands: string[] = [];
   const sensitive_paths: string[] = [];
   let approval = "interactive";
@@ -122,6 +130,14 @@ export function parseGuardrailsDoc(raw: string): GuardrailsDoc | null {
         cur = null;
       }
       mode = "denied_commands";
+      continue;
+    }
+    if (/^\s*denied_tools\s*:/.test(line)) {
+      if (cur?.id) {
+        rules.push(cur as GuardrailRule);
+        cur = null;
+      }
+      mode = "denied_tools";
       continue;
     }
     if (/^\s*sensitive_paths\s*:/.test(line)) {
@@ -164,18 +180,26 @@ export function parseGuardrailsDoc(raw: string): GuardrailsDoc | null {
       continue;
     }
 
-    if (mode === "denied_commands" || mode === "sensitive_paths") {
+    if (mode === "denied_tools" || mode === "denied_commands" || mode === "sensitive_paths") {
       const item = line.match(/^\s*-\s*(.+)\s*$/);
       if (!item) continue;
       const v = stripQuotes(item[1]);
       if (!v) continue;
-      if (mode === "denied_commands") denied_commands.push(v);
+      if (mode === "denied_tools") denied_tools.push(v);
+      else if (mode === "denied_commands") denied_commands.push(v);
       else sensitive_paths.push(v);
     }
   }
   if (cur?.id) rules.push(cur as GuardrailRule);
 
-  return { rules, approval, redact_output, denied_commands, sensitive_paths };
+  return { rules, approval, redact_output, denied_tools, denied_commands, sensitive_paths };
+}
+
+/** Append a vendor tool-name pattern enforced at PreToolUse boundaries. */
+export function appendDeniedTool(yaml: string, pattern: string): string {
+  const p = pattern.trim();
+  if (!p) return yaml;
+  return appendListItem(yaml, "denied_tools", p, needsYamlQuotes(p));
 }
 
 export function appendGuardrailRule(
@@ -245,7 +269,7 @@ export type EvaluationsDoc = {
   judgeRubric: string;
 };
 
-/** Parse evals/configs.yaml into structured sections. */
+/** Parse the authoritative evals.yaml into structured sections. */
 export function parseEvaluationsDoc(raw: string): EvaluationsDoc | null {
   if (
     !/^\s*checks\s*:/m.test(raw) &&
@@ -347,6 +371,10 @@ function removeListItem(
 
 export function removeDeniedCommand(yaml: string, pattern: string): string {
   return removeListItem(yaml, "denied_commands", pattern);
+}
+
+export function removeDeniedTool(yaml: string, pattern: string): string {
+  return removeListItem(yaml, "denied_tools", pattern);
 }
 
 export function removeSensitivePath(yaml: string, pattern: string): string {
@@ -468,6 +496,7 @@ export function setJudgeRubric(yaml: string, rubric: string): string {
 }
 
 export type HarnessItemKind =
+  | "tool"
   | "command"
   | "path"
   | "advisory"
@@ -526,6 +555,11 @@ function appendListItem(
   for (let i = 0; i < lines.length; i++) {
     if (new RegExp(`^\\s*${key}\\s*:`).test(lines[i])) {
       keyIdx = i;
+	  // Convert an explicit empty YAML sequence before appending its first item.
+	  lines[i] = lines[i].replace(
+		new RegExp(`^(\\s*${key}\\s*:)\\s*\\[\\s*\\]\\s*$`),
+		"$1"
+	  );
       continue;
     }
     if (keyIdx >= 0 && insertAt < 0) {

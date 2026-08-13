@@ -95,25 +95,8 @@ func defaultTemplate(name string) string {
 	}
 }
 
-// SeedFromTemplates copies preferences.md / projects.md when missing or stub.
-// Never overwrites user-edited content.
+// SeedFromTemplates initializes the consolidated state document. The legacy
+// name is retained for callers; v2 never creates per-category memory files.
 func (s *Store) SeedFromTemplates() error {
-	root := FindTemplatesRoot()
-	for _, name := range []string{"preferences.md", "projects.md"} {
-		p := filepath.Join(s.Paths.MemoryDir, name)
-		existing, err := os.ReadFile(p)
-		if err == nil && !IsStubMarkdown(string(existing)) {
-			continue
-		}
-		body := defaultTemplate(name)
-		if root != "" {
-			if data, err := os.ReadFile(filepath.Join(root, "memory", name)); err == nil && len(strings.TrimSpace(string(data))) > 0 {
-				body = string(data)
-			}
-		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.Ensure()
 }

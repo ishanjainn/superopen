@@ -14,7 +14,6 @@ export type ThemePreference = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
 
 const STORAGE_KEY = "so-theme";
-const PREF_KEY = "theme";
 
 type ThemeContextValue = {
   preference: ThemePreference;
@@ -65,11 +64,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
-    void fetch("/api/ui/prefs", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: PREF_KEY, value: next }),
-    }).catch(() => undefined);
   }, []);
 
   const setPreference = useCallback(
@@ -91,31 +85,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     applyDomTheme(initialResolved);
     setReady(true);
 
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api/ui/prefs?key=${PREF_KEY}`);
-        if (!res.ok) return;
-        const j = (await res.json()) as { value?: string | null };
-        if (cancelled || !isPreference(j.value)) return;
-        if (j.value === local) return;
-        setPreferenceState(j.value);
-        try {
-          localStorage.setItem(STORAGE_KEY, j.value);
-        } catch {
-          /* ignore */
-        }
-        const nextResolved = j.value === "system" ? systemResolved() : j.value;
-        setResolved(nextResolved);
-        applyDomTheme(nextResolved);
-      } catch {
-        /* ignore */
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   useEffect(() => {

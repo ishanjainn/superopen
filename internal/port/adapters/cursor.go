@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/artifactmeta"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/port"
 	"github.com/ishanjainn/superopen/internal/session"
@@ -59,7 +60,7 @@ func (c CursorImport) Discover() ([]port.SessionRef, error) {
 		if !e.IsDir() || e.Name() == "." {
 			continue
 		}
-		metaPath := filepath.Join(dir, e.Name(), "meta.json")
+		metaPath := filepath.Join(dir, e.Name(), "session.json")
 		data, err := os.ReadFile(metaPath)
 		if err != nil {
 			continue
@@ -88,7 +89,7 @@ func (c CursorImport) Discover() ([]port.SessionRef, error) {
 			if !e.IsDir() {
 				continue
 			}
-			metaPath := filepath.Join(portRoot, e.Name(), "meta.json")
+			metaPath := filepath.Join(portRoot, e.Name(), "session.json")
 			data, err := os.ReadFile(metaPath)
 			if err != nil {
 				continue
@@ -113,10 +114,10 @@ func (c CursorImport) Discover() ([]port.SessionRef, error) {
 
 func (c CursorImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 	sess := port.NewPortableSession(port.HarnessCursor, ref.SourceSessionID, ref.SourcePath, ref.CWD, ref.Title)
-	transcript := filepath.Join(ref.SourcePath, "transcript.jsonl")
+	transcript := filepath.Join(ref.SourcePath, "events.jsonl")
 	data, err := os.ReadFile(transcript)
 	if err != nil {
-		metaPath := filepath.Join(ref.SourcePath, "meta.json")
+		metaPath := filepath.Join(ref.SourcePath, "session.json")
 		if md, err2 := os.ReadFile(metaPath); err2 == nil {
 			var meta session.Meta
 			_ = json.Unmarshal(md, &meta)
@@ -171,8 +172,23 @@ func (c CursorImport) Parse(ref port.SessionRef) (port.PortableSession, error) {
 }
 
 // loadWorkingStateSidecar restores working state written by SOHubExport, since
-// transcript.jsonl's role/text rows have no field for it.
+// events.jsonl's role/text rows have no field for it.
 func loadWorkingStateSidecar(sess *port.PortableSession, sourceDir string) {
+	if raw, err := os.ReadFile(filepath.Join(sourceDir, "session.json")); err == nil {
+		var doc struct {
+			Port struct {
+				WorkingState port.WorkingState `json:"working_state"`
+				DroppedTurns int               `json:"dropped_turns"`
+			} `json:"port"`
+		}
+		if json.Unmarshal(raw, &doc) == nil && (!doc.Port.WorkingState.Empty() || doc.Port.DroppedTurns > 0) {
+			sess.WorkingState = doc.Port.WorkingState
+			if doc.Port.DroppedTurns > sess.DroppedTurns {
+				sess.DroppedTurns = doc.Port.DroppedTurns
+			}
+			return
+		}
+	}
 	raw, err := os.ReadFile(filepath.Join(sourceDir, "working-state.json"))
 	if err != nil {
 		return
@@ -247,7 +263,12 @@ func (c CursorExport) Write(ps port.PortableSession, opts port.WriteOptions) (po
 	if err := writeTranscript(dir, ps); err != nil {
 		return port.ExportResult{}, err
 	}
-	writeWorkingStateSidecar(dir, ps)
+	if prov, err := json.Marshal(map[string]any{
+		"source_harness": ps.SourceHarness, "source_session_id": ps.SourceSessionID, "source_path": ps.SourcePath,
+		"working_state": ps.WorkingState, "dropped_turns": ps.DroppedTurns,
+	}); err == nil {
+		_ = store.WriteDocument(destID, func(d *session.Document) { d.Port = prov })
+	}
 
 	// Native Cursor resume pack under project .cursor/so-port/<id>/
 	portDir := filepath.Join(repoRoot, ".cursor", "so-port", destID)
@@ -261,7 +282,7 @@ func (c CursorExport) Write(ps port.PortableSession, opts port.WriteOptions) (po
 		"source_session_id": ps.SourceSessionID, "turns": len(ps.Turns),
 		"resume": fmt.Sprintf("so sessions resume --vendor=cursor --id=%s", destID),
 	}, "", "  ")
-	_ = os.WriteFile(filepath.Join(portDir, "meta.json"), portMeta, 0o644)
+	_ = os.WriteFile(filepath.Join(portDir, "session.json"), portMeta, 0o644)
 
 	var conv strings.Builder
 	conv.WriteString("# Ported conversation (Cursor resume pack)\n\n")
@@ -283,7 +304,7 @@ when the destination is Cursor). Start any coding agent with Superopen hooks in:
 Optional manual re-arm:
    so sessions resume --vendor=cursor --id=%s
 
-Transcript: .cursor/so-port/%s/transcript.jsonl
+Transcript: .cursor/so-port/%s/events.jsonl
 Hub mirror: .so/sessions/%s/
 `, repoRoot, destID, destID, destID)
 	_ = os.WriteFile(filepath.Join(portDir, "RESUME.md"), []byte(resume), 0o644)
@@ -294,12 +315,18 @@ Hub mirror: .so/sessions/%s/
 }
 
 func writeTranscript(dir string, ps port.PortableSession) error {
-	tf, err := os.Create(filepath.Join(dir, "transcript.jsonl"))
+	tf, err := os.Create(filepath.Join(dir, "events.jsonl"))
 	if err != nil {
 		return err
 	}
 	defer tf.Close()
 	enc := json.NewEncoder(tf)
+	if err := enc.Encode(artifactmeta.JSONLManifest{
+		Type: "superopen.file_manifest", Purpose: "Normalized prompts, responses, tool calls, file activity, usage, lifecycle, and audit events for this session.",
+		Authority: "authoritative session event stream", UpdatedBy: "vendor telemetry adapter",
+	}); err != nil {
+		return err
+	}
 	for _, t := range ps.Turns {
 		if err := enc.Encode(map[string]any{"role": t.Role, "text": t.Text, "timestamp": t.Timestamp}); err != nil {
 			return err
@@ -308,9 +335,8 @@ func writeTranscript(dir string, ps port.PortableSession) error {
 	return nil
 }
 
-// writeWorkingStateSidecar persists recovered files/commands beside the
-// role/text transcript. CursorImport.Parse (and SO hub round-trips) read it
-// back; without it, hub mirrors and so-port packs lose working state.
+// writeWorkingStateSidecar persists recovered files/commands in native Cursor
+// resume packs outside .so. Hub sessions embed this data in session.json.
 func writeWorkingStateSidecar(dir string, ps port.PortableSession) {
 	if ps.WorkingState.Empty() && ps.DroppedTurns == 0 {
 		return

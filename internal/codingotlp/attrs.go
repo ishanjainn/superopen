@@ -62,14 +62,6 @@ func bodyAllowed(mode string) bool {
 	return mode == semconv.CodingAgentContentCaptureFull
 }
 
-// perEventSpansAllowed returns true when the active capture mode
-// permits emitting per-event spans (tool.call, llm.turn, subagent,
-// edit.decision, and events). Minimal mode collapses these into
-// rolled-up counters on the session-root span.
-func perEventSpansAllowed(mode string) bool {
-	return mode != semconv.CodingAgentContentCaptureMinimal
-}
-
 // inferProvider returns the OTel-standard `gen_ai.system` /
 // `gen_ai.provider.name` value based on the model name and (as a last
 // resort) the vendor. We deliberately only handle the model families

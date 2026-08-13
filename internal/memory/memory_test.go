@@ -1,10 +1,12 @@
 package memory
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ishanjainn/superopen/internal/harness"
 )
@@ -56,6 +58,27 @@ func TestTemporaryMode(t *testing.T) {
 	}
 }
 
+func TestRefreshStateStaysInConsolidatedState(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	store := NewStore(paths)
+	want := RefreshState{SHA: "abc123", At: time.Now().UTC(), GraphBuilt: true}
+	if err := store.SaveRefreshState(want); err != nil {
+		t.Fatal(err)
+	}
+	got := store.LoadRefreshState()
+	if got.SHA != want.SHA || !got.At.Equal(want.At) || !got.GraphBuilt {
+		t.Fatalf("refresh state = %#v, want %#v", got, want)
+	}
+	entries, err := os.ReadDir(paths.MemoryDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "state.json" {
+		t.Fatalf("memory artifacts = %v, want only state.json", entries)
+	}
+}
+
 func TestSeedReplacesStubOnly(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "repo")
@@ -65,18 +88,24 @@ func TestSeedReplacesStubOnly(t *testing.T) {
 	if err := s.Ensure(); err != nil {
 		t.Fatal(err)
 	}
-	prefs, _ := os.ReadFile(filepath.Join(paths.MemoryDir, "preferences.md"))
-	if IsStubMarkdown(string(prefs)) {
-		t.Fatalf("expected seeded prefs, got stub: %q", prefs)
+	state, err := s.readState()
+	if err != nil || IsStubMarkdown(state.Preferences) {
+		t.Fatalf("expected seeded prefs in state.json, got %q (%v)", state.Preferences, err)
 	}
-	custom := "# Preferences\n\nMy custom rule about widgets.\n"
-	_ = os.WriteFile(filepath.Join(paths.MemoryDir, "preferences.md"), []byte(custom), 0o644)
+	custom := "# Preferences\n\n- My custom rule about widgets.\n"
+	state.Preferences = custom
+	if err := s.writeState(state); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.SeedFromTemplates(); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := os.ReadFile(filepath.Join(paths.MemoryDir, "preferences.md"))
-	if string(after) != custom {
-		t.Fatalf("overwrote user prefs: %q", after)
+	after, _ := s.readState()
+	if after.Preferences != custom {
+		t.Fatalf("overwrote user prefs: %q", after.Preferences)
+	}
+	if entries, _ := os.ReadDir(paths.MemoryDir); len(entries) != 1 || entries[0].Name() != "state.json" {
+		t.Fatalf("expected only consolidated state.json, got %v", entries)
 	}
 }
 
@@ -107,5 +136,54 @@ func TestIsStubMarkdown(t *testing.T) {
 	}
 	if IsStubMarkdown("# Preferences\n\n- Always run tests\n") {
 		t.Fatal("expected non-stub")
+	}
+}
+
+func TestPatternsAggregateOncePerSessionAndRetentionDropsReferences(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	store := NewStore(paths)
+	base := Pattern{Fingerprint: "pattern-x", Vendor: "codex", Kind: "workflow", Summary: "Run focused tests after edits.", Confidence: 0.7}
+	p, err := store.UpsertPattern(base, "s1", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Occurrences != 1 || len(p.VerifiedSessions) != 1 {
+		t.Fatalf("first occurrence = %+v", p)
+	}
+	p, err = store.UpsertPattern(base, "s1", true)
+	if err != nil || p.Occurrences != 1 {
+		t.Fatalf("retry must be idempotent: %+v err=%v", p, err)
+	}
+	p, err = store.UpsertPattern(base, "s2", false)
+	if err != nil || p.Occurrences != 2 || len(p.SessionIDs) != 2 {
+		t.Fatalf("second session not aggregated: %+v err=%v", p, err)
+	}
+	if err := store.RemoveSessionReferences("s1"); err != nil {
+		t.Fatal(err)
+	}
+	patterns, _ := store.ListPatterns()
+	if patterns[0].Occurrences != 2 || len(patterns[0].SessionIDs) != 1 || len(patterns[0].VerifiedSessions) != 0 {
+		t.Fatalf("retention should keep count but remove references: %+v", patterns[0])
+	}
+}
+
+func TestPrunePatternsPrefersDismissedAndProtectsDurablePatterns(t *testing.T) {
+	now := time.Now().UTC()
+	st := stateFile{Patterns: make([]Pattern, 0, 1002)}
+	st.Patterns = append(st.Patterns,
+		Pattern{Fingerprint: "explicit", ExplicitWorkflow: true, Status: "dismissed", LastObservedAt: now.Add(-400 * 24 * time.Hour)},
+		Pattern{Fingerprint: "verified", VerifiedSessions: []string{"s1"}, LastObservedAt: now.Add(-400 * 24 * time.Hour)},
+		Pattern{Fingerprint: "old-dismissed", Status: "dismissed", LastObservedAt: now.Add(-10 * 24 * time.Hour)},
+	)
+	for i := 0; i < 999; i++ {
+		st.Patterns = append(st.Patterns, Pattern{Fingerprint: fmt.Sprintf("active-%04d", i), Confidence: .8, LastObservedAt: now})
+	}
+	prunePatterns(&st, now)
+	seen := map[string]bool{}
+	for _, p := range st.Patterns {
+		seen[p.Fingerprint] = true
+	}
+	if len(st.Patterns) != 1000 || seen["old-dismissed"] || !seen["explicit"] || !seen["verified"] {
+		t.Fatalf("unexpected pruning: len=%d dismissed=%v explicit=%v verified=%v", len(st.Patterns), seen["old-dismissed"], seen["explicit"], seen["verified"])
 	}
 }

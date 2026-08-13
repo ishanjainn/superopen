@@ -16,7 +16,6 @@ import (
 	"github.com/ishanjainn/superopen/internal/blame"
 	"github.com/ishanjainn/superopen/internal/checkpoint"
 	"github.com/ishanjainn/superopen/internal/config"
-	"github.com/ishanjainn/superopen/internal/entitlement"
 	"github.com/ishanjainn/superopen/internal/githooks"
 	"github.com/ishanjainn/superopen/internal/gitruntime"
 	"github.com/ishanjainn/superopen/internal/harness"
@@ -416,43 +415,6 @@ func cmdGitHook() *cobra.Command {
 	return c
 }
 
-func cmdLogin() *cobra.Command {
-	var email, token, otlp, query string
-	c := &cobra.Command{
-		Use:   "login",
-		Short: "Authenticate CLI with paid Superopen UI (unlocks cloud OTLP)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if email == "" || token == "" {
-				return fmt.Errorf("paid login requires --email and --token from the Superopen paid UI")
-			}
-			if otlp == "" && query == "" {
-				return fmt.Errorf("paid login requires --otlp-endpoint and/or --query-endpoint from the paid UI")
-			}
-			exp := time.Now().Add(30 * 24 * time.Hour)
-			if err := entitlement.LoginPaid(email, token, otlp, query, exp); err != nil {
-				return err
-			}
-			fmt.Println("logged in - cloud OTLP enabled")
-			return nil
-		},
-	}
-	c.Flags().StringVar(&email, "email", "", "account email")
-	c.Flags().StringVar(&token, "token", "", "session token from paid UI")
-	c.Flags().StringVar(&otlp, "otlp-endpoint", "", "OTLP export endpoint")
-	c.Flags().StringVar(&query, "query-endpoint", "", "session query API endpoint")
-	return c
-}
-
-func cmdLogout() *cobra.Command {
-	return &cobra.Command{
-		Use:   "logout",
-		Short: "Clear paid authentication",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return entitlement.Clear()
-		},
-	}
-}
-
 func extendSessionsCmd(c *cobra.Command) {
 	attachSessionsPort(c)
 	resume := &cobra.Command{
@@ -468,7 +430,7 @@ func extendSessionsCmd(c *cobra.Command) {
 			}
 			cfg, _ := config.Load(paths.Config)
 			if cfg.MemoryEnabled() {
-				_, _ = memory.NewStore(paths).BuildSessionContext(12000, "", memory.ModePersistent)
+				_, _ = memory.NewStore(paths).BuildSessionContext(1500, "", memory.ModePersistent)
 			}
 			vendorFlag, _ := cmd.Flags().GetString("vendor")
 			vendor := strings.ToLower(m.Vendor)
@@ -639,12 +601,12 @@ func extendSessionsCmd(c *cobra.Command) {
 func materializeCursorResumePack(paths harness.Paths, repoRoot string, m session.Meta) error {
 	portDir := filepath.Join(repoRoot, ".cursor", "so-port", m.ID)
 	_ = os.MkdirAll(portDir, 0o755)
-	src := filepath.Join(paths.SessionDir(m.ID), "transcript.jsonl")
+	src := filepath.Join(paths.SessionDir(m.ID), "events.jsonl")
 	data, err := os.ReadFile(src)
 	if err != nil {
 		data = []byte{}
 	}
-	_ = os.WriteFile(filepath.Join(portDir, "transcript.jsonl"), data, 0o644)
+	_ = os.WriteFile(filepath.Join(portDir, "events.jsonl"), data, 0o644)
 	var conv strings.Builder
 	conv.WriteString("# Ported conversation (Cursor resume pack)\n\n")
 	if m.Title != "" {
@@ -694,7 +656,7 @@ func harnessIDFromVendor(vendor string) port.HarnessID {
 }
 
 func portableSessionFromHub(paths harness.Paths, m session.Meta, to port.HarnessID) (port.PortableSession, error) {
-	src := filepath.Join(paths.SessionDir(m.ID), "transcript.jsonl")
+	src := filepath.Join(paths.SessionDir(m.ID), "events.jsonl")
 	data, err := os.ReadFile(src)
 	if err != nil {
 		data = []byte{}

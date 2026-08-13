@@ -14,26 +14,27 @@ import (
 )
 
 type payload struct {
-	Type        string `json:"type"`
-	Event       string `json:"event"`
-	SessionID   string `json:"session_id"`
-	SessionFile string `json:"session_file"`
-	CWD         string `json:"cwd"`
-	Prompt      string `json:"prompt"`
-	Text        string `json:"text"`
-	Thinking    string `json:"thinking"`
-	Content     any    `json:"content"`
-	Model       string `json:"model"`
-	Role        string `json:"role"`
-	ToolName    string `json:"toolName"`
-	ToolNameAlt string `json:"tool_name"`
-	ToolCallID  string `json:"toolCallId"`
-	IsError     bool   `json:"isError"`
-	Input       json.RawMessage `json:"input"`
-	Args        json.RawMessage `json:"args"`
-	Result      string          `json:"result"`
-	ToolResults []piToolResult  `json:"toolResults"`
-	Usage       *struct {
+	Type         string          `json:"type"`
+	Event        string          `json:"event"`
+	SessionID    string          `json:"session_id"`
+	SessionFile  string          `json:"session_file"`
+	CWD          string          `json:"cwd"`
+	Prompt       string          `json:"prompt"`
+	GenerationID string          `json:"generation_id"`
+	Text         string          `json:"text"`
+	Thinking     string          `json:"thinking"`
+	Content      any             `json:"content"`
+	Model        string          `json:"model"`
+	Role         string          `json:"role"`
+	ToolName     string          `json:"toolName"`
+	ToolNameAlt  string          `json:"tool_name"`
+	ToolCallID   string          `json:"toolCallId"`
+	IsError      bool            `json:"isError"`
+	Input        json.RawMessage `json:"input"`
+	Args         json.RawMessage `json:"args"`
+	Result       string          `json:"result"`
+	ToolResults  []piToolResult  `json:"toolResults"`
+	Usage        *struct {
 		Input       int64 `json:"input"`
 		Output      int64 `json:"output"`
 		CacheRead   int64 `json:"cacheRead"`
@@ -91,7 +92,7 @@ func handle(in normalize.Input) error {
 	case event == "before_agent_start" || event == "turn_start":
 		return in.Emit.EmitLLMTurn(normalize.LLMTurn{
 			SessionID: sid, Vendor: in.Vendor, Model: model, StartedAt: now,
-			Prompt: capture(in, text),
+			Prompt: capture(in, text), GenerationID: p.GenerationID,
 		})
 
 	case event == "message_end" || event == "message_update":
@@ -99,12 +100,13 @@ func handle(in normalize.Input) error {
 		if role == "user" {
 			return in.Emit.EmitLLMTurn(normalize.LLMTurn{
 				SessionID: sid, Vendor: in.Vendor, Model: model, StartedAt: now,
-				Prompt: capture(in, text),
+				Prompt: capture(in, text), GenerationID: p.GenerationID,
 			})
 		}
 		turn := normalize.LLMTurn{
 			SessionID: sid, Vendor: in.Vendor, Model: model,
-			StartedAt: now.Add(-time.Second), EndedAt: now,
+			GenerationID: p.GenerationID,
+			StartedAt:    now.Add(-time.Second), EndedAt: now,
 			Response: capture(in, text), AssistantMessageOnly: true,
 			ThoughtText: capture(in, firstNonEmpty(p.Thinking, thinkingFromContent(p.Content))),
 		}

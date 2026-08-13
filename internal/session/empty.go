@@ -8,7 +8,7 @@ import (
 )
 
 // SpansHaveActivity reports whether spans include a real user turn or tool work.
-// Identity-only OTLP (vendor/model/user/branch) does not count - those create
+// Identity-only telemetry (vendor/model/user/branch) does not count - those create
 // empty "opened chat then closed" sessions.
 func SpansHaveActivity(spans []tracestore.Span) bool {
 	for _, sp := range spans {
@@ -50,6 +50,9 @@ func SpansHaveActivity(spans []tracestore.Span) bool {
 
 // IsEmptyListItem is true when a session never got real turns/work.
 func IsEmptyListItem(item ListItem) bool {
+	if item.hasActivity {
+		return false
+	}
 	if item.Turns > 0 || item.Tokens > 0 || item.Checkpoints > 0 {
 		return false
 	}
@@ -92,9 +95,5 @@ func (s *Store) Delete(id string) error {
 		}
 		kept = append(kept, e)
 	}
-	if len(kept) == 0 {
-		_ = os.Remove(s.Paths.SessionsIndex)
-		return nil
-	}
-	return writeJSON(s.Paths.SessionsIndex, kept)
+	return writeJSON(s.Paths.SessionsIndex, indexFile{About: indexAbout, Sessions: kept})
 }

@@ -3,7 +3,7 @@
 # Philosophy:
 # - Hard denies are rare and must not block normal coding.
 # - Secrets protection prefers redaction/transcript hygiene over blocking reads.
-# - Advisory `rules` guide the agent; only denied_commands / sensitive_paths gate tools.
+# - Advisory `rules` guide the agent; denied_tools / denied_commands / sensitive_paths gate hooks.
 #
 # severity:block is reserved for secrets/credentials guidance (advisory text).
 # Edit freely; so sync / so init will not overwrite once present.
@@ -31,6 +31,10 @@ rules:
 approval: interactive
 redact_output: true
 
+# Hard tool denies use the tool names reported by vendor hooks; `*` wildcards are supported.
+# Keep empty unless the repository has a tool that coding agents must never invoke.
+denied_tools: []
+
 # Hard shell denies: catastrophic / obvious malware footguns only.
 # Do NOT put routine commands here (tests, git, package managers, force-push with care).
 denied_commands:
@@ -45,8 +49,9 @@ denied_commands:
   - "wget *| bash"
   - "chmod -R 777 /"
 
-# Hard path denies: protect Superopen's own audit trail only.
+# Hard path denies: protect Superopen's session and audit history only.
 # Do NOT block .env / .ssh / credentials by default -
 # agents often need to read them; redact instead of bricking the session.
 sensitive_paths:
+  - "**/.so/sessions/**"
   - "**/.so/audit/**"

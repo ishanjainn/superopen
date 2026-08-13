@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { cn } from "@/lib/utils";
+import { getUIPref, setUIPref } from "@/lib/ui-prefs";
 
 type SidebarLayoutContextValue = {
   isExpanded: boolean;
@@ -21,27 +22,12 @@ type SidebarLayoutContextValue = {
 const SidebarLayoutContext = createContext<SidebarLayoutContextValue | null>(null);
 
 async function loadExpanded(): Promise<boolean> {
-  try {
-    const res = await fetch("/api/ui/prefs?key=sidebar_expanded");
-    if (!res.ok) return true;
-    const data = (await res.json()) as { value?: string };
-    if (data.value === "0" || data.value === "false") return false;
-    return true;
-  } catch {
-    return true;
-  }
+	const value = getUIPref("sidebar_expanded");
+	return value !== "0" && value !== "false";
 }
 
 async function saveExpanded(expanded: boolean) {
-  try {
-    await fetch("/api/ui/prefs", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: "sidebar_expanded", value: expanded ? "1" : "0" }),
-    });
-  } catch {
-    /* ignore */
-  }
+	setUIPref("sidebar_expanded", expanded ? "1" : "0");
 }
 
 export function SidebarLayoutProvider({ children }: { children: ReactNode }) {

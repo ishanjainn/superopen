@@ -1,43 +1,65 @@
-// Package audit writes append-only SEL-style events under .so/audit/.
+// Package audit writes repository events to .so/audit/events.jsonl and
+// session-associated audit events to that session's unified events.jsonl.
 package audit
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/artifactmeta"
 	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/session"
 )
 
 type Event struct {
-	At       time.Time         `json:"at"`
-	Action   string            `json:"action"` // deny|allow|create|update|conflict_skip|injection_blocked|session.start_from_memory|…
-	Key      string            `json:"key,omitempty"`
-	Type     string            `json:"type,omitempty"` // semantic|episodic|lesson|policy|session|…
-	Detail   string            `json:"detail,omitempty"`
-	Vendor   string            `json:"vendor,omitempty"`
-	Session  string            `json:"session_id,omitempty"`
-	Attrs    map[string]string `json:"attrs,omitempty"`
+	At      time.Time         `json:"at"`
+	Action  string            `json:"action"` // deny|allow|create|update|conflict_skip|injection_blocked|session.start_from_memory|…
+	Key     string            `json:"key,omitempty"`
+	Type    string            `json:"type,omitempty"` // semantic|episodic|lesson|policy|session|…
+	Detail  string            `json:"detail,omitempty"`
+	Vendor  string            `json:"vendor,omitempty"`
+	Session string            `json:"session_id,omitempty"`
+	Attrs   map[string]string `json:"attrs,omitempty"`
 }
 
 var mu sync.Mutex
 
 func Path(paths harness.Paths) string {
-	return filepath.Join(paths.AuditDir, "events.jsonl")
+	return paths.AuditEvents
+}
+
+// Ensure creates the self-describing repository audit stream even before the
+// first event, making the initialized harness layout predictable.
+func Ensure(paths harness.Paths) error {
+	return artifactmeta.EnsureJSONL(paths.AuditEvents, artifactmeta.About{
+		Purpose: "Audit events that are not associated with a coding session.", Authority: "append-only runtime history", UpdatedBy: "Superopen CLI and hooks",
+	})
 }
 
 func Append(paths harness.Paths, ev Event) error {
-	if err := os.MkdirAll(paths.AuditDir, 0o755); err != nil {
-		return err
-	}
 	if ev.At.IsZero() {
 		ev.At = time.Now().UTC()
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	f, err := os.OpenFile(Path(paths), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	path := Path(paths)
+	about := artifactmeta.About{Purpose: "Audit events that are not associated with a coding session.", Authority: "append-only runtime history", UpdatedBy: "Superopen CLI and hooks"}
+	if ev.Session != "" {
+		store := session.NewStore(paths)
+		if _, err := store.Get(ev.Session); os.IsNotExist(err) {
+			_ = store.Start(session.Meta{ID: ev.Session, Vendor: ev.Vendor, StartedAt: ev.At})
+		}
+		path = filepath.Join(paths.SessionDir(ev.Session), "events.jsonl")
+		about = artifactmeta.About{Purpose: "Normalized prompts, responses, tool calls, file activity, usage, lifecycle, and audit events for this session.", Authority: "authoritative session event stream", UpdatedBy: "vendor telemetry adapter"}
+	}
+	if err := artifactmeta.EnsureJSONL(path, about); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
@@ -47,29 +69,29 @@ func Append(paths harness.Paths, ev Event) error {
 }
 
 func List(paths harness.Paths, limit int) ([]Event, error) {
-	data, err := os.ReadFile(Path(paths))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
 	var out []Event
-	for _, line := range splitLines(data) {
-		if len(line) == 0 {
+	files := []string{paths.AuditEvents}
+	_ = filepath.WalkDir(paths.SessionsDir, func(path string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && d.Name() == "events.jsonl" {
+			files = append(files, path)
+		}
+		return nil
+	})
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
 			continue
 		}
-		var ev Event
-		if json.Unmarshal(line, &ev) == nil {
-			out = append(out, ev)
+		for _, line := range splitLines(data) {
+			var ev Event
+			if len(line) > 0 && json.Unmarshal(line, &ev) == nil && ev.Action != "" {
+				out = append(out, ev)
+			}
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
 	if limit > 0 && len(out) > limit {
-		out = out[len(out)-limit:]
-	}
-	// newest first
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
+		out = out[:limit]
 	}
 	return out, nil
 }

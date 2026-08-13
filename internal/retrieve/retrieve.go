@@ -23,7 +23,7 @@ type IndexDoc struct {
 }
 
 func indexPath(paths harness.Paths) string {
-	return filepath.Join(paths.GraphDir, "retrieve_index.json")
+	return paths.GraphCorpus
 }
 
 // Rebuild walks harness corpus into a simple keyword index.
@@ -52,6 +52,13 @@ func Rebuild(repoRoot string, paths harness.Paths) (int, error) {
 			text = text[:100_000]
 		}
 		docs = append(docs, IndexDoc{Path: rel, Kind: kind, Content: text})
+	}
+	addSynthetic := func(path, kind, content string) {
+		content = strings.TrimSpace(content)
+		if content == "" {
+			return
+		}
+		docs = append(docs, IndexDoc{Path: filepath.ToSlash(path), Kind: kind, Content: content})
 	}
 	walkRules := func(dir string) {
 		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -105,46 +112,122 @@ func Rebuild(repoRoot string, paths harness.Paths) (int, error) {
 	for _, agents := range paths.AgentsPaths() {
 		addFile(agents, "knowledge")
 	}
-	walkDir := func(dir, kind string) {
-		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
+	addFile(paths.GuardrailsFile, "guardrails")
+	if data, err := os.ReadFile(filepath.Join(paths.MemoryDir, "state.json")); err == nil {
+		var state struct {
+			Preferences string                      `json:"preferences"`
+			Projects    string                      `json:"projects"`
+			Lessons     []struct{ ID, Text string } `json:"lessons"`
+			Patterns    []struct {
+				Fingerprint     string   `json:"fingerprint"`
+				Summary         string   `json:"summary"`
+				Applicability   string   `json:"applicability"`
+				TargetPath      string   `json:"target_path"`
+				Status          string   `json:"status"`
+				Keywords        []string `json:"keywords"`
+				Paths           []string `json:"paths"`
+				Symbols         []string `json:"symbols"`
+				ErrorSignatures []string `json:"error_signatures"`
+			} `json:"patterns"`
+		}
+		if json.Unmarshal(data, &state) == nil {
+			addSynthetic(".so/memory/preferences", "memory", state.Preferences)
+			addSynthetic(".so/memory/projects", "memory", state.Projects)
+			for _, lesson := range state.Lessons {
+				addSynthetic(".so/memory/lesson/"+lesson.ID, "memory", lesson.Text)
 			}
-			ext := strings.ToLower(filepath.Ext(path))
-			switch ext {
-			case ".md", ".yaml", ".yml", ".json", ".jsonl", ".txt":
-				addFile(path, kind)
+			for _, p := range state.Patterns {
+				if p.Status == "dismissed" || p.Status == "superseded" {
+					continue
+				}
+				content := strings.Join([]string{p.Summary, p.Applicability, p.TargetPath, strings.Join(p.Keywords, " "), strings.Join(p.Paths, " "), strings.Join(p.Symbols, " "), strings.Join(p.ErrorSignatures, " ")}, "\n")
+				addSynthetic(".so/memory/pattern/"+p.Fingerprint, "memory", content)
 			}
-			return nil
-		})
+		}
 	}
-	walkDir(paths.GuardrailsDir, "guardrails")
-	walkDir(paths.MemoryDir, "memory")
 	if data, err := os.ReadFile(paths.GraphJSON); err == nil {
 		docs = append(docs, IndexDoc{Path: ".so/graph/graph.json", Kind: "graph", Content: string(data)})
 	}
-	if data, err := os.ReadFile(paths.GraphReport); err == nil {
-		docs = append(docs, IndexDoc{Path: ".so/graph/GRAPH_REPORT.md", Kind: "graph", Content: string(data)})
-	}
-	// recent session metas
+	// Recent sessions contribute compact summaries and finding conclusions only.
+	// Full prompts, tool results, transcripts, and recommendation bodies never
+	// enter the corpus.
 	_ = filepath.WalkDir(paths.SessionsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
-		if d.Name() == "meta.json" || d.Name() == "footprint.json" {
-			addFile(path, "session")
+		if d.Name() == "session.json" {
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return nil
+			}
+			var doc struct {
+				Summary string `json:"summary"`
+				Review  struct {
+					Findings []struct {
+						Kind            string   `json:"kind"`
+						Summary         string   `json:"summary"`
+						TargetPath      string   `json:"target_path"`
+						Applicability   string   `json:"applicability"`
+						Keywords        []string `json:"keywords"`
+						Paths           []string `json:"paths"`
+						Symbols         []string `json:"symbols"`
+						ErrorSignatures []string `json:"error_signatures"`
+					} `json:"findings"`
+				} `json:"review"`
+			}
+			if json.Unmarshal(data, &doc) != nil {
+				return nil
+			}
+			var lines []string
+			if doc.Summary != "" {
+				lines = append(lines, doc.Summary)
+			}
+			for _, f := range doc.Review.Findings {
+				lines = append(lines, strings.Join([]string{f.Kind, f.Summary, f.TargetPath, f.Applicability, strings.Join(f.Keywords, " "), strings.Join(f.Paths, " "), strings.Join(f.Symbols, " "), strings.Join(f.ErrorSignatures, " ")}, " "))
+			}
+			rel, _ := filepath.Rel(repoRoot, path)
+			addSynthetic(rel, "session", strings.Join(lines, "\n"))
 		}
 		return nil
 	})
 	if err := os.MkdirAll(paths.GraphDir, 0o755); err != nil {
 		return 0, err
 	}
-	raw, err := json.MarshalIndent(docs, "", "  ")
+	raw, err := json.MarshalIndent(map[string]any{
+		"_about": map[string]string{
+			"purpose":    "Search index for AGENTS.md, active-vendor rules and skills, guardrails, memory context, and recent session summaries.",
+			"authority":  "derived and rebuildable",
+			"updated_by": "so init, so sync, graph refresh, and documentation updates",
+		},
+		"documents": docs,
+	}, "", "  ")
 	if err != nil {
 		return 0, err
 	}
-	if err := os.WriteFile(indexPath(paths), raw, 0o644); err != nil {
+	tmp, err := os.CreateTemp(paths.GraphDir, "corpus.json.*")
+	if err != nil {
 		return 0, err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+		_ = tmp.Close()
+		return 0, err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return 0, err
+	}
+	if err := tmp.Close(); err != nil {
+		return 0, err
+	}
+	if err := os.Rename(tmpName, indexPath(paths)); err != nil {
+		if removeErr := os.Remove(indexPath(paths)); removeErr != nil && !os.IsNotExist(removeErr) {
+			return 0, err
+		}
+		if err := os.Rename(tmpName, indexPath(paths)); err != nil {
+			return 0, err
+		}
 	}
 	return len(docs), nil
 }
@@ -183,10 +266,13 @@ func SearchWith(paths harness.Paths, q string, opts SearchOptions) ([]Hit, error
 		}
 		return nil, err
 	}
-	var docs []IndexDoc
-	if err := json.Unmarshal(data, &docs); err != nil {
+	var corpus struct {
+		Documents []IndexDoc `json:"documents"`
+	}
+	if err := json.Unmarshal(data, &corpus); err != nil {
 		return nil, err
 	}
+	docs := corpus.Documents
 	var hits []Hit
 	for _, d := range docs {
 		c := strings.ToLower(d.Content)

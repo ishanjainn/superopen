@@ -13,7 +13,7 @@ export default function GraphPage() {
   const graphSrc = useMemo(() => {
     // bump v when theme/serve rules change so iframes refresh
     const params = new URLSearchParams({ theme: resolved, v: "8" });
-    if (projectId && projectId !== "all") params.set("project", projectId);
+    if (projectId) params.set("project", projectId);
     return `/api/graph/html?${params.toString()}`;
   }, [projectId, resolved]);
 

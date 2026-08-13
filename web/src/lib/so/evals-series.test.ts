@@ -8,7 +8,7 @@ function run(at: string, badge: string = "good"): EvalRun {
     at,
     badge,
     notes: [],
-    source: "history",
+    source: "session.json",
     scope: "snapshot",
     failure_points: [],
   };

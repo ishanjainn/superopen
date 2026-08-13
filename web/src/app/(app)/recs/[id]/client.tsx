@@ -191,6 +191,22 @@ export default function RecDetailPage() {
             )}
 
             <dl className="space-y-4 rounded-lg border border-neutral-200 p-4">
+              {(rec.vendor || rec.change_kind || rec.occurrence_count || rec.confidence) && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {rec.vendor && <Field label="Originating vendor">{rec.vendor}</Field>}
+                  {rec.change_kind && <Field label="Change">{rec.change_kind}</Field>}
+                  {typeof rec.confidence === "number" && (
+                    <Field label="Confidence">{Math.round(rec.confidence * 100)}%</Field>
+                  )}
+                  {typeof rec.occurrence_count === "number" && (
+                    <Field label="Supporting sessions">
+                      {rec.occurrence_count}
+                      {rec.auto_apply_after ? ` of ${rec.auto_apply_after}` : ""}
+                      {rec.verified ? " · verified" : " · not verified"}
+                    </Field>
+                  )}
+                </div>
+              )}
               {rec.rationale && <Field label="Reason">{rec.rationale}</Field>}
               {rec.why && rec.why !== rec.rationale && (
                 <Field label="Why">{rec.why}</Field>
@@ -235,6 +251,9 @@ export default function RecDetailPage() {
                     {rec.proposed_path}
                   </span>
                 </Field>
+              )}
+              {rec.auto_apply_reason && (
+                <Field label="Automatic application">{rec.auto_apply_reason}</Field>
               )}
               {rec.proposed_body && (
                 <div>

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -11,13 +12,22 @@ import (
 	"github.com/ishanjainn/superopen/internal/port/adapters"
 )
 
+func encodeClaudeFixturePath(path string) string {
+	path = filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		return strings.NewReplacer("/", "-", `\`, "-", ":", "-").Replace(path)
+	}
+	return strings.ReplaceAll(path, "/", "-")
+}
+
 func TestClaudeRoundTripViaSOHub(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	cwd := filepath.Join(home, "proj")
 	_ = os.MkdirAll(cwd, 0o755)
 
-	encoded := strings.ReplaceAll(cwd, string(os.PathSeparator), "-")
+	encoded := encodeClaudeFixturePath(cwd)
 	projDir := filepath.Join(home, ".claude", "projects", encoded)
 	_ = os.MkdirAll(projDir, 0o755)
 	sid := "sess-test-1"
@@ -87,12 +97,14 @@ func TestLedgerIdempotency(t *testing.T) {
 }
 
 func TestRemapCWD(t *testing.T) {
-	sess := port.NewPortableSession(port.HarnessClaude, "1", "/x", "/old/worktree", "t")
-	port.RemapCWD(&sess, "/new/worktree")
-	if sess.CWD != "/new/worktree" {
+	original := filepath.FromSlash("/old/worktree")
+	destination := filepath.FromSlash("/new/worktree")
+	sess := port.NewPortableSession(port.HarnessClaude, "1", filepath.FromSlash("/x"), original, "t")
+	port.RemapCWD(&sess, destination)
+	if sess.CWD != filepath.Clean(destination) {
 		t.Fatalf("cwd=%s", sess.CWD)
 	}
-	if sess.SourceMetadata["original_cwd"] != "/old/worktree" {
+	if sess.SourceMetadata["original_cwd"] != filepath.Clean(original) {
 		t.Fatalf("metadata=%v", sess.SourceMetadata)
 	}
 }
@@ -100,6 +112,7 @@ func TestRemapCWD(t *testing.T) {
 func TestCodexParseExport(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	sessDir := filepath.Join(home, ".codex", "sessions", "2026", "01", "01")
 	_ = os.MkdirAll(sessDir, 0o755)
@@ -141,6 +154,7 @@ func TestCodexParseExport(t *testing.T) {
 func TestCodexParseRecoversWorkingState(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	sessDir := filepath.Join(home, ".codex", "sessions", "2026", "01", "02")
 	_ = os.MkdirAll(sessDir, 0o755)
@@ -197,6 +211,7 @@ func TestCodexParseRecoversWorkingState(t *testing.T) {
 func TestCodexParseRepeatedCommandKeepsLatestExitCode(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	sessDir := filepath.Join(home, ".codex", "sessions", "2026", "01", "03")
 	_ = os.MkdirAll(sessDir, 0o755)
@@ -252,6 +267,7 @@ func TestCodexParseRepeatedCommandKeepsLatestExitCode(t *testing.T) {
 func TestCodexParseInterleavedOutputsAttachExitByCallID(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	sessDir := filepath.Join(home, ".codex", "sessions", "2026", "01", "04")
 	_ = os.MkdirAll(sessDir, 0o755)
@@ -313,9 +329,10 @@ func TestCodexParseInterleavedOutputsAttachExitByCallID(t *testing.T) {
 func TestClaudeParseRecoversWorkingStateFromToolUse(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	cwd := filepath.Join(home, "proj")
 	_ = os.MkdirAll(cwd, 0o755)
-	encoded := strings.ReplaceAll(cwd, string(os.PathSeparator), "-")
+	encoded := encodeClaudeFixturePath(cwd)
 	projDir := filepath.Join(home, ".claude", "projects", encoded)
 	_ = os.MkdirAll(projDir, 0o755)
 	sid := "sess-ws-1"

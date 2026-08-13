@@ -56,7 +56,7 @@ func resolveGitDir(repoRoot string) string {
 }
 
 // WriteSession commits files into refs/so/sessions/<id> without touching HEAD.
-// files keys are paths inside the session tree (e.g. meta.json, transcript.jsonl).
+// files keys are paths inside the session tree (e.g. session.json, events.jsonl).
 func WriteSession(repoRoot, sessionID string, files map[string][]byte) (string, error) {
 	if repoRoot == "" || sessionID == "" {
 		return "", fmt.Errorf("repo root and session id required")
@@ -165,11 +165,11 @@ func PushSessionsFF(repoRoot, remote string) error {
 	return nil
 }
 
-// SnapshotSessionDir packs meta/transcript/footprint from a filesystem session
+// SnapshotSessionDir packs the compact session document and event stream
 // directory into the side ref.
 func SnapshotSessionDir(repoRoot, sessionDir, sessionID string) (string, error) {
 	files := map[string][]byte{}
-	for _, name := range []string{"meta.json", "transcript.jsonl", "footprint.json"} {
+	for _, name := range []string{"session.json", "events.jsonl"} {
 		data, err := os.ReadFile(filepath.Join(sessionDir, name))
 		if err != nil {
 			if os.IsNotExist(err) {

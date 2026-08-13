@@ -24,28 +24,6 @@ export function GraphifyFrame({ src }: { src: string }) {
     };
   }, []);
 
-  useEffect(() => {
-    // Graphify's export has no cached layout, so the iframe stabilizes once
-    // and reports the result here; /api/graph/html bakes it in next load so
-    // returning to this page doesn't re-run the physics pass. Best-effort:
-    // a failed POST just means the next visit stabilizes again.
-    function onMessage(e: MessageEvent) {
-      if (e?.data?.type !== "so-graph-positions") return;
-      const positions = e.data.positions;
-      if (!positions || typeof positions !== "object") return;
-      const project = new URL(src, window.location.origin).searchParams.get("project");
-      const url = new URL("/api/graph/positions", window.location.origin);
-      if (project) url.searchParams.set("project", project);
-      fetch(url.toString(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ positions }),
-      }).catch(() => {});
-    }
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [src]);
-
   return (
     <div
       className="absolute inset-0 bg-white"

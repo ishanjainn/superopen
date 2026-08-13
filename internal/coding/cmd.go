@@ -8,7 +8,7 @@
 //	so coding launch    <claude|cursor|codex>
 //
 // All children share the resolved config from internal/config and the
-// OTLP exporter from internal/codingotlp. The hook subcommand is the hot path
+// local event exporter from internal/codingotlp. The hook subcommand is the hot path
 // invoked once per agent event and follows the crash-isolation rules
 // documented in cmd/so (crash-isolation / hard timeout).
 package coding
@@ -25,7 +25,7 @@ import (
 func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "coding",
-		Short: "Coding-agent observability (Claude Code, Cursor, Codex)",
+		Short: "Coding-agent observability (Claude, Cursor, Codex, Gemini, OpenCode, Copilot, Pi)",
 		Long: `Send telemetry from AI coding agents into Superopen.
 
 Three install paths land at the same plugin manifests under plugins/:

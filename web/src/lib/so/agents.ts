@@ -20,7 +20,7 @@ type SessionMetaFile = {
 };
 
 function readMeta(dir: string): SessionMetaFile | null {
-  const p = join(dir, "meta.json");
+  const p = join(dir, "session.json");
   if (!fileExists(p)) return null;
   try {
     return JSON.parse(readText(p)) as SessionMetaFile;

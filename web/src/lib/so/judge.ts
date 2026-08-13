@@ -1,6 +1,4 @@
-import { mkdirSync, writeFileSync, unlinkSync } from "fs";
-import { fileExists, readText } from "./nodeio";
-import { join } from "path";
+import { readText, writeText } from "./nodeio";
 import { spawnSync } from "child_process";
 import { soPath } from "./root";
 import type {
@@ -25,31 +23,54 @@ type RunningJob = {
 };
 
 const running = new Map<string, RunningJob>();
+const failures = new Map<string, string>();
 
-function reportPath(sessionId: string): string {
-  return join(soPath("sessions", sessionId), "report.json");
+type SessionReviewDocument = {
+  report?: Report;
+  report_error?: string;
+  [key: string]: unknown;
+};
+
+function sessionDocument(sessionId: string): SessionReviewDocument | null {
+  try {
+    return JSON.parse(
+      readText(soPath("sessions", sessionId, "session.json")),
+    ) as SessionReviewDocument;
+  } catch {
+    return null;
+  }
 }
 
-function errorPath(sessionId: string): string {
-  return join(soPath("sessions", sessionId), "report.error.json");
+function writeSessionReport(
+  sessionId: string,
+  report?: Report,
+  error?: string,
+): void {
+  const path = soPath("sessions", sessionId, "session.json");
+  const doc = sessionDocument(sessionId) || {
+    _about: {
+      purpose:
+        "Materialized state, summary, footprint, review, recommendations, and replay metadata for one coding session.",
+      authority: "authoritative session state derived from events.jsonl",
+      updated_by: "session materializer and review worker",
+    },
+    id: sessionId,
+  };
+  if (report) doc.report = report;
+  else delete doc.report;
+  if (error) doc.report_error = error;
+  else delete doc.report_error;
+  writeText(path, JSON.stringify(doc, null, 2));
 }
 
 function which(cli: string): boolean {
-  const r = spawnSync("which", [cli], { encoding: "utf8" });
+  const locator = process.platform === "win32" ? "where.exe" : "which";
+  const r = spawnSync(locator, [cli], { encoding: "utf8" });
   return r.status === 0 && Boolean(r.stdout.trim());
 }
 
 function availableJudgeClis(): string[] {
   return JUDGE_CLIS.filter((cli) => which(cli));
-}
-
-function readJSON<T>(path: string): T | null {
-  if (!fileExists(path)) return null;
-  try {
-    return JSON.parse(readText(path)) as T;
-  } catch {
-    return null;
-  }
 }
 
 function digestTrace(trace: Trace): string {
@@ -63,10 +84,11 @@ function digestTrace(trace: Trace): string {
   for (const ev of trace.events.slice(0, 200)) {
     const paths = ev.targets.map((t) => `${t.touch}:${t.path}`).join(", ");
     lines.push(
-      `#${ev.seq + 1} ${ev.action} ${ev.tool}${ev.isError ? " ERROR" : ""} ${paths || ev.summary}`
+      `#${ev.seq + 1} ${ev.action} ${ev.tool}${ev.isError ? " ERROR" : ""} ${paths || ev.summary}`,
     );
   }
-  if (trace.events.length > 200) lines.push(`… ${trace.events.length - 200} more events`);
+  if (trace.events.length > 200)
+    lines.push(`… ${trace.events.length - 200} more events`);
   const userMarks = trace.marks.filter((m) => m.type === "user-message");
   if (userMarks.length) {
     lines.push("");
@@ -86,7 +108,12 @@ function heuristicReport(trace: Trace, cli: string, model: string): Report {
     filesInRepo?: number;
     errorRate?: number;
     churnFiles?: number;
-    actions?: { edit?: number; verify?: number; read?: number; search?: number };
+    actions?: {
+      edit?: number;
+      verify?: number;
+      read?: number;
+      search?: number;
+    };
   };
   const edited = stats.edited ?? 0;
   const seen = (stats.fovea ?? 0) + (stats.parafovea ?? 0);
@@ -98,7 +125,7 @@ function heuristicReport(trace: Trace, cli: string, model: string): Report {
     verdict: Verdict,
     claim: string,
     severity: Severity,
-    seqs?: number[]
+    seqs?: number[],
   ): ReportDimension => ({
     name,
     verdict,
@@ -108,19 +135,23 @@ function heuristicReport(trace: Trace, cli: string, model: string): Report {
   const firstEdit = trace.events.findIndex((e) => e.action === "edit");
   const exploration: ReportDimension = dim(
     "exploration",
-    firstEdit > 8 || firstEdit < 0 ? "good" : firstEdit < 3 ? "warning" : "good",
+    firstEdit > 8 || firstEdit < 0
+      ? "good"
+      : firstEdit < 3
+        ? "warning"
+        : "good",
     firstEdit < 0
       ? "No edits in this trace."
       : `First edit at step #${firstEdit + 1} after ${firstEdit} prior events.`,
     firstEdit >= 0 && firstEdit < 3 ? "warning" : "info",
-    firstEdit >= 0 ? [firstEdit] : undefined
+    firstEdit >= 0 ? [firstEdit] : undefined,
   );
 
   const scope: ReportDimension = dim(
     "scope",
     footprint < 0.35 ? "good" : footprint < 0.6 ? "warning" : "problem",
     `Touched ${seen} of ${files} mapped files (${Math.round(footprint * 100)}% footprint).`,
-    footprint < 0.6 ? "info" : "warning"
+    footprint < 0.6 ? "info" : "warning",
   );
 
   const churn = stats.churnFiles ?? 0;
@@ -130,7 +161,7 @@ function heuristicReport(trace: Trace, cli: string, model: string): Report {
     churn === 0
       ? "No high-churn files (3+ edits)."
       : `${churn} file(s) were edited three or more times.`,
-    churn ? "warning" : "info"
+    churn ? "warning" : "info",
   );
 
   const verifies = stats.actions?.verify ?? 0;
@@ -143,7 +174,7 @@ function heuristicReport(trace: Trace, cli: string, model: string): Report {
       : edits === 0
         ? "No edits to verify."
         : "Edits present but no verify actions were recorded in the trace.",
-    verifies > 0 || edits === 0 ? "info" : "warning"
+    verifies > 0 || edits === 0 ? "info" : "warning",
   );
 
   const dimensions = [exploration, scope, wandering, verification];
@@ -185,11 +216,17 @@ function extractJSON(raw: string): unknown {
   const text = fenced ? fenced[1] : raw;
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("judge returned no JSON object");
+  if (start < 0 || end <= start)
+    throw new Error("judge returned no JSON object");
   return JSON.parse(text.slice(start, end + 1));
 }
 
-function normalizeReport(raw: unknown, trace: Trace, cli: string, model: string): Report {
+function normalizeReport(
+  raw: unknown,
+  trace: Trace,
+  cli: string,
+  model: string,
+): Report {
   const obj = raw as Partial<Report>;
   if (!obj.dimensions || !Array.isArray(obj.dimensions)) {
     throw new Error("judge JSON missing dimensions");
@@ -204,11 +241,16 @@ function normalizeReport(raw: unknown, trace: Trace, cli: string, model: string)
     },
     judge: {
       cli,
-      model: (obj.judge as { model?: string } | undefined)?.model || model || undefined,
+      model:
+        (obj.judge as { model?: string } | undefined)?.model ||
+        model ||
+        undefined,
       promptVersion: PROMPT_VERSION,
       generatedAt: new Date().toISOString(),
     },
-    taskSummary: String(obj.taskSummary || trace.session.title || "Session evaluation"),
+    taskSummary: String(
+      obj.taskSummary || trace.session.title || "Session evaluation",
+    ),
     dimensions: obj.dimensions as ReportDimension[],
     rubric: obj.rubric,
     notableMoments: obj.notableMoments,
@@ -242,7 +284,12 @@ ${digestTrace(trace)}
 }
 
 function runClaude(prompt: string, model: string): string {
-  const args = ["-p", "--output-format", "json", "--dangerously-skip-permissions"];
+  const args = [
+    "-p",
+    "--output-format",
+    "json",
+    "--dangerously-skip-permissions",
+  ];
   if (model) args.push("--model", model);
   args.push(prompt);
   const r = spawnSync("claude", args, {
@@ -254,7 +301,10 @@ function runClaude(prompt: string, model: string): string {
   if (r.error) throw r.error;
   if (r.status !== 0) throw new Error(r.stderr || `claude exited ${r.status}`);
   try {
-    const envelope = JSON.parse(r.stdout) as { result?: string; content?: string };
+    const envelope = JSON.parse(r.stdout) as {
+      result?: string;
+      content?: string;
+    };
     return String(envelope.result || envelope.content || r.stdout);
   } catch {
     return r.stdout;
@@ -306,7 +356,10 @@ async function runJudge(trace: Trace, choice: JudgeChoice): Promise<Report> {
   }
 }
 
-export function getReportStatus(sessionId: string, eventCount: number): ReportStatus {
+export function getReportStatus(
+  sessionId: string,
+  eventCount: number,
+): ReportStatus {
   const clis = availableJudgeClis();
   const job = running.get(sessionId);
   if (job) {
@@ -318,18 +371,19 @@ export function getReportStatus(sessionId: string, eventCount: number): ReportSt
       judgeClis: clis,
     };
   }
-  const err = readJSON<{ error: string }>(errorPath(sessionId));
-  if (err?.error && !fileExists(reportPath(sessionId))) {
+  const doc = sessionDocument(sessionId);
+  const error = failures.get(sessionId) || doc?.report_error;
+  if (error && !doc?.report) {
     return {
       state: "failed",
       stale: false,
-      error: err.error,
+      error,
       judgeAvailable: clis.length > 0 || true,
       judgeCli: clis[0],
       judgeClis: clis.length ? clis : ["heuristic"],
     };
   }
-  const report = readJSON<Report>(reportPath(sessionId));
+  const report = doc?.report;
   if (!report) {
     return {
       state: "none",
@@ -346,35 +400,30 @@ export function getReportStatus(sessionId: string, eventCount: number): ReportSt
     report,
     judgeAvailable: true,
     judgeCli: clis[0] || report.judge.cli,
-    judgeClis: clis.length ? clis : [report.judge.cli, "heuristic"].filter(Boolean),
+    judgeClis: clis.length
+      ? clis
+      : [report.judge.cli, "heuristic"].filter(Boolean),
   };
 }
 
 export function startAnalyze(
   sessionId: string,
   trace: Trace,
-  choice: JudgeChoice
+  choice: JudgeChoice,
 ): ReportStatus {
   if (running.has(sessionId)) {
     return getReportStatus(sessionId, trace.events.length);
   }
-  const dir = soPath("sessions", sessionId);
-  mkdirSync(dir, { recursive: true });
-  try {
-    unlinkSync(errorPath(sessionId));
-  } catch {
-    /* ok */
-  }
+  failures.delete(sessionId);
 
   const promise = (async () => {
     try {
       const report = await runJudge(trace, choice);
-      writeFileSync(reportPath(sessionId), JSON.stringify(report, null, 2));
+      writeSessionReport(sessionId, report);
     } catch (err) {
-      writeFileSync(
-        errorPath(sessionId),
-        JSON.stringify({ error: err instanceof Error ? err.message : String(err) })
-      );
+      const message = err instanceof Error ? err.message : String(err);
+      failures.set(sessionId, message);
+      writeSessionReport(sessionId, undefined, message);
     } finally {
       running.delete(sessionId);
     }

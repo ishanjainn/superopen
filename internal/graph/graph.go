@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +13,16 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/retrieve"
+	"github.com/ishanjainn/superopen/internal/runtimestate"
 )
+
+var graphAbout = map[string]string{
+	"purpose":    "Repository code graph used by Graphify and so graph query.",
+	"authority":  "derived from repository source files",
+	"updated_by": "background graph refresh after sessions that changed files",
+}
+
+const graphHTMLComment = "<!-- Superopen Graphify visualization. Derived from graph.json for the Sessions UI and safe to regenerate. -->\n<!-- Updated by successful atomic graph refreshes. -->\n"
 
 const graphifyOutName = "graphify-out"
 
@@ -100,6 +110,77 @@ func Build(repoRoot string, paths harness.Paths, codeOnly bool, semanticBackend 
 		return buildStub(repoRoot, paths)
 	}
 	return buildWithGraphify(bin, prefix, repoRoot, paths, codeOnly, semanticBackend)
+}
+
+// RefreshAtomic builds a complete graph directory off to the side and swaps it
+// into place only after graph.json and required UI artifacts validate.
+func RefreshAtomic(repoRoot string, paths harness.Paths, codeOnly bool, semanticBackend string) (Result, error) {
+	tmp, err := os.MkdirTemp(filepath.Dir(paths.GraphDir), ".graph-v2-")
+	if err != nil {
+		return Result{}, err
+	}
+	defer os.RemoveAll(tmp)
+	tp := paths
+	tp.GraphDir = tmp
+	tp.GraphJSON = filepath.Join(tmp, "graph.json")
+	tp.GraphCorpus = filepath.Join(tmp, "corpus.json")
+	tp.GraphHTML = filepath.Join(tmp, "graph.html")
+	tp.GraphState = filepath.Join(tmp, "state.json")
+	res, err := Build(repoRoot, tp, codeOnly, semanticBackend)
+	if err != nil {
+		return res, err
+	}
+	if _, err := os.Stat(tp.GraphJSON); err != nil {
+		return res, fmt.Errorf("graph refresh validation: %w", err)
+	}
+	if err := validateGraphArtifacts(tp); err != nil {
+		return res, fmt.Errorf("graph refresh validation: %w", err)
+	}
+	backup := paths.GraphDir + ".previous"
+	_ = os.RemoveAll(backup)
+	if _, err := os.Stat(paths.GraphDir); err == nil {
+		if err := os.Rename(paths.GraphDir, backup); err != nil {
+			return res, err
+		}
+	}
+	if err := os.Rename(tmp, paths.GraphDir); err != nil {
+		_ = os.Rename(backup, paths.GraphDir)
+		return res, err
+	}
+	if _, err := Query(repoRoot, "superopen validation"); err != nil {
+		failed := paths.GraphDir + ".failed"
+		_ = os.RemoveAll(failed)
+		_ = os.Rename(paths.GraphDir, failed)
+		_ = os.Rename(backup, paths.GraphDir)
+		_ = os.RemoveAll(failed)
+		return res, fmt.Errorf("graph query validation: %w", err)
+	}
+	_ = os.RemoveAll(backup)
+	res.Path = paths.GraphJSON
+	return res, nil
+}
+
+func validateGraphArtifacts(paths harness.Paths) error {
+	data, err := os.ReadFile(paths.GraphJSON)
+	if err != nil {
+		return err
+	}
+	var graphObj map[string]json.RawMessage
+	if json.Unmarshal(data, &graphObj) != nil || len(graphObj["_about"]) == 0 || len(graphObj["nodes"]) == 0 {
+		return fmt.Errorf("graph.json is not a described graph object")
+	}
+	for _, path := range []string{paths.GraphCorpus, paths.GraphState} {
+		var obj map[string]json.RawMessage
+		body, readErr := os.ReadFile(path)
+		if readErr != nil || json.Unmarshal(body, &obj) != nil || len(obj["_about"]) == 0 {
+			return fmt.Errorf("%s is missing valid _about metadata", filepath.Base(path))
+		}
+	}
+	html, err := os.ReadFile(paths.GraphHTML)
+	if err != nil || !strings.HasPrefix(string(html), "<!-- Superopen Graphify visualization.") {
+		return fmt.Errorf("graph.html is missing its leading description")
+	}
+	return nil
 }
 
 func buildWithGraphify(bin string, prefix []string, repoRoot string, paths harness.Paths, codeOnly bool, semanticBackend string) (Result, error) {
@@ -378,16 +459,14 @@ func ingestFromDir(srcDir string, paths harness.Paths) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("read graph.json: %w", err)
 	}
+	data = describeGraphJSON(data)
 	if err := os.WriteFile(paths.GraphJSON, data, 0o644); err != nil {
 		return Result{}, err
-	}
-	if report, err := os.ReadFile(filepath.Join(srcDir, "GRAPH_REPORT.md")); err == nil {
-		_ = os.WriteFile(paths.GraphReport, report, 0o644)
 	}
 	hasHTML := false
 	if html, err := os.ReadFile(filepath.Join(srcDir, "graph.html")); err == nil && len(html) > 0 {
 		if ok, _ := htmlHasGraphifyCommunities(filepath.Join(srcDir, "graph.html")); ok {
-			if err := os.WriteFile(filepath.Join(paths.GraphDir, "graph.html"), html, 0o644); err == nil {
+			if err := os.WriteFile(paths.GraphHTML, append([]byte(graphHTMLComment), html...), 0o644); err == nil {
 				hasHTML = true
 			}
 		} else {
@@ -395,21 +474,10 @@ func ingestFromDir(srcDir string, paths harness.Paths) (Result, error) {
 			_ = os.Remove(filepath.Join(paths.GraphDir, "graph.html"))
 		}
 	}
-	for _, name := range []string{".graphify_analysis.json", ".graphify_labels.json", ".graphify_labels.json.sig"} {
-		if b, err := os.ReadFile(filepath.Join(srcDir, name)); err == nil {
-			_ = os.WriteFile(filepath.Join(paths.GraphDir, name), b, 0o644)
-		}
-	}
-	cacheSrc := filepath.Join(srcDir, "cache")
-	cacheDst := filepath.Join(paths.GraphDir, "cache")
-	if info, err := os.Stat(cacheSrc); err == nil && info.IsDir() {
-		_ = os.RemoveAll(cacheDst)
-		_ = copyDir(cacheSrc, cacheDst)
-	}
-
 	nodes, edges := countGraph(data)
 	repoRoot := filepath.Dir(paths.Root)
 	_, _ = retrieve.Rebuild(repoRoot, paths)
+	_ = writeGraphState(paths, data, nodes, edges, "graphify")
 	return Result{NodeCount: nodes, EdgeCount: edges, Source: "graphify", Path: paths.GraphJSON, HasHTML: hasHTML}, nil
 }
 
@@ -490,16 +558,75 @@ func buildStub(repoRoot string, paths harness.Paths) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	data = describeGraphJSON(data)
 	if err := os.WriteFile(paths.GraphJSON, data, 0o644); err != nil {
 		return Result{}, err
 	}
-	report := fmt.Sprintf("# Graph report\n\nGenerated by Superopen stub at %s.\n\n- Nodes: %d\n- Edges: %d\n\nInstall `graphify` (`uv tool install graphifyy`) for full AST + semantic graphs.\n",
-		time.Now().UTC().Format(time.RFC3339), len(g.Nodes), len(g.Edges))
-	_ = os.WriteFile(paths.GraphReport, []byte(report), 0o644)
-	// Remove stale Graphify HTML so the UI does not show an outdated map.
-	_ = os.Remove(filepath.Join(paths.GraphDir, "graph.html"))
+	stubHTML := graphHTMLComment + "<!doctype html><html><head><meta charset=\"utf-8\"><title>Superopen graph</title></head><body><p>Graphify visualization is unavailable; use <code>so graph query</code>.</p></body></html>\n"
+	if err := os.WriteFile(paths.GraphHTML, []byte(stubHTML), 0o644); err != nil {
+		return Result{}, err
+	}
 	_, _ = retrieve.Rebuild(repoRoot, paths)
-	return Result{NodeCount: len(g.Nodes), EdgeCount: len(g.Edges), Source: "stub", Path: paths.GraphJSON, HasHTML: false}, nil
+	_ = writeGraphState(paths, data, len(g.Nodes), len(g.Edges), "stub")
+	return Result{NodeCount: len(g.Nodes), EdgeCount: len(g.Edges), Source: "stub", Path: paths.GraphJSON, HasHTML: true}, nil
+}
+
+func describeGraphJSON(data []byte) []byte {
+	var obj map[string]any
+	if json.Unmarshal(data, &obj) != nil {
+		return data
+	}
+	obj["_about"] = graphAbout
+	out, err := json.MarshalIndent(obj, "", "  ")
+	if err != nil {
+		return data
+	}
+	return append(out, '\n')
+}
+
+func writeGraphState(paths harness.Paths, graphData []byte, nodes, edges int, source string) error {
+	sum := sha256.Sum256(graphData)
+	repoSum := sha256.Sum256([]byte(filepath.Clean(paths.RepoRoot)))
+	sourceSum := sourceFingerprint(paths.RepoRoot)
+	now := time.Now().UTC()
+	state := map[string]any{
+		"_about": map[string]string{
+			"purpose":   "Graph freshness and build metadata used to decide whether a refresh is necessary.",
+			"authority": "runtime state", "updated_by": "successful atomic graph refresh",
+		},
+		"schema_version": 2, "graphify_version": source,
+		"repository_fingerprint": fmt.Sprintf("%x", repoSum[:]), "source_file_fingerprint": sourceSum,
+		"started_at": now, "completed_at": now, "source": source,
+		"graph_sha256": fmt.Sprintf("%x", sum[:]), "nodes": nodes, "edges": edges,
+		"last_build_result": "success",
+	}
+	b, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(paths.GraphState, append(b, '\n'), 0o644)
+}
+
+func sourceFingerprint(repoRoot string) string {
+	h := sha256.New()
+	_ = filepath.WalkDir(repoRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() && (d.Name() == ".git" || d.Name() == ".so" || d.Name() == "node_modules" || d.Name() == "vendor") {
+			return filepath.SkipDir
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(repoRoot, path)
+		info, statErr := d.Info()
+		if statErr == nil {
+			_, _ = fmt.Fprintf(h, "%s\x00%d\x00%d\n", filepath.ToSlash(rel), info.Size(), info.ModTime().UnixNano())
+		}
+		return nil
+	})
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func countGraph(data []byte) (int, int) {
@@ -519,6 +646,10 @@ func countGraph(data []byte) (int, int) {
 // Query shells to graphify when available, else hybrid harness retrieve + stub graph labels.
 func Query(repoRoot, question string) (string, error) {
 	graphPath := filepath.Join(repoRoot, ".so", "graph", "graph.json")
+	// Graphify writes cache/last_query_stamp beside graph.json. Superopen keeps
+	// that coordination marker in the consolidated OS runtime state instead.
+	defer os.RemoveAll(filepath.Join(filepath.Dir(graphPath), "cache"))
+	_, _ = runtimestate.TouchIfStale(repoRoot, "graph_query", 0)
 	if bin, prefix, err := resolveGraphify(); err == nil {
 		args := append(append([]string{}, prefix...), "query", question, "--graph", graphPath)
 		cmd := exec.Command(bin, args...)

@@ -298,20 +298,10 @@ jobs:
     needs: [prepare, github-release]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-        with:
-          sparse-checkout: .github/scripts
-
       - name: Update Homebrew tap
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          REPOSITORY: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          python3 .github/scripts/release-packages.py bump-homebrew-formula \
-            --repository "$REPOSITORY" \
-            --tag "$RELEASE_TAG" \
-            --version "$RELEASE_VERSION" \
-            --tap ishanjainn/homebrew-superopen \
-            --token "$HOMEBREW_TAP_TOKEN"
+        uses: dawidd6/action-homebrew-bump-formula@a0e064e08103c01870c6d1b05168d1b726aab119 # v8
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          tap: ishanjainn/homebrew-superopen
+          formula: so
+          tag: ${{ needs.prepare.outputs.tag }}

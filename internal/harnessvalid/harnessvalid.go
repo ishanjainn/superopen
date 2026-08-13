@@ -89,11 +89,14 @@ func ValidateGuardrailsBody(body string) (guardrails.File, error) {
 	if err := yaml.Unmarshal([]byte(body), &f); err != nil {
 		return guardrails.File{}, fmt.Errorf("guardrails yaml: %w", err)
 	}
-	if len(f.Rules) == 0 && len(f.DeniedCommands) == 0 && len(f.SensitivePaths) == 0 && f.Approval == "" {
+	if len(f.Rules) == 0 && len(f.DeniedTools) == 0 && len(f.DeniedCommands) == 0 && len(f.SensitivePaths) == 0 && f.Approval == "" {
 		return guardrails.File{}, fmt.Errorf("guardrails body has no rules, denies, paths, or approval")
 	}
 	// Dry-run: engine load from body
 	eng := guardrails.Engine{Policy: guardrails.DefaultPolicy(), Rules: f.Rules}
+	if f.DeniedTools != nil {
+		eng.Policy.DeniedTools = f.DeniedTools
+	}
 	if len(f.DeniedCommands) > 0 {
 		eng.Policy.DeniedCommands = f.DeniedCommands
 	}
@@ -104,6 +107,7 @@ func ValidateGuardrailsBody(body string) (guardrails.File, error) {
 		eng.Policy.Approval = f.Approval
 	}
 	_ = eng.CheckCommand("echo ok")
+	_ = eng.CheckTool("safe_tool")
 	_ = eng.CheckPath("/tmp/safe.txt")
 	return f, nil
 }

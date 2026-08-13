@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   createContext,
   useCallback,
   useContext,
@@ -10,6 +11,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { getUIPref, setUIPref } from "@/lib/ui-prefs";
 
 export type Project = {
   id: string;
@@ -23,7 +25,7 @@ export type Project = {
 
 type ProjectContextValue = {
   projects: Project[];
-  /** "" = this repo, "all" = all projects, else project id */
+  /** "" = the UI server's repository; otherwise one managed project id. */
   projectId: string;
   setProjectId: (id: string) => void;
   refreshProjects: () => Promise<void>;
@@ -38,26 +40,11 @@ const PREF_KEY = "selected_project";
 const HEADER = "x-so-project";
 
 async function loadPref(): Promise<string> {
-  try {
-    const res = await fetch(`/api/ui/prefs?key=${encodeURIComponent(PREF_KEY)}`);
-    if (!res.ok) return "";
-    const data = (await res.json()) as { value?: string | null };
-    return typeof data.value === "string" ? data.value : "";
-  } catch {
-    return "";
-  }
+	return getUIPref(PREF_KEY) ?? "";
 }
 
 async function savePref(value: string) {
-  try {
-    await fetch("/api/ui/prefs", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: PREF_KEY, value }),
-    });
-  } catch {
-    /* ignore */
-  }
+	setUIPref(PREF_KEY, value);
 }
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
@@ -106,7 +93,17 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         meta?.repo ||
         "repo";
       setCurrentSlug(slug);
-      setProjectIdState(pref);
+      // "all" was a legacy aggregate scope. Data pages are now always bound
+      // to one repository, while Settings still lists the global registry.
+      const preferredProject = list.find((project) => project.id === pref);
+      const selected =
+        pref !== "all" &&
+        preferredProject &&
+        preferredProject.repo_root !== meta?.root
+          ? pref
+          : "";
+      setProjectIdState(selected);
+      if (selected !== pref) void savePref(selected);
       setReady(true);
     })();
     return () => {
@@ -146,8 +143,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setProjectId = useCallback((id: string) => {
-    setProjectIdState(id);
-    void savePref(id);
+    const selected = id === "all" ? "" : id;
+    setProjectIdState(selected);
+    void savePref(selected);
   }, []);
 
   const value = useMemo(
@@ -163,7 +161,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
+    <ProjectContext.Provider value={value}>
+      <Fragment key={projectId}>{children}</Fragment>
+    </ProjectContext.Provider>
   );
 }
 

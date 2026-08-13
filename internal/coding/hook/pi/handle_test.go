@@ -13,14 +13,14 @@ type rec struct {
 	tools    []normalize.ToolCall
 }
 
-func (r *rec) EmitSession(s normalize.Session) error                 { r.sessions = append(r.sessions, s); return nil }
-func (r *rec) EmitToolCall(t normalize.ToolCall) error               { r.tools = append(r.tools, t); return nil }
-func (r *rec) EmitLLMTurn(t normalize.LLMTurn) error                 { r.turns = append(r.turns, t); return nil }
-func (r *rec) EmitEvent(normalize.EventEmission) error               { return nil }
-func (r *rec) EmitEditDecision(normalize.EditDecision) error         { return nil }
-func (r *rec) EmitSubagent(normalize.Subagent) error                 { return nil }
-func (r *rec) EmitGitCommit(normalize.GitCommit) error               { return nil }
-func (r *rec) EmitGitPullRequest(normalize.GitPullRequest) error     { return nil }
+func (r *rec) EmitSession(s normalize.Session) error             { r.sessions = append(r.sessions, s); return nil }
+func (r *rec) EmitToolCall(t normalize.ToolCall) error           { r.tools = append(r.tools, t); return nil }
+func (r *rec) EmitLLMTurn(t normalize.LLMTurn) error             { r.turns = append(r.turns, t); return nil }
+func (r *rec) EmitEvent(normalize.EventEmission) error           { return nil }
+func (r *rec) EmitEditDecision(normalize.EditDecision) error     { return nil }
+func (r *rec) EmitSubagent(normalize.Subagent) error             { return nil }
+func (r *rec) EmitGitCommit(normalize.GitCommit) error           { return nil }
+func (r *rec) EmitGitPullRequest(normalize.GitPullRequest) error { return nil }
 
 func TestPiHostCostPreferred(t *testing.T) {
 	em := &rec{}

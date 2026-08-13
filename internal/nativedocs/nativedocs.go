@@ -21,15 +21,14 @@ const (
 )
 
 // WriteOpts controls where rules/skills mutations land.
-// Policy: update-in-place across every existing vendor copy (keep in sync);
-// if none exist, create under the session vendor tree (else preferred roots).
+// Policy: write only the explicit session vendor tree. AGENTS.md is the only
+// shared guidance surface; same-named files owned by other vendors are untouched.
 // AGENTS.md is always shared and ignores Vendor.
 type WriteOpts struct {
 	Vendor string // session meta.Vendor (claude-code, cursor, codex, …)
 }
 
 func (o WriteOpts) vendor() string { return strings.TrimSpace(o.Vendor) }
-
 
 // EnsureAgentsMD creates root AGENTS.md from body if missing (or force).
 func EnsureAgentsMD(paths harness.Paths, body string, force bool) error {
@@ -122,7 +121,7 @@ func RemoveLearnedContaining(agentsPath, needle string) error {
 }
 
 // UpsertRule writes or replaces a rule file. Identical content is a no-op.
-// When the stem already exists in multiple vendor trees, all copies are synced.
+// Existing same-named rules in other vendor trees are never synchronized.
 func UpsertRule(paths harness.Paths, rel, body string, opts ...WriteOpts) error {
 	opt := firstOpts(opts)
 	body = strings.TrimSpace(body) + "\n"
@@ -185,13 +184,9 @@ func RemoveRuleContaining(paths harness.Paths, rel, needle string, opts ...Write
 	if needle == "" {
 		return nil
 	}
-	existing := harness.FindExistingRules(paths.RepoRoot, rel)
-	if len(existing) == 0 {
-		full, err := RulePath(paths, rel)
-		if err != nil {
-			return err
-		}
-		existing = []string{full}
+	existing, err := ruleWriteTargets(paths, rel, firstOpts(opts))
+	if err != nil {
+		return err
 	}
 	for _, full := range existing {
 		data, err := os.ReadFile(full)
@@ -217,26 +212,27 @@ func RemoveRuleContaining(paths harness.Paths, rel, needle string, opts ...Write
 	return nil
 }
 
-// WriteSkillCreateOnly writes skills/<name>/SKILL.md if missing everywhere.
-// If any vendor already has the skill, this is a no-op (use UpsertSkill to update + sync).
+// WriteSkillCreateOnly writes skills/<name>/SKILL.md only in the selected tree.
 func WriteSkillCreateOnly(paths harness.Paths, name, body string, opts ...WriteOpts) error {
 	opt := firstOpts(opts)
 	name, err := normalizeSkillName(name)
 	if err != nil {
 		return err
 	}
-	if len(harness.FindExistingSkills(paths.RepoRoot, name)) > 0 {
+	full := filepath.Join(skillCreateDir(paths, opt), name, "SKILL.md")
+	if skillCreateDir(paths, opt) == "" {
+		return fmt.Errorf("explicit vendor required for skill write")
+	}
+	if _, err := os.Stat(full); err == nil {
 		return nil
 	}
-	full := filepath.Join(skillCreateDir(paths, opt), name, "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(full, []byte(strings.TrimSpace(body)+"\n"), 0o644)
 }
 
-// UpsertSkill replaces skills/<name>/SKILL.md across every vendor copy (sync).
-// Creates under the session vendor tree when none exist.
+// UpsertSkill replaces a skill only in the selected vendor tree.
 func UpsertSkill(paths harness.Paths, name, body string, opts ...WriteOpts) error {
 	opt := firstOpts(opts)
 	name, err := normalizeSkillName(name)
@@ -244,10 +240,11 @@ func UpsertSkill(paths harness.Paths, name, body string, opts ...WriteOpts) erro
 		return err
 	}
 	body = strings.TrimSpace(body) + "\n"
-	targets := harness.FindExistingSkills(paths.RepoRoot, name)
-	if len(targets) == 0 {
-		targets = []string{filepath.Join(skillCreateDir(paths, opt), name, "SKILL.md")}
+	dir := skillCreateDir(paths, opt)
+	if dir == "" {
+		return fmt.Errorf("explicit vendor required for skill write")
 	}
+	targets := []string{filepath.Join(dir, name, "SKILL.md")}
 	for _, full := range targets {
 		if prev, err := os.ReadFile(full); err == nil && string(prev) == body {
 			continue
@@ -264,15 +261,16 @@ func UpsertSkill(paths harness.Paths, name, body string, opts ...WriteOpts) erro
 
 // RemoveSkill deletes a non-/so skill directory from every vendor tree.
 func RemoveSkill(paths harness.Paths, name string, opts ...WriteOpts) error {
-	_ = opts
+	opt := firstOpts(opts)
 	name, err := normalizeSkillName(name)
 	if err != nil {
 		return err
 	}
-	targets := harness.FindExistingSkills(paths.RepoRoot, name)
-	if len(targets) == 0 {
-		targets = []string{filepath.Join(paths.SkillsDir, name, "SKILL.md")}
+	dir := skillCreateDir(paths, opt)
+	if dir == "" {
+		return fmt.Errorf("explicit vendor required for skill removal")
 	}
+	targets := []string{filepath.Join(dir, name, "SKILL.md")}
 	for _, full := range targets {
 		dir := filepath.Dir(full)
 		base := filepath.Base(dir)
@@ -292,13 +290,12 @@ func firstOpts(opts []WriteOpts) WriteOpts {
 }
 
 func ruleWriteTargets(paths harness.Paths, rel string, opt WriteOpts) ([]string, error) {
-	existing := harness.FindExistingRules(paths.RepoRoot, rel)
-	if len(existing) > 0 {
-		return existing, nil
-	}
 	dir := paths.RulesDir
 	if opt.vendor() != "" {
 		dir = harness.RulesDirForVendor(paths.RepoRoot, opt.vendor())
+	}
+	if dir == "" {
+		return nil, fmt.Errorf("explicit vendor required for rule write")
 	}
 	stem := harness.RuleStem(rel)
 	if stem == "" || stem == "superopen" {

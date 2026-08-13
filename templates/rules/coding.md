@@ -2,7 +2,7 @@
 
 Project-specific rules for AI coding agents. Prefer these over inventing process.
 
-Guardrails (`.so/guardrails/`) are hard stop/warn policies. **Rules** here are guidance the agent should follow while coding (style, PR conventions, concurrency, etc.).
+Guardrails (`.so/guardrails.yaml`) are hard stop/warn policies. **Rules** here are vendor-owned guidance the agent should follow while coding.
 
 ## Sources
 

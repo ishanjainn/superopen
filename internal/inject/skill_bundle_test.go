@@ -9,19 +9,12 @@ import (
 func TestWriteSkillBundle_ProjectVendors(t *testing.T) {
 	root := t.TempDir()
 	body := "# /so\ntest skill\n"
-	written, err := writeSkillBundle(root, body, false)
+	written, err := writeSkillBundleFor(root, body, []string{"codex"}, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
-		filepath.Join(root, ".agents", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".claude", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".cursor", "skills", "so", "SKILL.md"),
 		filepath.Join(root, ".codex", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".gemini", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".opencode", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".github", "skills", "so", "SKILL.md"),
-		filepath.Join(root, ".pi", "skills", "so", "SKILL.md"),
 	}
 	if len(written) != len(want) {
 		t.Fatalf("wrote %d paths, want %d: %v", len(written), len(want), written)
@@ -39,13 +32,15 @@ func TestWriteSkillBundle_ProjectVendors(t *testing.T) {
 
 func TestWriteSkillBundle_GlobalVendors(t *testing.T) {
 	home := t.TempDir()
+	// The explicit home argument is the install target under test. Do not let a
+	// runner-level XDG override redirect OpenCode writes outside the fixture.
+	t.Setenv("XDG_CONFIG_HOME", "")
 	body := "# /so\nglobal\n"
-	written, err := writeSkillBundle(home, body, true)
+	written, err := writeSkillBundleFor(home, body, []string{"opencode", "copilot-cli", "pi", "gemini"}, false, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	extra := []string{
-		filepath.Join(home, ".config", "so", "SKILL.md"),
 		filepath.Join(home, ".config", "opencode", "skills", "so", "SKILL.md"),
 		filepath.Join(home, ".copilot", "skills", "so", "SKILL.md"),
 		filepath.Join(home, ".pi", "agent", "skills", "so", "SKILL.md"),
@@ -63,7 +58,10 @@ func TestWriteSkillBundle_GlobalVendors(t *testing.T) {
 
 func TestRemoveSkillBundle_RemovesNewVendors(t *testing.T) {
 	root := t.TempDir()
-	if _, err := writeSkillBundle(root, "x", false); err != nil {
+	// Installation detection intentionally depends on the host. Removal tests
+	// instead seed every project integration explicitly so a clean CI runner and
+	// a developer machine exercise exactly the same files.
+	if _, err := writeSkillBundleFor(root, "x", []string{"gemini", "opencode", "copilot-cli", "pi"}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	removed := removeSkillBundle(root, false)
@@ -78,6 +76,22 @@ func TestRemoveSkillBundle_RemovesNewVendors(t *testing.T) {
 	} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); !os.IsNotExist(err) {
 			t.Fatalf("%s should be gone", rel)
+		}
+	}
+}
+
+func TestCheckedInSkillCopiesMatchEmbedded(t *testing.T) {
+	repo := filepath.Clean(filepath.Join("..", ".."))
+	for _, rel := range []string{
+		".claude/skills/so/SKILL.md", ".cursor/skills/so/SKILL.md", ".codex/skills/so/SKILL.md",
+		".gemini/skills/so/SKILL.md", ".opencode/skills/so/SKILL.md", ".github/skills/so/SKILL.md", ".pi/skills/so/SKILL.md",
+	} {
+		data, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if string(data) != embeddedSkillMD {
+			t.Fatalf("%s drifted from internal/inject/skill.md", rel)
 		}
 	}
 }

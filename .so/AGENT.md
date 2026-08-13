@@ -1,1 +1,0 @@
-Superopen (`so`) — agent harness engineering. Read AGENTS.md, .cursor/rules/, .agents/skills/, and .so/guardrails/guardrails.yaml before changing process. For codebase questions run `so graph query "…"`. CLI: cmd/so + internal/; UI: web/; telemetry: internal/codingotlp. Prefer focused tests per CONTRIBUTING.md.

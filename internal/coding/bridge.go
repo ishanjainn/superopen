@@ -5,28 +5,37 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/coding/install"
 	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
-// Install installs coding-agent observability for the given vendors.
-// endpoint is best-effort written to the platform config.env when non-empty.
-func Install(repoRoot, endpoint string, vendors []string) error {
+// Install installs coding-agent observability for the given vendors. Hooks
+// persist into the current repository directly; no local receiver is configured.
+func Install(repoRoot string, vendors []string) error {
 	_ = repoRoot
-	if endpoint != "" {
-		_ = writeEndpointConfig(endpoint)
-	}
+	_ = removeNetworkTelemetryConfig()
 	targets := vendors
 	if len(targets) == 0 {
 		targets = []string{"claude-code", "cursor", "codex", "gemini", "opencode", "copilot-cli", "pi"}
 	}
+	seen := make(map[string]bool, len(targets))
 	for _, v := range targets {
+		v = strings.ToLower(strings.TrimSpace(v))
 		switch v {
 		case "claude", "claude-code":
 			v = "claude-code"
+		case "copilot":
+			v = "copilot-cli"
+		case "agents", "":
+			continue
 		}
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
 		if _, err := install.InstallVendor(v, false); err != nil {
 			return fmt.Errorf("install %s: %w", v, err)
 		}
@@ -68,11 +77,13 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 			out["gemini"] = e == nil && strings.Contains(string(data), "coding hook --vendor=gemini")
 		case "opencode":
 			// Host loads ~/.config/opencode/plugins (not ~/.opencode/plugins).
-			_, e := os.Stat(filepath.Join(home, ".config", "opencode", "plugins", "superopen.ts"))
+			base, _ := userpaths.OpenCodeConfigDir()
+			_, e := os.Stat(filepath.Join(base, "plugins", "superopen.ts"))
 			out["opencode"] = e == nil
 		case "copilot-cli", "copilot":
 			// Copilot CLI: ~/.copilot/hooks (not ~/.github/hooks).
-			data, e := os.ReadFile(filepath.Join(home, ".copilot", "hooks", "superopen.json"))
+			base, _ := userpaths.CopilotHome()
+			data, e := os.ReadFile(filepath.Join(base, "hooks", "superopen.json"))
 			out["copilot-cli"] = e == nil && strings.Contains(string(data), "coding hook --vendor=copilot")
 		case "pi":
 			// Host loads ~/.pi/agent/extensions (not ~/.pi/extensions).
@@ -100,24 +111,47 @@ func hookBinaryAvailable(manifest, vendor string) bool {
 		return err == nil
 	}
 	info, err := os.Stat(bin)
-	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return info.Mode()&0o111 != 0
 }
 
-func writeEndpointConfig(endpoint string) error {
+func removeNetworkTelemetryConfig() error {
 	dir, err := userpaths.ConfigDir()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// Older builds stored remote-export credentials here. No current command
+	// reads this file, so remove the obsolete secret during install/sync.
+	_ = os.Remove(filepath.Join(dir, "auth.json"))
+	path := filepath.Join(dir, "config.env")
+	prev, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
-	path := filepath.Join(dir, "config.env")
-	if prev, err := os.ReadFile(path); err == nil {
-		s := string(prev)
-		if strings.Contains(s, "SUPEROPEN_OTLP_ENDPOINT=") {
-			return nil
+	var kept []string
+	for _, line := range strings.Split(string(prev), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "SUPEROPEN_OTLP_ENDPOINT=") ||
+			strings.HasPrefix(trimmed, "OTEL_EXPORTER_OTLP_ENDPOINT=") ||
+			strings.HasPrefix(trimmed, "OTEL_EXPORTER_OTLP_HEADERS=") ||
+			strings.HasPrefix(trimmed, "SUPEROPEN_API_KEY=") ||
+			trimmed == "# written by so init / so coding install" {
+			continue
+		}
+		if trimmed != "" {
+			kept = append(kept, line)
 		}
 	}
-	body := "# written by so init / so coding install\nSUPEROPEN_OTLP_ENDPOINT=" + endpoint + "\n"
-	return os.WriteFile(path, []byte(body), 0o600)
+	if len(kept) == 0 {
+		return os.Remove(path)
+	}
+	return os.WriteFile(path, []byte(strings.Join(kept, "\n")+"\n"), 0o600)
 }

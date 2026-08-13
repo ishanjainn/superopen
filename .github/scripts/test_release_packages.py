@@ -33,6 +33,7 @@ class ReleaseTests(unittest.TestCase):
             "admin-pr-summary.yml",
             "ci-automation.yml",
             "ci-cli.yml",
+            "ci-cross-platform.yml",
             "ci-web.yml",
             "release-cli.yml",
             "release-packages.yml",

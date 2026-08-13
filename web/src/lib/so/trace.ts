@@ -1,11 +1,14 @@
 import { readdirSync, statSync } from "fs";
 import { fileExists, readText } from "./nodeio";
 import { join, relative } from "path";
-import { homedir } from "os";
 import type { CityMap } from "./citymap";
 import { sessionKey } from "./citymap";
 import { repoRoot, soPath } from "./root";
-import { humanizePromptPreview, isNestedSubagentSession, type SessionMeta } from "./sessions";
+import {
+  humanizePromptPreview,
+  isNestedSubagentSession,
+  type SessionMeta,
+} from "./sessions";
 
 export type Touch = "hit" | "read" | "edit";
 export type Action = "search" | "read" | "edit" | "exec" | "verify" | "other";
@@ -84,7 +87,11 @@ function relToRepo(cwd: string, path: string): string {
   return norm;
 }
 
-function emptyStats(filesInRepo: number, events: TraceEvent[], marks: TraceMark[]) {
+function emptyStats(
+  filesInRepo: number,
+  events: TraceEvent[],
+  marks: TraceMark[],
+) {
   let edited = 0;
   let read = 0;
   let seen = 0;
@@ -144,14 +151,17 @@ function emptyStats(filesInRepo: number, events: TraceEvent[], marks: TraceMark[
 function footprintEvents(
   sessionDir: string,
   cwd: string,
-  startedAt?: string
+  startedAt?: string,
 ): TraceEvent[] {
-  const fpPath = join(sessionDir, "footprint.json");
+  const fpPath = join(sessionDir, "session.json");
   if (!fileExists(fpPath)) return [];
   try {
-    const fp = JSON.parse(readText(fpPath)) as {
-      files?: { path: string; state?: string; count?: number }[];
+    const doc = JSON.parse(readText(fpPath)) as {
+      footprint?: {
+        files?: { path: string; state?: string; count?: number }[];
+      };
     };
+    const fp = doc.footprint || {};
     return (fp.files || []).map((f, i) => {
       let touch: Touch = "hit";
       let tool = "Glob";
@@ -209,21 +219,21 @@ function patchTargets(patch: string, cwd: string): TraceTarget[] {
 }
 
 function nestedCodexCommand(code: string): string {
-  return decodedStringLiteral(
-    code,
-    /\bcmd\s*:\s*("(?:\\.|[^"\\])*")/
-  );
+  return decodedStringLiteral(code, /\bcmd\s*:\s*("(?:\\.|[^"\\])*")/);
 }
 
 function nestedCodexPatch(code: string): string {
   return decodedStringLiteral(
     code,
-    /\b(?:const|let|var)\s+patch\s*=\s*("(?:\\.|[^"\\])*")/
+    /\b(?:const|let|var)\s+patch\s*=\s*("(?:\\.|[^"\\])*")/,
   );
 }
 
 /** Parse Codex's authoritative rollout JSONL into Map playback events. */
-export function parseCodexRolloutLines(lines: string[], cwd: string): ParsedSpans {
+export function parseCodexRolloutLines(
+  lines: string[],
+  cwd: string,
+): ParsedSpans {
   const events: TraceEvent[] = [];
   const marks: TraceMark[] = [];
   for (const line of lines) {
@@ -241,17 +251,26 @@ export function parseCodexRolloutLines(lines: string[], cwd: string): ParsedSpan
     const payload = record.payload || {};
     const payloadType = String(payload.type || "");
     if (
-      (record.type === "response_item" && payloadType === "message" && payload.role === "user") ||
+      (record.type === "response_item" &&
+        payloadType === "message" &&
+        payload.role === "user") ||
       (record.type === "event_msg" && payloadType === "user_message")
     ) {
       marks.push({ seq: Math.max(0, events.length - 1), type: "user-message" });
       continue;
     }
     if (record.type !== "response_item") continue;
-    if (!/^(custom_tool_call|function_call|local_shell_call)$/.test(payloadType)) continue;
+    if (
+      !/^(custom_tool_call|function_call|local_shell_call)$/.test(payloadType)
+    )
+      continue;
 
-    const rawTool = String(payload.name || (payloadType === "local_shell_call" ? "Bash" : ""));
-    const input = String(payload.input || payload.arguments || payload.command || "");
+    const rawTool = String(
+      payload.name || (payloadType === "local_shell_call" ? "Bash" : ""),
+    );
+    const input = String(
+      payload.input || payload.arguments || payload.command || "",
+    );
     let tool = rawTool || "Tool";
     let action: Action = "other";
     let command = "";
@@ -261,15 +280,24 @@ export function parseCodexRolloutLines(lines: string[], cwd: string): ParsedSpan
       tool = "apply_patch";
       action = "edit";
       targets = patchTargets(input, cwd);
-    } else if (/^(exec|code|bash)$/i.test(rawTool) && /tools\.apply_patch/.test(input)) {
+    } else if (
+      /^(exec|code|bash)$/i.test(rawTool) &&
+      /tools\.apply_patch/.test(input)
+    ) {
       tool = "apply_patch";
       action = "edit";
       targets = patchTargets(nestedCodexPatch(input), cwd);
-    } else if (/^(exec|code)$/i.test(rawTool) && /tools\.(?:exec_command|write_stdin)/.test(input)) {
+    } else if (
+      /^(exec|code)$/i.test(rawTool) &&
+      /tools\.(?:exec_command|write_stdin)/.test(input)
+    ) {
       tool = "Bash";
       action = "exec";
       command = nestedCodexCommand(input);
-    } else if (payloadType === "local_shell_call" || /bash|shell/i.test(rawTool)) {
+    } else if (
+      payloadType === "local_shell_call" ||
+      /bash|shell/i.test(rawTool)
+    ) {
       tool = "Bash";
       action = "exec";
       command = input;
@@ -296,100 +324,10 @@ export function parseCodexRolloutLines(lines: string[], cwd: string): ParsedSpan
   return { events, marks };
 }
 
-function codexRolloutEvents(session: MapSessionMeta, cwd: string): ParsedSpans {
-  if (session.harness.toLowerCase() !== "codex") return { events: [], marks: [] };
-  const started = new Date(session.startedAt || Date.now());
-  if (Number.isNaN(started.getTime())) return { events: [], marks: [] };
-  const root = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "sessions");
-  for (const delta of [-1, 0, 1]) {
-    const date = new Date(started.getTime() + delta * 86400000);
-    const dir = join(
-      root,
-      String(date.getUTCFullYear()),
-      String(date.getUTCMonth() + 1).padStart(2, "0"),
-      String(date.getUTCDate()).padStart(2, "0")
-    );
-    if (!fileExists(dir)) continue;
-    try {
-      const name = readdirSync(dir).find(
-        (candidate) => candidate.endsWith(".jsonl") && candidate.includes(session.id)
-      );
-      if (name) return parseCodexRolloutLines(readText(join(dir, name)).split("\n"), cwd);
-    } catch {
-      /* fall through to hook-derived traces */
-    }
-  }
-  return { events: [], marks: [] };
-}
-
-function mergeParsedSpans(...sources: ParsedSpans[]): ParsedSpans {
-  const events: TraceEvent[] = [];
-  const marks: TraceMark[] = [];
-  const eventKeys = new Set<string>();
-  const markKeys = new Set<string>();
-  for (const source of sources) {
-    for (const event of source.events) {
-      const key = JSON.stringify([
-        event.ts,
-        event.tool,
-        event.action,
-        event.summary,
-        event.targets.map((target) => [target.path, target.touch]),
-      ]);
-      if (eventKeys.has(key)) continue;
-      eventKeys.add(key);
-      events.push(event);
-    }
-    for (const mark of source.marks) {
-      const key = JSON.stringify([mark.seq, mark.type, mark.note]);
-      if (markKeys.has(key)) continue;
-      markKeys.add(key);
-      marks.push(mark);
-    }
-  }
-  events.sort((a, b) => String(a.ts || "").localeCompare(String(b.ts || "")));
-  return { events, marks };
-}
-
 function parseTranscriptEvents(sessionDir: string, cwd: string): ParsedSpans {
-  const tPath = join(sessionDir, "transcript.jsonl");
+  const tPath = join(sessionDir, "events.jsonl");
   if (!fileExists(tPath)) return { events: [], marks: [] };
   return parseSpanLines(readText(tPath).split("\n"), cwd);
-}
-
-function parseLiveTraceEvents(sessionId: string, cwd: string): ParsedSpans {
-  const tracesDir = soPath("traces");
-  if (!fileExists(tracesDir)) return { events: [], marks: [] };
-  const lines: string[] = [];
-  for (const name of readdirSync(tracesDir)) {
-    if (!name.endsWith(".jsonl")) continue;
-    try {
-      lines.push(...readText(join(tracesDir, name)).split("\n"));
-    } catch {
-      /* skip */
-    }
-  }
-  const filtered: string[] = [];
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    try {
-      const sp = JSON.parse(line) as Span & {
-        session_id?: string;
-        attributes?: Record<string, string>;
-      };
-      const attrs = sp.attributes || {};
-      const ids = [
-        sp.session_id,
-        attrs["coding_agent.session.id"],
-        attrs["coding_agent.session_id"],
-        attrs["gen_ai.conversation.id"],
-      ];
-      if (ids.includes(sessionId)) filtered.push(line);
-    } catch {
-      /* skip */
-    }
-  }
-  return parseSpanLines(filtered, cwd);
 }
 
 function markSeq(events: TraceEvent[]): number {
@@ -399,9 +337,10 @@ function markSeq(events: TraceEvent[]): number {
 function classifyMark(
   name: string,
   attrs: Record<string, string>,
-  tool: string
+  tool: string,
 ): TraceMark["type"] | null {
-  const blob = `${name} ${tool} ${attrs["coding_agent.event"] || ""} ${attrs["gen_ai.operation.name"] || ""}`.toLowerCase();
+  const blob =
+    `${name} ${tool} ${attrs["coding_agent.event"] || ""} ${attrs["gen_ai.operation.name"] || ""}`.toLowerCase();
   if (
     attrs["coding_agent.is_subagent"] === "true" ||
     attrs["coding_agent.subagent"] === "true" ||
@@ -410,19 +349,22 @@ function classifyMark(
   ) {
     return "subagent";
   }
-  if (/compact|compaction|summariz(e|ing).?context|context.?summar/.test(blob)) {
+  if (
+    /compact|compaction|summariz(e|ing).?context|context.?summar/.test(blob)
+  ) {
     return "compaction";
   }
   if (
     attrs["gen_ai.prompt.role"] === "user" ||
     attrs["coding_agent.message.role"] === "user" ||
     /user.?prompt|user_prompt|user.?message|user.?turn|gen_ai\.user|llm\.user/.test(
-      blob
+      blob,
     ) ||
     (name.includes("llm") && attrs["gen_ai.input.messages"] && !tool)
   ) {
     // Prefer explicit user turns; llm.turn with input messages often is a user prompt boundary
-    if (/assistant|tool\.|completion/.test(blob) && !/user/.test(blob)) return null;
+    if (/assistant|tool\.|completion/.test(blob) && !/user/.test(blob))
+      return null;
     return "user-message";
   }
   return null;
@@ -448,12 +390,12 @@ function pathFromCommand(command: string, cwd: string): string {
   const abs = command.match(
     new RegExp(
       `(${repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/[^\\s'\"\`]+)`,
-      "i"
-    )
+      "i",
+    ),
   );
   if (abs?.[1]) return abs[1];
   const rel = command.match(
-    /(?:^|[\s"'`])((?:\.\/)?(?:src|pkg|internal|web|cmd|integrations|ops|docs)\/[^\s'"`]+)/
+    /(?:^|[\s"'`])((?:\.\/)?(?:src|pkg|internal|web|cmd|integrations|ops|docs)\/[^\s'"`]+)/,
   );
   if (rel?.[1]) return rel[1].replace(/^\.\//, "");
   return "";
@@ -478,13 +420,18 @@ function parseSpanLines(lines: string[], cwd: string): ParsedSpans {
         : undefined;
 
     let filePath =
-      attrs["code.file.path"] ||
-      attrs["coding_agent.file_path"] ||
-      "";
-    let tool = attrs["gen_ai.tool.name"] || attrs["coding_agent.tool.name"] || "";
+      attrs["code.file.path"] || attrs["coding_agent.file_path"] || "";
+    let tool =
+      attrs["gen_ai.tool.name"] || attrs["coding_agent.tool.name"] || "";
     const args = attrs["gen_ai.tool.call.arguments"] || "";
     if (!filePath && args) {
-      if (args.startsWith("/") || args.startsWith(".")) filePath = args;
+      if (
+        args.startsWith("/") ||
+        args.startsWith(".") ||
+        /^[A-Za-z]:[\\/]/.test(args) ||
+        args.startsWith("\\\\")
+      )
+        filePath = args;
       else {
         try {
           const parsed = JSON.parse(args) as Record<string, unknown>;
@@ -493,7 +440,7 @@ function parseSpanLines(lines: string[], cwd: string): ParsedSpans {
               parsed.path ||
               parsed.target_file ||
               parsed.filePath ||
-              ""
+              "",
           );
         } catch {
           /* ignore */
@@ -516,7 +463,7 @@ function parseSpanLines(lines: string[], cwd: string): ParsedSpans {
               attrs["coding_agent.prompt"] ||
               attrs["gen_ai.input.messages"] ||
               attrs["coding_agent.user_prompt"] ||
-              ""
+              "",
           ) || undefined;
       } else if (markType === "subagent") {
         note =
@@ -536,11 +483,18 @@ function parseSpanLines(lines: string[], cwd: string): ParsedSpans {
     let touch: Touch | null = null;
     let action: Action = "other";
     const toolBlob = `${tool} ${name}`.toLowerCase();
-    if (name.includes("edit") || /write|searchreplace|applypatch|edit/i.test(tool)) {
+    if (
+      name.includes("edit") ||
+      /write|searchreplace|applypatch|edit/i.test(tool)
+    ) {
       touch = "edit";
       action = "edit";
       tool = tool || "Write";
-    } else if (/^read$/i.test(tool) || /\bread\b/i.test(tool) || name.includes("read")) {
+    } else if (
+      /^read$/i.test(tool) ||
+      /\bread\b/i.test(tool) ||
+      name.includes("read")
+    ) {
       touch = "read";
       action = "read";
       tool = tool || "Read";
@@ -613,7 +567,7 @@ export function listMapSessions(): MapSessionMeta[] {
     } catch {
       continue;
     }
-    const metaPath = join(sessionDir, "meta.json");
+    const metaPath = join(sessionDir, "session.json");
     if (!fileExists(metaPath)) continue;
     try {
       const meta = JSON.parse(readText(metaPath)) as SessionMeta;
@@ -627,7 +581,7 @@ export function listMapSessions(): MapSessionMeta[] {
         harness,
         title:
           humanizePromptPreview(
-            String(meta.title || meta.prompt_preview || "")
+            String(meta.title || meta.prompt_preview || ""),
           ) || String(meta.title || meta.prompt_preview || ""),
         path: sessionDir,
         cwd: root,
@@ -642,14 +596,12 @@ export function listMapSessions(): MapSessionMeta[] {
     }
   }
   out.sort((a, b) =>
-    String(b.startedAt || "").localeCompare(String(a.startedAt || ""))
+    String(b.startedAt || "").localeCompare(String(a.startedAt || "")),
   );
   return out;
 }
 
-export function resolveMapSession(
-  selector: string
-): MapSessionMeta | null {
+export function resolveMapSession(selector: string): MapSessionMeta | null {
   const all = listMapSessions();
   const exact = all.find((s) => s.key === selector);
   if (exact) return exact;
@@ -674,7 +626,7 @@ function resolveNestedMapSession(selector: string): MapSessionMeta | null {
     } catch {
       continue;
     }
-    const metaPath = join(sessionDir, "meta.json");
+    const metaPath = join(sessionDir, "session.json");
     if (!fileExists(metaPath)) continue;
     try {
       const meta = JSON.parse(readText(metaPath)) as SessionMeta;
@@ -690,7 +642,7 @@ function resolveNestedMapSession(selector: string): MapSessionMeta | null {
         harness,
         title:
           humanizePromptPreview(
-            String(meta.title || meta.prompt_preview || "")
+            String(meta.title || meta.prompt_preview || ""),
           ) || String(meta.title || meta.prompt_preview || id),
         path: sessionDir,
         cwd: root,
@@ -718,20 +670,25 @@ function assignFileIds(trace: Trace, city: CityMap) {
 }
 
 /** Child sessions launched from this session → subagent marks on the timeline. */
-function subagentMarksFromChildren(parentId: string, eventCount: number): TraceMark[] {
+function subagentMarksFromChildren(
+  parentId: string,
+  eventCount: number,
+): TraceMark[] {
   const dir = soPath("sessions");
   if (!fileExists(dir)) return [];
   const marks: TraceMark[] = [];
   for (const name of readdirSync(dir)) {
-    if (name === "index.json" || name.startsWith(".") || name === parentId) continue;
+    if (name === "index.json" || name.startsWith(".") || name === parentId)
+      continue;
     try {
       const meta = JSON.parse(
-        readText(join(dir, name, "meta.json"))
+        readText(join(dir, name, "session.json")),
       ) as Record<string, unknown>;
       if (String(meta.parent_id || "") !== parentId) continue;
       const title =
-        humanizePromptPreview(String(meta.title || meta.prompt_preview || "")) ||
-        String(meta.title || name);
+        humanizePromptPreview(
+          String(meta.title || meta.prompt_preview || ""),
+        ) || String(meta.title || name);
       marks.push({
         seq: Math.max(0, eventCount - 1),
         type: "subagent",
@@ -747,13 +704,7 @@ function subagentMarksFromChildren(parentId: string, eventCount: number): TraceM
 /** Build map Trace from a Superopen session directory. */
 export function buildTrace(session: MapSessionMeta, city: CityMap): Trace {
   const cwd = session.cwd || repoRoot();
-  const rollout = codexRolloutEvents(session, cwd);
-  let parsed = rollout.events.length > 0
-    ? rollout
-    : mergeParsedSpans(
-        parseTranscriptEvents(session.path, cwd),
-        parseLiveTraceEvents(session.id, cwd)
-      );
+  let parsed = parseTranscriptEvents(session.path, cwd);
   if (parsed.events.length === 0) {
     parsed = {
       events: footprintEvents(session.path, cwd, session.startedAt),
@@ -764,7 +715,10 @@ export function buildTrace(session: MapSessionMeta, city: CityMap): Trace {
     e.seq = i;
   });
 
-  const childMarks = subagentMarksFromChildren(session.id, parsed.events.length);
+  const childMarks = subagentMarksFromChildren(
+    session.id,
+    parsed.events.length,
+  );
   const marks = [...parsed.marks, ...childMarks];
   // Clamp mark seqs into event range
   for (const m of marks) {

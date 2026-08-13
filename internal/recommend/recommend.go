@@ -1,6 +1,7 @@
 package recommend
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -33,14 +34,24 @@ type Recommendation struct {
 	Status          string    `json:"status"` // pending | applied | dismissed | reverted | invalid | stale
 	CreatedAt       time.Time `json:"created_at"`
 	// Snapshot fields for revert
-	PreviousBody    string    `json:"previous_body,omitempty"`
-	PreviousExisted bool      `json:"previous_existed,omitempty"`
-	AppliedAt       time.Time `json:"applied_at,omitempty"`
-	AppliedPaths    []string  `json:"applied_paths,omitempty"`
-	LessonText      string    `json:"lesson_text,omitempty"`
-	DecisionReason  string    `json:"decision_reason,omitempty"`
-	DecisionActor   string    `json:"decision_actor,omitempty"` // human | agent | system
-	DecisionAt      time.Time `json:"decision_at,omitempty"`
+	PreviousBody      string    `json:"previous_body,omitempty"`
+	PreviousExisted   bool      `json:"previous_existed,omitempty"`
+	AppliedAt         time.Time `json:"applied_at,omitempty"`
+	AppliedPaths      []string  `json:"applied_paths,omitempty"`
+	LessonText        string    `json:"lesson_text,omitempty"`
+	DecisionReason    string    `json:"decision_reason,omitempty"`
+	DecisionActor     string    `json:"decision_actor,omitempty"` // human | agent | system
+	DecisionAt        time.Time `json:"decision_at,omitempty"`
+	Vendor            string    `json:"vendor,omitempty"`
+	TargetType        string    `json:"target_type,omitempty"`
+	ChangeKind        string    `json:"change_kind,omitempty"`
+	Confidence        float64   `json:"confidence,omitempty"`
+	Verified          bool      `json:"verified,omitempty"`
+	ExplicitWorkflow  bool      `json:"explicit_workflow,omitempty"`
+	OccurrenceCount   int       `json:"occurrence_count,omitempty"`
+	AutoApplyAfter    int       `json:"auto_apply_after,omitempty"`
+	AutoApplyReason   string    `json:"auto_apply_reason,omitempty"`
+	BaseContentSHA256 string    `json:"base_content_sha256,omitempty"`
 }
 
 type Decision struct {
@@ -83,7 +94,7 @@ func FingerprintKey(recType, proposedPath, kind string) string {
 	} else if strings.Contains(p, "/rules/") || strings.Contains(p, "/instructions/") {
 		p = "rules/" + filepath.Base(p)
 	} else if strings.HasSuffix(p, "guardrails.yaml") {
-		p = "guardrails/guardrails.yaml"
+		p = "guardrails.yaml"
 	}
 	kind = strings.ToLower(strings.TrimSpace(kind))
 	if kind != "" {
@@ -93,7 +104,7 @@ func FingerprintKey(recType, proposedPath, kind string) string {
 }
 
 func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ interface{}) ([]Recommendation, error) {
-	if evalRes.EvidenceStatus == "insufficient" {
+	if evalRes.EvidenceStatus == "insufficient" || evalRes.EvaluationScope == "snapshot" {
 		return nil, nil
 	}
 	var draft []Recommendation
@@ -103,16 +114,51 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 	if meta, err := session.NewStore(paths).Get(sessionID); err == nil {
 		vendor = meta.Vendor
 	}
-	skillPath := paths.SkillSKILL("reduce-exploration")
-	if vendor != "" {
-		skillPath = filepath.Join(harness.SkillsDirForVendor(paths.RepoRoot, vendor), "reduce-exploration", "SKILL.md")
-	}
 	vendorLabel := harness.NormalizeVendorKind(vendor)
 	if vendorLabel == "" {
-		vendorLabel = "project"
+		vendorLabel = "unknown"
+	}
+	patterns := RecordFindings(paths, sessionID, vendorLabel, evalRes.Findings)
+	if doc, err := session.NewStore(paths).ReadDocument(sessionID); err == nil {
+		var ids, edited []string
+		for _, retrieval := range doc.MemoryRetrievals {
+			ids = append(ids, retrieval.PatternIDs...)
+		}
+		for _, file := range doc.Footprint.Files {
+			if file.State == "edited" {
+				edited = append(edited, file.Path)
+			}
+		}
+		_ = memory.NewStore(paths).ConsolidateRetrievals(sessionID, vendorLabel, ids, edited, evalRes.Verified)
+	}
+	for _, d := range evalRes.Drafts {
+		pattern := patterns[d.Fingerprint]
+		title := strings.TrimSpace(d.Title)
+		if title == "" {
+			title = "Improve " + d.Type + " from session evidence"
+		}
+		rationale := strings.TrimSpace(d.Rationale)
+		if rationale == "" {
+			rationale = pattern.Summary
+		}
+		draft = append(draft, Recommendation{
+			ID: fmt.Sprintf("rec_%d_review", now.UnixNano()+int64(len(draft))), SessionID: sessionID,
+			Type: d.Type, TargetType: d.Type, ChangeKind: d.ChangeKind, Title: title,
+			Rationale: rationale, Why: rationale, Fingerprint: d.Fingerprint,
+			RelatedSessions: append([]string(nil), pattern.SessionIDs...), Evidence: d.Evidence,
+			ProposedPath: d.Path, ProposedBody: d.Body, Status: "pending", CreatedAt: now,
+			Vendor: vendorLabel, Confidence: pattern.Confidence,
+			Verified: len(pattern.VerifiedSessions) > 0, ExplicitWorkflow: pattern.ExplicitWorkflow,
+			OccurrenceCount: pattern.Occurrences, AutoApplyAfter: autoApplyThreshold(d.Type, d.ChangeKind),
+		})
+	}
+	skillsDir := harness.SkillsDirForVendor(paths.RepoRoot, vendor)
+	skillPath := ""
+	if skillsDir != "" {
+		skillPath = filepath.Join(skillsDir, "reduce-exploration", "SKILL.md")
 	}
 
-	if evalRes.Dimensions["wandering"] > 0.6 {
+	if wandering, applicable := evalRes.Dimensions["wandering"]; applicable && wandering > 0.6 {
 		hot := ""
 		if len(evalRes.HotAreas) > 0 {
 			hot = evalRes.HotAreas[0]
@@ -121,15 +167,15 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 			nestedPath := filepath.Join(paths.RepoRoot, filepath.FromSlash(hot), "AGENTS.md")
 			draft = append(draft, Recommendation{
 				ID: fmt.Sprintf("rec_%d_area_agents", now.UnixNano()), SessionID: sessionID,
-				Type:  "docs",
-				Title: "Add " + hot + "/AGENTS.md for this hot path",
+				Type:      "docs",
+				Title:     "Add " + hot + "/AGENTS.md for this hot path",
 				Rationale: "Eval wandering is high and file activity concentrated under " + hot + ".",
 				Why: "Why: the agent searched broadly while mostly touching " + hot + ".\n" +
 					"Change: create a focused " + hot + "/AGENTS.md with entrypoints, invariants, and where to look first.\n" +
 					"How it helps: the next session in that package reads local guidance instead of re-grepping the whole repo, cutting tokens and wrong-file edits.",
 				RelatedSessions: nonEmpty(sessionID),
 				Evidence: []string{
-					fmt.Sprintf("wandering score %.2f", evalRes.Dimensions["wandering"]),
+					fmt.Sprintf("wandering score %.2f", wandering),
 					"hot_area=" + hot,
 				},
 				ProposedPath: nestedPath,
@@ -140,15 +186,15 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 		} else {
 			draft = append(draft, Recommendation{
 				ID: fmt.Sprintf("rec_%d_root_agents", now.UnixNano()), SessionID: sessionID,
-				Type:  "docs",
-				Title: "Clarify hot paths in root AGENTS.md",
+				Type:      "docs",
+				Title:     "Clarify hot paths in root AGENTS.md",
 				Rationale: "Eval wandering is high without a single dominant package — root map is the shared fix.",
 				Why: "Why: the agent ran many searches without a clear package home.\n" +
 					"Change: append a short Hot paths section to root AGENTS.md (shared by every coding agent).\n" +
 					"How it helps: the next session starts from documented entrypoints and spends fewer tokens rediscovering structure.",
 				RelatedSessions: nonEmpty(sessionID),
 				Evidence: []string{
-					fmt.Sprintf("wandering score %.2f", evalRes.Dimensions["wandering"]),
+					fmt.Sprintf("wandering score %.2f", wandering),
 				},
 				ProposedPath: paths.AgentsMD,
 				ProposedBody: "## Hot paths\n\n- Document primary services and entrypoints discovered this session.\n- Prefer `so graph query` before broad Grep when asking how an area works.\n",
@@ -157,25 +203,19 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 			})
 		}
 	}
-	if evalRes.Dimensions["harness_use"] < 0.4 {
-		where := ".agents/skills"
-		if vendor != "" {
-			where = harness.SkillsRelForKind(vendorLabel)
-			if where == "" {
-				where = ".agents/skills"
-			}
-		}
+	if harnessUse, applicable := evalRes.Dimensions["harness_use"]; applicable && harnessUse < 0.4 && skillPath != "" {
+		where := harness.SkillsRelForKind(vendorLabel)
 		draft = append(draft, Recommendation{
 			ID: fmt.Sprintf("rec_%d_skill", now.UnixNano()), SessionID: sessionID,
-			Type:  "skill",
-			Title: "Add a " + vendorLabel + " skill to prefer harness before search",
+			Type:      "skill",
+			Title:     "Add a " + vendorLabel + " skill to prefer harness before search",
 			Rationale: "Eval harness_use is low — this " + vendorLabel + " session skipped AGENTS.md / rules / skills / so graph.",
 			Why: "Why: the agent explored without reading durable guidance.\n" +
 				"Change: create `" + where + "/reduce-exploration/SKILL.md` for this vendor (Cursor→.cursor, Claude→.claude, …).\n" +
 				"How it helps: the next " + vendorLabel + " session can invoke that skill and jump to graph + AGENTS.md instead of broad Grep, saving tokens.",
 			RelatedSessions: nonEmpty(sessionID),
 			Evidence: []string{
-				fmt.Sprintf("harness_use score %.2f", evalRes.Dimensions["harness_use"]),
+				fmt.Sprintf("harness_use score %.2f", harnessUse),
 				"vendor=" + vendorLabel,
 			},
 			ProposedPath: skillPath,
@@ -184,19 +224,19 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 			Fingerprint: FingerprintKey("skill", skillPath, "reduce-exploration"),
 		})
 	}
-	if evalRes.Dimensions["scope"] < 0.5 {
+	if scope, applicable := evalRes.Dimensions["scope"]; applicable && scope < 0.5 {
 		guardBody := advisoryGuardrailBody("avoid-unrelated-drift", "Keep edits scoped to the requested task; avoid unrelated drive-by refactors.")
 		draft = append(draft, Recommendation{
 			ID: fmt.Sprintf("rec_%d_guard", now.UnixNano()), SessionID: sessionID,
-			Type:  "guardrail",
-			Title: "Warn on unrelated drive-by edits",
+			Type:      "guardrail",
+			Title:     "Warn on unrelated drive-by edits",
 			Rationale: "Eval scope is low — edits look broader than the asked task.",
 			Why: "Why: the session edited without enough read context or drifted outside the request.\n" +
-				"Change: add/strengthen the avoid-unrelated-drift warn rule in `.so/guardrails/guardrails.yaml`.\n" +
+				"Change: add/strengthen the avoid-unrelated-drift warn rule in `.so/guardrails.yaml`.\n" +
 				"How it helps: the next session gets an explicit stop/warn signal before sprawling diffs, keeping PRs reviewable.",
 			RelatedSessions: nonEmpty(sessionID),
 			Evidence: []string{
-				fmt.Sprintf("scope score %.2f", evalRes.Dimensions["scope"]),
+				fmt.Sprintf("scope score %.2f", scope),
 			},
 			ProposedPath: paths.GuardrailsFile,
 			ProposedBody: guardBody,
@@ -205,8 +245,225 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 		})
 	}
 
-	// No title-rewrite agent calls (token budget).
+	// Coarse heuristic recommendations also participate in the same durable
+	// evidence model, so all existing recommendation sources share one policy.
+	for i := range draft {
+		draft[i].Verified = draft[i].Verified || evalRes.Verified
+		enrichRecommendation(paths, sessionID, vendorLabel, &draft[i], patterns)
+	}
 	return MergePending(paths, draft)
+}
+
+// RecordFindings consolidates session review evidence into durable memory even
+// when automatic recommendation generation is disabled.
+func RecordFindings(paths harness.Paths, sessionID, vendor string, findings []session.ReviewFinding) map[string]memory.Pattern {
+	store := memory.NewStore(paths)
+	footprint, _ := session.NewStore(paths).GetFootprint(sessionID)
+	modified := map[string]bool{}
+	for _, file := range footprint.Files {
+		if file.State == "edited" {
+			modified[filepath.ToSlash(file.Path)] = true
+		}
+	}
+	out := map[string]memory.Pattern{}
+	for _, finding := range findings {
+		if harness.NormalizeVendorKind(finding.Vendor) != harness.NormalizeVendorKind(vendor) {
+			continue
+		}
+		if finding.Kind == "failure" && finding.TargetPath != "" {
+			_ = store.RecordContradiction(sessionID, vendor, finding.TargetPath)
+		}
+		pattern, err := store.UpsertPattern(memory.Pattern{
+			Fingerprint: finding.Fingerprint, Vendor: vendor, Kind: finding.Kind,
+			ChangeKind: finding.ChangeKind, TargetType: finding.TargetType, TargetPath: finding.TargetPath,
+			Summary: finding.Summary, Evidence: finding.Evidence, Confidence: finding.Confidence,
+			ExplicitWorkflow: finding.ExplicitWorkflow, Scope: findingScope(finding),
+			Paths: mergeSessions(nonEmpty(finding.TargetPath), finding.Paths), Keywords: append(finding.Keywords, strings.Fields(finding.Summary)...),
+			Symbols: finding.Symbols, ErrorSignatures: finding.ErrorSignatures, Applicability: finding.Applicability,
+			SourceSHA256: fileSHA256(filepath.Join(paths.RepoRoot, filepath.FromSlash(finding.TargetPath))),
+			EvidenceRefs: []memory.EvidenceRef{{SessionID: sessionID, EventIDs: finding.EventIDs, Summary: finding.Summary, Modified: modified[filepath.ToSlash(finding.TargetPath)], SessionFileCount: len(footprint.Files)}},
+		}, sessionID, finding.Verified)
+		if err == nil {
+			out[finding.Fingerprint] = pattern
+		}
+	}
+	return out
+}
+
+func findingScope(f session.ReviewFinding) string {
+	if !f.ExplicitWorkflow {
+		return "vendor"
+	}
+	if f.TargetType == "memory" || (f.TargetType == "docs" && strings.EqualFold(filepath.Base(f.TargetPath), "AGENTS.md")) {
+		return "shared"
+	}
+	return "vendor"
+}
+
+func enrichRecommendation(paths harness.Paths, sessionID, vendor string, rec *Recommendation, known map[string]memory.Pattern) {
+	if rec.Fingerprint == "" {
+		rec.Fingerprint = FingerprintKey(rec.Type, rec.ProposedPath, rec.Title)
+	}
+	pattern, ok := known[rec.Fingerprint]
+	if !ok {
+		rec.Fingerprint = harness.NormalizeVendorKind(vendor) + "|" + rec.Fingerprint
+		verified := rec.Verified
+		pattern, _ = memory.NewStore(paths).UpsertPattern(memory.Pattern{
+			Fingerprint: rec.Fingerprint, Vendor: vendor, Kind: "guidance_gap",
+			ChangeKind: nonEmptyString(rec.ChangeKind, inferChangeKind(rec.ProposedPath)),
+			TargetType: rec.Type, TargetPath: repoRelative(paths.RepoRoot, rec.ProposedPath),
+			Summary: rec.Rationale, Evidence: rec.Evidence, Confidence: nonZeroFloat(rec.Confidence, 0.65),
+			ExplicitWorkflow: rec.ExplicitWorkflow, Paths: nonEmpty(repoRelative(paths.RepoRoot, rec.ProposedPath)),
+			Keywords: strings.Fields(rec.Rationale), EvidenceRefs: []memory.EvidenceRef{{SessionID: sessionID, Summary: rec.Rationale}},
+		}, sessionID, verified)
+	}
+	rec.Vendor = vendor
+	rec.TargetType = nonEmptyString(rec.TargetType, rec.Type)
+	rec.ChangeKind = nonEmptyString(rec.ChangeKind, inferChangeKind(rec.ProposedPath))
+	rec.Confidence = pattern.Confidence
+	rec.Verified = len(pattern.VerifiedSessions) > 0
+	rec.ExplicitWorkflow = pattern.ExplicitWorkflow
+	rec.OccurrenceCount = pattern.Occurrences
+	rec.AutoApplyAfter = autoApplyThreshold(rec.Type, rec.ChangeKind)
+	if len(pattern.SessionIDs) > 0 {
+		rec.RelatedSessions = mergeSessions(rec.RelatedSessions, pattern.SessionIDs)
+	}
+	if rec.ChangeKind == "update" && rec.ProposedPath != "" {
+		rec.BaseContentSHA256 = fileSHA256(rec.ProposedPath)
+	}
+}
+
+func autoApplyThreshold(recType, changeKind string) int {
+	typ := strings.ToLower(strings.TrimSpace(recType))
+	if strings.EqualFold(changeKind, "create") && (typ == "skill" || typ == "rule" || typ == "rules" || typ == "docs") {
+		return 3
+	}
+	return 1
+}
+
+func inferChangeKind(path string) string {
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return "update"
+	}
+	return "create"
+}
+
+func repoRelative(root, path string) string {
+	if path == "" {
+		return ""
+	}
+	if rel, err := filepath.Rel(root, path); err == nil && !strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(path)
+}
+
+func nonEmptyString(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
+}
+
+func nonZeroFloat(value, fallback float64) float64 {
+	if value != 0 {
+		return value
+	}
+	return fallback
+}
+
+func fileSHA256(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func validateCurrent(r Recommendation) error {
+	switch strings.ToLower(strings.TrimSpace(r.ChangeKind)) {
+	case "create":
+		if info, err := os.Stat(r.ProposedPath); err == nil && !info.IsDir() {
+			return fmt.Errorf("target now exists")
+		}
+	case "update":
+		if r.BaseContentSHA256 != "" && fileSHA256(r.ProposedPath) != r.BaseContentSHA256 {
+			return fmt.Errorf("target changed after review")
+		}
+	case "remove", "restructure":
+		return fmt.Errorf("%s requires explicit implementation", r.ChangeKind)
+	}
+	return nil
+}
+
+func validateOwnership(paths harness.Paths, r Recommendation) error {
+	vendor := harness.NormalizeVendorKind(r.Vendor)
+	if vendor == "" {
+		vendor = harness.NormalizeVendorKind(sessionVendor(paths, &r))
+	}
+	if vendor == "" {
+		return fmt.Errorf("unsupported originating vendor")
+	}
+	path, err := filepath.Abs(r.ProposedPath)
+	if err != nil {
+		return err
+	}
+	within := func(root string) bool {
+		root, _ = filepath.Abs(root)
+		return root != "" && (path == root || strings.HasPrefix(path, root+string(os.PathSeparator)))
+	}
+	switch strings.ToLower(strings.TrimSpace(r.Type)) {
+	case "skill":
+		if !within(harness.SkillsDirForVendor(paths.RepoRoot, vendor)) {
+			return fmt.Errorf("skill target is outside %s vendor tree", vendor)
+		}
+		lower := strings.ToLower(filepath.ToSlash(path))
+		if strings.Contains(lower, "/skills/so/") || strings.Contains(lower, "/skills/superopen/") {
+			return fmt.Errorf("managed Superopen skill is protected")
+		}
+	case "rules":
+		if !within(harness.RulesDirForVendor(paths.RepoRoot, vendor)) {
+			return fmt.Errorf("rule target is outside %s vendor tree", vendor)
+		}
+	case "docs":
+		if !within(paths.RepoRoot) || filepath.Base(path) != "AGENTS.md" {
+			return fmt.Errorf("shared documentation target must be AGENTS.md inside the repository")
+		}
+	case "guardrail":
+		if path != paths.GuardrailsFile {
+			return fmt.Errorf("guardrail target must be guardrails.yaml")
+		}
+	case "eval", "evals":
+		if path != paths.EvalsConfig {
+			return fmt.Errorf("evaluation target must be evals.yaml")
+		}
+	}
+	return nil
+}
+
+func mergeEvidence(a, b []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, value := range append(a, b...) {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+		if len(out) == 10 {
+			break
+		}
+	}
+	return out
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func nestedAgentsBody(hot string) string {
@@ -228,24 +485,34 @@ func advisoryGuardrailBody(id, desc string) string {
 }
 
 func LoadPending(paths harness.Paths) ([]Recommendation, error) {
-	data, err := os.ReadFile(paths.PendingRecs)
+	all, err := loadAll(paths)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	var recs []Recommendation
-	return recs, json.Unmarshal(data, &recs)
+	var out []Recommendation
+	for _, r := range all {
+		if r.Status == "pending" || r.Status == "stale" {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 func SavePending(paths harness.Paths, recs []Recommendation) error {
-	_ = os.MkdirAll(filepath.Dir(paths.PendingRecs), 0o755)
-	data, err := json.MarshalIndent(recs, "", "  ")
+	all, err := loadAll(paths)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(paths.PendingRecs, data, 0o644)
+	byID := map[string]Recommendation{}
+	for _, r := range all {
+		if r.Status != "pending" && r.Status != "stale" {
+			byID[r.ID] = r
+		}
+	}
+	for _, r := range recs {
+		byID[r.ID] = r
+	}
+	return saveAll(paths, byID)
 }
 
 // EnqueuePending merges a single recommendation via fingerprint rules.
@@ -310,9 +577,10 @@ func MergePending(paths harness.Paths, draft []Recommendation) ([]Recommendation
 			r.ID = prev.ID
 			r.CreatedAt = prev.CreatedAt
 			r.RelatedSessions = mergeSessions(prev.RelatedSessions, r.RelatedSessions)
-			if r.Evidence == nil {
-				r.Evidence = prev.Evidence
-			}
+			r.Evidence = mergeEvidence(prev.Evidence, r.Evidence)
+			r.OccurrenceCount = maxInt(prev.OccurrenceCount, r.OccurrenceCount)
+			r.Verified = r.Verified || prev.Verified
+			r.ExplicitWorkflow = r.ExplicitWorkflow || prev.ExplicitWorkflow
 			pending[i] = r
 			upserted = append(upserted, r)
 			continue
@@ -365,6 +633,12 @@ func Apply(paths harness.Paths, id string, decision Decision) error {
 	if err := harnessvalid.Applyable(applied.Type, applied.ProposedPath, applied.ProposedBody, applied.Evidence); err != nil {
 		return fmt.Errorf("not applyable: %w", err)
 	}
+	if err := validateOwnership(paths, *applied); err != nil {
+		return fmt.Errorf("recommendation ownership: %w", err)
+	}
+	if err := validateCurrent(*applied); err != nil {
+		return fmt.Errorf("recommendation is stale: %w", err)
+	}
 
 	var prevBody []byte
 	prevExisted := false
@@ -386,13 +660,13 @@ func Apply(paths harness.Paths, id string, decision Decision) error {
 			name = "reduce-exploration"
 		}
 		vendor := sessionVendor(paths, applied)
+		if harness.SkillsDirForVendor(paths.RepoRoot, vendor) == "" {
+			return fmt.Errorf("recommendation has no explicit supported session vendor")
+		}
 		if err := nativedocs.UpsertSkill(paths, name, applied.ProposedBody, nativedocs.WriteOpts{Vendor: vendor}); err != nil {
 			return err
 		}
-		applied.AppliedPaths = harness.FindExistingSkills(paths.RepoRoot, name)
-		if len(applied.AppliedPaths) == 0 && applied.ProposedPath != "" {
-			applied.AppliedPaths = []string{applied.ProposedPath}
-		}
+		applied.AppliedPaths = []string{filepath.Join(harness.SkillsDirForVendor(paths.RepoRoot, vendor), name, "SKILL.md")}
 	case "docs":
 		if applied.ProposedPath != "" && applied.ProposedBody != "" {
 			// Root or nested AGENTS.md — shared across vendors.
@@ -413,12 +687,7 @@ func Apply(paths harness.Paths, id string, decision Decision) error {
 			case isAgents:
 				// Existing AGENTS — append into the learned section when possible.
 				if err := nativedocs.AppendLearnedAt(applied.ProposedPath, body); err != nil {
-					f, err2 := os.OpenFile(applied.ProposedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-					if err2 != nil {
-						return err
-					}
-					_, _ = f.WriteString("\n\n" + body)
-					_ = f.Close()
+					return fmt.Errorf("AGENTS.md has no valid managed learned section: %w", err)
 				}
 			default:
 				f, err := os.OpenFile(applied.ProposedPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
@@ -455,17 +724,15 @@ func Apply(paths harness.Paths, id string, decision Decision) error {
 	applied.DecisionReason = decision.Reason
 	applied.DecisionActor = decision.Actor
 	applied.DecisionAt = applied.AppliedAt
+	if decision.Actor == "system" {
+		applied.AutoApplyReason = decision.Reason
+	}
 	if len(applied.AppliedPaths) == 0 && applied.ProposedPath != "" {
 		applied.AppliedPaths = []string{applied.ProposedPath}
 	}
 
-	hist := []Recommendation{}
-	if data, err := os.ReadFile(paths.RecsHistory); err == nil {
-		_ = json.Unmarshal(data, &hist)
-	}
-	hist = append(hist, *applied)
-	hdata, _ := json.MarshalIndent(hist, "", "  ")
-	_ = os.WriteFile(paths.RecsHistory, hdata, 0o644)
+	_ = saveOne(paths, *applied)
+	_ = memory.NewStore(paths).SetPatternStatus(applied.Fingerprint, applied.Vendor, "applied")
 	return SavePending(paths, kept)
 }
 
@@ -477,7 +744,7 @@ func mergeGuardrails(paths harness.Paths, body string) error {
 	eng, _ := guardrails.Load(paths)
 	existing := guardrails.File{
 		Rules: eng.Rules, Approval: eng.Policy.Approval,
-		DeniedCommands: eng.Policy.DeniedCommands, SensitivePaths: eng.Policy.SensitivePaths,
+		DeniedTools: eng.Policy.DeniedTools, DeniedCommands: eng.Policy.DeniedCommands, SensitivePaths: eng.Policy.SensitivePaths,
 		RedactOutput: eng.Policy.RedactOutput,
 	}
 	if data, err := os.ReadFile(paths.GuardrailsFile); err == nil {
@@ -497,6 +764,11 @@ func mergeGuardrails(paths harness.Paths, body string) error {
 	if incoming.Approval != "" && existing.Approval == "" {
 		existing.Approval = incoming.Approval
 	}
+	for _, tool := range incoming.DeniedTools {
+		if !containsStr(existing.DeniedTools, tool) {
+			existing.DeniedTools = append(existing.DeniedTools, tool)
+		}
+	}
 	for _, c := range incoming.DeniedCommands {
 		if !containsStr(existing.DeniedCommands, c) {
 			existing.DeniedCommands = append(existing.DeniedCommands, c)
@@ -511,7 +783,7 @@ func mergeGuardrails(paths harness.Paths, body string) error {
 	if err != nil {
 		return err
 	}
-	header := "# Superopen guardrails (advisory rules + enforcement)\n# Edit freely; so sync will not overwrite.\n\n"
+	header := "# Superopen guardrails. These are shared project safety rules enforced at coding-agent hook boundaries.\n# Authoritative project policy updated by project maintainers and approved recommendations.\n\n"
 	_ = os.MkdirAll(filepath.Dir(paths.GuardrailsFile), 0o755)
 	return os.WriteFile(paths.GuardrailsFile, append([]byte(header), out...), 0o644)
 }
@@ -551,13 +823,8 @@ func Dismiss(paths harness.Paths, id string, decision Decision) error {
 	if dismissed == nil {
 		return fmt.Errorf("recommendation %s not found", id)
 	}
-	hist := []Recommendation{}
-	if data, err := os.ReadFile(paths.RecsHistory); err == nil {
-		_ = json.Unmarshal(data, &hist)
-	}
-	hist = append(hist, *dismissed)
-	hdata, _ := json.MarshalIndent(hist, "", "  ")
-	_ = os.WriteFile(paths.RecsHistory, hdata, 0o644)
+	_ = saveOne(paths, *dismissed)
+	_ = memory.NewStore(paths).SetPatternStatus(dismissed.Fingerprint, dismissed.Vendor, "dismissed")
 	// A dismissal is durable product feedback. Preserve it as workspace memory so
 	// future recommendation generation can avoid repeating the same bad advice.
 	_ = memory.NewStore(paths).AddLesson(memory.Lesson{
@@ -605,8 +872,51 @@ func Revert(paths harness.Paths, id string, decision Decision) error {
 	hist[found].DecisionReason = decision.Reason
 	hist[found].DecisionActor = decision.Actor
 	hist[found].DecisionAt = time.Now().UTC()
-	hdata, _ := json.MarshalIndent(hist, "", "  ")
-	return os.WriteFile(paths.RecsHistory, hdata, 0o644)
+	_ = memory.NewStore(paths).RecordPatternRevert(hist[found].Fingerprint, hist[found].Vendor, decision.Reason)
+	return saveOne(paths, hist[found])
+}
+
+// ShouldAutoApply is the shared policy for finalization. Soft updates may be
+// applied immediately, but creating guidance requires recurrence plus verified
+// execution; policy changes, removals, and restructures always require review.
+func ShouldAutoApply(paths harness.Paths, r Recommendation) (bool, string) {
+	change := strings.ToLower(strings.TrimSpace(r.ChangeKind))
+	typ := strings.ToLower(strings.TrimSpace(r.Type))
+	path := filepath.ToSlash(strings.ToLower(r.ProposedPath))
+	if change == "remove" || change == "restructure" {
+		return false, "removals and restructures require approval"
+	}
+	if typ == "guardrail" || typ == "policy" || typ == "eval" || typ == "evals" {
+		return false, "guardrail and evaluation policy changes require approval"
+	}
+	if strings.Contains(path, "/.agents/") || strings.Contains(path, "/skills/so/") || strings.Contains(path, "/skills/superopen/") {
+		return false, "shared agents and managed Superopen skills are protected"
+	}
+	if harness.NormalizeVendorKind(r.Vendor) == "" {
+		return false, "recommendation has no supported originating vendor"
+	}
+	createsGuidance := change == "create" && (typ == "skill" || typ == "rule" || typ == "rules" || typ == "docs")
+	if createsGuidance {
+		if !r.Verified {
+			return false, "new guidance workflow has not been verified"
+		}
+		if r.OccurrenceCount < 3 && !r.ExplicitWorkflow {
+			return false, fmt.Sprintf("new guidance has %d of 3 supporting sessions", r.OccurrenceCount)
+		}
+		if typ == "skill" {
+			name := skillNameFromPath(r.ProposedPath)
+			for _, existing := range harness.FindExistingSkills(paths.RepoRoot, name) {
+				if filepath.Clean(existing) != filepath.Clean(r.ProposedPath) {
+					return false, "an existing skill already covers this name"
+				}
+			}
+		}
+		if r.ExplicitWorkflow {
+			return true, "verified explicit workflow satisfies the automatic creation threshold"
+		}
+		return true, "verified workflow reached the automatic creation threshold"
+	}
+	return true, "validated existing guidance update"
 }
 
 // MarkStaleFlags pending recs whose proposed paths disappeared after pull.
@@ -635,15 +945,92 @@ func MarkStaleFlags(paths harness.Paths) error {
 }
 
 func LoadHistory(paths harness.Paths) ([]Recommendation, error) {
-	data, err := os.ReadFile(paths.RecsHistory)
+	all, err := loadAll(paths)
+	if err != nil {
+		return nil, err
+	}
+	var out []Recommendation
+	for _, r := range all {
+		if r.Status != "pending" && r.Status != "stale" {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func loadAll(paths harness.Paths) ([]Recommendation, error) {
+	entries, err := os.ReadDir(paths.SessionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	var recs []Recommendation
-	return recs, json.Unmarshal(data, &recs)
+	var out []Recommendation
+	store := session.NewStore(paths)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		d, err := store.ReadDocument(e.Name())
+		if err != nil || len(d.Recommendations) == 0 {
+			continue
+		}
+		var rs []Recommendation
+		if json.Unmarshal(d.Recommendations, &rs) == nil {
+			out = append(out, rs...)
+		}
+	}
+	return out, nil
+}
+
+func saveAll(paths harness.Paths, all map[string]Recommendation) error {
+	bySession := map[string][]Recommendation{}
+	for _, r := range all {
+		id := strings.TrimSpace(r.SessionID)
+		if id == "" {
+			id = "_system"
+		}
+		bySession[id] = append(bySession[id], r)
+	}
+	store := session.NewStore(paths)
+	entries, _ := os.ReadDir(paths.SessionsDir)
+	seen := map[string]bool{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		id := e.Name()
+		seen[id] = true
+		rs := bySession[id]
+		raw, _ := json.Marshal(rs)
+		if err := store.WriteDocument(id, func(d *session.Document) { d.Recommendations = raw }); err != nil {
+			return err
+		}
+	}
+	for id, rs := range bySession {
+		if seen[id] {
+			continue
+		}
+		raw, _ := json.Marshal(rs)
+		if err := store.WriteDocument(id, func(d *session.Document) { d.Recommendations = raw }); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func saveOne(paths harness.Paths, rec Recommendation) error {
+	all, err := loadAll(paths)
+	if err != nil {
+		return err
+	}
+	m := map[string]Recommendation{}
+	for _, r := range all {
+		m[r.ID] = r
+	}
+	m[rec.ID] = rec
+	return saveAll(paths, m)
 }
 
 func nonEmpty(ids ...string) []string {

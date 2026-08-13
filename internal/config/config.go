@@ -11,7 +11,9 @@ import (
 
 // Config is the harness configuration stored at .so/config.yaml.
 type Config struct {
-	LLM             LLMConfig             `yaml:"llm"`
+	LayoutVersion   int                   `yaml:"layout_version"`
+	Vendors         VendorsConfig         `yaml:"vendors"`
+	LLM             LLMConfig             `yaml:"llm,omitempty"`
 	Graph           GraphConfig           `yaml:"graph"`
 	Evals           EvalsConfig           `yaml:"evals"`
 	Recommendations RecommendationsConfig `yaml:"recommendations"`
@@ -23,6 +25,11 @@ type Config struct {
 	Retention       RetentionConfig       `yaml:"retention"`
 }
 
+type VendorsConfig struct {
+	Enabled      []string `yaml:"enabled,omitempty"`
+	SharedAgents bool     `yaml:"shared_agents"`
+}
+
 type LLMConfig struct {
 	Provider  string `yaml:"provider"` // openai | anthropic | openrouter | local | compatible
 	Model     string `yaml:"model"`
@@ -30,10 +37,18 @@ type LLMConfig struct {
 	BaseURL   string `yaml:"base_url,omitempty"` // OpenAI-compatible gateway / local server
 }
 
+// HasExplicitLLM reports whether project configuration opted into an API or
+// compatible local model backend. Ambient API keys alone do not opt reviews in.
+func (c Config) HasExplicitLLM() bool {
+	return strings.TrimSpace(c.LLM.Provider) != "" || strings.TrimSpace(c.LLM.Model) != "" ||
+		strings.TrimSpace(c.LLM.APIKeyEnv) != "" || strings.TrimSpace(c.LLM.BaseURL) != ""
+}
+
 type GraphConfig struct {
 	Code            bool   `yaml:"code"`
 	Semantic        bool   `yaml:"semantic"`
 	SemanticBackend string `yaml:"semantic_backend"`
+	RefreshPolicy   string `yaml:"refresh_policy"`
 }
 
 type EvalsConfig struct {
@@ -62,39 +77,21 @@ type RecommendationsConfig struct {
 
 type ObservabilityConfig struct {
 	Vendors   []string         `yaml:"vendors"`
-	Listen    string           `yaml:"listen"`
 	Exporters []ExporterConfig `yaml:"exporters"`
 	Viz       VizConfig        `yaml:"viz"`
 }
 
 type ExporterConfig struct {
-	// Type must be local_jsonl (local file under Path). Other types are ignored.
+	// Type must be local_jsonl (local file under Path).
 	Type string `yaml:"type"`
 	Path string `yaml:"path,omitempty"`
-	// Endpoint/Headers are reserved and ignored for local installs.
-	Endpoint string            `yaml:"endpoint,omitempty"`
-	Headers  map[string]string `yaml:"headers,omitempty"`
 }
 
 // LocalTracesDir returns the on-disk JSONL traces directory from
 // observability.exporters (local_jsonl only). Not exposed in Settings UI -
 // defaults apply unless edited in .so/config.yaml.
 func (c Config) LocalTracesDir(repoRoot string) string {
-	for _, e := range c.Observability.Exporters {
-		t := strings.ToLower(strings.TrimSpace(e.Type))
-		if t != "" && t != "local_jsonl" {
-			continue
-		}
-		path := strings.TrimSpace(e.Path)
-		if path == "" {
-			continue
-		}
-		if filepath.IsAbs(path) {
-			return path
-		}
-		return filepath.Join(repoRoot, filepath.FromSlash(path))
-	}
-	return filepath.Join(repoRoot, ".so", "traces")
+	return filepath.Join(repoRoot, ".so", "sessions")
 }
 
 type VizConfig struct {
@@ -115,7 +112,7 @@ type MemoryConfig struct {
 	Models map[string]string `yaml:"models,omitempty"`
 }
 
-// GuardrailsConfig toggles enforcement of .so/guardrails/guardrails.yaml at hook boundaries.
+// GuardrailsConfig toggles enforcement of .so/guardrails.yaml at hook boundaries.
 // Advisory rules + denied commands/sensitive paths all live in that single file.
 type GuardrailsConfig struct {
 	// Enabled defaults true. Set false (or SUPEROPEN_GUARDRAILS=off) to pause denies while dogfooding.
@@ -132,25 +129,23 @@ type CostConfig struct {
 	Track bool `yaml:"track"`
 }
 
-// RetentionConfig controls how long session/eval/audit/rec artifacts are kept.
+// RetentionConfig controls how long compact session documents are kept.
 type RetentionConfig struct {
-	// Days defaults to 7. Sessions, eval history, audit events, recommendations,
-	// and daily trace files older than this are pruned.
+	// Days defaults to 7. Removing a session removes its embedded events,
+	// evaluation, recommendations, replay, and checkpoints as one unit.
 	Days int `yaml:"days,omitempty"`
 }
 
 // Default returns MVP defaults from the product plan.
 func Default() Config {
 	return Config{
-		LLM: LLMConfig{
-			Provider:  "openai",
-			Model:     "gpt-4.1-mini",
-			APIKeyEnv: "SUPEROPEN_LLM_API_KEY",
-		},
+		LayoutVersion: 2,
+		Vendors:       VendorsConfig{},
 		Graph: GraphConfig{
 			Code:            true,
-			Semantic:        true,
+			Semantic:        false,
 			SemanticBackend: "auto",
+			RefreshPolicy:   "after_changed_session",
 		},
 		Evals: EvalsConfig{
 			Auto:         true,
@@ -169,11 +164,10 @@ func Default() Config {
 		},
 		Observability: ObservabilityConfig{
 			Vendors: []string{"claude-code", "cursor", "codex", "gemini", "opencode", "copilot-cli", "pi"},
-			Listen:  "http://127.0.0.1:4318",
 			Exporters: []ExporterConfig{
-				{Type: "local_jsonl", Path: ".so/traces"},
+				{Type: "local_jsonl", Path: ".so/sessions"},
 			},
-			Viz: VizConfig{Citymap: true, Replay: true},
+			Viz: VizConfig{Citymap: false, Replay: true},
 		},
 		Memory: MemoryConfig{
 			Provider:         "file_lessons",
@@ -351,6 +345,15 @@ func Load(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	var header struct {
+		LayoutVersion *int `yaml:"layout_version"`
+	}
+	if err := yaml.Unmarshal(data, &header); err != nil {
+		return Config{}, fmt.Errorf("parse config: %w", err)
+	}
+	if header.LayoutVersion == nil || *header.LayoutVersion != 2 {
+		return Config{}, fmt.Errorf("unsupported Superopen layout: expected layout_version: 2; remove .so and run so init")
+	}
 	cfg := Default()
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
@@ -359,26 +362,19 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// normalizeObservability keeps a single local_jsonl file exporter.
-// Remote OTLP endpoints are not supported in the local CLI/UI.
+// normalizeObservability keeps a single local_jsonl file exporter. The UI
+// reads this store directly and never owns a telemetry receiver.
 func (c *Config) normalizeObservability() {
-	if strings.TrimSpace(c.Observability.Listen) == "" {
-		c.Observability.Listen = "http://127.0.0.1:4318"
-	}
 	var local []ExporterConfig
 	for _, e := range c.Observability.Exporters {
 		t := strings.ToLower(strings.TrimSpace(e.Type))
 		if t == "" || t == "local_jsonl" {
-			path := strings.TrimSpace(e.Path)
-			if path == "" {
-				path = ".so/traces"
-			}
-			local = append(local, ExporterConfig{Type: "local_jsonl", Path: path})
+			local = append(local, ExporterConfig{Type: "local_jsonl", Path: ".so/sessions"})
 			break
 		}
 	}
 	if len(local) == 0 {
-		local = []ExporterConfig{{Type: "local_jsonl", Path: ".so/traces"}}
+		local = []ExporterConfig{{Type: "local_jsonl", Path: ".so/sessions"}}
 	}
 	c.Observability.Exporters = local
 }
@@ -391,7 +387,8 @@ func Save(path string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	header := "# Superopen project configuration. This is the authoritative source for enabled vendors, review behavior, graph refresh, retention, and feature settings.\n# Updated by project maintainers and Superopen configuration commands.\n"
+	return os.WriteFile(path, append([]byte(header), data...), 0o644)
 }
 
 // ResolvedLLM is the effective provider settings after env autodetection.

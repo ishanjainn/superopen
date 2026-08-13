@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 // LedgerEntry records a successful (or live) port.
@@ -34,7 +36,11 @@ func NewLedger(path string) *Ledger {
 }
 
 func DefaultLedgerPath(soRoot string) string {
-	return filepath.Join(soRoot, "port", "ledger.json")
+	repoRoot := filepath.Dir(filepath.Clean(soRoot))
+	if runtimeDir, err := userpaths.RuntimeDir(repoRoot); err == nil {
+		return filepath.Join(runtimeDir, "port", "ledger.json")
+	}
+	return filepath.Join(os.TempDir(), "superopen-runtime", "port", "ledger.json")
 }
 
 func (l *Ledger) key(srcH HarnessID, srcID string, dstH HarnessID) string {

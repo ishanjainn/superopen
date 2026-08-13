@@ -1,6 +1,7 @@
 package session
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/artifactmeta"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/llm"
 	"github.com/ishanjainn/superopen/internal/otlp"
@@ -24,12 +26,12 @@ const (
 	StatusEnded  Status = "ended"
 )
 
-// Meta is stored at .so/sessions/<id>/meta.json.
+// Meta is stored in .so/sessions/<id>/session.json.
 type Meta struct {
 	ID            string     `json:"id"`
 	Vendor        string     `json:"vendor"`
 	Model         string     `json:"model,omitempty"`
-	User          string     `json:"user,omitempty"` // gen_ai.user.name (email / identity)
+	User          string     `json:"user,omitempty"`  // gen_ai.user.name (email / identity)
 	Title         string     `json:"title,omitempty"` // AI/vendor display name
 	PromptPreview string     `json:"prompt_preview,omitempty"`
 	Status        Status     `json:"status"`
@@ -43,15 +45,15 @@ type Meta struct {
 	IsSubagent    bool       `json:"is_subagent,omitempty"`
 
 	// VCS / join fields (materialized from spans + optional git trailers).
-	ProjectID     string              `json:"project_id,omitempty"`
-	RepoRoot      string              `json:"repo_root,omitempty"`
-	Branch        string              `json:"branch,omitempty"`
-	BaseSHA       string              `json:"base_sha,omitempty"`
-	HeadSHA       string              `json:"head_sha,omitempty"`
-	Commits       []CommitRef         `json:"commits,omitempty"`
-	PullRequests  []PRRef             `json:"pull_requests,omitempty"`
-	Attribution   *AttributionSummary `json:"attribution,omitempty"`
-	Summary       string              `json:"summary,omitempty"`
+	ProjectID    string              `json:"project_id,omitempty"`
+	RepoRoot     string              `json:"repo_root,omitempty"`
+	Branch       string              `json:"branch,omitempty"`
+	BaseSHA      string              `json:"base_sha,omitempty"`
+	HeadSHA      string              `json:"head_sha,omitempty"`
+	Commits      []CommitRef         `json:"commits,omitempty"`
+	PullRequests []PRRef             `json:"pull_requests,omitempty"`
+	Attribution  *AttributionSummary `json:"attribution,omitempty"`
+	Summary      string              `json:"summary,omitempty"`
 }
 
 type FootprintFile struct {
@@ -66,6 +68,84 @@ type Footprint struct {
 
 type IndexEntry = Meta
 
+type ReviewState struct {
+	Status               string          `json:"status,omitempty"`
+	Trigger              string          `json:"trigger,omitempty"`
+	Backend              string          `json:"backend,omitempty"`
+	StartedAt            *time.Time      `json:"started_at,omitempty"`
+	CompletedAt          *time.Time      `json:"completed_at,omitempty"`
+	Error                string          `json:"error,omitempty"`
+	HarvestedAt          *time.Time      `json:"harvested_at,omitempty"`
+	HarvestedSourceMtime int64           `json:"harvested_source_mtime,omitempty"`
+	HarvestTrigger       string          `json:"harvest_trigger,omitempty"`
+	Findings             []ReviewFinding `json:"findings,omitempty"`
+}
+
+// ReviewFinding is compact, redacted evidence from one session review. It
+// intentionally excludes proposed file bodies; actionable content belongs to
+// the recommendation record and cross-session counters belong to memory.
+type ReviewFinding struct {
+	Fingerprint      string   `json:"fingerprint"`
+	Kind             string   `json:"kind"`
+	ChangeKind       string   `json:"change_kind,omitempty"`
+	Summary          string   `json:"summary"`
+	Vendor           string   `json:"vendor"`
+	TargetType       string   `json:"target_type,omitempty"`
+	TargetPath       string   `json:"target_path,omitempty"`
+	Confidence       float64  `json:"confidence,omitempty"`
+	Verified         bool     `json:"verified,omitempty"`
+	ExplicitWorkflow bool     `json:"explicit_workflow,omitempty"`
+	Evidence         []string `json:"evidence,omitempty"`
+	EventIDs         []string `json:"event_ids,omitempty"`
+	Keywords         []string `json:"keywords,omitempty"`
+	Paths            []string `json:"paths,omitempty"`
+	Symbols          []string `json:"symbols,omitempty"`
+	ErrorSignatures  []string `json:"error_signatures,omitempty"`
+	Applicability    string   `json:"applicability,omitempty"`
+}
+
+type MemoryRetrieval struct {
+	PatternIDs      []string  `json:"pattern_ids"`
+	Scores          []string  `json:"scores,omitempty"`
+	Reasons         []string  `json:"selection_reasons,omitempty"`
+	TargetPaths     []string  `json:"target_paths,omitempty"`
+	EstimatedTokens int64     `json:"estimated_tokens"`
+	TurnID          string    `json:"turn_id,omitempty"`
+	Delivery        string    `json:"delivery,omitempty"`
+	At              time.Time `json:"at"`
+}
+
+type Document struct {
+	About artifactmeta.About `json:"_about"`
+	Meta
+	Footprint        Footprint         `json:"footprint,omitempty"`
+	Evaluation       json.RawMessage   `json:"evaluation,omitempty"`
+	Recommendations  json.RawMessage   `json:"recommendations,omitempty"`
+	Replay           json.RawMessage   `json:"replay,omitempty"`
+	Port             json.RawMessage   `json:"port,omitempty"`
+	Review           ReviewState       `json:"review,omitempty"`
+	MemoryRetrievals []MemoryRetrieval `json:"memory_retrievals,omitempty"`
+}
+
+type indexFile struct {
+	About         artifactmeta.About `json:"_about"`
+	Sessions      []Meta             `json:"sessions"`
+	PendingSpawns json.RawMessage    `json:"pending_spawns,omitempty"`
+	Links         json.RawMessage    `json:"links,omitempty"`
+}
+
+var sessionAbout = artifactmeta.About{
+	Purpose:   "Materialized state, summary, footprint, review, recommendations, and replay metadata for one coding session.",
+	Authority: "authoritative session state derived from events.jsonl",
+	UpdatedBy: "session materializer and review worker",
+}
+
+var indexAbout = artifactmeta.About{
+	Purpose:   "Rebuildable catalog of sessions, parent-child links, pending reviews, and the latest session for each vendor.",
+	Authority: "derived from session.json files with temporary coordination state",
+	UpdatedBy: "session ingestion and review workers",
+}
+
 // Store manages session materialization under .so/sessions/.
 type Store struct {
 	Paths harness.Paths
@@ -73,6 +153,67 @@ type Store struct {
 
 func NewStore(paths harness.Paths) *Store {
 	return &Store{Paths: paths}
+}
+
+// Ensure creates the self-describing empty session catalog. Individual
+// session directories remain event-driven.
+func (s *Store) Ensure() error {
+	if _, err := os.Stat(s.Paths.SessionsIndex); err == nil {
+		// Continue below to repair any event stream that predates its
+		// materialized session document.
+	} else if !os.IsNotExist(err) {
+		return err
+	} else if err := writeJSON(s.Paths.SessionsIndex, indexFile{About: indexAbout, Sessions: []Meta{}}); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(s.Paths.SessionsDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		id := entry.Name()
+		if _, err := os.Stat(filepath.Join(s.Paths.SessionDir(id), "session.json")); err == nil {
+			// session.json is authoritative and index.json is rebuildable. Repair
+			// an interrupted/migrated catalog instead of leaving the session hidden
+			// from CLI consumers.
+			if meta, getErr := s.Get(id); getErr == nil {
+				if err := s.upsertIndex(meta); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		events := filepath.Join(s.Paths.SessionDir(id), "events.jsonl")
+		info, err := os.Stat(events)
+		if err != nil {
+			continue
+		}
+		meta := Meta{ID: id, Status: StatusActive, StartedAt: info.ModTime().UTC()}
+		if data, readErr := os.ReadFile(events); readErr == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				var row map[string]any
+				if json.Unmarshal([]byte(line), &row) != nil || row["type"] == "superopen.file_manifest" {
+					continue
+				}
+				if vendor, _ := row["vendor"].(string); vendor != "" {
+					meta.Vendor = vendor
+				}
+				if at, _ := row["at"].(string); at != "" {
+					if parsed, parseErr := time.Parse(time.RFC3339Nano, at); parseErr == nil {
+						meta.StartedAt = parsed
+					}
+				}
+				break
+			}
+		}
+		if err := s.Start(meta); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) List() ([]IndexEntry, error) {
@@ -83,9 +224,29 @@ func (s *Store) List() ([]IndexEntry, error) {
 		}
 		return nil, err
 	}
-	var entries []IndexEntry
-	if err := json.Unmarshal(data, &entries); err != nil {
+	var idx indexFile
+	if err := json.Unmarshal(data, &idx); err != nil {
 		return nil, err
+	}
+	// The catalog is derived. Merge authoritative session documents on every
+	// read so a stale/interrupted concurrent index write cannot hide sessions.
+	byID := make(map[string]Meta, len(idx.Sessions))
+	for _, meta := range idx.Sessions {
+		byID[meta.ID] = meta
+	}
+	if dirs, readErr := os.ReadDir(s.Paths.SessionsDir); readErr == nil {
+		for _, dir := range dirs {
+			if !dir.IsDir() || strings.HasPrefix(dir.Name(), ".") {
+				continue
+			}
+			if meta, getErr := s.Get(dir.Name()); getErr == nil && meta.ID != "" {
+				byID[meta.ID] = meta
+			}
+		}
+	}
+	entries := make([]Meta, 0, len(byID))
+	for _, meta := range byID {
+		entries = append(entries, meta)
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].StartedAt.After(entries[j].StartedAt)
@@ -100,6 +261,7 @@ type ListItem struct {
 	Turns       int      `json:"turns"`       // user prompt markers in transcript
 	Files       []string `json:"files,omitempty"`
 	Match       string   `json:"match,omitempty"` // why this row matched a search query
+	hasActivity bool
 }
 
 // ListDetailed returns top-level sessions (subagents nested under a parent
@@ -125,7 +287,7 @@ func (s *Store) ListDetailed() ([]ListItem, error) {
 }
 
 // resolveNestedParent returns the parent id when e is a nested subagent,
-// repairing meta.json / agent-links when discovery finds a link that
+// repairing session.json / agent-links when discovery finds a link that
 // was not stamped yet (Cursor Task agents).
 //
 // Orphan is_subagent=true without parent_id is treated as poison (parent
@@ -262,16 +424,13 @@ func (s *Store) enrich(meta Meta) ListItem {
 	item := ListItem{Meta: meta}
 	dir := s.Paths.SessionDir(meta.ID)
 
-	if data, err := os.ReadFile(filepath.Join(dir, "footprint.json")); err == nil {
-		var fp Footprint
-		if json.Unmarshal(data, &fp) == nil {
-			for _, f := range fp.Files {
-				item.Files = append(item.Files, f.Path)
-			}
+	if fp, err := s.GetFootprint(meta.ID); err == nil {
+		for _, f := range fp.Files {
+			item.Files = append(item.Files, f.Path)
 		}
 	}
 
-	item.Turns, item.Model = s.scanTranscript(dir, meta.Model)
+	item.Turns, item.Model, item.hasActivity = s.scanTranscript(dir, meta.Model)
 	if item.Model != "" && meta.Model == "" {
 		item.Meta.Model = item.Model
 	}
@@ -293,24 +452,28 @@ func countCheckpointDirs(dir string) int {
 	return n
 }
 
-func (s *Store) scanTranscript(dir, existingModel string) (checkpoints int, model string) {
+func (s *Store) scanTranscript(dir, existingModel string) (turns int, model string, hasActivity bool) {
 	model = existingModel
-	f, err := os.Open(filepath.Join(dir, "transcript.jsonl"))
+	f, err := os.Open(filepath.Join(dir, "events.jsonl"))
 	if err != nil {
-		return 0, model
+		return 0, model, false
 	}
 	defer f.Close()
+	spans := make([]tracestore.Span, 0)
 
 	dec := json.NewDecoder(f)
 	for {
-		var sp struct {
-			Name       string            `json:"name"`
-			Attributes map[string]string `json:"attributes"`
-		}
+		var sp tracestore.Span
 		if err := dec.Decode(&sp); err != nil {
 			break
 		}
+		spans = append(spans, sp)
 		attrs := sp.Attributes
+		name := strings.ToLower(sp.Name)
+		if strings.Contains(name, "user_prompt") || strings.Contains(name, "user.prompt") {
+			turns++
+			continue
+		}
 		if attrs == nil {
 			continue
 		}
@@ -322,18 +485,26 @@ func (s *Store) scanTranscript(dir, existingModel string) (checkpoints int, mode
 			}
 		}
 		if attrs["gen_ai.prompt"] != "" || attrs["gen_ai.content.prompt"] != "" {
-			checkpoints++
+			turns++
 			continue
 		}
 		if raw := attrs["gen_ai.input.messages"]; raw != "" {
 			low := strings.ToLower(raw)
 			if strings.Contains(low, `"role":"user"`) || strings.Contains(low, `"role": "user"`) ||
 				strings.Contains(low, `"role":"user_prompt"`) {
-				checkpoints++
+				turns++
 			}
 		}
 	}
-	return checkpoints, model
+	if turns == 0 {
+		for _, sp := range spans {
+			name := strings.ToLower(sp.Name)
+			if name == "coding_agent.llm.turn" || strings.Contains(name, "completion") {
+				turns++
+			}
+		}
+	}
+	return turns, model, SpansHaveActivity(spans)
 }
 
 func (s *Store) matchQuery(item ListItem, needle string) string {
@@ -369,7 +540,7 @@ func (s *Store) matchQuery(item ListItem, needle string) string {
 }
 
 func (s *Store) transcriptContains(id, needle string) string {
-	f, err := os.Open(filepath.Join(s.Paths.SessionDir(id), "transcript.jsonl"))
+	f, err := os.Open(filepath.Join(s.Paths.SessionDir(id), "events.jsonl"))
 	if err != nil {
 		return ""
 	}
@@ -445,23 +616,23 @@ func (s *Store) FillMissingTitles(client *llm.Client, limit int) int {
 }
 
 func (s *Store) Get(id string) (Meta, error) {
-	path := filepath.Join(s.Paths.SessionDir(id), "meta.json")
+	path := filepath.Join(s.Paths.SessionDir(id), "session.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Meta{}, err
 	}
-	var m Meta
-	return m, json.Unmarshal(data, &m)
+	var d Document
+	return d.Meta, json.Unmarshal(data, &d)
 }
 
-// GetFootprint loads footprint.json for a session.
+// GetFootprint loads the footprint embedded in session.json.
 func (s *Store) GetFootprint(id string) (Footprint, error) {
-	data, err := os.ReadFile(filepath.Join(s.Paths.SessionDir(id), "footprint.json"))
+	data, err := os.ReadFile(filepath.Join(s.Paths.SessionDir(id), "session.json"))
 	if err != nil {
 		return Footprint{}, err
 	}
-	var fp Footprint
-	return fp, json.Unmarshal(data, &fp)
+	var d Document
+	return d.Footprint, json.Unmarshal(data, &d)
 }
 
 // VendorFromAttrs picks the coding-agent identity from span attributes.
@@ -496,6 +667,35 @@ func VendorFromSpans(spans []tracestore.Span) string {
 		}
 	}
 	return ""
+}
+
+// StartTimeFromSpans returns the earliest plausible telemetry timestamp. Some
+// vendor hooks omit timestamps or emit zero/Unix-epoch values; those must not
+// turn an active session into a decades-long session in the UI.
+func StartTimeFromSpans(spans []tracestore.Span) time.Time {
+	now := time.Now().UTC()
+	var earliest time.Time
+	for _, sp := range spans {
+		if sp.StartTimeUnixN <= 0 {
+			continue
+		}
+		candidate := time.Unix(0, sp.StartTimeUnixN).UTC()
+		if !validSessionTime(candidate, now) {
+			continue
+		}
+		if earliest.IsZero() || candidate.Before(earliest) {
+			earliest = candidate
+		}
+	}
+	if earliest.IsZero() {
+		return now
+	}
+	return earliest
+}
+
+func validSessionTime(value, now time.Time) bool {
+	oldest := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	return !value.IsZero() && !value.Before(oldest) && !value.After(now.Add(24*time.Hour))
 }
 
 // mergeMetaSticky keeps previously detected identity fields when a later
@@ -537,7 +737,7 @@ func mergeMetaSticky(existing, incoming Meta) Meta {
 	if !out.IsSubagent && existing.IsSubagent && out.ParentID != "" {
 		out.IsSubagent = true
 	}
-	if out.StartedAt.IsZero() {
+	if !validSessionTime(out.StartedAt, time.Now().UTC()) {
 		out.StartedAt = existing.StartedAt
 	}
 	if out.Tokens == 0 {
@@ -552,13 +752,13 @@ func mergeMetaSticky(existing, incoming Meta) Meta {
 	return out
 }
 
-// UpdateMeta writes meta.json and refreshes the sessions index.
+// UpdateMeta writes session.json and refreshes the sessions index.
 func (s *Store) UpdateMeta(meta Meta) error {
 	dir := s.Paths.SessionDir(meta.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	if err := writeJSON(filepath.Join(dir, "meta.json"), meta); err != nil {
+	if err := s.writeDocument(meta.ID, func(d *Document) { d.Meta = meta }); err != nil {
 		return err
 	}
 	return s.upsertIndex(meta)
@@ -571,7 +771,7 @@ func (s *Store) Start(meta Meta) error {
 	if existing, err := s.Get(meta.ID); err == nil {
 		meta = mergeMetaSticky(existing, meta)
 	}
-	if meta.StartedAt.IsZero() {
+	if !validSessionTime(meta.StartedAt, time.Now().UTC()) {
 		meta.StartedAt = time.Now().UTC()
 	}
 	meta.Status = StatusActive
@@ -579,7 +779,7 @@ func (s *Store) Start(meta Meta) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	if err := writeJSON(filepath.Join(dir, "meta.json"), meta); err != nil {
+	if err := s.writeDocument(meta.ID, func(d *Document) { d.Meta = meta }); err != nil {
 		return err
 	}
 	return s.upsertIndex(meta)
@@ -623,7 +823,7 @@ func (s *Store) UpsertActiveFromSpans(spans []tracestore.Span) {
 	}
 	for id, b := range by {
 		if !SpansHaveActivity(b.spans) {
-			// Do not create empty sessions from identity-only OTLP.
+			// Do not create empty sessions from identity-only telemetry.
 			// Still refresh existing rows if they already exist.
 			if _, err := s.Get(id); err != nil {
 				continue
@@ -656,7 +856,7 @@ func (s *Store) UpsertActiveFromSpans(spans []tracestore.Span) {
 		if b.parent != "" {
 			meta.ParentID = b.parent
 			meta.IsSubagent = true
-			_ = agentlinks.Register(s.Paths.SessionsDir, id, b.parent, meta.Vendor, "otlp-upsert")
+			_ = agentlinks.Register(s.Paths.SessionsDir, id, b.parent, meta.Vendor, "event-upsert")
 		} else if meta.IsSubagent && meta.ParentID != "" {
 			// Parent cleared above - ensure meta stays top-level.
 			meta.ParentID = ""
@@ -666,9 +866,6 @@ func (s *Store) UpsertActiveFromSpans(spans []tracestore.Span) {
 			meta.IsSubagent = false
 		}
 		for _, sp := range b.spans {
-			if meta.StartedAt.IsZero() && sp.StartTimeUnixN > 0 {
-				meta.StartedAt = time.Unix(0, sp.StartTimeUnixN).UTC()
-			}
 			if meta.Vendor == "" {
 				meta.Vendor = VendorFromAttrs(sp.Attributes)
 			}
@@ -713,13 +910,13 @@ func (s *Store) UpsertActiveFromSpans(spans []tracestore.Span) {
 		if IsPlaceholderTitle(meta.Title, meta.ID) {
 			EnsureTitle(&meta, nil)
 		}
-		if meta.StartedAt.IsZero() {
-			meta.StartedAt = time.Now().UTC()
+		if !validSessionTime(meta.StartedAt, time.Now().UTC()) {
+			meta.StartedAt = StartTimeFromSpans(b.spans)
 		}
 		_ = s.Start(meta)
 		// Do NOT create empty parent stubs here. Empty parents hide nested
 		// children from the Sessions list (and recreate test pollution like
-		// cur-chat-2). Parents materialize from their own OTLP traffic.
+		// cur-chat-2). Parents materialize from their own hook traffic.
 	}
 }
 
@@ -731,8 +928,7 @@ func truncateRunes(s string, n int) string {
 	return s[:n] + "…"
 }
 
-
-// MaterializeFromSpans builds transcript, footprint, and updates meta post-session.
+// MaterializeFromSpans builds events, footprint, and updates session.json post-session.
 func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens int64, cost float64) (Meta, error) {
 	dir := s.Paths.SessionDir(id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -741,10 +937,9 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 
 	meta, err := s.Get(id)
 	if err != nil {
-		meta = Meta{ID: id, StartedAt: time.Now().UTC()}
-		if len(spans) > 0 {
-			meta.StartedAt = time.Unix(0, spans[0].StartTimeUnixN).UTC()
-		}
+		meta = Meta{ID: id, StartedAt: StartTimeFromSpans(spans)}
+	} else if !validSessionTime(meta.StartedAt, time.Now().UTC()) {
+		meta.StartedAt = StartTimeFromSpans(spans)
 	}
 	// Always (re)fill empty vendor from spans — never leave "" after materialize,
 	// and never rely on a prior Start that only read coding_agent.vendor.
@@ -766,17 +961,28 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 	now := time.Now().UTC()
 	meta.Status = StatusEnded
 	meta.EndedAt = &now
-	meta.DurationMs = now.Sub(meta.StartedAt).Milliseconds()
+	meta.DurationMs = max(0, now.Sub(meta.StartedAt).Milliseconds())
 	meta.Tokens = tokens
 	meta.CostUSD = cost
 
-	// Transcript
-	tf, err := os.Create(filepath.Join(dir, "transcript.jsonl"))
+	// Authoritative normalized event stream.
+	eventsPath := filepath.Join(dir, "events.jsonl")
+	if err := os.Remove(eventsPath); err != nil && !os.IsNotExist(err) {
+		return Meta{}, err
+	}
+	if err := artifactmeta.EnsureJSONL(eventsPath, artifactmeta.About{
+		Purpose:   "Normalized prompts, responses, tool calls, file activity, usage, lifecycle, and audit events for this session.",
+		Authority: "authoritative session event stream", UpdatedBy: "vendor telemetry adapter",
+	}); err != nil {
+		return Meta{}, err
+	}
+	tf, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return Meta{}, err
 	}
 	enc := json.NewEncoder(tf)
 	foot := map[string]*FootprintFile{}
+	retrievals := []MemoryRetrieval{}
 	for _, sp := range spans {
 		safe := sp
 		if len(sp.Attributes) > 0 {
@@ -786,6 +992,17 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 			}
 		}
 		_ = enc.Encode(safe)
+		if sp.Name == "superopen.memory.retrieved" {
+			retrievals = append(retrievals, MemoryRetrieval{
+				PatternIDs:      parseStringList(safe.Attributes["superopen.memory.pattern_ids"]),
+				Scores:          parseStringList(safe.Attributes["superopen.memory.scores"]),
+				Reasons:         parseStringList(safe.Attributes["superopen.memory.reasons"]),
+				TargetPaths:     parseStringList(safe.Attributes["superopen.memory.target_paths"]),
+				EstimatedTokens: parseInt64(safe.Attributes["superopen.memory.estimated_tokens"]),
+				TurnID:          safe.Attributes["superopen.memory.turn_id"], Delivery: safe.Attributes["superopen.memory.delivery"],
+				At: time.Unix(0, sp.StartTimeUnixN).UTC(),
+			})
+		}
 		if meta.Vendor == "" || meta.Vendor == "unknown" {
 			if v := VendorFromAttrs(sp.Attributes); v != "" {
 				meta.Vendor = v
@@ -844,10 +1061,6 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 		fp.Files = append(fp.Files, *f)
 	}
 	sort.Slice(fp.Files, func(i, j int) bool { return fp.Files[i].Path < fp.Files[j].Path })
-	if err := writeJSON(filepath.Join(dir, "footprint.json"), fp); err != nil {
-		return Meta{}, err
-	}
-
 	ApplyVCSFromSpans(&meta, spans)
 
 	// Persist parent / subagent linkage from span attributes so nested agents
@@ -874,13 +1087,30 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 		EnsureTitle(&meta, nil) // vendor lookup only; LLM fill happens via FillMissingTitles
 	}
 
-	if err := writeJSON(filepath.Join(dir, "meta.json"), meta); err != nil {
+	if err := s.writeDocument(id, func(d *Document) { d.Meta = meta; d.Footprint = fp; d.MemoryRetrievals = retrievals }); err != nil {
 		return Meta{}, err
 	}
 	if err := s.upsertIndex(meta); err != nil {
 		return Meta{}, err
 	}
 	return meta, nil
+}
+
+func parseStringList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var values []string
+	if json.Unmarshal([]byte(raw), &values) == nil {
+		return values
+	}
+	return []string{raw}
+}
+
+func parseInt64(raw string) int64 {
+	var value int64
+	_, _ = fmt.Sscan(raw, &value)
+	return value
 }
 
 func (s *Store) upsertIndex(meta Meta) error {
@@ -899,7 +1129,102 @@ func (s *Store) upsertIndex(meta Meta) error {
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].StartedAt.After(entries[j].StartedAt)
 	})
-	return writeJSON(s.Paths.SessionsIndex, entries)
+	idx := indexFile{About: indexAbout, Sessions: entries}
+	if data, err := os.ReadFile(s.Paths.SessionsIndex); err == nil {
+		var prev indexFile
+		if json.Unmarshal(data, &prev) == nil {
+			idx.PendingSpawns = prev.PendingSpawns
+			idx.Links = prev.Links
+		}
+	}
+	return writeJSON(s.Paths.SessionsIndex, idx)
+}
+
+func (s *Store) ReadDocument(id string) (Document, error) {
+	var d Document
+	data, err := os.ReadFile(filepath.Join(s.Paths.SessionDir(id), "session.json"))
+	if err != nil {
+		return d, err
+	}
+	err = json.Unmarshal(data, &d)
+	return d, err
+}
+
+func (s *Store) WriteDocument(id string, mutate func(*Document)) error {
+	return s.writeDocument(id, mutate)
+}
+
+// PreviousReviewContext returns context for only the latest preceding session
+// owned by vendor. It never leaks another vendor's review into a new session.
+func (s *Store) PreviousReviewContext(vendor, exceptID string) string {
+	entries, _ := s.List()
+	kind := harness.NormalizeVendorKind(vendor)
+	for _, m := range entries {
+		if m.ID == exceptID || harness.NormalizeVendorKind(m.Vendor) != kind {
+			continue
+		}
+		d, err := s.ReadDocument(m.ID)
+		if err != nil {
+			continue
+		}
+		switch d.Review.Status {
+		case "pending", "running", "failed":
+			return fmt.Sprintf("## Previous %s session review\n\nReview for `%s` is pending in the background; normal work may continue.", kind, m.ID)
+		case "complete":
+			var ev struct {
+				Score float64  `json:"score"`
+				Badge string   `json:"badge"`
+				Notes []string `json:"notes"`
+			}
+			_ = json.Unmarshal(d.Evaluation, &ev)
+			text := fmt.Sprintf("## Previous %s session review\n\nSession `%s`: %s (%.2f).", kind, m.ID, ev.Badge, ev.Score)
+			if len(ev.Notes) > 0 {
+				text += "\n\n- " + strings.Join(ev.Notes, "\n- ")
+			}
+			return text
+		}
+		return ""
+	}
+	return ""
+}
+
+// ClaimReview uses an OS-runtime lock so concurrent end/start hooks cannot
+// review or apply documentation for the same session twice.
+func (s *Store) ClaimReview(id, trigger string) (func(), bool) {
+	sum := sha256.Sum256([]byte(s.Paths.RepoRoot + "\x00" + id))
+	lock := filepath.Join(os.TempDir(), fmt.Sprintf("superopen-review-%x.lock", sum[:12]))
+	if err := os.Mkdir(lock, 0o700); err != nil {
+		if st, statErr := os.Stat(lock); statErr == nil && time.Since(st.ModTime()) > 10*time.Minute {
+			_ = os.RemoveAll(lock)
+			if err = os.Mkdir(lock, 0o700); err == nil {
+				goto claimed
+			}
+		}
+		return func() {}, false
+	}
+claimed:
+	now := time.Now().UTC()
+	_ = s.WriteDocument(id, func(d *Document) {
+		d.Review.Status = "running"
+		d.Review.Trigger = trigger
+		d.Review.StartedAt = &now
+		d.Review.Error = ""
+	})
+	return func() { _ = os.RemoveAll(lock) }, true
+}
+
+func (s *Store) writeDocument(id string, mutate func(*Document)) error {
+	d, _ := s.ReadDocument(id)
+	d.About = sessionAbout
+	mutate(&d)
+	if d.ID == "" {
+		d.ID = id
+	}
+	path := filepath.Join(s.Paths.SessionDir(id), "session.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return writeJSON(path, d)
 }
 
 func writeJSON(path string, v any) error {
@@ -907,7 +1232,10 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
 func truncate(s string, n int) string {

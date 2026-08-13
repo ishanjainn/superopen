@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 func TestArmAndConsumePendingResume(t *testing.T) {
@@ -111,7 +113,11 @@ func TestConsumePendingResumeArchivesFullTranscriptWhenTrimmed(t *testing.T) {
 	if !strings.Contains(body, "THE FINAL WORD") {
 		t.Fatalf("expected most recent turn to survive trimming")
 	}
-	archive := filepath.Join(root, ".so", "port", "last-conversation.md")
+	runtimeDir, err := userpaths.RuntimeDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(runtimeDir, "port", "last-conversation.md")
 	raw, err := os.ReadFile(archive)
 	if err != nil {
 		t.Fatalf("expected archived full transcript at %s: %v", archive, err)

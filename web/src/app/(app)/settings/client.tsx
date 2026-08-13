@@ -207,7 +207,7 @@ export default function SettingsPage() {
                   </code>
                   . Delete unregisters the project and permanently wipes its{" "}
                   <code className="rounded bg-neutral-100 px-1">.so</code> data
-                  (sessions, traces, graph). CLI:{" "}
+                  (sessions, audit history, graph, and memory). CLI:{" "}
                   <code className="rounded bg-neutral-100 px-1">
                     so projects remove &lt;id&gt; --purge
                   </code>
@@ -288,7 +288,7 @@ export default function SettingsPage() {
                 </span>{" "}
                 from Superopen and deletes its{" "}
                 <code className="rounded bg-neutral-100 px-1">.so</code> data
-                (sessions, traces, graph). Type the project name to confirm.
+                (sessions, audit history, graph, and memory). Type the project name to confirm.
               </DialogDescription>
               <label className="mt-1 block text-xs text-neutral-600">
                 Type{" "}
@@ -406,7 +406,7 @@ export default function SettingsPage() {
               <h3 className="font-medium">Retention</h3>
               <p className="mt-1 text-xs text-neutral-500">
                 Empty sessions are dropped. Everything else older than this many days is
-                pruned (sessions, eval history, recommendations, traces).
+                pruned with their evaluations and recommendations.
               </p>
               <label className="mt-3 flex items-center gap-2 text-xs">
                 retention.days

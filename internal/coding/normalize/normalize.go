@@ -40,11 +40,8 @@ type Input struct {
 	// Payload is the entire stdin body from the host plugin.
 	Payload []byte
 
-	// ContentCapture is one of "minimal" | "metadata_only" | "full".
-	// Adapters MUST honor this when constructing event/span
-	// attributes that would otherwise contain prompt or tool-arg
-	// bodies. See Phase C of the coding-agents plan for the full
-	// per-mode attribute matrix.
+	// ContentCapture is always "full". The field remains internal while
+	// vendor adapters are simplified; it is not user configurable.
 	ContentCapture string
 
 	// Emit is the OTLP-bound emitter the adapter writes to.

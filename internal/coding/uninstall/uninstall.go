@@ -14,8 +14,8 @@ package uninstall
 
 import (
 	"errors"
-	"io"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"

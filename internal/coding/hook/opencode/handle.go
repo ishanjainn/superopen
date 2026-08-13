@@ -13,26 +13,27 @@ import (
 
 // Payload covers the JSON we receive from plugins/opencode.
 type payload struct {
-	Type         string `json:"type"`
-	Event        string `json:"event"`
-	SessionID    string `json:"session_id"`
-	SessionId    string `json:"sessionId"`
-	SessionIDCam string `json:"sessionID"` // OpenCode plugin field
-	CWD          string `json:"cwd"`
-	Directory    string `json:"directory"`
-	Model        string `json:"model"`
-	Provider     string `json:"provider"`
-	Title        string `json:"title"`
-	Prompt       string `json:"prompt"`
-	Text         string `json:"text"`
-	Content      any    `json:"content"` // string | parts[]
-	Role         string `json:"role"`
-	MessageID    string `json:"message_id"`
-	ToolName     string `json:"tool_name"`
-	ToolID       string `json:"tool_use_id"`
+	Type         string          `json:"type"`
+	Event        string          `json:"event"`
+	SessionID    string          `json:"session_id"`
+	SessionId    string          `json:"sessionId"`
+	SessionIDCam string          `json:"sessionID"` // OpenCode plugin field
+	CWD          string          `json:"cwd"`
+	Directory    string          `json:"directory"`
+	Model        string          `json:"model"`
+	Provider     string          `json:"provider"`
+	Title        string          `json:"title"`
+	Prompt       string          `json:"prompt"`
+	Text         string          `json:"text"`
+	Content      any             `json:"content"` // string | parts[]
+	Role         string          `json:"role"`
+	MessageID    string          `json:"message_id"`
+	GenerationID string          `json:"generation_id"`
+	ToolName     string          `json:"tool_name"`
+	ToolID       string          `json:"tool_use_id"`
 	ToolInput    json.RawMessage `json:"tool_input"`
-	ToolResult   string `json:"tool_result"`
-	Errored      bool   `json:"errored"`
+	ToolResult   string          `json:"tool_result"`
+	Errored      bool            `json:"errored"`
 	// Tokens - OpenCode shape (input excludes cache; we recombine for pricing).
 	Tokens *struct {
 		Input     int64 `json:"input"`
@@ -117,7 +118,7 @@ func handle(in normalize.Input) error {
 		if role == "user" || (p.Prompt != "" && role != "assistant" && len(p.Tools) == 0) {
 			return in.Emit.EmitLLMTurn(normalize.LLMTurn{
 				SessionID: sid, Vendor: in.Vendor, Model: model, StartedAt: now,
-				Prompt: capture(in, text),
+				Prompt: capture(in, text), GenerationID: firstNonEmpty(p.GenerationID, p.MessageID),
 			})
 		}
 		turn := normalize.LLMTurn{

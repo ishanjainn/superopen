@@ -32,6 +32,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 // ResolveForVendor returns the canonical user identity for `vendor` by
@@ -99,11 +101,11 @@ func claudeCodeEmail() string {
 //   - the JSON / JWT layout doesn't match
 //   - the `email` claim is empty
 func codexEmail() string {
-	home, err := os.UserHomeDir()
+	home, err := userpaths.CodexHome()
 	if err != nil {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".codex", "auth.json"))
+	data, err := os.ReadFile(filepath.Join(home, "auth.json"))
 	if err != nil {
 		return ""
 	}

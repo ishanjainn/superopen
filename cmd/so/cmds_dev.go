@@ -14,12 +14,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/harness"
-	"github.com/ishanjainn/superopen/internal/otlp"
-	"github.com/ishanjainn/superopen/internal/otlpremote"
-	"github.com/ishanjainn/superopen/internal/session"
-	"github.com/ishanjainn/superopen/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 func cmdDev() *cobra.Command {
@@ -29,7 +25,7 @@ func cmdDev() *cobra.Command {
 
 	c := &cobra.Command{
 		Use:   "dev",
-		Short: "Start the Superopen UI (light Next.js dev server + OTLP)",
+		Short: "Start the Superopen file-backed Sessions UI",
 		Long: `Start the local Superopen UI with Next.js in development mode
 (Turbopack by default on Next 16) so pages compile on demand with fast HMR.
 
@@ -66,7 +62,11 @@ uses next dev (Turbopack).`,
 }
 
 func runDir(paths harness.Paths) string {
-	return filepath.Join(paths.Root, "run")
+	dir, err := userpaths.RuntimeDir(paths.RepoRoot)
+	if err != nil {
+		return filepath.Join(os.TempDir(), "superopen-runtime")
+	}
+	return dir
 }
 
 func pidFile(paths harness.Paths) string {
@@ -166,23 +166,6 @@ func startDevDetached(root string, paths harness.Paths, uiPort int, noOpen bool)
 }
 
 func runDevForeground(root string, paths harness.Paths, uiPort int, noOpen bool) error {
-	cfg, _ := config.Load(paths.Config)
-	applyTracesDir(root, &paths, cfg)
-	local := tracestore.NewLocalJSONL(paths.TracesDir)
-	store := otlpremote.FanoutLocalRemote(local)
-	recv, err := otlp.NewReceiver(cfg.Observability.Listen, store)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: OTLP receiver: %v\n", err)
-	} else {
-		sessStore := session.NewStore(paths)
-		recv.AfterWrite = func(spans []tracestore.Span) {
-			sessStore.UpsertActiveFromSpans(spans)
-		}
-		if err := recv.Start(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: OTLP receiver: %v\n", err)
-		}
-	}
-
 	nextCmd, nextURL, err := startNextUI(root, uiPort)
 	if err != nil {
 		return fmt.Errorf("Next.js UI: %w", err)
@@ -195,7 +178,6 @@ func runDevForeground(root string, paths harness.Paths, uiPort int, noOpen bool)
 		_ = os.WriteFile(pidFile(paths), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
 	}
 
-	startRefreshWatcher(root)
 	defer func() {
 		if nextCmd.Process != nil {
 			_ = nextCmd.Process.Kill()

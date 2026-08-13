@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -48,6 +50,40 @@ func TestLLMSetupGuide(t *testing.T) {
 		if !strings.Contains(g, needle) {
 			t.Fatalf("guide missing %s", needle)
 		}
+	}
+}
+
+func TestDefaultConfigDoesNotAdvertiseAPIProvider(t *testing.T) {
+	cfg := config.Default()
+	if cfg.Graph.Semantic {
+		t.Fatal("fresh config must not enable network-backed semantic extraction")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := config.Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "semantic: false") {
+		t.Fatalf("fresh config does not record the code-only default:\n%s", text)
+	}
+	if strings.Contains(text, "\nllm:") || strings.Contains(text, "provider: openai") || strings.Contains(text, "SUPEROPEN_LLM_API_KEY") {
+		t.Fatalf("fresh config contains unused API configuration:\n%s", text)
+	}
+}
+
+func TestLoadRequiresV2Layout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	legacy := "llm:\n  provider: openai\n"
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := config.Load(path)
+	if err == nil || !strings.Contains(err.Error(), "layout_version: 2") {
+		t.Fatalf("expected unsupported-layout error, got %v", err)
 	}
 }
 

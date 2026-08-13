@@ -100,3 +100,29 @@ func TestMaterializeFillsVendorFromClientWhenVendorKeyMissing(t *testing.T) {
 		t.Fatalf("persisted vendor=%q", raw.Vendor)
 	}
 }
+
+func TestMaterializeRepairsEpochSessionStart(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(paths)
+	if err := store.Start(Meta{ID: "epoch", Vendor: "codex", StartedAt: time.Unix(0, 0).UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now().UTC().Add(-time.Minute)
+	meta, err := store.MaterializeFromSpans("epoch", []tracestore.Span{{
+		Name: "coding_agent.tool.call", StartTimeUnixN: started.UnixNano(),
+		Attributes: map[string]string{"coding_agent.vendor": "codex", "gen_ai.tool.name": "Read"},
+	}}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.StartedAt.Before(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("epoch timestamp was retained: %s", meta.StartedAt)
+	}
+	if meta.DurationMs < 0 || meta.DurationMs > int64((5*time.Minute)/time.Millisecond) {
+		t.Fatalf("implausible duration after repair: %dms", meta.DurationMs)
+	}
+}

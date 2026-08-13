@@ -1,0 +1,60 @@
+# Superopen guardrails. These are shared project safety rules enforced at coding-agent hook boundaries.
+# Authoritative project policy updated by project maintainers and approved Superopen upgrades.
+rules:
+    - id: no-secrets
+      description: Never commit credentials, API keys, tokens, or other secrets; redact sensitive values from logs, telemetry, fixtures, and harness data.
+      severity: block
+      source: llm
+    - id: run-tests
+      description: Run the focused tests for changed behavior and the stack-appropriate validation before finishing.
+      severity: warn
+      source: llm
+    - id: avoid-unrelated
+      description: Keep diffs focused and avoid unrelated formatting, refactors, generated files, or dependency changes.
+      severity: warn
+      source: llm
+    - id: go-race-vet
+      description: For Go or CLI changes, run go test -race -count=1 ./... and go vet ./....
+      severity: warn
+      source: llm
+    - id: web-validation
+      description: For web changes, run tests, type checking, and linting from the web workspace.
+      severity: warn
+      source: llm
+    - id: plugin-sync
+      description: After plugin changes, run scripts/sync-plugins.sh and include only intentional marketplace drift.
+      severity: warn
+      source: llm
+    - id: preserve-file-contract
+      description: Keep CLI, web UI, plugins, templates, and documentation compatible with the shared file-backed .so schema.
+      severity: warn
+      source: llm
+    - id: cross-platform
+      description: Preserve Linux, macOS, and Windows behavior when changing paths, processes, hooks, or installation code.
+      severity: warn
+      source: llm
+    - id: docs-with-interface-change
+      description: Update user-facing documentation when commands, configuration, schemas, or workflows change.
+      severity: warn
+      source: llm
+    - id: conventional-pr-title
+      description: Use a clear Conventional Commit title for pull requests.
+      severity: warn
+      source: llm
+approval: interactive
+denied_tools: []
+denied_commands:
+    - rm -rf /
+    - rm -rf /*
+    - mkfs*
+    - dd if=/dev/zero*
+    - ':(){ :|:& };:'
+    - curl *| sh
+    - curl *| bash
+    - wget *| sh
+    - wget *| bash
+    - chmod -R 777 /
+sensitive_paths:
+    - '**/.so/sessions/**'
+    - '**/.so/audit/**'
+redact_output: true

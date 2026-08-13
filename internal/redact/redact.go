@@ -23,12 +23,67 @@
 package redact
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 )
 
 // Replacement is the placeholder we substitute for matched secrets.
 const Replacement = "[REDACTED]"
+
+// PrivateReplacement preserves event structure while excluding user-marked
+// content from traces, reviews, indexes, and durable memory.
+const PrivateReplacement = "[EXCLUDED_PRIVATE]"
+
+// JSON sanitizes every string value while preserving the event envelope. For
+// malformed payloads it falls back to safe plain-text replacement.
+func JSON(data []byte) []byte {
+	var value any
+	if json.Unmarshal(data, &value) != nil {
+		return []byte(StringFull(string(data)))
+	}
+	value = sanitizeJSONValue(value)
+	out, err := json.Marshal(value)
+	if err != nil {
+		return []byte(StringFull(string(data)))
+	}
+	return out
+}
+
+func sanitizeJSONValue(value any) any {
+	switch v := value.(type) {
+	case string:
+		return StringFull(v)
+	case []any:
+		for i := range v {
+			v[i] = sanitizeJSONValue(v[i])
+		}
+		return v
+	case map[string]any:
+		for key := range v {
+			v[key] = sanitizeJSONValue(v[key])
+		}
+		return v
+	default:
+		return value
+	}
+}
+
+var privateBlockRE = regexp.MustCompile(`(?is)<private\b[^>]*>.*?</private\s*>`)
+var privateOpenRE = regexp.MustCompile(`(?is)<private\b[^>]*>.*$`)
+var privateCloseRE = regexp.MustCompile(`(?is)</private\s*>`)
+
+// Private removes explicit private blocks before ordinary secret redaction.
+// An unclosed opening tag protects through end-of-input; stray closing tags
+// are removed so the control markup never becomes learned content.
+func Private(s string) string {
+	if s == "" {
+		return s
+	}
+	s = privateBlockRE.ReplaceAllString(s, PrivateReplacement)
+	s = privateOpenRE.ReplaceAllString(s, PrivateReplacement)
+	return privateCloseRE.ReplaceAllString(s, "")
+}
 
 // tier1Patterns are the always-on secret patterns. Order doesn't matter
 // since each rewrites in place.
@@ -116,6 +171,7 @@ var tier2Patterns = []*regexp.Regexp{
 
 // String runs tier-1 redaction on s. Always safe to call.
 func String(s string) string {
+	s = Private(s)
 	s = scrubExfilURLs(s)
 	if s == "" {
 		return s
@@ -141,22 +197,6 @@ func StringFull(s string) string {
 	}
 	return s
 }
-
-// ForCapture returns the appropriate redactor for the given capture mode.
-//
-//   - "minimal" / "metadata_only"  → tier 1 redaction
-//   - "full"                        → tier 1 + tier 2
-//
-// Unknown modes default to the safer tier 1 only - never weaker.
-func ForCapture(mode string) func(string) string {
-	switch mode {
-	case "full":
-		return StringFull
-	default:
-		return String
-	}
-}
-
 
 // scrubExfilURLs redacts common paste/exfil hosts when redact_output guardrails are on.
 func scrubExfilURLs(s string) string {

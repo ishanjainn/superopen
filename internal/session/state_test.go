@@ -15,10 +15,10 @@ func TestStateStoreLifecycle(t *testing.T) {
 	st := session.NewStateStore(paths)
 
 	err := st.Save(session.State{
-		SessionID: "s1",
-		Vendor:    "cursor",
-		Phase:     session.PhaseActive,
-		Branch:    "main",
+		SessionID:  "s1",
+		Vendor:     "cursor",
+		Phase:      session.PhaseActive,
+		Branch:     "main",
 		WorktreeID: "wt1",
 	})
 	if err != nil {

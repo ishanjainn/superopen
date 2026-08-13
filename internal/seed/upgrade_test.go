@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/ishanjainn/superopen/internal/discover"
-	"github.com/ishanjainn/superopen/internal/seed"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/llm"
+	"github.com/ishanjainn/superopen/internal/seed"
 )
 
 func TestExtractJSONAndApplyUpgrade(t *testing.T) {

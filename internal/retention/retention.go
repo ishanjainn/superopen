@@ -4,15 +4,13 @@ package retention
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/audit"
 	"github.com/ishanjainn/superopen/internal/config"
-	"github.com/ishanjainn/superopen/internal/eval"
 	"github.com/ishanjainn/superopen/internal/harness"
-	"github.com/ishanjainn/superopen/internal/recommend"
+	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/session"
 )
 
@@ -42,6 +40,7 @@ func Prune(paths harness.Paths, cfg config.Config) (Report, error) {
 		seen[e.ID] = true
 		if ss.IsEmpty(e.ID) {
 			if err := ss.Delete(e.ID); err == nil {
+				_ = memory.NewStore(paths).RemoveSessionReferences(e.ID)
 				rep.EmptySessions++
 			}
 			continue
@@ -57,6 +56,7 @@ func Prune(paths harness.Paths, cfg config.Config) (Report, error) {
 		}
 		if !when.IsZero() && when.Before(cutoff) {
 			if err := ss.Delete(e.ID); err == nil {
+				_ = memory.NewStore(paths).RemoveSessionReferences(e.ID)
 				rep.ExpiredSessions++
 			}
 		}
@@ -73,6 +73,7 @@ func Prune(paths harness.Paths, cfg config.Config) (Report, error) {
 			}
 			if ss.IsEmpty(id) {
 				if err := ss.Delete(id); err == nil {
+					_ = memory.NewStore(paths).RemoveSessionReferences(id)
 					rep.EmptySessions++
 				}
 				continue
@@ -83,60 +84,18 @@ func Prune(paths harness.Paths, cfg config.Config) (Report, error) {
 			}
 			if st.ModTime().UTC().Before(cutoff) {
 				if err := ss.Delete(id); err == nil {
+					_ = memory.NewStore(paths).RemoveSessionReferences(id)
 					rep.ExpiredSessions++
 				}
 			}
 		}
 	}
 
-	n, err := pruneEvalHistory(paths.EvalsHistory, cutoff)
-	if err == nil {
-		rep.EvalHistory = n
-	}
-	n, err = pruneAudit(paths, cutoff)
+	n, err := pruneAudit(paths, cutoff)
 	if err == nil {
 		rep.AuditEvents = n
 	}
-	n, err = pruneRecommendations(paths, cutoff)
-	if err == nil {
-		rep.Recommendations = n
-	}
-	n, err = pruneTraceFiles(paths.TracesDir, cutoff)
-	if err == nil {
-		rep.TraceFiles = n
-	}
 	return rep, nil
-}
-
-func pruneEvalHistory(path string, cutoff time.Time) (int, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	var hist []eval.Result
-	if err := json.Unmarshal(data, &hist); err != nil {
-		return 0, err
-	}
-	kept := make([]eval.Result, 0, len(hist))
-	removed := 0
-	for _, r := range hist {
-		if r.At.IsZero() || !r.At.Before(cutoff) {
-			kept = append(kept, r)
-			continue
-		}
-		removed++
-	}
-	if removed == 0 {
-		return 0, nil
-	}
-	out, err := json.MarshalIndent(kept, "", "  ")
-	if err != nil {
-		return removed, err
-	}
-	return removed, os.WriteFile(path, out, 0o644)
 }
 
 func pruneAudit(paths harness.Paths, cutoff time.Time) (int, error) {
@@ -180,84 +139,4 @@ func pruneAudit(paths harness.Paths, cutoff time.Time) (int, error) {
 		b.WriteByte('\n')
 	}
 	return removed, os.WriteFile(p, []byte(b.String()), 0o644)
-}
-
-func pruneRecommendations(paths harness.Paths, cutoff time.Time) (int, error) {
-	removed := 0
-	pending, err := recommend.LoadPending(paths)
-	if err != nil {
-		return 0, err
-	}
-	keptP := make([]recommend.Recommendation, 0, len(pending))
-	for _, r := range pending {
-		if !r.CreatedAt.IsZero() && r.CreatedAt.Before(cutoff) {
-			removed++
-			continue
-		}
-		keptP = append(keptP, r)
-	}
-	if removed > 0 {
-		_ = recommend.SavePending(paths, keptP)
-	}
-
-	hist, err := recommend.LoadHistory(paths)
-	if err != nil {
-		return removed, err
-	}
-	keptH := make([]recommend.Recommendation, 0, len(hist))
-	hRemoved := 0
-	for _, r := range hist {
-		if !r.CreatedAt.IsZero() && r.CreatedAt.Before(cutoff) {
-			hRemoved++
-			continue
-		}
-		keptH = append(keptH, r)
-	}
-	if hRemoved > 0 {
-		data, err := json.MarshalIndent(keptH, "", "  ")
-		if err != nil {
-			return removed + hRemoved, err
-		}
-		if err := os.WriteFile(paths.RecsHistory, data, 0o644); err != nil {
-			return removed + hRemoved, err
-		}
-	}
-	return removed + hRemoved, nil
-}
-
-func pruneTraceFiles(dir string, cutoff time.Time) (int, error) {
-	ents, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	removed := 0
-	dayCutoff := cutoff.Truncate(24 * time.Hour)
-	for _, e := range ents {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
-			continue
-		}
-		stem := strings.TrimSuffix(e.Name(), ".jsonl")
-		if t, err := time.ParseInLocation("2006-01-02", stem, time.UTC); err == nil {
-			if t.Before(dayCutoff) {
-				if os.Remove(filepath.Join(dir, e.Name())) == nil {
-					removed++
-				}
-				continue
-			}
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if info.ModTime().UTC().Before(cutoff) {
-			if os.Remove(filepath.Join(dir, e.Name())) == nil {
-				removed++
-			}
-		}
-	}
-	return removed, nil
 }

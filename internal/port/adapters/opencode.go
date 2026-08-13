@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/port"
+	"github.com/ishanjainn/superopen/internal/userpaths"
 )
 
 type OpenCodeImport struct{}
@@ -17,8 +18,8 @@ type OpenCodeImport struct{}
 func (OpenCodeImport) Harness() port.HarnessID { return port.HarnessOpenCode }
 
 func opencodeDataDir() string {
-	if v := os.Getenv("XDG_DATA_HOME"); v != "" {
-		return filepath.Join(v, "opencode")
+	if dir, err := userpaths.OpenCodeDataDir(); err == nil {
+		return dir
 	}
 	return filepath.Join(home(), ".local", "share", "opencode")
 }

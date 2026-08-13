@@ -112,21 +112,38 @@ func TestStringFullCatchesGenericPasswords(t *testing.T) {
 	}
 }
 
-func TestForCaptureSelector(t *testing.T) {
-	if got := ForCapture("metadata_only")("password=secret_value_123"); got == "password="+Replacement {
-		// Tier 1 alone should NOT match this generic password pattern.
-		t.Errorf("metadata_only mode unexpectedly applied tier 2: %q", got)
-	}
-	if got := ForCapture("full")("password=secret_value_123"); !strings.Contains(got, Replacement) {
-		t.Errorf("full mode should have redacted: %q", got)
-	}
-}
-
 func TestEmptyString(t *testing.T) {
 	if got := String(""); got != "" {
 		t.Errorf("String(%q) = %q", "", got)
 	}
 	if got := StringFull(""); got != "" {
 		t.Errorf("StringFull(%q) = %q", "", got)
+	}
+}
+
+func TestPrivateBlocksAreRemovedBeforePersistence(t *testing.T) {
+	tests := map[string]string{
+		"before <private>customer incident</private> after": "before [EXCLUDED_PRIVATE] after",
+		"<PRIVATE>one\ntwo</PRIVATE>":                       "[EXCLUDED_PRIVATE]",
+		"safe <private>unfinished":                          "safe [EXCLUDED_PRIVATE]",
+		"safe </private> text":                              "safe  text",
+		"<private>a</private> x <private>b</private>":       "[EXCLUDED_PRIVATE] x [EXCLUDED_PRIVATE]",
+	}
+	for input, want := range tests {
+		if got := StringFull(input); got != want {
+			t.Errorf("StringFull(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestJSONPrivateReplacementPreservesEnvelope(t *testing.T) {
+	got := string(JSON([]byte(`{"session_id":"s1","prompt":"visible <private>prompt secret","response":"<private>response secret</private>","reasoning":"<private>reasoning secret</private>","tool_args":{"value":"<private>argument secret</private>"},"tool_result":"<private>result secret</private>"}`)))
+	if !strings.Contains(got, `"session_id":"s1"`) || strings.Count(got, PrivateReplacement) != 5 {
+		t.Fatalf("sanitized JSON = %s", got)
+	}
+	for _, secret := range []string{"prompt secret", "response secret", "reasoning secret", "argument secret", "result secret"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("leaked %q in %s", secret, got)
+		}
 	}
 }

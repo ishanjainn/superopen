@@ -60,6 +60,27 @@ func TestIsEmptyListItem(t *testing.T) {
 	}
 }
 
+func TestListDetailedKeepsToolOnlyLiveSession(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(paths)
+	if err := store.Start(Meta{ID: "tool-session", Vendor: "claude-code", Status: StatusActive, StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	events := filepath.Join(paths.SessionDir("tool-session"), "events.jsonl")
+	body := `{"name":"coding_agent.tool.call","attributes":{"gen_ai.tool.name":"Write","code.file.path":"main.go"}}` + "\n"
+	if err := os.WriteFile(events, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	items, err := store.ListDetailed()
+	if err != nil || len(items) != 1 || items[0].ID != "tool-session" {
+		t.Fatalf("items = %#v, %v", items, err)
+	}
+}
+
 func TestUpsertSkipsIdentityOnly(t *testing.T) {
 	root := t.TempDir()
 	paths := harness.Paths{
