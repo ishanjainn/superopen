@@ -1,6 +1,7 @@
 package userpaths_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -63,6 +64,27 @@ func TestVendorHomeOverrides(t *testing.T) {
 	// Ensure the test does not accidentally depend on inherited values.
 	if os.Getenv("CODEX_HOME") == "" {
 		t.Fatal("CODEX_HOME override was not installed")
+	}
+}
+
+func TestEscapeJSONString(t *testing.T) {
+	// The escaped result must round-trip through a JSON string literal, which
+	// is how hook manifests embed the binary path.
+	for _, in := range []string{
+		`C:\Users\RUNNER~1\AppData\Local\Temp\so.exe`,
+		`C:\Program Files\Superopen\so.exe`,
+		`/tmp/bin/so`,
+		`weird "quoted" path`,
+		``,
+	} {
+		var got string
+		literal := `"` + userpaths.EscapeJSONString(in) + `"`
+		if err := json.Unmarshal([]byte(literal), &got); err != nil {
+			t.Fatalf("EscapeJSONString(%q) -> %s is not a valid JSON string: %v", in, literal, err)
+		}
+		if got != in {
+			t.Fatalf("round-trip mismatch: got %q, want %q", got, in)
+		}
 	}
 }
 

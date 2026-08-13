@@ -14,6 +14,51 @@ func TestPatchManifestUsesAbsoluteBinaryForRefresh(t *testing.T) {
 	}
 }
 
+// Windows paths are the reason patchManifestBytes has to JSON-escape: a raw
+// `C:\Users\...` yields the invalid escape `\U`, and a shell-quoted path's
+// leading `"` closes the JSON string early ("invalid character 'C' after
+// object key:value pair"). Both broke every Windows install.
+func TestPatchManifestProducesValidJSONForWindowsPaths(t *testing.T) {
+	for _, bin := range []string{
+		`C:\Users\RUNNER~1\AppData\Local\Temp\TestInstall001\bin\so.exe`,
+		`C:\Program Files\Superopen\so.exe`,
+		`/tmp/bin/so`,
+		`/tmp/dir with space/so`,
+	} {
+		t.Run(bin, func(t *testing.T) {
+			raw, err := marketplaceFS.ReadFile("marketplace/plugins/cursor/hooks/hooks.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			patched := patchManifestBytes("hooks/hooks.json", raw, bin)
+
+			var manifest struct {
+				Hooks map[string][]struct {
+					Command string `json:"command"`
+				} `json:"hooks"`
+			}
+			if err := json.Unmarshal(patched, &manifest); err != nil {
+				t.Fatalf("patched manifest is not valid JSON: %v\n%s", err, patched)
+			}
+			if len(manifest.Hooks) == 0 {
+				t.Fatal("patched manifest decoded no hooks")
+			}
+			// The decoded command must still name the real binary, and must no
+			// longer rely on a bare `so` resolved from PATH.
+			for event, entries := range manifest.Hooks {
+				for _, e := range entries {
+					if !strings.Contains(e.Command, bin) {
+						t.Fatalf("%s: command %q lost the binary path %q", event, e.Command, bin)
+					}
+					if strings.HasPrefix(e.Command, "so ") {
+						t.Fatalf("%s: command %q still uses bare so", event, e.Command)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestCodexStopHookUsesSessionsRefresh(t *testing.T) {
 	// Codex has no SessionEnd; Stop is turn-end and must refresh (keep active)
 	// rather than finalize (close + eval). Both the repo plugins/ tree and the

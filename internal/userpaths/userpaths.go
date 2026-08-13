@@ -4,6 +4,7 @@ package userpaths
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -134,26 +135,42 @@ func ShellPath(p string) string {
 	return p
 }
 
-// QuoteForHook quotes a binary path for hook command lines. The result is
-// spliced directly into embedded JSON hook manifests (Cursor/Claude), so on
-// Windows both backslashes and quotes must be JSON-escaped or paths like
-// `C:\Users\...` corrupt the manifest (e.g. `\U` is not a valid JSON escape).
+// QuoteForHook quotes a binary path so it survives as a single argument on a
+// hook command line. This produces *shell* syntax only; callers splicing the
+// result into a JSON manifest string must additionally run it through
+// EscapeJSONString to escape the backslashes and quotes it may contain.
 func QuoteForHook(p string) string {
 	if p == "" {
 		return `""`
 	}
 	if runtime.GOOS == "windows" {
-		if !strings.ContainsAny(p, " \t\"\\") {
+		// cmd.exe has no escape for a literal quote inside a quoted token,
+		// so only wrap when whitespace makes it necessary.
+		if !strings.ContainsAny(p, " \t\"") {
 			return p
 		}
-		escaped := strings.ReplaceAll(p, `\`, `\\`)
-		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-		return `"` + escaped + `"`
+		return `"` + strings.ReplaceAll(p, `"`, `\"`) + `"`
 	}
 	if !strings.ContainsAny(p, " \t\n'\"\\$`") {
 		return p
 	}
 	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
+}
+
+// EscapeJSONString escapes s for use inside a JSON string literal, without
+// adding the surrounding quotes. Windows paths make this mandatory: a raw
+// `C:\Users\...` spliced into a manifest yields `\U`, which is not a valid
+// JSON escape, and an unescaped `"` would terminate the string early.
+func EscapeJSONString(s string) string {
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		// json.Marshal never fails for a string; fall back to the two
+		// escapes that actually matter rather than dropping the value.
+		out := strings.ReplaceAll(s, `\`, `\\`)
+		return strings.ReplaceAll(out, `"`, `\"`)
+	}
+	// Strip the quotes json.Marshal adds; the caller supplies its own.
+	return string(encoded[1 : len(encoded)-1])
 }
 
 // IsSoBinary reports whether base name is so or so.exe.

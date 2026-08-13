@@ -18,20 +18,28 @@ import (
 // `so` command with the absolute path of the binary that ran
 // `so coding install` removes that whole class of "hooks fire but
 // don't find the CLI" failures.
-func patchManifestBytes(_ string, body []byte, soBin string) []byte {
+// The `so ...` commands being rewritten live inside JSON string values (e.g.
+// `"command": "so coding hook --vendor=cursor"`), so the replacement is
+// escaped for that context. Skipping this breaks every Windows install: a raw
+// `C:\Users\...` produces the invalid JSON escape `\U`, and a shell-quoted
+// path's leading `"` terminates the string value early.
+func patchManifestBytes(name string, body []byte, soBin string) []byte {
 	s := string(body)
+	jsonManifest := strings.HasSuffix(strings.ToLower(name), ".json")
 	if strings.Contains(s, "__SO_BIN__") {
-		s = strings.ReplaceAll(s, "__SO_BIN__", soBin)
+		bin := soBin
+		if jsonManifest {
+			bin = userpaths.EscapeJSONString(bin)
+		}
+		s = strings.ReplaceAll(s, "__SO_BIN__", bin)
 	}
 	quoted := shellQuote(soBin)
-	if strings.Contains(s, "so coding hook") {
-		s = strings.ReplaceAll(s, "so coding hook", quoted+" coding hook")
+	if jsonManifest {
+		quoted = userpaths.EscapeJSONString(quoted)
 	}
-	if strings.Contains(s, "so sessions finalize") {
-		s = strings.ReplaceAll(s, "so sessions finalize", quoted+" sessions finalize")
-	}
-	if strings.Contains(s, "so sessions refresh") {
-		s = strings.ReplaceAll(s, "so sessions refresh", quoted+" sessions refresh")
+	for _, verb := range []string{"so coding hook", "so sessions finalize", "so sessions refresh"} {
+		suffix := strings.TrimPrefix(verb, "so")
+		s = strings.ReplaceAll(s, verb, quoted+suffix)
 	}
 	return []byte(s)
 }
