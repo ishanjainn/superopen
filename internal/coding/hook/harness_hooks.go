@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,6 +22,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/port"
+	"github.com/ishanjainn/superopen/internal/redact"
 	"github.com/ishanjainn/superopen/internal/runtimestate"
 	"github.com/ishanjainn/superopen/internal/session"
 )
@@ -45,10 +47,11 @@ func maybeInjectDynamicMemory(vendor, event, sessionID, cwd string, probe peeked
 
 	e := strings.ToLower(strings.TrimSpace(event))
 	isPrompt := isPromptRecallEvent(vendor, e)
-	isFile := isFileRecallEvent(vendor, e) && strings.TrimSpace(probe.ToolPath) != ""
-	observedFile := isFileObservationEvent(vendor, e) && strings.TrimSpace(probe.ToolPath) != ""
+	safeToolPath := redact.StringFull(probe.ToolPath)
+	isFile := isFileRecallEvent(vendor, e) && strings.TrimSpace(safeToolPath) != ""
+	observedFile := isFileObservationEvent(vendor, e) && strings.TrimSpace(safeToolPath) != ""
 	if observedFile {
-		cached.RecentPaths = appendRecentPath(cached.RecentPaths, repoPath(root, probe.ToolPath), 32)
+		cached.RecentPaths = appendRecentPath(cached.RecentPaths, repoPath(root, safeToolPath), 32)
 	}
 	if !isPrompt && !isFile {
 		if observedFile {
@@ -61,25 +64,24 @@ func maybeInjectDynamicMemory(vendor, event, sessionID, cwd string, probe peeked
 		return
 	}
 	maxTokens := memory.DefaultTurnTokens
-	queryText := probe.Prompt
+	queryText := dynamicMemoryQueryText(probe)
 	queryPaths := append([]string(nil), cached.RecentPaths...)
 	if isFile {
 		maxTokens = memory.DefaultFileTokens
-		queryPaths = []string{repoPath(root, probe.ToolPath)}
+		queryPaths = []string{repoPath(root, safeToolPath)}
 	}
+	promptHash := ""
+	turnID := cached.MemoryTurnID
+	turnTokens := cached.MemoryTurnTokens
 	if isPrompt {
-		if probe.TransformedPrompt != "" {
-			queryText = probe.TransformedPrompt
-		}
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(queryText)))
-		if hash == cached.LastPromptHash {
+		promptHash = fmt.Sprintf("%x", sha256.Sum256([]byte(queryText)))
+		if promptHash == cached.LastPromptHash {
 			return
 		}
-		cached.LastPromptHash = hash
-		cached.MemoryTurnID = nonEmptyTurnID(probe.TurnID, hash)
-		cached.MemoryTurnTokens = 0
+		turnID = nonEmptyTurnID(probe.TurnID, promptHash)
+		turnTokens = 0
 	}
-	turnRemaining := memory.DefaultTurnTokens - int(cached.MemoryTurnTokens)
+	turnRemaining := memory.DefaultTurnTokens - int(turnTokens)
 	if maxTokens > turnRemaining {
 		maxTokens = turnRemaining
 	}
@@ -113,6 +115,15 @@ func maybeInjectDynamicMemory(vendor, event, sessionID, cwd string, probe peeked
 	if text == "" {
 		return
 	}
+	// Delivery must succeed before Superopen claims an injection or consumes
+	// deduplication/token budget. A broken stdout remains fail-open and the
+	// next supported hook may retry the same memory.
+	if err := writeDynamicContext(vendor, event, probe, text, isFile); err != nil {
+		if observedFile {
+			sessionstate.Save(sessionID, vendor, cached)
+		}
+		return
+	}
 	var used int64
 	var ids, reasons, targets []string
 	for _, hit := range hits {
@@ -124,6 +135,11 @@ func maybeInjectDynamicMemory(vendor, event, sessionID, cwd string, probe peeked
 			targets = append(targets, hit.TargetPath)
 		}
 	}
+	if isPrompt {
+		cached.LastPromptHash = promptHash
+		cached.MemoryTurnID = turnID
+		cached.MemoryTurnTokens = 0
+	}
 	cached.MemoryTokens += used
 	cached.MemoryTurnTokens += used
 	sessionstate.Save(sessionID, vendor, cached)
@@ -131,9 +147,16 @@ func maybeInjectDynamicMemory(vendor, event, sessionID, cwd string, probe peeked
 		"coding_agent.client": vendor, "superopen.memory.pattern_ids": ids,
 		"superopen.memory.scores": retrievalScores(hits), "superopen.memory.reasons": reasons,
 		"superopen.memory.estimated_tokens": used, "superopen.memory.target_paths": targets,
-		"superopen.memory.turn_id": nonEmptyTurnID(probe.TurnID, cached.MemoryTurnID), "superopen.memory.delivery": deliveryFor(vendor, isFile),
+		"superopen.memory.turn_id": nonEmptyTurnID(probe.TurnID, turnID), "superopen.memory.delivery": deliveryFor(vendor, isFile),
 	}})
-	writeDynamicContext(vendor, event, probe, text, isFile)
+}
+
+func dynamicMemoryQueryText(probe peekedContext) string {
+	text := probe.Prompt
+	if probe.TransformedPrompt != "" {
+		text = probe.TransformedPrompt
+	}
+	return redact.StringFull(text)
 }
 
 func nonEmptyTurnID(values ...string) string {
@@ -190,22 +213,21 @@ func isFileObservationEvent(vendor, event string) bool {
 	return false
 }
 
-func writeDynamicContext(vendor, event string, probe peekedContext, text string, file bool) {
+func writeDynamicContext(vendor, event string, probe peekedContext, text string, file bool) error {
 	switch vendor {
 	case "opencode", "pi":
-		_ = writeHookJSON(map[string]any{"inject_context": text, "additional_context": text})
+		return writeHookJSON(map[string]any{"inject_context": text, "additional_context": text})
 	case "copilot-cli":
 		if file {
-			_ = writeHookJSON(map[string]any{"additionalContext": text})
-			return
+			return writeHookJSON(map[string]any{"additionalContext": text})
 		}
 		base := probe.TransformedPrompt
 		if base == "" {
 			base = probe.Prompt
 		}
-		_ = writeHookJSON(map[string]any{"modifiedTransformedPrompt": base + "\n\n" + text})
+		return writeHookJSON(map[string]any{"modifiedTransformedPrompt": base + "\n\n" + text})
 	default:
-		_ = writeHookJSON(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": event, "additionalContext": text, "permissionDecision": "allow"}, "additionalContext": text, "additional_context": text})
+		return writeHookJSON(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": event, "additionalContext": text, "permissionDecision": "allow"}, "additionalContext": text, "additional_context": text})
 	}
 }
 
@@ -526,9 +548,11 @@ func writeDeny(vendor, event string, dec guardrails.Decision) {
 }
 
 func writeHookJSON(v any) error {
-	enc := json.NewEncoder(os.Stdout)
+	enc := json.NewEncoder(hookJSONOutput())
 	return enc.Encode(v)
 }
+
+var hookJSONOutput = func() io.Writer { return os.Stdout }
 
 func isSessionStartEvent(event string) bool {
 	e := strings.ToLower(event)

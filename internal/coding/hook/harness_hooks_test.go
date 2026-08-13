@@ -1,14 +1,39 @@
 package hook
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ishanjainn/superopen/internal/artifactmeta"
+	"github.com/ishanjainn/superopen/internal/coding/normalize"
+	"github.com/ishanjainn/superopen/internal/coding/sessionstate"
 	"github.com/ishanjainn/superopen/internal/guardrails"
+	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/runtimestate"
 )
+
+type hookMemoryEmitter struct{ events []normalize.EventEmission }
+
+func (*hookMemoryEmitter) EmitSession(normalize.Session) error           { return nil }
+func (*hookMemoryEmitter) EmitToolCall(normalize.ToolCall) error         { return nil }
+func (*hookMemoryEmitter) EmitEditDecision(normalize.EditDecision) error { return nil }
+func (*hookMemoryEmitter) EmitLLMTurn(normalize.LLMTurn) error           { return nil }
+func (*hookMemoryEmitter) EmitSubagent(normalize.Subagent) error         { return nil }
+func (e *hookMemoryEmitter) EmitEvent(v normalize.EventEmission) error {
+	e.events = append(e.events, v)
+	return nil
+}
+func (*hookMemoryEmitter) EmitGitCommit(normalize.GitCommit) error           { return nil }
+func (*hookMemoryEmitter) EmitGitPullRequest(normalize.GitPullRequest) error { return nil }
+
+type failingHookWriter struct{}
+
+func (failingHookWriter) Write([]byte) (int, error) { return 0, errors.New("closed hook output") }
 
 func TestDecideGuardrailAllowsEmptyTargets(t *testing.T) {
 	eng := guardrails.Engine{Policy: guardrails.DefaultPolicy()}
@@ -132,5 +157,50 @@ func TestApprovalDebounceStaysOutsideHarness(t *testing.T) {
 	events := filepath.Join(repo, ".so", "sessions", "session-1", "events.jsonl")
 	if err := artifactmeta.Validate(events); err != nil {
 		t.Fatalf("described audit stream: %v", err)
+	}
+}
+
+func TestDynamicMemoryQuerySanitizesPrivateAndSecretText(t *testing.T) {
+	got := dynamicMemoryQueryText(peekedContext{Prompt: "fix <private>customer-name</private> token=abcdefgh visible"})
+	if strings.Contains(got, "customer-name") || strings.Contains(got, "abcdefgh") {
+		t.Fatalf("retrieval query retained excluded content: %q", got)
+	}
+	if !strings.Contains(got, "[EXCLUDED_PRIVATE]") || !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("retrieval query did not use central sanitizer: %q", got)
+	}
+}
+
+func TestDynamicMemoryDoesNotClaimFailedDelivery(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	store := memory.NewStore(paths)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := store.UpsertPattern(memory.Pattern{
+		Fingerprint: "fp_delivery", Vendor: "codex", Kind: "workflow",
+		Summary: "Run focused authentication tests", Confidence: .9, ExplicitWorkflow: true,
+	}, "prior-session", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	previousOutput := hookJSONOutput
+	hookJSONOutput = func() io.Writer { return failingHookWriter{} }
+	t.Cleanup(func() { hookJSONOutput = previousOutput })
+	cached := &sessionstate.State{}
+	emitter := &hookMemoryEmitter{}
+	maybeInjectDynamicMemory("codex", "UserPromptSubmit", "current-session", root, peekedContext{
+		CWD: root, Prompt: "Run focused authentication tests", TurnID: "turn-1",
+	}, cached, emitter)
+
+	if len(emitter.events) != 0 {
+		t.Fatalf("failed delivery emitted retrieval event: %+v", emitter.events)
+	}
+	if cached.MemoryTokens != 0 || cached.MemoryTurnTokens != 0 || cached.LastPromptHash != "" || len(cached.MemorySeen) != 0 {
+		t.Fatalf("failed delivery consumed retrieval state: %+v", cached)
 	}
 }
