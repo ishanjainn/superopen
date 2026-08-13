@@ -2,6 +2,9 @@
 # Updated by so init when the tracking policy changes; everything ignored below is derived or machine-local.
 
 graph/
+.graph-v2-*
+graph.previous/
+graph.failed/
 sessions/
 memory/
 audit/

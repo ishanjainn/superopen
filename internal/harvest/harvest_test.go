@@ -102,3 +102,79 @@ func TestPendingVendorSelectsOnlyImmediatelyPriorSameVendor(t *testing.T) {
 		t.Fatalf("cross-vendor selection failed: %q", got)
 	}
 }
+
+func TestIdleSweepIncludesEndedPendingAndDoesNotComplete(t *testing.T) {
+	dir := t.TempDir()
+	paths := harness.Resolve(dir)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	store := session.NewStore(paths)
+	id := "ses_ended_pending"
+	started := time.Now().UTC().Add(-8 * time.Hour)
+	ended := started.Add(time.Hour)
+	if err := store.Start(session.Meta{ID: id, Vendor: "cursor", StartedAt: started, PromptPreview: "landed the review work", Tokens: 42}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := store.Get(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.Status = session.StatusEnded
+	meta.StartedAt = started
+	meta.EndedAt = &ended
+	meta.PromptPreview = "landed the review work"
+	meta.Tokens = 42
+	if err := store.UpdateMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteDocument(id, func(d *session.Document) { d.Review.Status = "pending" }); err != nil {
+		t.Fatal(err)
+	}
+	sessDir := paths.SessionDir(id)
+	if err := os.WriteFile(filepath.Join(sessDir, "events.jsonl"), []byte(`{"role":"user","text":"hi"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-8 * time.Hour)
+	_ = os.Chtimes(filepath.Join(sessDir, "session.json"), old, old)
+	_ = os.Chtimes(filepath.Join(sessDir, "events.jsonl"), old, old)
+
+	cfg := config.Default()
+	cfg.Memory.IdleHarvestHours = 6
+	results, err := harvest.IdleSweep(paths, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].SessionID != id || results[0].Action != "review" {
+		t.Fatalf("expected pending-ended CLI retry, got %+v", results)
+	}
+	doc, err := store.ReadDocument(id)
+	if err != nil || doc.Review.Status != "pending" {
+		t.Fatalf("idle must not heuristic-complete, got %+v err=%v", doc.Review, err)
+	}
+}
+
+func TestMarkPendingDoesNotClobberCompleteOrRunning(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	_ = paths.EnsureDirs()
+	store := session.NewStore(paths)
+	if err := store.Start(session.Meta{ID: "done", Vendor: "cursor", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.WriteDocument("done", func(d *session.Document) { d.Review.Status = "complete" })
+	if err := harvest.MarkPending(paths, "done", "cursor"); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := store.ReadDocument("done")
+	if err != nil || doc.Review.Status != "complete" {
+		t.Fatalf("complete must stay complete, got %+v err=%v", doc.Review, err)
+	}
+	_ = store.WriteDocument("done", func(d *session.Document) { d.Review.Status = "running" })
+	if err := harvest.MarkPending(paths, "done", "cursor"); err != nil {
+		t.Fatal(err)
+	}
+	doc, err = store.ReadDocument("done")
+	if err != nil || doc.Review.Status != "running" {
+		t.Fatalf("running must stay running, got %+v err=%v", doc.Review, err)
+	}
+}

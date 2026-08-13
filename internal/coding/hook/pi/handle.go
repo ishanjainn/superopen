@@ -81,7 +81,7 @@ func handle(in normalize.Input) error {
 			Extras: map[string]string{"pi.session_file": p.SessionFile},
 		})
 
-	case event == "session_shutdown" || event == "agent_end" || event == "sessionend" || event == "session_end":
+	case event == "session_shutdown" || event == "sessionend" || event == "session_end":
 		s := normalize.Session{
 			SessionID: sid, Vendor: in.Vendor, Model: model, CWD: p.CWD, EndedAt: now,
 			Outcome: "completed",

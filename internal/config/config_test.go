@@ -75,6 +75,29 @@ func TestDefaultConfigDoesNotAdvertiseAPIProvider(t *testing.T) {
 	}
 }
 
+func TestEvalsLiveAgentDefaults(t *testing.T) {
+	cfg := config.Default()
+	if !cfg.LiveAgentEnabled() || !cfg.CLIFallbackEnabled() || cfg.MidSessionEnabled() {
+		t.Fatalf("defaults live_agent=%v cli_fallback=%v mid_session=%v", cfg.LiveAgentEnabled(), cfg.CLIFallbackEnabled(), cfg.MidSessionEnabled())
+	}
+	if cfg.MidSessionMinEdits() != 3 || cfg.MidSessionMinTools() != 10 {
+		t.Fatalf("mid-session thresholds edits=%d tools=%d", cfg.MidSessionMinEdits(), cfg.MidSessionMinTools())
+	}
+	if cfg.ExplicitHeuristics() {
+		t.Fatal("auto must not be explicit heuristics")
+	}
+	cfg.Evals.Backend = "heuristics"
+	if !cfg.ExplicitHeuristics() {
+		t.Fatal("heuristics backend must be explicit")
+	}
+	off := false
+	cfg.Evals.LiveAgent = &off
+	cfg.Evals.CLIFallback = &off
+	if cfg.LiveAgentEnabled() || cfg.CLIFallbackEnabled() {
+		t.Fatal("false pointers must disable live agent / cli fallback")
+	}
+}
+
 func TestLoadRequiresV2Layout(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	legacy := "llm:\n  provider: openai\n"

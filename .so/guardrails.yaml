@@ -1,46 +1,25 @@
 # Superopen guardrails. These are shared project safety rules enforced at coding-agent hook boundaries.
-# Authoritative project policy updated by project maintainers and approved Superopen upgrades.
+# Authoritative project policy updated by project maintainers; so sync will not overwrite this file.
 rules:
     - id: no-secrets
-      description: Never commit secrets, API keys, tokens, or credentials
+      description: Never commit secrets, API keys, or credentials
       severity: block
-      source: llm
+    - id: no-generated
+      description: Never edit generated files (dist/, vendor/, *.generated.*)
+      severity: block
     - id: run-tests
-      description: Run relevant tests (Go race tests or web test/lint) before finishing
+      description: Always run relevant tests before finishing
       severity: warn
-      source: llm
-    - id: avoid-unrelated
-      description: Avoid changing unrelated code; keep diffs small and focused
-      severity: warn
-      source: llm
-    - id: block-lockfile-edits
-      description: Do not hand-edit lockfiles; use go mod or npm/pnpm/yarn instead
-      severity: warn
-      source: llm
-    - id: go-race-test
-      description: For Go changes, run go test -race -count=1 on affected packages
-      severity: warn
-      source: llm
-    - id: go-vet
-      description: Run go vet ./... for Go changes
-      severity: warn
-      source: llm
-    - id: pr-title-convention
-      description: Use Conventional Commit PR titles (feat:, fix:, docs:, etc.)
-      severity: warn
-      source: llm
-    - id: no-generated-edits
-      description: Do not edit generated files (dist/, vendor/, *.generated.*)
-      severity: warn
-      source: llm
     - id: respect-formatting
-      description: Match existing formatting and lint rules before submitting
+      description: Respect project formatting and lint rules
       severity: warn
-      source: llm
-    - id: graph-query-first
-      description: Prefer so graph query over broad codebase search when the graph exists
+    - id: avoid-unrelated
+      description: Avoid changing unrelated code
       severity: warn
-      source: llm
+    - id: from-agents-1
+      description: 'Prefer Conventional Commit titles, for example feat: add project prune or'
+      severity: warn
+      source: agent-md
 approval: interactive
 denied_tools: []
 denied_commands:

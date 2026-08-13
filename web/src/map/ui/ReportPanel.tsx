@@ -44,7 +44,9 @@ const JUDGE_MODELS: Record<string, { value: string; label: string }[]> = {
     { value: "", label: "default model" },
     { value: "gpt-5.6-sol", label: "gpt-5.6 sol" },
     { value: "gpt-5.6-terra", label: "gpt-5.6 terra" }
-  ]
+  ],
+  opencode: [{ value: "", label: "default model" }],
+  pi: [{ value: "", label: "default model" }]
 };
 
 const JUDGE_CHOICE_KEY = "superopen:judge-choice";
@@ -203,7 +205,7 @@ function PanelBody({
     if (!status.judgeAvailable) {
       return (
         <p className="report-note">
-          Evaluation needs a local agent CLI as judge. Install <code>claude</code> or <code>codex</code> and
+          Evaluation needs a local agent CLI as judge. Install <code>claude</code>, <code>codex</code>, <code>opencode</code>, or <code>pi</code> and
           make it available on PATH.
         </p>
       );

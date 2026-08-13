@@ -570,14 +570,14 @@ export default function SettingsPage() {
                 </dd>
               </dl>
               <p className="mt-2 text-[11px] text-neutral-500">
-                Backend AI uses Claude/Codex CLI on this machine (even for Cursor/OpenCode/Pi/Gemini sessions).
+                Backend AI uses a sealed claude, codex, opencode, or pi CLI on this machine (even for Cursor/Gemini/Copilot sessions).
               </p>
             </section>
 
             <section className="rounded border border-neutral-200 p-4">
               <h3 className="font-medium">Headless LLM</h3>
               <p className="mt-1 text-xs text-neutral-500">
-                Optional fallback for CI/servers without a coding-agent login. Prefer Claude/Codex/Cursor CLI when available. Maps to{" "}
+                Optional fallback for CI/servers without a coding-agent login. Prefer a sealed claude/codex/opencode/pi CLI when available. Maps to{" "}
                 <code className="rounded bg-neutral-100 px-1">llm:</code> in config.
               </p>
               <dl className="mt-3 grid grid-cols-[10rem_1fr] items-center gap-2 text-xs">

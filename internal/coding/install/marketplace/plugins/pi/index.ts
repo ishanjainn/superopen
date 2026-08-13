@@ -273,7 +273,7 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
+	pi.on("agent_end", async (_event, ctx) => {
     fire(
       "agent_end",
       {
@@ -284,7 +284,7 @@ export default function (pi: ExtensionAPI) {
       },
       true
     );
-    runFinalize();
+    // agent_end is a turn boundary (one user→agent loop), not chat close.
   });
 
   pi.on("session_shutdown", async () => {

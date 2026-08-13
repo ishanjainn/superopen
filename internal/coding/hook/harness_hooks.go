@@ -16,6 +16,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/coding/pricing"
 	"github.com/ishanjainn/superopen/internal/coding/sessionstate"
 	"github.com/ishanjainn/superopen/internal/config"
+	"github.com/ishanjainn/superopen/internal/eval"
 	"github.com/ishanjainn/superopen/internal/execx"
 	"github.com/ishanjainn/superopen/internal/guardrails"
 	"github.com/ishanjainn/superopen/internal/harness"
@@ -25,6 +26,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/redact"
 	"github.com/ishanjainn/superopen/internal/runtimestate"
 	"github.com/ishanjainn/superopen/internal/session"
+	"github.com/ishanjainn/superopen/internal/tracestore"
 )
 
 const dynamicMemorySessionTokens = 2000
@@ -41,12 +43,18 @@ func maybeInjectDynamicMemory(vendor, event, sessionID, cwd string, probe peeked
 	if !paths.Exists() {
 		return
 	}
-	if cfg, err := config.Load(paths.Config); err == nil && !cfg.MemoryEnabled() {
-		return
-	}
+	cfg, _ := config.Load(paths.Config)
+	memoryOn := cfg.MemoryEnabled()
 
 	e := strings.ToLower(strings.TrimSpace(event))
 	isPrompt := isPromptRecallEvent(vendor, e)
+	midReview := ""
+	if isPrompt {
+		midReview = midSessionReviewInject(vendor, sessionID, paths)
+	}
+	if !memoryOn && midReview == "" {
+		return
+	}
 	safeToolPath := redact.StringFull(probe.ToolPath)
 	isFile := isFileRecallEvent(vendor, e) && strings.TrimSpace(safeToolPath) != ""
 	observedFile := isFileObservationEvent(vendor, e) && strings.TrimSpace(safeToolPath) != ""
@@ -60,7 +68,14 @@ func maybeInjectDynamicMemory(vendor, event, sessionID, cwd string, probe peeked
 		return
 	}
 	remaining := dynamicMemorySessionTokens - int(cached.MemoryTokens)
+	if remaining <= 0 && midReview == "" {
+		return
+	}
 	if remaining <= 0 {
+		if err := writeDynamicContext(vendor, event, probe, midReview, false); err == nil {
+			markMidSessionInjected(sessionID, paths)
+			sessionstate.Save(sessionID, vendor, cached)
+		}
 		return
 	}
 	maxTokens := memory.DefaultTurnTokens
@@ -75,7 +90,7 @@ func maybeInjectDynamicMemory(vendor, event, sessionID, cwd string, probe peeked
 	turnTokens := cached.MemoryTurnTokens
 	if isPrompt {
 		promptHash = fmt.Sprintf("%x", sha256.Sum256([]byte(queryText)))
-		if promptHash == cached.LastPromptHash {
+		if promptHash == cached.LastPromptHash && midReview == "" {
 			return
 		}
 		turnID = nonEmptyTurnID(probe.TurnID, promptHash)
@@ -88,31 +103,43 @@ func maybeInjectDynamicMemory(vendor, event, sessionID, cwd string, probe peeked
 	if maxTokens > remaining {
 		maxTokens = remaining
 	}
-	if maxTokens <= 0 {
+	if maxTokens <= 0 && midReview == "" {
 		sessionstate.Save(sessionID, vendor, cached)
 		return
 	}
 	if cached.MemorySeen == nil {
 		cached.MemorySeen = map[string]string{}
 	}
-	hits, err := memory.NewStore(paths).Retrieve(memory.RetrievalQuery{
-		Text: queryText, Vendor: vendor, Paths: queryPaths, Seen: cached.MemorySeen,
-		Branch: cached.Branch, Worktree: root,
-		MaxTokens: maxTokens, MaxResults: memory.DefaultTurnHits, FileOnly: isFile,
-	})
-	if err != nil || len(hits) == 0 {
+	var hits []memory.RetrievalHit
+	if memoryOn {
+		var err error
+		hits, err = memory.NewStore(paths).Retrieve(memory.RetrievalQuery{
+			Text: queryText, Vendor: vendor, Paths: queryPaths, Seen: cached.MemorySeen,
+			Branch: cached.Branch, Worktree: root,
+			MaxTokens: maxTokens, MaxResults: memory.DefaultTurnHits, FileOnly: isFile,
+		})
+		if err != nil {
+			hits = nil
+		}
+	}
+	text := memory.FormatRetrieval(hits)
+	if midReview != "" {
+		if text != "" {
+			text = midReview + "\n\n" + text
+		} else {
+			text = midReview
+		}
+	}
+	if text == "" {
 		sessionstate.Save(sessionID, vendor, cached)
 		return
 	}
 	// Cursor exposes this prompt boundary for observation but not same-turn
 	// model context. Ranking occurs for diagnostics, while no retrieval event,
-	// token use, or injection claim is recorded.
-	if vendor == "cursor" {
+	// token use, or injection claim is recorded. Mid-session review still injects;
+	// Cursor skill is the reliable apply-review path.
+	if vendor == "cursor" && midReview == "" {
 		sessionstate.Save(sessionID, vendor, cached)
-		return
-	}
-	text := memory.FormatRetrieval(hits)
-	if text == "" {
 		return
 	}
 	// Delivery must succeed before Superopen claims an injection or consumes
@@ -123,6 +150,9 @@ func maybeInjectDynamicMemory(vendor, event, sessionID, cwd string, probe peeked
 			sessionstate.Save(sessionID, vendor, cached)
 		}
 		return
+	}
+	if midReview != "" {
+		markMidSessionInjected(sessionID, paths)
 	}
 	var used int64
 	var ids, reasons, targets []string
@@ -288,10 +318,15 @@ func maybeInjectMemory(vendor, event, sessionID, cwd string) {
 	portExtra := port.ConsumePendingResume(root)
 
 	memoryOn := true
+	liveAgent := true
 	if cfg, err := config.Load(paths.Config); err == nil {
 		memoryOn = cfg.MemoryEnabled()
+		liveAgent = cfg.LiveAgentEnabled() && !cfg.ExplicitHeuristics()
 	}
 	reviewExtra := session.NewStore(paths).PreviousReviewContext(vendor, sessionID)
+	if !liveAgent && (strings.Contains(reviewExtra, "pending review") || strings.Contains(reviewExtra, "is running")) {
+		reviewExtra = ""
+	}
 	if !memoryOn && portExtra == "" && reviewExtra == "" {
 		return
 	}
@@ -299,9 +334,18 @@ func maybeInjectMemory(vendor, event, sessionID, cwd string) {
 	var packText string
 	var sections any
 	var charCount int
-	if memoryOn {
+	memLimit := int64(1500)
+	if reviewExtra != "" {
+		need := pricing.EstimateTokens(reviewExtra) + 8
+		if need < memLimit {
+			memLimit -= need
+		} else {
+			memLimit = 0
+		}
+	}
+	if memoryOn && memLimit > 0 {
 		store := memory.NewStore(paths)
-		pack, err := store.BuildSessionContextForVendor(1500, "", memory.ModePersistent, vendor)
+		pack, err := store.BuildSessionContextForVendor(int(memLimit), "", memory.ModePersistent, vendor)
 		if err == nil {
 			packText = pack.Text
 			sections = pack.Sections
@@ -318,7 +362,7 @@ func maybeInjectMemory(vendor, event, sessionID, cwd string) {
 	}
 	if reviewExtra != "" {
 		if packText != "" {
-			packText += "\n\n" + reviewExtra
+			packText = reviewExtra + "\n\n" + packText
 		} else {
 			packText = reviewExtra
 		}
@@ -398,10 +442,10 @@ func maybeHarvestOnSessionEnd(vendor, event, sessionID, cwd string) {
 		return
 	}
 	if isSessionStartEvent(event) {
-		// A new same-vendor session only schedules the immediately preceding
-		// pending review. The hook never waits for evaluation or backlog work.
+		// Materialize the immediately preceding same-vendor session without CLI
+		// review so Codex/Pi chats get footprint/graph. The live agent owns review.
 		if previous := harvest.PendingVendor(paths, sessionID, vendor); previous != "" {
-			scheduleFinalize(root, previous)
+			scheduleFinalize(root, previous, true)
 		}
 		return
 	}
@@ -411,36 +455,41 @@ func maybeHarvestOnSessionEnd(vendor, event, sessionID, cwd string) {
 			return
 		}
 		_ = harvest.MarkPending(paths, sessionID, vendor)
-		// Detached post-session pipeline: materialize → graph → review → apply.
-		scheduleFinalize(root, sessionID)
+		scheduleFinalize(root, sessionID, false)
 		return
 	}
 
-	// Vendors without a real session-end hook (Codex Stop, and any Stop-only adapter).
+	// Vendors without a real session-end hook (Codex Stop, Pi turn_end).
 	if isTurnBoundaryHarvestEvent(vendor, event) {
 		if sessionID != "" {
 			_ = harvest.MarkPending(paths, sessionID, vendor)
 		}
-		// Stop is only a marker. Finalize runs on explicit close, idle handling,
-		// or the next different same-vendor SessionStart.
 	}
 }
 
 // scheduleFinalize kicks off so sessions finalize in the background so the
 // agent hook can return immediately. Failures are swallowed (fail-soft).
-func scheduleFinalize(repoRoot, sessionID string) {
-	if strings.TrimSpace(sessionID) == "" {
-		execx.SpawnSO(repoRoot, "sessions", "finalize")
-		return
+// noCLI is true for SessionStart materialize of a previous Codex/Pi session.
+func scheduleFinalize(repoRoot, sessionID string, noCLI bool) {
+	spawnFinalizeFn(repoRoot, sessionID, noCLI)
+}
+
+var spawnFinalizeFn = func(repoRoot, sessionID string, noCLI bool) {
+	args := []string{"sessions", "finalize"}
+	if noCLI {
+		args = append(args, "--no-cli")
 	}
-	execx.SpawnSO(repoRoot, "sessions", "finalize", sessionID)
+	if strings.TrimSpace(sessionID) != "" {
+		args = append(args, sessionID)
+	}
+	execx.SpawnSO(repoRoot, args...)
 }
 
 func isSessionEndEvent(event string) bool {
 	e := strings.ToLower(strings.TrimSpace(event))
 	switch e {
 	case "sessionend", "session_end", "session.shutdown", "session_shutdown",
-		"dispose", "agent_end", "session.idle", "session.deleted", "session_deleted":
+		"dispose", "session.idle", "session.deleted", "session_deleted":
 		return true
 	default:
 		return strings.Contains(e, "session.end") || strings.Contains(e, "session_end")
@@ -452,16 +501,48 @@ func isSessionEndEvent(event string) bool {
 // is debounced / pending-flushed rather than run raw on every Stop.
 func isTurnBoundaryHarvestEvent(vendor, event string) bool {
 	e := strings.ToLower(strings.TrimSpace(event))
-	if e != "stop" {
-		return false
-	}
 	switch strings.ToLower(strings.TrimSpace(vendor)) {
-	case "codex", "gemini", "copilot-cli", "copilot":
-		return true
+	case "codex":
+		return e == "stop"
+	case "pi":
+		return e == "turn_end" || e == "agent_end"
+	case "copilot-cli", "copilot":
+		return e == "stop" || e == "agentstop" || e == "agent_stop"
+	case "gemini":
+		return e == "stop"
 	default:
-		// Claude/Cursor have SessionEnd; their Stop must not harvest.
 		return false
 	}
+}
+
+func midSessionReviewInject(vendor, sessionID string, paths harness.Paths) string {
+	if sessionID == "" || !paths.Exists() {
+		return ""
+	}
+	cfg, err := config.Load(paths.Config)
+	if err != nil || !cfg.LiveAgentEnabled() || !cfg.MidSessionEnabled() || cfg.ExplicitHeuristics() {
+		return ""
+	}
+	sess := session.NewStore(paths)
+	doc, err := sess.ReadDocument(sessionID)
+	if err == nil && (doc.Review.Status == "complete" || doc.Review.Status == "running" || doc.Review.MidSessionInjected) {
+		return ""
+	}
+	store := tracestore.NewLocalJSONL(paths.TracesDir)
+	spans, _ := store.Query(tracestore.QueryFilter{SessionID: sessionID})
+	if !eval.ConsiderableWork(spans, cfg.MidSessionMinEdits(), cfg.MidSessionMinTools()) {
+		return ""
+	}
+	return fmt.Sprintf("## This session review\n\nThis session `%s` has enough work for a one-shot review. Run `so review-brief %s`, produce the JSON with your model, then `so apply-review %s`. Then continue the user's task. Skip if status is complete or running.", sessionID, sessionID, sessionID)
+}
+
+func markMidSessionInjected(sessionID string, paths harness.Paths) {
+	_ = session.NewStore(paths).WriteDocument(sessionID, func(d *session.Document) {
+		d.Review.MidSessionInjected = true
+		if d.Review.Status == "" {
+			d.Review.Status = "pending"
+		}
+	})
 }
 
 // maybeEnforceGuardrails returns true if the hook already wrote a deny response.

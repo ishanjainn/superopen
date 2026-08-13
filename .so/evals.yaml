@@ -1,24 +1,16 @@
 # Superopen evaluation policy. This defines how completed coding sessions are scored and which reviewer backends may be used.
-# Authoritative project policy updated by project maintainers and approved Superopen upgrades.
+# Authoritative project policy updated by project maintainers and so init from graph plus agent instructions.
 checks:
   - tests
   - lint
   - scope
-  - go_build
-  - race_patterns
-  - pr_title_convention
+  - retries
   - harness_usage
+  - go_build
 
+# Rules mirrored from agent markdown (for LLM judge context)
 agent_rules:
-  - "Prefer so graph query and AGENTS.md before broad exploration"
-  - "Run go test -race and go vet for Go changes; run web test/typecheck/lint for UI changes"
-  - "Keep diffs focused; avoid unrelated refactors"
-  - "Use Conventional Commit titles for PRs"
-  - "Do not commit secrets or hand-edit lockfiles"
-
-judge_rubric: |
-  Score sessions on whether the agent used Superopen harness tools (graph query, guardrails, memory) appropriately, kept scope tight, ran stack-appropriate checks, and produced conventional commits/PRs. Penalize secret exposure, lockfile hand-edits, skipped tests on behavior changes, and large unrelated diffs.
+  - "Prefer Conventional Commit titles, for example feat: add project prune or"
 
 sources:
-  - /Users/ishanjain/work/superopen/AGENTS.md
   - /Users/ishanjain/work/superopen/CONTRIBUTING.md

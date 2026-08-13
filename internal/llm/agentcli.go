@@ -17,11 +17,11 @@ type Completer interface {
 	Backend() string
 }
 
-// AgentCLI shells out to Claude Code (`claude -p`) or Codex (`codex exec`)
-// in sealed/non-interactive mode. Uses the user's logged-in coding-agent
+// AgentCLI shells out to a sealed coding-agent CLI (`claude -p`, `codex exec`,
+// `opencode run`, `pi --print --no-tools`). Uses the user's logged-in
 // subscription; no separate API key.
 type AgentCLI struct {
-	CLI   string // "claude" | "codex"
+	CLI   string // "claude" | "codex" | "opencode" | "pi"
 	Model string // optional override
 }
 
@@ -60,13 +60,14 @@ func (c *Client) Backend() string {
 //
 //	evals.backend:
 //	  auto       - prefer agent CLI on PATH, else API key, else none/heuristics (default)
-//	  agent_cli  - Claude Code / Codex CLI only (reuse coding-agent login)
+//	  agent_cli  - sealed coding-agent CLI only (reuse coding-agent login)
 //	  llm_api    - API key / gateway only
 //	  heuristics - never call a model
 //
 // Cost balance: agent/LLM judging produces useful harness improvements; heuristics
-// is the free fallback when no model backend is available. Cursor has no sealed
-// headless CLI — use Claude Code or Codex for judging; Cursor still works for `/so init`.
+// is the free fallback when no model backend is available. Cursor, Gemini, and
+// Copilot have no sealed headless CLI — use claude, codex, opencode, or pi for
+// judging; those vendors still work for `/so init` and live-agent review.
 func NewBestCompleter(cfg config.Config) Completer {
 	backend := cfg.Evals.Backend
 	if strings.TrimSpace(backend) == "" {
@@ -78,20 +79,28 @@ func NewBestCompleter(cfg config.Config) Completer {
 // NewVendorCompleter keeps self-review vendor-affine when that vendor has a
 // sealed CLI. Other vendors use the configured fallback and record its backend.
 func NewVendorCompleter(cfg config.Config, vendor string) Completer {
-	v := strings.ToLower(strings.TrimSpace(vendor))
-	prefer := ""
-	if strings.Contains(v, "claude") {
-		prefer = "claude"
-	}
-	if strings.Contains(v, "codex") {
-		prefer = "codex"
-	}
-	if prefer != "" {
+	if prefer := preferCLIForVendor(vendor); prefer != "" {
 		if c := newAgentCLI(cfg, prefer); c != nil && c.Available() {
 			return c
 		}
 	}
 	return NewBestCompleter(cfg)
+}
+
+func preferCLIForVendor(vendor string) string {
+	v := strings.ToLower(strings.TrimSpace(vendor))
+	switch {
+	case strings.Contains(v, "claude"):
+		return "claude"
+	case strings.Contains(v, "codex"):
+		return "codex"
+	case strings.Contains(v, "opencode"):
+		return "opencode"
+	case v == "pi" || strings.HasPrefix(v, "pi-"):
+		return "pi"
+	default:
+		return ""
+	}
 }
 
 // NewMemoryCompleter uses memory.backend (default auto) - agent CLI preferred.
@@ -136,17 +145,13 @@ func NewCompleterForBackend(cfg config.Config, backend string) Completer {
 func newAgentCLI(cfg config.Config, prefer string) *AgentCLI {
 	prefer = strings.ToLower(strings.TrimSpace(prefer))
 	switch prefer {
-	case "claude", "claude-code":
-		for _, c := range agentcli.DetectAll() {
-			if c == "claude" {
-				return &AgentCLI{CLI: "claude", Model: cfg.ModelForCLI("claude")}
-			}
+	case "claude", "claude-code", "codex", "opencode", "pi":
+		if prefer == "claude-code" {
+			prefer = "claude"
 		}
-		return nil
-	case "codex":
 		for _, c := range agentcli.DetectAll() {
-			if c == "codex" {
-				return &AgentCLI{CLI: "codex", Model: cfg.ModelForCLI("codex")}
+			if c == prefer {
+				return &AgentCLI{CLI: c, Model: cfg.ModelForCLI(c)}
 			}
 		}
 		return nil

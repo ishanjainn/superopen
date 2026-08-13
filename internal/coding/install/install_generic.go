@@ -123,7 +123,7 @@ func copilotManifest(soBin string) (string, error) {
 			"postToolUse":           []any{hook("coding hook --vendor=copilot-cli --event=postToolUse")},
 			"postToolUseFailure":    []any{hook("coding hook --vendor=copilot-cli --event=postToolUseFailure")},
 			"errorOccurred":         []any{hook("coding hook --vendor=copilot-cli --event=errorOccurred")},
-			"agentStop":             []any{hook("coding hook --vendor=copilot-cli --event=agentStop"), hook("sessions finalize --detach")},
+			"agentStop":             []any{hook("coding hook --vendor=copilot-cli --event=agentStop")},
 		},
 	}
 	body, err := json.MarshalIndent(doc, "", "  ")

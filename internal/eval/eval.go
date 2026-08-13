@@ -35,6 +35,8 @@ type Result struct {
 	Findings []session.ReviewFinding `json:"-"`
 	Drafts   []Draft                 `json:"-"`
 	Memory   MemoryDelta             `json:"-"`
+	// CompleteReview is true when a durable model (or explicit heuristics) finished the review.
+	CompleteReview bool `json:"-"`
 }
 
 type RunOptions struct {
@@ -695,40 +697,15 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, spans []trace
 	res.Backend = "heuristics"
 	wantModel := backend != "heuristics" && backend != "none" && backend != "off"
 	if wantModel && completer != nil && completer.Available() {
-		summary := fmt.Sprintf("session=%s vendor=%s scope=%s reads=%d edits=%d searches=%d tool_calls=%d failed_tools=%d verified=%v harness_hits=%d files=%d notes=%v\n\nREDACTED SESSION TEXT:\n%s\n\nCURRENT GUIDANCE:\n%s",
-			sessionID, harness.NormalizeVendorKind(vendor), scope, signals.reads, signals.edits, signals.searches, signals.toolCalls, signals.failedTools, signals.verified, signals.harnessHits, len(signals.files), res.Notes,
-			truncateText(reviewText(spans), 5000), currentGuidance(paths, vendor, 5000))
-		out, err := completer.Complete(
-			`Review one coding-agent session and return JSON only:
-{"exploration":null,"scope":null,"wandering":null,"verification":null,"note":"","findings":[{"kind":"correction|workflow|failure|success|guidance_gap|simplification|product_gap","change_kind":"create|update|remove|restructure","summary":"","target_type":"skill|rules|docs|memory|guardrail|eval","target_path":"repository-relative path","confidence":0,"verified":false,"explicit_workflow":false,"evidence":["short redacted fact"],"event_ids":["span id"],"keywords":["normalized term"],"paths":["repository-relative path"],"symbols":["symbol"],"error_signatures":["stable error signature"],"applicability":"when this applies","workflow_shape":"stable action sequence without generated prose","title":"","rationale":"","proposed_body":""}],"memory":{"lessons":[],"preference":"","project_note":""}}
-Use null for dimensions that cannot be judged from evidence. Scope and verification are null when no repository edits occurred. This is a snapshot unless scope=complete in the summary; snapshots must return no findings or memory changes. Use existing guidance before proposing anything. Prefer no finding over weak advice. Never infer a reusable workflow from repeated generic shell invocations. A removal or restructure may be recommended but must never be auto-applied. Never target another vendor, .agents, or a managed so/superopen skill. Proposed bodies must be complete and concise. Do not include prompts or tool output verbatim in evidence.`,
-			summary,
-		)
+		out, err := completer.Complete(ReviewerSystemPrompt, reviewerUserPrompt(sessionID, vendor, scope, signals, res.Notes, spans, paths))
 		if err == nil {
-			res.Backend = completer.Backend()
-			res.Notes = append(res.Notes, "model:"+completer.Backend())
 			var parsed reviewerResult
 			if json.Unmarshal([]byte(extractJSON(out)), &parsed) == nil {
-				for _, k := range []string{"exploration", "scope", "wandering", "verification"} {
-					if _, applicable := res.Dimensions[k]; !applicable {
-						continue
-					}
-					if v := parsed.dimension(k); v >= 0 {
-						res.Dimensions[k] = v
-					}
-				}
-				if parsed.Note != "" {
-					res.Notes = append(res.Notes, parsed.Note)
-				}
-				modelFindings, drafts := parsed.toFindings(paths, vendor, signals.verified)
-				for i := range modelFindings {
-					modelFindings[i].EventIDs = eventIDs(spans, 6)
-				}
-				if final {
-					res.Findings = mergeFindings(res.Findings, modelFindings)
-					res.Drafts = drafts
-					res.Memory = parsed.Memory
-				}
+				res.Backend = completer.Backend()
+				res.Notes = append(res.Notes, "model:"+completer.Backend())
+				applyReviewerParse(&res, parsed, paths, vendor, signals, spans, final)
+			} else {
+				res.Notes = append(res.Notes, "model reviewer JSON missing; leaving review pending")
 			}
 		} else {
 			res.Notes = append(res.Notes, "model enrichment skipped: "+err.Error())
@@ -746,12 +723,14 @@ Use null for dimensions that cannot be judged from evidence. Scope and verificat
 	if len(res.Dimensions) == 0 {
 		res.Badge = "unknown"
 		res.EvidenceStatus = "insufficient"
+		res.CompleteReview = durableReview(res.Backend, cfg)
 		return persistResult(paths, res)
 	}
 	res.Score = sum / float64(len(res.Dimensions))
 	if signals.edits == 0 {
 		res.Badge = "unknown"
 		res.Notes = append(res.Notes, "Read-only session: scope and verification are not applicable, so no edit-quality badge was produced.")
+		res.CompleteReview = durableReview(res.Backend, cfg)
 		return persistResult(paths, res)
 	}
 	switch {
@@ -763,6 +742,7 @@ Use null for dimensions that cannot be judged from evidence. Scope and verificat
 		res.Badge = "poor"
 	}
 
+	res.CompleteReview = durableReview(res.Backend, cfg)
 	return persistResult(paths, res)
 }
 
@@ -773,7 +753,7 @@ func persistResult(paths harness.Paths, res Result) (Result, error) {
 	if err := ss.WriteDocument(res.SessionID, func(d *session.Document) {
 		d.Evaluation = data
 		d.EvalBadge = res.Badge
-		if res.EvaluationScope != "complete" {
+		if res.EvaluationScope != "complete" || !res.CompleteReview {
 			return
 		}
 		d.Review.Findings = res.Findings
