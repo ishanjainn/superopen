@@ -105,7 +105,7 @@ func acquireDirLock(path string, wait time.Duration) (func(), error) {
 		if err == nil {
 			return func() { _ = os.Remove(path) }, nil
 		}
-		if !errors.Is(err, os.ErrExist) {
+		if !isDirLockContention(err) {
 			return nil, err
 		}
 		if info, statErr := os.Stat(path); statErr == nil && time.Since(info.ModTime()) > 30*time.Second {
