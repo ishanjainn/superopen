@@ -29,7 +29,8 @@ type Candidate struct {
 	// MCP fields (kind=mcp)
 	Command string   `json:"command,omitempty"`
 	Args    []string `json:"args,omitempty"`
-	// Skill body (kind=skill); empty means use DefaultSkillBody(name)
+	// Skill body (kind=skill). Catalog does not emit template skills;
+	// upgrade JSON may include repo-learned skill bodies.
 	Body string `json:"body,omitempty"`
 	// Guardrail fields
 	GuardrailID string `json:"guardrail_id,omitempty"`
@@ -37,22 +38,21 @@ type Candidate struct {
 	Score       int    `json:"score,omitempty"`
 }
 
-// CatalogCandidates ranks MCP/skill/guardrail suggestions from stack signals.
+// CatalogCandidates ranks MCP and guardrail suggestions from stack signals.
 // MCP is never auto-committed by heuristic seed — assistants pick via upgrade JSON.
+// Skills are not catalogued as templates; upgrade may include repo-learned skills only.
 func CatalogCandidates(repoRoot string, paths harness.Paths, sig StackSignals, graph GraphSummary) []Candidate {
-	existingSkills := existingSkillNames(repoRoot)
+	_ = graph
 	existingMCP := existingMCPNames(repoRoot, paths)
 	existingGuards := existingGuardrailIDs(paths)
 
 	var all []Candidate
 	all = append(all, mcpCandidates(sig, existingMCP)...)
-	all = append(all, skillCandidates(sig, graph, existingSkills)...)
 	all = append(all, guardrailCandidates(sig, existingGuards)...)
 
-	// Cap per kind: top 2 MCP, top 2 skills, top 2 guardrails (upgrade brief can show more)
+	// Cap per kind: show more MCP in the brief; upgrade JSON asks for 1-2.
 	return capByKind(all, map[CandidateKind]int{
-		CandidateMCP:       4, // show more in brief; upgrade JSON asks for 1-2
-		CandidateSkill:     4,
+		CandidateMCP:       4,
 		CandidateGuardrail: 2,
 	})
 }
@@ -115,88 +115,6 @@ func mcpCandidates(sig StackSignals, existing map[string]bool) []Candidate {
 	return sortByScore(out)
 }
 
-func skillCandidates(sig StackSignals, graph GraphSummary, existing map[string]bool) []Candidate {
-	var out []Candidate
-	add := func(c Candidate) {
-		if existing[strings.ToLower(c.Name)] || c.Name == "so" || c.Name == "superopen" {
-			return
-		}
-		if c.Body == "" {
-			c.Body = DefaultSkillBody(c.Name)
-		}
-		out = append(out, c)
-	}
-
-	if sig.HasDir("tests") || sig.HasDir("test") || sig.HasDir("__tests__") ||
-		sig.HasConfig("jest") || sig.HasConfig("pytest") || sig.HasConfig("vitest") ||
-		sig.HasManifest("go.mod") {
-		add(Candidate{
-			ID: "skill-gen-test", Kind: CandidateSkill, Name: "gen-test",
-			Title:     "Add gen-test skill for project test conventions",
-			Rationale: "Test suite or test runner config detected.",
-			Evidence:  evidenceFor(sig, "tests directory or test runner"),
-			Score:     85,
-		})
-	}
-	if sig.IsGitHub() || strings.Contains(strings.ToLower(strings.Join(sig.Deps, " ")), "github") {
-		add(Candidate{
-			ID: "skill-pr-check", Kind: CandidateSkill, Name: "pr-check",
-			Title:     "Add pr-check skill for PR review checklist",
-			Rationale: "GitHub-hosted repo — PR review workflows are common.",
-			Evidence:  evidenceFor(sig, "github remote or tooling"),
-			Score:     75,
-		})
-	}
-	if sig.IsFrontend() {
-		add(Candidate{
-			ID: "skill-frontend-design", Kind: CandidateSkill, Name: "frontend-design",
-			Title:     "Add frontend-design skill for UI work",
-			Rationale: "Frontend framework or UI directories detected.",
-			Evidence:  evidenceFor(sig, "frontend stack"),
-			Score:     80,
-		})
-	}
-	if sig.HasDep("prisma") || sig.HasDep("alembic") || sig.HasDir("migrations") ||
-		sig.HasDep("sqlalchemy") || sig.HasDep("gorm") {
-		add(Candidate{
-			ID: "skill-create-migration", Kind: CandidateSkill, Name: "create-migration",
-			Title:     "Add create-migration skill for schema changes",
-			Rationale: "ORM/migration tooling detected.",
-			Evidence:  evidenceFor(sig, "prisma/alembic/migrations"),
-			Score:     88,
-		})
-	}
-	if sig.HasDep("auth") || sig.HasDep("stripe") || sig.HasDep("passport") || sig.HasDep("jwt") {
-		add(Candidate{
-			ID: "skill-security-reviewer", Kind: CandidateSkill, Name: "security-reviewer",
-			Title:     "Add security-reviewer skill for auth/payments code",
-			Rationale: "Auth or payments dependencies detected.",
-			Evidence:  evidenceFor(sig, "auth or payments deps"),
-			Score:     92,
-		})
-	}
-	if graph.NodeCount > 500 {
-		add(Candidate{
-			ID: "skill-code-reviewer", Kind: CandidateSkill, Name: "code-reviewer",
-			Title:     "Add code-reviewer skill for large codebases",
-			Rationale: "Large graph — specialized review skill reduces wandering.",
-			Evidence:  []string{"graph nodes=" + itoa(graph.NodeCount)},
-			Score:     60,
-		})
-	}
-	// Prefer unused templates when stack is generic Go/Node without stronger signals.
-	if len(out) == 0 && (sig.HasManifest("go.mod") || sig.HasManifest("package.json")) {
-		add(Candidate{
-			ID: "skill-testing", Kind: CandidateSkill, Name: "testing",
-			Title:     "Add testing skill from project templates",
-			Rationale: "Baseline testing guidance for this stack.",
-			Evidence:  evidenceFor(sig, "go.mod or package.json"),
-			Score:     50,
-		})
-	}
-	return sortByScore(out)
-}
-
 func guardrailCandidates(sig StackSignals, existing map[string]bool) []Candidate {
 	var out []Candidate
 	if sig.HasEnvFiles && !existing["block-env-edits"] && !existing["no-secrets"] {
@@ -222,85 +140,6 @@ func guardrailCandidates(sig StackSignals, existing map[string]bool) []Candidate
 		})
 	}
 	return sortByScore(out)
-}
-
-// DefaultSkillBody returns a short SKILL.md for known catalog skills.
-func DefaultSkillBody(name string) string {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "gen-test", "testing":
-		return `# Generate tests
-
-Use when adding or updating tests for a changed file.
-
-1. Prefer existing test frameworks and helpers in the repo.
-2. Cover happy path + one failure case for new behavior.
-3. Do not skip tests to "finish faster".
-4. Run the relevant test target before claiming done.
-`
-	case "pr-check":
-		return "# PR check\n\nUse when reviewing a pull request or preparing one for review.\n\n1. Diff: run `gh pr diff` (or `git diff main...HEAD`).\n2. Checklist:\n   - Tests added for new behavior\n   - No secrets or credentials in the diff\n   - Scope stays on the requested task\n   - Conventional Commit PR title\n3. Mark each item pass/fail with a one-line reason.\n"
-	case "frontend-design":
-		return `# Frontend design
-
-Use when building or refining UI components.
-
-1. Match existing design tokens, spacing, and component patterns in this repo.
-2. Prefer accessible markup (labels, focus, contrast) over decorative complexity.
-3. Avoid generic AI aesthetics; reuse project primitives.
-4. Add or update a focused component test when behavior changes.
-`
-	case "create-migration":
-		return `# Create migration
-
-Use when changing database schema.
-
-1. Follow the project's existing migration tool and naming.
-2. Include reversible up/down steps when the tool supports them.
-3. Validate with the project's migrate/validate command before finishing.
-4. Never invent production credentials; use local/.env.example only.
-`
-	case "security-reviewer":
-		return `# Security reviewer
-
-Use when touching auth, payments, credentials, or user data.
-
-1. Check for secrets in code, logs, and fixtures.
-2. Prefer parameterized queries and existing auth helpers.
-3. Flag missing authorization checks on new endpoints.
-4. Keep diffs focused; do not expand scope into unrelated refactors.
-`
-	case "code-reviewer":
-		return "# Code reviewer\n\nUse for a focused review of a change set.\n\n1. Run `so graph query` for the touched packages before broad search.\n2. Check tests, error handling, and scope against the request.\n3. Prefer concrete file:line findings over vague advice.\n"
-	case "debugging":
-		return `# Debugging
-
-1. Reproduce the failure with the smallest command.
-2. Check recent Superopen sessions for similar failures.
-3. Prefer reading AGENTS.md and graph query over broad greps.
-4. Fix root cause; avoid drive-by refactors.
-5. Add or update a regression test when practical.
-`
-	case "create-api":
-		return "# Create API\n\nUse when adding a REST/HTTP endpoint.\n\n1. Locate the existing API router via `so graph query \"api router\"`.\n2. Match existing auth, validation, and error patterns.\n3. Add tests next to similar handlers.\n4. Update docs if the public API surface changes.\n5. Run lint/tests before finishing.\n"
-	default:
-		return "# " + name + "\n\nProject-specific skill. Prefer AGENTS.md, guardrails, and `so graph query` before broad exploration.\n"
-	}
-}
-
-func existingSkillNames(repoRoot string) map[string]bool {
-	out := map[string]bool{}
-	for _, dir := range harness.SkillsCandidates(repoRoot) {
-		ents, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range ents {
-			if e.IsDir() {
-				out[strings.ToLower(e.Name())] = true
-			}
-		}
-	}
-	return out
 }
 
 func existingMCPNames(repoRoot string, paths harness.Paths) map[string]bool {
@@ -399,18 +238,4 @@ func capByKind(in []Candidate, limits map[CandidateKind]int) []Candidate {
 		out = append(out, c)
 	}
 	return out
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(b[i:])
 }

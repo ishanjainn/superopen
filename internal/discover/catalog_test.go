@@ -42,8 +42,11 @@ func TestCatalogCandidatesNextStack(t *testing.T) {
 	if !contains(kinds[discover.CandidateMCP], "sentry") {
 		t.Fatalf("expected sentry mcp, got %v", kinds[discover.CandidateMCP])
 	}
-	if !contains(kinds[discover.CandidateSkill], "gen-test") && !contains(kinds[discover.CandidateSkill], "frontend-design") {
-		t.Fatalf("expected frontend/test skills, got %v", kinds[discover.CandidateSkill])
+	if contains(kinds[discover.CandidateSkill], "gen-test") || contains(kinds[discover.CandidateSkill], "frontend-design") || contains(kinds[discover.CandidateSkill], "pr-check") {
+		t.Fatalf("catalog must not emit template skills, got %v", kinds[discover.CandidateSkill])
+	}
+	if len(kinds[discover.CandidateSkill]) != 0 {
+		t.Fatalf("catalog must not emit skills, got %v", kinds[discover.CandidateSkill])
 	}
 	if !contains(kinds[discover.CandidateGuardrail], "block-env-edits") {
 		t.Fatalf("expected env guardrail, got %v", kinds[discover.CandidateGuardrail])
@@ -66,23 +69,6 @@ func TestCatalogCandidatesGoCLI(t *testing.T) {
 		}
 		if strings.EqualFold(c.Name, "memory") {
 			t.Fatal("must never recommend memory mcp")
-		}
-	}
-}
-
-func TestCatalogSuppressesExistingSkills(t *testing.T) {
-	dir := t.TempDir()
-	_ = os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"dependencies":{"react":"18.0.0"}}`), 0o644)
-	_ = os.MkdirAll(filepath.Join(dir, "tests"), 0o755)
-	_ = os.MkdirAll(filepath.Join(dir, ".cursor", "skills", "gen-test"), 0o755)
-	_ = os.WriteFile(filepath.Join(dir, ".cursor", "skills", "gen-test", "SKILL.md"), []byte("# gen-test\n"), 0o644)
-
-	paths := harness.Resolve(dir)
-	_ = paths.EnsureDirs()
-	cands := discover.CatalogCandidates(dir, paths, discover.DetectSignals(dir), discover.GraphSummary{})
-	for _, c := range cands {
-		if c.Name == "gen-test" {
-			t.Fatal("existing gen-test skill should be suppressed")
 		}
 	}
 }

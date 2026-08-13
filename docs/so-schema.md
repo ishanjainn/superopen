@@ -10,7 +10,7 @@ Superopen keeps shared policy compact and separates vendor-owned guidance. Runti
 | `.claude`, `.codex`, `.cursor`, `.gemini`, `.opencode`, `.github`, `.pi` | Owned by that vendor. A session may update only its own vendor tree. |
 | `.agents` | Shared opt-in only: `--shared-agents`, `--vendor agents`, or `vendors.shared_agents: true`. |
 
-`so init` and `so install` enable detected vendors plus repeatable `--vendor` flags. `so sync` refreshes enabled plumbing and never copies **session** guidance between vendors. **Init/upgrade** is the exception: project-wide skill picks from `so apply-upgrade` fan out to every enabled vendor tree, and committed `mcp:` policy is projected into shared project MCP files.
+`so init` and `so install` enable detected vendors plus repeatable `--vendor` flags. `so sync` refreshes enabled plumbing and never copies **session** guidance between vendors. **Init/upgrade** is the exception: repo-learned project skills from `so apply-upgrade` fan out to every enabled vendor tree, and committed `mcp:` policy is projected into shared project MCP files.
 
 ## Compact `.so` layout
 
@@ -61,7 +61,7 @@ mcp:
       args: ["-y", "@upstash/context7-mcp@1.0.0"]
 ```
 
-Authoritative list is `mcp.servers` (no secrets/env). `so sync` merges those entries into project-scoped vendor files for enabled agents (never under the user home directory). Extra human-added servers in `.mcp.json` are preserved. Unpinned `@latest` packages and Memory MCP are refused. After graph build, `so upgrade-brief` lists automation candidates from stack signals; the assistant picks 1–2 MCP and 1–2 skills in upgrade JSON; `so apply-upgrade` writes them as committed policy. MCP omitted from upgrade stays for the next refresh (not a recommendation type). High-signal skills/guardrails omitted from upgrade may enqueue as ordinary pending recommendations.
+Authoritative list is `mcp.servers` (no secrets/env). `so sync` merges those entries into project-scoped vendor files for enabled agents (never under the user home directory). Extra human-added servers in `.mcp.json` are preserved. Unpinned `@latest` packages and Memory MCP are refused. After graph build, `so upgrade-brief` lists MCP and guardrail candidates from stack signals; the assistant picks 1–2 MCP in upgrade JSON. Skills are included only when distilled from this repo (not catalog templates); `so apply-upgrade` writes those as committed policy and fans them out to enabled vendor trees. MCP omitted from upgrade stays for the next refresh (not a recommendation type). High-signal guardrails omitted from upgrade may enqueue as ordinary pending recommendations.
 
 Fresh configuration does not advertise an API provider or model. Reviews use the next same-vendor live agent (`so review-brief` / `so apply-review`) first, then a sealed coding-agent CLI (`claude`, `codex`, `opencode`, or `pi` on PATH) after a true SessionEnd or idle. Heuristics do not complete a review under `evals.backend: auto`. The optional `llm:` section is written only when a maintainer explicitly configures an API or compatible local backend.
 

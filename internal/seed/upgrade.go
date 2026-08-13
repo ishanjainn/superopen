@@ -77,7 +77,7 @@ Return ONLY valid JSON (no markdown fences) with this shape:
     {"name": "context7", "command": "npx", "args": ["-y", "@upstash/context7-mcp@1.0.0"]}
   ],
   "skills": [
-    {"name": "gen-test", "body": "# gen-test\n\n..."}
+    {"name": "short-kebab-name", "body": "# Title\n\nRepo-specific workflow distilled from this profile.\n"}
   ]
 }
 
@@ -88,10 +88,11 @@ Rules for quality:
 - Include baseline: no-secrets (block), run-tests (warn), avoid-unrelated (warn).
 - checks should include stack-appropriate ones (e.g. go_build, race_patterns, sql_parameterized, pr_title_convention).
 - architecture_md and conventions_md should be useful to a coding agent in <4000 chars each.
-- From "## Automation candidates", pick the top 1-2 MCP servers and top 1-2 skills that fit this repo. Omit empty arrays.
+- From "## Automation candidates", pick the top 1-2 MCP servers that fit this repo. Omit empty arrays.
 - MCP entries must use pinned package versions (never @latest). No env blocks or secrets.
 - Never recommend Memory MCP — Superopen memory already covers cross-session recall.
-- Skill bodies should be short SKILL.md markdown. Prefer candidate names from the catalog.
+- Do not emit catalog template skills (gen-test, pr-check, frontend-design, create-migration, and similar). Include skills only when the profile reveals a concrete repo-specific workflow (exact commands, paths, review steps). Omit the array otherwise.
+- Skill bodies must be short SKILL.md markdown distilled from this repo — never a generic template.
 - Include catalog guardrail candidates (block-env-edits, block-lockfile-edits) when their evidence matches.
 `
 
@@ -203,8 +204,8 @@ func buildUpgradePrompt(p discover.Profile) string {
 		}
 	}
 	if len(p.Candidates) > 0 {
-		b.WriteString("\n## Automation candidates (pick top 1-2 MCP and 1-2 skills)\n")
-		b.WriteString("Do not invent MCP packages outside this list unless evidence is overwhelming. Never pick Memory MCP.\n")
+		b.WriteString("\n## Automation candidates (pick top 1-2 MCP)\n")
+		b.WriteString("Do not invent MCP packages outside this list unless evidence is overwhelming. Never pick Memory MCP. Do not add generic template skills.\n")
 		for _, c := range p.Candidates {
 			b.WriteString(fmt.Sprintf("- [%s] id=%s name=%s score=%d — %s\n", c.Kind, c.ID, c.Name, c.Score, c.Title))
 			if c.Rationale != "" {
@@ -414,7 +415,7 @@ func applyAutomationPicks(paths harness.Paths, out llmHarnessOut) (map[string]bo
 		}
 		body := strings.TrimSpace(sk.Body)
 		if body == "" {
-			body = discover.DefaultSkillBody(name)
+			continue
 		}
 		for _, vendor := range vendors {
 			_ = nativedocs.UpsertSkill(paths, name, body, nativedocs.WriteOpts{Vendor: vendor})
@@ -462,47 +463,17 @@ func enabledVendors(cfg config.Config) []string {
 	return out
 }
 
-// EnqueueLeftoverCandidates queues high-signal skill/guardrail candidates that
+// EnqueueLeftoverCandidates queues high-signal guardrail candidates that
 // the upgrade JSON omitted. MCP leftovers stay for the next /so init refresh.
+// Catalog template skills are not queued.
 func EnqueueLeftoverCandidates(paths harness.Paths, p discover.Profile, pickedMCP, pickedSkills map[string]bool) error {
 	_ = pickedMCP // MCP is not a recommendation type; next upgrade-brief surfaces them.
+	_ = pickedSkills
 	now := time.Now().UTC()
 	var draft []recommend.Recommendation
-	skillCount := 0
 	guardCount := 0
 	for _, c := range p.Candidates {
 		switch c.Kind {
-		case discover.CandidateSkill:
-			if pickedSkills[strings.ToLower(c.Name)] || skillCount >= 2 {
-				continue
-			}
-			vendors := enabledVendors(mustLoadConfig(paths))
-			if len(vendors) == 0 {
-				continue
-			}
-			vendor := vendors[0]
-			body := c.Body
-			if body == "" {
-				body = discover.DefaultSkillBody(c.Name)
-			}
-			path := filepath.Join(harness.SkillsDirForVendor(paths.RepoRoot, vendor), c.Name, "SKILL.md")
-			draft = append(draft, recommend.Recommendation{
-				ID:           fmt.Sprintf("rec_setup_%d_%s", now.UnixNano(), c.Name),
-				Fingerprint:  recommend.FingerprintKey("skill", path, c.Name),
-				SessionID:    "_system",
-				Type:         "skill",
-				Title:        c.Title,
-				Rationale:    c.Rationale,
-				Why:          c.Rationale,
-				Evidence:     c.Evidence,
-				ProposedPath: path,
-				ProposedBody: body,
-				Status:       "pending",
-				CreatedAt:    now,
-				Vendor:       vendor,
-				ChangeKind:   "create",
-			})
-			skillCount++
 		case discover.CandidateGuardrail:
 			if guardCount >= 2 {
 				continue

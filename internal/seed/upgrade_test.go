@@ -89,7 +89,7 @@ func TestApplyUpgradeJSONMCPAndSkills(t *testing.T) {
     {"name": "playwright", "command": "npx", "args": ["-y", "@playwright/mcp@0.0.10"]}
   ],
   "skills": [
-    {"name": "gen-test", "body": "# Generate tests\n\nWrite focused tests.\n"}
+    {"name": "web-vitest", "body": "# Web tests\n\nThis repo uses tests/. Run npm test after UI changes.\n"}
   ]
 }`
 	if err := seed.ApplyUpgradeJSON(paths, p, raw); err != nil {
@@ -115,9 +115,9 @@ func TestApplyUpgradeJSONMCPAndSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, vendor := range []string{".claude", ".cursor"} {
-		skill := filepath.Join(dir, vendor, "skills", "gen-test", "SKILL.md")
+		skill := filepath.Join(dir, vendor, "skills", "web-vitest", "SKILL.md")
 		if _, err := os.Stat(skill); err != nil {
-			t.Fatalf("expected skill at %s: %v", skill, err)
+			t.Fatalf("expected repo-learned skill at %s: %v", skill, err)
 		}
 	}
 
@@ -132,7 +132,7 @@ func TestApplyUpgradeJSONMCPAndSkills(t *testing.T) {
   ]},
   "evals": {"checks": ["tests"]},
   "mcp": [{"name": "sentry", "command": "npx", "args": ["-y", "@sentry/mcp-server@0.1.0"]}],
-  "skills": [{"name": "gen-test", "body": "# Generate tests\n\nUpdated.\n"}]
+  "skills": [{"name": "web-vitest", "body": "# Web tests\n\nUpdated from this repo.\n"}]
 }`
 	if err := seed.ApplyUpgradeJSON(paths, p, raw2); err != nil {
 		t.Fatal(err)
@@ -147,7 +147,35 @@ func TestApplyUpgradeJSONMCPAndSkills(t *testing.T) {
 	}
 }
 
-func TestEnqueueLeftoverSkillCandidates(t *testing.T) {
+func TestApplyUpgradeJSONSkipsEmptySkillBody(t *testing.T) {
+	dir := t.TempDir()
+	paths := harness.Resolve(dir)
+	_ = paths.EnsureDirs()
+	cfg := config.Default()
+	cfg.Vendors.Enabled = []string{"cursor"}
+	if err := config.Save(paths.Config, cfg); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{
+  "architecture_md": "# A",
+  "conventions_md": "# C",
+  "guardrails": {"rules": [
+    {"id": "no-secrets", "description": "Never commit secrets", "severity": "block"},
+    {"id": "run-tests", "description": "Run tests", "severity": "warn"},
+    {"id": "avoid-unrelated", "description": "Keep diffs focused", "severity": "warn"}
+  ]},
+  "evals": {"checks": ["tests"]},
+  "skills": [{"name": "gen-test"}]
+}`
+	if err := seed.ApplyUpgradeJSON(paths, discover.Profile{Stack: "Go"}, raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".cursor", "skills", "gen-test", "SKILL.md")); !os.IsNotExist(err) {
+		t.Fatal("empty skill body must not write a catalog template")
+	}
+}
+
+func TestEnqueueLeftoverDoesNotQueueSkills(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"dependencies":{"react":"18.0.0","stripe":"14.0.0"}}`), 0o644)
 	_ = os.MkdirAll(filepath.Join(dir, "tests"), 0o755)
@@ -186,7 +214,7 @@ func TestEnqueueLeftoverSkillCandidates(t *testing.T) {
 			sawSkill = true
 		}
 	}
-	if !sawSkill {
-		t.Fatalf("expected leftover skill recs, got %#v", pending)
+	if sawSkill {
+		t.Fatalf("must not enqueue catalog skill templates, got %#v", pending)
 	}
 }
