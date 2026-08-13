@@ -13,6 +13,8 @@ import (
 func TestTouchIfStaleUsesOneDescribedStateFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "cache"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
 	repo := t.TempDir()
 

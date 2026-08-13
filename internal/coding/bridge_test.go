@@ -23,6 +23,8 @@ func writeClaudeManifest(t *testing.T, home, soBin string) {
 func TestInstallRemovesNetworkTelemetryConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, ".config"))
 	cfg := filepath.Join(home, ".config", "superopen", "config.env")
 	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
 		t.Fatal(err)
@@ -53,6 +55,7 @@ func TestInstallRemovesNetworkTelemetryConfig(t *testing.T) {
 func TestStatusClaudeCodeDetectsStaleBinaryPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	// A hooks.json pointing at a binary that doesn't exist (e.g. a Homebrew
 	// `so` that was later uninstalled in favor of a different build) must not
@@ -68,6 +71,7 @@ func TestStatusClaudeCodeDetectsStaleBinaryPath(t *testing.T) {
 func TestStatusClaudeCodeOKWithValidBinaryPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	realBin := filepath.Join(home, "bin", "so")
 	if err := os.MkdirAll(filepath.Dir(realBin), 0o755); err != nil {
@@ -87,6 +91,7 @@ func TestStatusClaudeCodeOKWithValidBinaryPath(t *testing.T) {
 func TestStatusClaudeCodeMissingManifest(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	got := Status(home, []string{"claude-code"})
 	if got["claude-code"] {

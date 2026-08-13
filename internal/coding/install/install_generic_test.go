@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -11,12 +12,17 @@ import (
 func TestInstallOpenCodeAndPiUseHostDiscoveryPaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	// resolveSoBin looks on PATH — plant a fake so.
 	binDir := filepath.Join(home, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	so := filepath.Join(binDir, "so")
+	soName := "so"
+	if runtime.GOOS == "windows" {
+		soName += ".exe"
+	}
+	so := filepath.Join(binDir, soName)
 	if err := os.WriteFile(so, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +75,7 @@ func TestInstallOpenCodeAndPiUseHostDiscoveryPaths(t *testing.T) {
 func TestInstallGeminiMergesSettingsAndUsesCurrentEvents(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	path := filepath.Join(home, ".gemini", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -108,13 +115,18 @@ func TestInstallGeminiMergesSettingsAndUsesCurrentEvents(t *testing.T) {
 func TestGenericVendorHonorsConfigOverrides(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
 	t.Setenv("COPILOT_HOME", filepath.Join(home, "copilot-home"))
 	binDir := filepath.Join(home, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	so := filepath.Join(binDir, "so")
+	soName := "so"
+	if runtime.GOOS == "windows" {
+		soName += ".exe"
+	}
+	so := filepath.Join(binDir, soName)
 	if err := os.WriteFile(so, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

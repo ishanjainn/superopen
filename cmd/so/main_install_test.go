@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -13,13 +14,18 @@ func TestInstallCommandRegistersCodexHooks(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"so", "codex", "graphify"} {
+	for _, name := range []string{"so", "graphify"} {
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
 		path := filepath.Join(binDir, name)
 		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
 	t.Setenv("PATH", binDir)
 
 	cmd := cmdInstall()

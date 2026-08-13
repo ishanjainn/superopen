@@ -9,6 +9,7 @@ import (
 func TestResolveForVendor_ClaudeCodeReadsOAuthEmail(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	const wantEmail = "username@example.com"
 	body := `{"oauthAccount":{"accountUuid":"abc","emailAddress":"` + wantEmail + `"}}`
 	if err := os.WriteFile(filepath.Join(tmp, ".claude.json"), []byte(body), 0o600); err != nil {
@@ -25,7 +26,9 @@ func TestResolveForVendor_ClaudeCodeReadsOAuthEmail(t *testing.T) {
 }
 
 func TestResolveForVendor_MissingFileReturnsEmpty(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	if got := ResolveForVendor("claude-code"); got != "" {
 		t.Fatalf("expected empty when ~/.claude.json missing, got %q", got)
 	}
@@ -37,6 +40,7 @@ func TestResolveForVendor_MissingFileReturnsEmpty(t *testing.T) {
 func TestResolveForVendor_MalformedJSONReturnsEmpty(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	if err := os.WriteFile(filepath.Join(tmp, ".claude.json"), []byte("{ not-json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -48,6 +52,7 @@ func TestResolveForVendor_MalformedJSONReturnsEmpty(t *testing.T) {
 func TestResolveForVendor_CodexExtractsEmailFromJWT(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	codexHome := filepath.Join(tmp, "custom-codex")
 	t.Setenv("CODEX_HOME", codexHome)
 	if err := os.MkdirAll(codexHome, 0o700); err != nil {

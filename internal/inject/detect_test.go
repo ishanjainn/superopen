@@ -12,6 +12,7 @@ func TestDetectVendorsFindsCodexFromNativeHome(t *testing.T) {
 	root := t.TempDir()
 	emptyPath := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("PATH", emptyPath)
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatal(err)
@@ -30,8 +31,12 @@ func TestDetectVendorsFindsCursorFromNativeHome(t *testing.T) {
 	home := t.TempDir()
 	root := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("PATH", t.TempDir())
-	if err := os.MkdirAll(filepath.Join(home, "Library", "Application Support", "Cursor"), 0o755); err != nil {
+	// ~/.cursor is the cross-platform native agent home. OS-specific GUI
+	// locations are covered separately by TestVendorInstallCandidates… so this
+	// detection test must not assume that the runner itself is macOS.
+	if err := os.MkdirAll(filepath.Join(home, ".cursor"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 

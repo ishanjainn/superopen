@@ -71,6 +71,8 @@ func withIsolatedCache(t *testing.T) {
 	if home := os.Getenv("HOME"); home != "" {
 		t.Setenv("HOME", dir)
 	}
+	t.Setenv("USERPROFILE", dir)
+	t.Setenv("LOCALAPPDATA", dir)
 }
 
 // input builds a normalize.Input the way the hook runner does.

@@ -67,6 +67,8 @@ func withIsolatedCache(t *testing.T) {
 	if home := os.Getenv("HOME"); home != "" {
 		t.Setenv("HOME", dir)
 	}
+	t.Setenv("USERPROFILE", dir)
+	t.Setenv("LOCALAPPDATA", dir)
 }
 
 func inputBuilder(t *testing.T, em *recordingEmitter) func(event string, payload any) normalize.Input {

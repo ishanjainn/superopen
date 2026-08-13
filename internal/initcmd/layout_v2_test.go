@@ -17,7 +17,9 @@ func TestFreshInitCreatesOnlyDescribedV2HarnessFiles(t *testing.T) {
 	repo := t.TempDir()
 	emptyPath := t.TempDir()
 	t.Setenv("PATH", emptyPath)
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 
 	_, err := initcmd.Run(initcmd.Options{

@@ -112,6 +112,7 @@ func TestUnregister(t *testing.T) {
 func TestClaimPendingSkipsTopLevelCursorChat(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	parent := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	child := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 	// child looks like a parent chat (own transcripts folder)
@@ -131,6 +132,7 @@ func TestClaimPendingSkipsTopLevelCursorChat(t *testing.T) {
 func TestDiscoverCursorParent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	// On darwin UserHomeDir uses home; ensure layout exists
 	parent := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	child := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"

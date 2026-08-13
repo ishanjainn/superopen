@@ -36,8 +36,12 @@ func TestQueryRemovesGraphifyRepositoryCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cacheHome := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	t.Setenv("LOCALAPPDATA", cacheHome)
 	if _, err := Query(repo, "anything"); err != nil {
 		t.Fatal(err)
 	}

@@ -76,6 +76,7 @@ func TestLookupPiSessionNameMissingInfoFallsThrough(t *testing.T) {
 func TestLookupOpenCodeTitleFromJSON(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	// UserHomeDir reads HOME on Unix.
 	dir := filepath.Join(home, ".opencode", "sessions")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -99,6 +100,7 @@ func TestLookupOpenCodeTitleFromJSON(t *testing.T) {
 func TestLookupOpenCodeTitleIgnoresStubID(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	dir := filepath.Join(home, ".opencode", "sessions")
 	_ = os.MkdirAll(dir, 0o755)
 	id := "ses_stub"
@@ -111,6 +113,7 @@ func TestLookupOpenCodeTitleIgnoresStubID(t *testing.T) {
 func TestLookupOpenCodeTitleIgnoresNewSessionStub(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	dir := filepath.Join(home, ".opencode", "sessions")
 	_ = os.MkdirAll(dir, 0o755)
 	id := "ses_newstub"
@@ -124,6 +127,7 @@ func TestLookupOpenCodeTitleIgnoresNewSessionStub(t *testing.T) {
 func TestEnsureTitleRefreshesOpenCodePlaceholder(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	dir := filepath.Join(home, ".opencode", "sessions")
 	_ = os.MkdirAll(dir, 0o755)
 	id := "ses_refresh"

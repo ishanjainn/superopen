@@ -32,6 +32,9 @@ func TestWriteSkillBundle_ProjectVendors(t *testing.T) {
 
 func TestWriteSkillBundle_GlobalVendors(t *testing.T) {
 	home := t.TempDir()
+	// The explicit home argument is the install target under test. Do not let a
+	// runner-level XDG override redirect OpenCode writes outside the fixture.
+	t.Setenv("XDG_CONFIG_HOME", "")
 	body := "# /so\nglobal\n"
 	written, err := writeSkillBundleFor(home, body, []string{"opencode", "copilot-cli", "pi", "gemini"}, false, true)
 	if err != nil {
@@ -55,7 +58,10 @@ func TestWriteSkillBundle_GlobalVendors(t *testing.T) {
 
 func TestRemoveSkillBundle_RemovesNewVendors(t *testing.T) {
 	root := t.TempDir()
-	if _, err := writeSkillBundle(root, "x", false); err != nil {
+	// Installation detection intentionally depends on the host. Removal tests
+	// instead seed every project integration explicitly so a clean CI runner and
+	// a developer machine exercise exactly the same files.
+	if _, err := writeSkillBundleFor(root, "x", []string{"gemini", "opencode", "copilot-cli", "pi"}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	removed := removeSkillBundle(root, false)

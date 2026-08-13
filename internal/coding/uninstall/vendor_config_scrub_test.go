@@ -174,6 +174,7 @@ multi_agent = true
 func TestStripClaudeMarketplaceJSONRemovesOwned(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 
 	pluginDir := filepath.Join(dir, ".claude", "plugins")
 	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
@@ -222,6 +223,7 @@ func TestStripClaudeMarketplaceJSONNoEntry(t *testing.T) {
 	// (and therefore must report touched="").
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 	pluginDir := filepath.Join(dir, ".claude", "plugins")
 	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -248,6 +250,7 @@ func TestStripClaudeMarketplaceJSONNoEntry(t *testing.T) {
 func TestStripClaudeMarketplaceJSONMissingFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 	touched, err := stripClaudeMarketplaceJSON(false)
 	if err != nil {
 		t.Errorf("missing file should be a no-op, got error: %v", err)
@@ -260,6 +263,7 @@ func TestStripClaudeMarketplaceJSONMissingFile(t *testing.T) {
 func TestStripClaudeMarketplaceJSONDryRun(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 	pluginDir := filepath.Join(dir, ".claude", "plugins")
 	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)

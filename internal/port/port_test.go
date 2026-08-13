@@ -14,6 +14,7 @@ import (
 func TestClaudeRoundTripViaSOHub(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	cwd := filepath.Join(home, "proj")
 	_ = os.MkdirAll(cwd, 0o755)
 
@@ -100,6 +101,7 @@ func TestRemapCWD(t *testing.T) {
 func TestCodexParseExport(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	sessDir := filepath.Join(home, ".codex", "sessions", "2026", "01", "01")
 	_ = os.MkdirAll(sessDir, 0o755)
@@ -141,6 +143,7 @@ func TestCodexParseExport(t *testing.T) {
 func TestCodexParseRecoversWorkingState(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	sessDir := filepath.Join(home, ".codex", "sessions", "2026", "01", "02")
 	_ = os.MkdirAll(sessDir, 0o755)
@@ -197,6 +200,7 @@ func TestCodexParseRecoversWorkingState(t *testing.T) {
 func TestCodexParseRepeatedCommandKeepsLatestExitCode(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	sessDir := filepath.Join(home, ".codex", "sessions", "2026", "01", "03")
 	_ = os.MkdirAll(sessDir, 0o755)
@@ -252,6 +256,7 @@ func TestCodexParseRepeatedCommandKeepsLatestExitCode(t *testing.T) {
 func TestCodexParseInterleavedOutputsAttachExitByCallID(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
 	sessDir := filepath.Join(home, ".codex", "sessions", "2026", "01", "04")
 	_ = os.MkdirAll(sessDir, 0o755)
@@ -313,6 +318,7 @@ func TestCodexParseInterleavedOutputsAttachExitByCallID(t *testing.T) {
 func TestClaudeParseRecoversWorkingStateFromToolUse(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	cwd := filepath.Join(home, "proj")
 	_ = os.MkdirAll(cwd, 0o755)
 	encoded := strings.ReplaceAll(cwd, string(os.PathSeparator), "-")
