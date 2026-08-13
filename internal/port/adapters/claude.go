@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -189,12 +190,20 @@ func (ClaudeExport) Detect() (bool, error) {
 }
 
 func encodeClaudeProjectDir(cwd string) string {
-	// Claude encodes absolute paths by replacing / with -
-	cwd = filepath.Clean(cwd)
-	if cwd == "" {
+	// Claude encodes absolute paths into one directory component. Normalize both
+	// Windows separators and remove the drive separator there because ':' is not
+	// a valid filename character. Unix keeps legal colons and backslashes intact.
+	if strings.TrimSpace(cwd) == "" {
 		cwd = home()
 	}
-	return strings.ReplaceAll(cwd, string(os.PathSeparator), "-")
+	return encodeClaudeProjectDirForOS(filepath.Clean(cwd), runtime.GOOS)
+}
+
+func encodeClaudeProjectDirForOS(cwd, goos string) string {
+	if goos == "windows" {
+		return strings.NewReplacer("/", "-", `\`, "-", ":", "-").Replace(cwd)
+	}
+	return strings.ReplaceAll(cwd, "/", "-")
 }
 
 func (ClaudeExport) Write(session port.PortableSession, opts port.WriteOptions) (port.ExportResult, error) {

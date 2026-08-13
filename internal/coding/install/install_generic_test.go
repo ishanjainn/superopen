@@ -13,6 +13,7 @@ func TestInstallOpenCodeAndPiUseHostDiscoveryPaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	// resolveSoBin looks on PATH — plant a fake so.
 	binDir := filepath.Join(home, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {

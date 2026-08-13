@@ -24,6 +24,7 @@ func TestInstallRemovesNetworkTelemetryConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("APPDATA", filepath.Join(home, ".config"))
 	cfg := filepath.Join(home, ".config", "superopen", "config.env")
 	if err := os.MkdirAll(filepath.Dir(cfg), 0o755); err != nil {
