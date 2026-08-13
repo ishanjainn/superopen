@@ -1,13 +1,12 @@
-import { mkdirSync, writeFileSync } from "fs";
+import { createHash } from "crypto";
+import { readFileSync } from "fs";
 import { fileExists, readJSONFile, readText } from "./nodeio";
-import { join } from "path";
-import { soPath } from "./root";
+import { isAbsolute, join } from "path";
+import { repoRoot, soPath } from "./root";
 import {
   composeLessonText,
   parsePreferenceItems,
   parseProjectSections,
-  serializePreferences,
-  serializeProjects,
   type MemoryLine,
   type MemoryVerb,
   type ProjectSection,
@@ -40,6 +39,21 @@ export type MemoryPattern = {
   status: string;
   first_observed_at?: string;
   last_observed_at?: string;
+	scope?: "vendor" | "shared";
+	applicability?: string;
+	paths?: string[];
+	symbols?: string[];
+	error_signatures?: string[];
+	retrieval_count?: number;
+	helpful_count?: number;
+	incorrect_count?: number;
+	contradiction_count?: number;
+	last_retrieved_at?: string;
+	last_verified_at?: string;
+	status_reason?: string;
+	source_sha256?: string;
+	guidance_sha256?: string;
+	freshness?: "current" | "stale" | "unanchored";
 };
 
 type MemoryState = {
@@ -66,40 +80,26 @@ function loadState(): MemoryState {
 	};
 }
 
-function saveState(state: MemoryState) {
-	ensureMemoryDirs();
-	writeFileSync(statePath(), JSON.stringify(state, null, 2) + "\n", "utf8");
-}
-
-function writeLessons(lessons: Lesson[]) {
-  ensureMemoryDirs();
-	const state = loadState(); state.lessons = lessons; saveState(state);
-}
-
-function ensureMemoryDirs() {
-  const dir = soPath("memory");
-  if (!fileExists(dir)) mkdirSync(dir, { recursive: true });
-}
-
 export function listLessons(): Lesson[] {
-  ensureMemoryDirs();
 	return loadState().lessons || [];
 }
 
 export function listPatterns(): MemoryPattern[] {
-  return loadState().patterns || [];
-}
-
-export function deleteLessonLocal(id: string): void {
-  writeLessons(listLessons().filter((l) => l.id !== id));
+	return (loadState().patterns || []).map((pattern) => {
+		const expected = pattern.status === "applied" && pattern.guidance_sha256 ? pattern.guidance_sha256 : pattern.source_sha256;
+		if (!expected) return { ...pattern, freshness: "unanchored" };
+		const target = pattern.target_path || pattern.paths?.[0];
+		if (!target) return { ...pattern, freshness: "stale" };
+		try {
+			const path = isAbsolute(target) ? target : join(repoRoot(), target);
+			const actual = createHash("sha256").update(readFileSync(path)).digest("hex");
+			return { ...pattern, freshness: actual === expected ? "current" : "stale" };
+		} catch { return { ...pattern, freshness: "stale" }; }
+	});
 }
 
 export function listPreferenceItems(): MemoryLine[] {
   return parsePreferenceItems(readMarkdown("preferences.md"));
-}
-
-function savePreferenceItems(items: MemoryLine[]): void {
-  writeMarkdown("preferences.md", serializePreferences(items));
 }
 
 export function upsertPreferenceItem(input: {
@@ -122,22 +122,16 @@ export function upsertPreferenceItem(input: {
       text,
     });
   }
-  savePreferenceItems(items);
   return items;
 }
 
 export function deletePreferenceItem(id: string): MemoryLine[] {
   const items = listPreferenceItems().filter((i) => i.id !== id);
-  savePreferenceItems(items);
   return items;
 }
 
 export function listProjectSections(): ProjectSection[] {
   return parseProjectSections(readMarkdown("projects.md"));
-}
-
-function saveProjectSections(sections: ProjectSection[]): void {
-  writeMarkdown("projects.md", serializeProjects(sections));
 }
 
 export function upsertProjectItem(input: {
@@ -163,7 +157,6 @@ export function upsertProjectItem(input: {
       text,
     });
   }
-  saveProjectSections(sections);
   return sections;
 }
 
@@ -172,7 +165,6 @@ export function deleteProjectItem(sectionId: string, id: string): ProjectSection
   const section = sections.find((s) => s.id === sectionId);
   if (!section) throw new Error("section not found");
   section.items = section.items.filter((i) => i.id !== id);
-  saveProjectSections(sections);
   return sections;
 }
 
@@ -187,13 +179,6 @@ export function readMarkdown(name: string): string {
 	if (name === "preferences.md") return state.preferences || "";
 	if (name === "projects.md") return state.projects || "";
 	return "";
-}
-
-export function writeMarkdown(name: string, body: string) {
-	const state = loadState();
-	if (name === "preferences.md") state.preferences = body;
-	if (name === "projects.md") state.projects = body;
-	saveState(state);
 }
 
 export function isStubMarkdown(content: string): boolean {

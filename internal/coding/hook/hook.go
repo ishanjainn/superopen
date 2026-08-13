@@ -16,6 +16,7 @@ package hook
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,6 +39,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/coding/normalize"
 	"github.com/ishanjainn/superopen/internal/coding/sessionstate"
 	"github.com/ishanjainn/superopen/internal/codingotlp"
+	"github.com/ishanjainn/superopen/internal/redact"
 	"github.com/ishanjainn/superopen/internal/session/agentlinks"
 	"github.com/spf13/cobra"
 )
@@ -121,7 +123,7 @@ func run(cmd *cobra.Command, vendor, event string) (rerr error) {
 	// it has zero cost when the env var is unset.
 	debugDir := strings.TrimSpace(os.Getenv("SUPEROPEN_DEBUG_PAYLOAD_DIR"))
 	if debugDir != "" {
-		_ = teePayload(debugDir, vendor, event, payload)
+		_ = teePayload(debugDir, vendor, event, redact.JSON(payload))
 	}
 
 	// Host-mismatch guard.
@@ -188,6 +190,10 @@ func run(cmd *cobra.Command, vendor, event string) (rerr error) {
 	// follow-up events that lack an email field in their payload
 	// still emit consistently-labeled spans.
 	probe := peekContext(payload)
+	if probe.TurnID == "" && strings.TrimSpace(probe.Prompt) != "" {
+		sum := sha256.Sum256([]byte(firstNonEmpty(probe.SessionID, probe.ConversationID) + "\x00" + probe.Prompt))
+		probe.TurnID = fmt.Sprintf("turn_%x", sum[:8])
+	}
 	// Prefer the stable chat-thread id when the vendor exposes one
 	// (Cursor conversation_id). session_id can change per process while
 	// the user stays in the same chat - using conversation keeps one
@@ -446,10 +452,24 @@ func run(cmd *cobra.Command, vendor, event string) (rerr error) {
 		}
 	}
 
+	// Sanitize the Superopen-owned copy before adapters can place prompt or
+	// tool content in their OS caches. The host has already received the
+	// original payload, so this does not alter the user's request.
+	capturedPayload := redact.JSON(payload)
+	if probe.TurnID != "" {
+		var captured map[string]any
+		if json.Unmarshal(capturedPayload, &captured) == nil {
+			captured["generation_id"] = probe.TurnID
+			if _, exists := captured["turn_id"]; !exists {
+				captured["turn_id"] = probe.TurnID
+			}
+			capturedPayload, _ = json.Marshal(captured)
+		}
+	}
 	if err := adapter.Handle(ctx, normalize.Input{
 		Vendor:         adapter.Vendor(),
 		Event:          event,
-		Payload:        payload,
+		Payload:        capturedPayload,
 		ContentCapture: "full",
 		Emit:           emit,
 	}); err != nil {
@@ -461,6 +481,7 @@ func run(cmd *cobra.Command, vendor, event string) (rerr error) {
 	if cwd == "" {
 		cwd = cached.CWD
 	}
+	maybeInjectDynamicMemory(adapter.Vendor(), event, sessionID, cwd, probe, cached, emit)
 	maybeInjectMemory(adapter.Vendor(), event, sessionID, cwd)
 	maybeHarvestOnSessionEnd(adapter.Vendor(), event, sessionID, cwd)
 
@@ -663,6 +684,10 @@ type peekedContext struct {
 	PermissionMode       string
 	Model                string
 	IsBackgroundAgent    bool
+	Prompt               string
+	TransformedPrompt    string
+	TurnID               string
+	ToolPath             string
 }
 
 // peekContext scans a hook payload for session id, user identity,
@@ -741,6 +766,23 @@ func peekContext(payload []byte) peekedContext {
 		"approval_mode", "approvalMode",
 	)
 	out.Model = pickString("model", "request_model", "requestModel")
+	out.Prompt = pickString("prompt", "message", "text")
+	out.TransformedPrompt = pickString("transformedPrompt", "transformed_prompt")
+	out.TurnID = pickString("turn_id", "turnId", "generation_id", "generationId", "message_id", "messageId")
+	out.ToolPath = pickString("file_path", "filePath", "path")
+	for _, key := range []string{"tool_input", "toolInput", "args"} {
+		if out.ToolPath != "" {
+			break
+		}
+		if nested, ok := probe[key].(map[string]any); ok {
+			for _, pathKey := range []string{"file_path", "filePath", "path", "notebook_path"} {
+				if value, ok := nested[pathKey].(string); ok && strings.TrimSpace(value) != "" {
+					out.ToolPath = strings.TrimSpace(value)
+					break
+				}
+			}
+		}
+	}
 	if v, ok := probe["is_background_agent"]; ok {
 		if b, ok := v.(bool); ok {
 			out.IsBackgroundAgent = b

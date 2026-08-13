@@ -332,6 +332,13 @@ type reviewerFinding struct {
 	Verified         bool     `json:"verified"`
 	ExplicitWorkflow bool     `json:"explicit_workflow"`
 	Evidence         []string `json:"evidence"`
+	EventIDs         []string `json:"event_ids"`
+	Keywords         []string `json:"keywords"`
+	Paths            []string `json:"paths"`
+	Symbols          []string `json:"symbols"`
+	ErrorSignatures  []string `json:"error_signatures"`
+	Applicability    string   `json:"applicability"`
+	WorkflowShape    string   `json:"workflow_shape"`
 	Title            string   `json:"title"`
 	Rationale        string   `json:"rationale"`
 	ProposedBody     string   `json:"proposed_body"`
@@ -383,7 +390,16 @@ func (r reviewerResult) toFindings(paths harness.Paths, vendor string, sessionVe
 		}
 		finding := newFinding(paths, vendor, item.Kind, item.ChangeKind, item.TargetType, path, item.Summary,
 			clamp01(item.Confidence), item.Verified || sessionVerified, item.ExplicitWorkflow,
-			compactEvidence(item.Evidence), nil)
+			compactEvidence(item.Evidence), compactEvidence(item.EventIDs))
+		finding.Keywords = compactEvidence(item.Keywords)
+		finding.Paths = compactEvidence(item.Paths)
+		finding.Symbols = compactEvidence(item.Symbols)
+		finding.ErrorSignatures = compactEvidence(item.ErrorSignatures)
+		finding.Applicability = truncateText(item.Applicability, 240)
+		if item.WorkflowShape != "" {
+			finding.Fingerprint = findingFingerprint(vendor, item.Kind, item.ChangeKind, item.TargetType, path,
+				item.WorkflowShape, finding.Paths, finding.Symbols, finding.ErrorSignatures)
+		}
 		findings = append(findings, finding)
 		if strings.TrimSpace(item.ProposedBody) == "" || item.ChangeKind == "remove" || item.ChangeKind == "restructure" || item.TargetType == "memory" || item.Kind == "product_gap" {
 			continue
@@ -395,6 +411,19 @@ func (r reviewerResult) toFindings(paths harness.Paths, vendor string, sessionVe
 		})
 	}
 	return findings, drafts
+}
+
+func findingFingerprint(vendor, kind, changeKind, targetType, targetPath, workflow string, paths, symbols, errors []string) string {
+	normalize := func(values []string) string {
+		for i := range values {
+			values[i] = normalizeSummary(filepath.ToSlash(values[i]))
+		}
+		sort.Strings(values)
+		return strings.Join(values, ",")
+	}
+	key := strings.Join([]string{vendor, kind, changeKind, targetType, filepath.ToSlash(targetPath), normalizeSummary(workflow), normalize(append([]string(nil), paths...)), normalize(append([]string(nil), symbols...)), normalize(append([]string(nil), errors...))}, "|")
+	sum := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("pattern_%x", sum[:10])
 }
 
 func allowedFindingKind(value string) bool {
@@ -621,7 +650,7 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, spans []trace
 			truncateText(reviewText(spans), 5000), currentGuidance(paths, vendor, 5000))
 		out, err := completer.Complete(
 			`Review one coding-agent session and return JSON only:
-{"exploration":0,"scope":0,"wandering":0,"verification":0,"note":"","findings":[{"kind":"correction|workflow|failure|success|guidance_gap|simplification|product_gap","change_kind":"create|update|remove|restructure","summary":"","target_type":"skill|rules|docs|memory|guardrail|eval","target_path":"repository-relative path","confidence":0,"verified":false,"explicit_workflow":false,"evidence":["short redacted fact"],"title":"","rationale":"","proposed_body":""}],"memory":{"lessons":[],"preference":"","project_note":""}}
+{"exploration":0,"scope":0,"wandering":0,"verification":0,"note":"","findings":[{"kind":"correction|workflow|failure|success|guidance_gap|simplification|product_gap","change_kind":"create|update|remove|restructure","summary":"","target_type":"skill|rules|docs|memory|guardrail|eval","target_path":"repository-relative path","confidence":0,"verified":false,"explicit_workflow":false,"evidence":["short redacted fact"],"event_ids":["span id"],"keywords":["normalized term"],"paths":["repository-relative path"],"symbols":["symbol"],"error_signatures":["stable error signature"],"applicability":"when this applies","workflow_shape":"stable action sequence without generated prose","title":"","rationale":"","proposed_body":""}],"memory":{"lessons":[],"preference":"","project_note":""}}
 Use existing guidance before proposing anything. Prefer no finding over weak advice. A removal or restructure may be recommended but must never be auto-applied. Never target another vendor, .agents, or a managed so/superopen skill. Proposed bodies must be complete and concise. Do not include prompts or tool output verbatim in evidence.`,
 			summary,
 		)

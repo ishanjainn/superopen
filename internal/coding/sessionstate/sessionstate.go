@@ -193,6 +193,15 @@ type State struct {
 	// session durations across the board.
 	SessionStartedAt time.Time `json:"session_started_at,omitempty"`
 
+	// Dynamic memory delivery stays in the OS cache so prompt hooks never
+	// rewrite repository memory or materialized session files.
+	MemorySeen       map[string]string `json:"memory_seen,omitempty"`
+	MemoryTokens     int64             `json:"memory_tokens,omitempty"`
+	LastPromptHash   string            `json:"last_prompt_hash,omitempty"`
+	MemoryTurnID     string            `json:"memory_turn_id,omitempty"`
+	MemoryTurnTokens int64             `json:"memory_turn_tokens,omitempty"`
+	RecentPaths      []string          `json:"recent_paths,omitempty"`
+
 	// LastSessionRootEmitAt is the wall-clock of the most recent
 	// `coding_agent.session` span emission. Used by Codex (which has
 	// no SessionEnd hook and would otherwise re-emit the session-

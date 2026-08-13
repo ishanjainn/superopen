@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import {
   composeLessonText,
-  deleteLessonLocal,
   deletePreferenceItem,
   deleteProjectItem,
   listLessons,
@@ -12,10 +11,10 @@ import {
   readMarkdown,
   upsertPreferenceItem,
   upsertProjectItem,
-  writeMarkdown,
   isStubMarkdown,
 } from "@/lib/so/memory";
 import type { MemoryVerb } from "@/lib/so/memory-items";
+import { serializePreferences, serializeProjects } from "@/lib/so/memory-items";
 import { soJSON, repoCwd } from "@/lib/so/exec";
 import { projectIdFromRequest, runWithProjectAsync } from "@/lib/so/workspace";
 
@@ -30,6 +29,11 @@ async function refreshActive(query = "") {
   } catch {
     /* best-effort - pack rebuilds on next SessionStart */
   }
+}
+
+async function persistDocument(kind: "preferences" | "projects", text: string) {
+	const res = await soJSON(["memory", "update", "document", text, "--kind", kind], { cwd: repoCwd() });
+	if (res.ok === false) throw new Error(String(res.error || `failed to update ${kind}`));
 }
 
 export async function GET(req: Request) {
@@ -75,6 +79,15 @@ export async function GET(req: Request) {
       const res = await soJSON(["memory", "search", q], { cwd: repoCwd() });
       return NextResponse.json(res);
     }
+		if (op === "pattern_evidence") {
+			const id = url.searchParams.get("id") || "";
+			const vendor = url.searchParams.get("vendor") || "";
+			if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+			const args = ["memory", "search", "--id", id];
+			if (vendor) args.push("--vendor", vendor);
+			const res = await soJSON(args, { cwd: repoCwd() });
+			return NextResponse.json(res);
+		}
     return NextResponse.json({
       lessons: listLessons().length,
       active: Boolean(readActivePack()),
@@ -88,6 +101,18 @@ export async function POST(req: Request) {
   const project = projectIdFromRequest(req);
 
   return runWithProjectAsync(project, async () => {
+		if (op === "pattern_feedback") {
+			const id = String(body.id || "");
+			const vendor = String(body.vendor || "");
+			const feedback = String(body.feedback || "");
+			if (!id || !vendor || !["helpful", "incorrect", "obsolete"].includes(feedback)) {
+				return NextResponse.json({ error: "id, vendor, and valid feedback required" }, { status: 400 });
+			}
+			const args = ["memory", "update", id, "--kind", "pattern", "--vendor", vendor, "--feedback", feedback];
+			if (body.reason) args.push("--reason", String(body.reason));
+			const res = await soJSON(args, { cwd: repoCwd() });
+			return NextResponse.json(res, { status: res.ok === false ? 400 : 200 });
+		}
     if (op === "add_lesson") {
       const verb = String(body.verb || "").trim() as MemoryVerb | "";
       const text = String(body.text || "").trim();
@@ -134,9 +159,7 @@ export async function POST(req: Request) {
       const res = await soJSON(["memory", "rm", id], { cwd: repoCwd() });
       if (res.ok === false) {
         try {
-          deleteLessonLocal(id);
-          await refreshActive();
-          return NextResponse.json({ ok: true, lessons: listLessons() });
+		  throw new Error(String(res.error || "delete failed"));
         } catch (e) {
           return NextResponse.json(
             { ok: false, error: String(e instanceof Error ? e.message : e) },
@@ -158,7 +181,7 @@ export async function POST(req: Request) {
           verb: verb as MemoryVerb,
           text: String(body.text || ""),
         });
-        await refreshActive();
+		await persistDocument("preferences", serializePreferences(items));
         return NextResponse.json({ ok: true, items });
       } catch (e) {
         return NextResponse.json(
@@ -171,7 +194,7 @@ export async function POST(req: Request) {
     if (op === "delete_preference") {
       try {
         const items = deletePreferenceItem(String(body.id || ""));
-        await refreshActive();
+		await persistDocument("preferences", serializePreferences(items));
         return NextResponse.json({ ok: true, items });
       } catch (e) {
         return NextResponse.json(
@@ -189,7 +212,7 @@ export async function POST(req: Request) {
           verb: String(body.verb || "").trim() as MemoryVerb | "",
           text: String(body.text || ""),
         });
-        await refreshActive();
+		await persistDocument("projects", serializeProjects(sections));
         return NextResponse.json({ ok: true, sections });
       } catch (e) {
         return NextResponse.json(
@@ -205,7 +228,7 @@ export async function POST(req: Request) {
           String(body.sectionId || ""),
           String(body.id || "")
         );
-        await refreshActive();
+		await persistDocument("projects", serializeProjects(sections));
         return NextResponse.json({ ok: true, sections });
       } catch (e) {
         return NextResponse.json(
@@ -216,8 +239,9 @@ export async function POST(req: Request) {
     }
 
     if (op === "write" && body.name && typeof body.text === "string") {
-      writeMarkdown(String(body.name), body.text);
-      await refreshActive();
+	  const kind = String(body.name).replace(".md", "");
+	  if (kind !== "preferences" && kind !== "projects") return NextResponse.json({ error: "invalid name" }, { status: 400 });
+	  await persistDocument(kind, body.text);
       return NextResponse.json({ ok: true });
     }
     if (op === "refresh") {
@@ -237,8 +261,8 @@ export async function POST(req: Request) {
       if (name !== "preferences.md" && name !== "projects.md") {
         return NextResponse.json({ error: "invalid name" }, { status: 400 });
       }
-      writeMarkdown(name, `# ${name.replace(".md", "")}\n`);
-      await refreshActive();
+	  const kind = name.replace(".md", "") as "preferences" | "projects";
+	  await persistDocument(kind, `# ${kind === "preferences" ? "Preferences" : "Projects"}\n`);
       const key = name.replace(".md", "");
       const text = readMarkdown(name);
       return NextResponse.json({

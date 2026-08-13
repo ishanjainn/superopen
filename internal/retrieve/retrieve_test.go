@@ -1,6 +1,7 @@
 package retrieve
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,59 @@ func TestRebuildAndSearch(t *testing.T) {
 	}
 	if len(hits) == 0 {
 		t.Fatal("expected hits")
+	}
+}
+
+func TestRebuildUsesCompactSyntheticMemoryAndSessions(t *testing.T) {
+	dir := t.TempDir()
+	paths := harness.Resolve(dir)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	memoryState := map[string]any{
+		"_about":                map[string]string{"purpose": "test"},
+		"preferences":           "# Preferences\n\n- Prefer focused tests.",
+		"patterns":              []map[string]any{{"fingerprint": "fp1", "summary": "Validate auth middleware", "status": "pending", "keywords": []string{"auth"}}},
+		"private_internal_blob": "MUST_NOT_INDEX_MEMORY_BLOB",
+	}
+	body, _ := json.Marshal(memoryState)
+	if err := os.WriteFile(filepath.Join(paths.MemoryDir, "state.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionDir := paths.SessionDir("s1")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionDoc := map[string]any{
+		"id": "s1", "summary": "Compact session summary",
+		"prompt_preview":  "MUST_NOT_INDEX_PROMPT",
+		"recommendations": map[string]any{"proposed_body": "MUST_NOT_INDEX_RECOMMENDATION"},
+		"review":          map[string]any{"findings": []map[string]any{{"kind": "success", "summary": "Focused verification passed"}}},
+	}
+	body, _ = json.Marshal(sessionDoc)
+	if err := os.WriteFile(filepath.Join(sessionDir, "session.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "events.jsonl"), []byte("MUST_NOT_INDEX_TRANSCRIPT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Rebuild(dir, paths); err != nil {
+		t.Fatal(err)
+	}
+	corpus, err := os.ReadFile(paths.GraphCorpus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(corpus)
+	for _, want := range []string{"Validate auth middleware", "Compact session summary", "Focused verification passed"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("compact corpus missing %q: %s", want, text)
+		}
+	}
+	for _, forbidden := range []string{"MUST_NOT_INDEX_MEMORY_BLOB", "MUST_NOT_INDEX_PROMPT", "MUST_NOT_INDEX_RECOMMENDATION", "MUST_NOT_INDEX_TRANSCRIPT"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("corpus leaked %q", forbidden)
+		}
 	}
 }
 

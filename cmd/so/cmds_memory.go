@@ -45,13 +45,40 @@ func cmdMemory() *cobra.Command {
 			}, data)
 		},
 	}
+	var searchID, searchVendor string
+	var searchDetails bool
 	search := &cobra.Command{
 		Use:   "search [query]",
-		Short: "Search memory + harness corpus (hybrid keyword)",
-		Args:  cobra.MinimumNArgs(1),
+		Short: "Search memory compactly or expand one pattern",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			paths := harness.Resolve(repoRoot())
 			s := memory.NewStore(paths)
+			if searchID != "" {
+				window, err := s.PatternEvidence(searchID, searchVendor)
+				if err != nil {
+					return axi.Err(err)
+				}
+				return out().HumanOrJSON("result", func() {
+					fmt.Printf("[%s] %s\n", window.Pattern.Fingerprint, window.Pattern.Summary)
+					for _, event := range window.Events {
+						fmt.Printf("  %s %s\n", event.SpanID, event.Name)
+					}
+				}, window)
+			}
+			if len(args) == 0 {
+				return axi.Err(fmt.Errorf("provide a query or --id"))
+			}
+			if searchDetails {
+				hits, err := s.Retrieve(memory.RetrievalQuery{Text: strings.Join(args, " "), Vendor: searchVendor, MaxTokens: 4000, MaxResults: 4})
+				if err != nil {
+					return axi.Err(err)
+				}
+				return out().HumanOrJSON("result", func() {
+					for _, h := range hits {
+						fmt.Printf("[%s] score=%.2f tokens=%d reasons=%s  %s\n", h.Fingerprint, h.Score, h.EstimatedTokens, strings.Join(h.Reasons, ","), h.Summary)
+					}
+				}, hits)
+			}
 			hits, err := s.HybridSearch(strings.Join(args, " "), 20)
 			if err != nil {
 				return axi.Err(err)
@@ -63,6 +90,9 @@ func cmdMemory() *cobra.Command {
 			}, hits)
 		},
 	}
+	search.Flags().StringVar(&searchID, "id", "", "Expand one durable pattern with its compact evidence window")
+	search.Flags().BoolVar(&searchDetails, "details", false, "Show deterministic ranking details")
+	search.Flags().StringVar(&searchVendor, "vendor", "", "Limit vendor-scoped memory to this coding agent")
 	add := &cobra.Command{
 		Use:   "add [text...]",
 		Short: "Add a lesson",
@@ -98,14 +128,38 @@ func cmdMemory() *cobra.Command {
 		},
 	}
 
+	var updateKind, updateVendor, updateFeedback, updateReason string
 	update := &cobra.Command{
 		Use:   "update [lesson-id] [text...]",
-		Short: "Update a lesson by id",
-		Args:  cobra.MinimumNArgs(2),
+		Short: "Update a lesson or record durable-pattern feedback",
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			paths := harness.Resolve(repoRoot())
 			s := memory.NewStore(paths)
 			id := args[0]
+			if updateKind == "preferences" || updateKind == "projects" {
+				if len(args) < 2 {
+					return axi.Err(fmt.Errorf("document update requires Markdown content"))
+				}
+				if err := s.ReplaceDocument(updateKind, strings.Join(args[1:], " ")); err != nil {
+					return axi.Err(err)
+				}
+				_, _ = s.RefreshActive("")
+				return out().HumanOrJSON("result", func() { fmt.Printf("updated %s\n", updateKind) }, map[string]any{"ok": true, "kind": updateKind})
+			}
+			if updateKind == "pattern" {
+				if updateFeedback == "" || updateVendor == "" {
+					return axi.Err(fmt.Errorf("pattern feedback requires --feedback and --vendor"))
+				}
+				pattern, err := s.FeedbackPattern(id, updateVendor, updateFeedback, updateReason)
+				if err != nil {
+					return axi.Err(err)
+				}
+				return out().HumanOrJSON("result", func() { fmt.Printf("recorded %s feedback for %s\n", updateFeedback, id) }, pattern)
+			}
+			if len(args) < 2 {
+				return axi.Err(fmt.Errorf("lesson update requires replacement text"))
+			}
 			text := strings.Join(args[1:], " ")
 			if err := s.UpdateLesson(id, text); err != nil {
 				return axi.Err(err)
@@ -121,6 +175,10 @@ func cmdMemory() *cobra.Command {
 			return out().HumanOrJSON("result", func() { fmt.Println("updated", id) }, map[string]any{"ok": true, "lesson": lesson})
 		},
 	}
+	update.Flags().StringVar(&updateKind, "kind", "lesson", "lesson|pattern|preferences|projects")
+	update.Flags().StringVar(&updateVendor, "vendor", "", "Originating vendor for a pattern")
+	update.Flags().StringVar(&updateFeedback, "feedback", "", "helpful|incorrect|obsolete")
+	update.Flags().StringVar(&updateReason, "reason", "", "Optional redacted feedback reason")
 
 	ctxCmd := &cobra.Command{
 		Use:     "active-context",
@@ -139,7 +197,7 @@ func cmdMemory() *cobra.Command {
 				return axi.Err(fmt.Errorf("memory.enabled is false"))
 			}
 			s := memory.NewStore(paths)
-			pack, err := s.BuildSessionContext(12000, q, mode)
+			pack, err := s.BuildSessionContext(1500, q, mode)
 			if err != nil {
 				return axi.Err(err)
 			}
@@ -437,7 +495,7 @@ func attachSessionsStart(sessions *cobra.Command) {
 			if m == "" {
 				m = memory.ModePersistent
 			}
-			pack, err := s.BuildSessionContext(12000, query, m)
+			pack, err := s.BuildSessionContext(1500, query, m)
 			if err != nil {
 				return axi.Err(err)
 			}

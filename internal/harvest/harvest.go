@@ -140,7 +140,7 @@ func Run(paths harness.Paths, cfg config.Config, sessionID string, trigger Trigg
 	if o.LocalOnly {
 		store := memory.NewStore(paths)
 		_ = store.AppendHistory(summary)
-		_, _ = store.BuildSessionContext(12000, "", memory.ModePersistent)
+		_, _ = store.BuildSessionContext(1500, "", memory.ModePersistent)
 		markHarvested(paths, sessionID, trigger, srcMtime)
 		res.Reason = "review_result"
 		return res, nil

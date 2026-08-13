@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import Link from "next/link";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
 import { MarkdownView } from "@/components/markdown-view";
 import { Dropdown } from "@/components/ui/dropdown";
@@ -21,7 +22,13 @@ type Pattern = {
   fingerprint: string; vendor: string; kind: string; summary: string;
   occurrences: number; status: string; confidence?: number; target_path?: string;
   verified_sessions?: string[]; session_ids?: string[];
+	scope?: string; applicability?: string; paths?: string[]; symbols?: string[];
+	error_signatures?: string[]; retrieval_count?: number; helpful_count?: number;
+	incorrect_count?: number; last_retrieved_at?: string; last_verified_at?: string;
+	status_reason?: string;
+	freshness?: string;
 };
+type Evidence = { events?: { span_id: string; name: string; session_id: string; facts?: Record<string, string> }[] };
 type Section = "active" | "lessons" | "patterns" | "prefs" | "projects";
 type Pack = { text?: string };
 
@@ -68,6 +75,8 @@ export default function MemoryPage() {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<any[]>([]);
   const [error, setError] = useState("");
+	const [expandedPattern, setExpandedPattern] = useState<string | null>(null);
+	const [evidence, setEvidence] = useState<Record<string, Evidence>>({});
   const [composerOpen, setComposerOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftVerb, setDraftVerb] = useState<MemoryVerb | "">("prefer");
@@ -94,6 +103,26 @@ export default function MemoryPage() {
     const data = await r.json();
     setPatterns(Array.isArray(data) ? data : []);
   }
+
+	async function feedbackPattern(pattern: Pattern, feedback: "helpful" | "incorrect" | "obsolete") {
+		setError("");
+		const r = await fetch("/api/memory", { method: "POST", headers: { "content-type": "application/json" },
+			body: JSON.stringify({ op: "pattern_feedback", id: pattern.fingerprint, vendor: pattern.vendor, feedback }) });
+		const j = await r.json();
+		if (!r.ok || j.ok === false) setError(String(j.error || "Feedback failed"));
+		else await loadPatterns();
+	}
+
+	async function toggleEvidence(pattern: Pattern) {
+		const key = `${pattern.vendor}:${pattern.fingerprint}`;
+		if (expandedPattern === key) { setExpandedPattern(null); return; }
+		setExpandedPattern(key);
+		if (evidence[key]) return;
+		const params = new URLSearchParams({ op: "pattern_evidence", id: pattern.fingerprint, vendor: pattern.vendor });
+		const r = await fetch(`/api/memory?${params}`);
+		const j = await r.json();
+		setEvidence((old) => ({ ...old, [key]: (j.data || j) as Evidence }));
+	}
 
   async function loadProjects() {
     const r = await fetch("/api/memory?op=projects");
@@ -526,12 +555,37 @@ export default function MemoryPage() {
                       <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-500">
                         <span className="font-semibold uppercase tracking-wide">{pattern.kind}</span>
                         <span>{pattern.vendor}</span>
+						<span>{pattern.scope || "vendor"}</span>
                         <span>{pattern.occurrences} supporting session{pattern.occurrences === 1 ? "" : "s"}</span>
                         <span>{pattern.verified_sessions?.length || 0} verified</span>
                         <span>{pattern.status}</span>
+						<span>{pattern.freshness || "unanchored"}</span>
+						{typeof pattern.confidence === "number" && <span>{Math.round(pattern.confidence * 100)}% confidence</span>}
+						{typeof pattern.retrieval_count === "number" && <span>{pattern.retrieval_count} retrievals</span>}
                       </div>
                       <p className="mt-2 text-sm text-neutral-800">{pattern.summary}</p>
+					  {pattern.applicability && <p className="mt-1 text-xs text-neutral-500">Applies when: {pattern.applicability}</p>}
                       {pattern.target_path && <p className="mt-2 font-mono text-[11px] text-neutral-500">{pattern.target_path}</p>}
+					  <div className="mt-3 flex flex-wrap gap-2">
+						{(["helpful", "incorrect", "obsolete"] as const).map((action) => (
+						  <button key={action} type="button" onClick={() => void feedbackPattern(pattern, action)}
+							className="rounded border border-neutral-200 px-2 py-1 text-xs capitalize hover:bg-neutral-50">{action}</button>
+						))}
+						<button type="button" onClick={() => void toggleEvidence(pattern)} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-neutral-600 hover:bg-neutral-50">
+						  {expandedPattern === `${pattern.vendor}:${pattern.fingerprint}` ? <ChevronUp size={13} /> : <ChevronDown size={13} />} Evidence
+						</button>
+					  </div>
+					  {expandedPattern === `${pattern.vendor}:${pattern.fingerprint}` && (
+						<div className="mt-3 border-t border-neutral-100 pt-3 text-xs text-neutral-600">
+						  {(evidence[`${pattern.vendor}:${pattern.fingerprint}`]?.events || []).map((event) => (
+							<div key={event.span_id} className="mb-2">
+							  <Link className="font-medium hover:underline" href={`/sessions/${encodeURIComponent(event.session_id)}?event=${encodeURIComponent(event.span_id)}`}>{event.name}</Link>
+							  {event.facts && <div className="font-mono text-[10px] text-neutral-500">{Object.values(event.facts).join(" · ")}</div>}
+							</div>
+						  ))}
+						  {evidence[`${pattern.vendor}:${pattern.fingerprint}`] && !(evidence[`${pattern.vendor}:${pattern.fingerprint}`]?.events || []).length && "No retained evidence window."}
+						</div>
+					  )}
                     </article>
                   ))}
                 </div>

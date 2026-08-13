@@ -31,6 +31,7 @@ The `/so` skill is registered with **`so install`** (after installing the CLI). 
 /so harvest idle                                 # harvest long-idle sessions into memory + native docs
 /so dev                                          # open the file-backed Sessions UI
 /so sessions                                     # list sessions
+/so memory search "<task>"                       # compact local recall; add --id to expand selected evidence
 /so eval <session-id>                            # score a session
 /so recommend list                               # pending Superopen recommendations
 /so recommend apply <id> --reason "…"          # resolve with an agent explanation
@@ -93,6 +94,8 @@ Prefer that answer over Grep/Glob when it is useful. You may still open a few sp
 
 2. For conventions / review rules, read `AGENTS.md` (and nested `*/AGENTS.md`), the active vendor's rules dir, and `.so/guardrails.yaml` before inventing process. When updating guidance, prune obsolete lines — do not only append.
 
+3. Search memory compactly with `so memory search "<task>" --vendor <vendor>` when prior project experience may matter. Expand only a selected result with `--id <fingerprint> --vendor <vendor>`. Cursor cannot receive same-turn prompt context from its hook, so Cursor sessions should use this guided search for task-specific recall; inspect the full Session view only when compact evidence is insufficient.
+
 ### Commands → shell
 
 Map `/so …` arguments to the `so` CLI on PATH (or `$(go env GOPATH)/bin/so` if needed):
@@ -112,6 +115,7 @@ Map `/so …` arguments to the `so` CLI on PATH (or `$(go env GOPATH)/bin/so` if
 | `/so knowledge` | read `AGENTS.md` (root + nested) relevant to the task |
 | `/so rules` | summarize coding rules in the discovered rules dir |
 | `/so sessions` | `so sessions` |
+| `/so memory search …` | `so memory search …` |
 | `/so eval …` | `so eval …` |
 | `/so recommend …` | `so recommend …` |
 

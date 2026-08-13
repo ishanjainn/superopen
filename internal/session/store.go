@@ -97,17 +97,34 @@ type ReviewFinding struct {
 	ExplicitWorkflow bool     `json:"explicit_workflow,omitempty"`
 	Evidence         []string `json:"evidence,omitempty"`
 	EventIDs         []string `json:"event_ids,omitempty"`
+	Keywords         []string `json:"keywords,omitempty"`
+	Paths            []string `json:"paths,omitempty"`
+	Symbols          []string `json:"symbols,omitempty"`
+	ErrorSignatures  []string `json:"error_signatures,omitempty"`
+	Applicability    string   `json:"applicability,omitempty"`
+}
+
+type MemoryRetrieval struct {
+	PatternIDs      []string  `json:"pattern_ids"`
+	Scores          []string  `json:"scores,omitempty"`
+	Reasons         []string  `json:"selection_reasons,omitempty"`
+	TargetPaths     []string  `json:"target_paths,omitempty"`
+	EstimatedTokens int64     `json:"estimated_tokens"`
+	TurnID          string    `json:"turn_id,omitempty"`
+	Delivery        string    `json:"delivery,omitempty"`
+	At              time.Time `json:"at"`
 }
 
 type Document struct {
 	About artifactmeta.About `json:"_about"`
 	Meta
-	Footprint       Footprint       `json:"footprint,omitempty"`
-	Evaluation      json.RawMessage `json:"evaluation,omitempty"`
-	Recommendations json.RawMessage `json:"recommendations,omitempty"`
-	Replay          json.RawMessage `json:"replay,omitempty"`
-	Port            json.RawMessage `json:"port,omitempty"`
-	Review          ReviewState     `json:"review,omitempty"`
+	Footprint        Footprint         `json:"footprint,omitempty"`
+	Evaluation       json.RawMessage   `json:"evaluation,omitempty"`
+	Recommendations  json.RawMessage   `json:"recommendations,omitempty"`
+	Replay           json.RawMessage   `json:"replay,omitempty"`
+	Port             json.RawMessage   `json:"port,omitempty"`
+	Review           ReviewState       `json:"review,omitempty"`
+	MemoryRetrievals []MemoryRetrieval `json:"memory_retrievals,omitempty"`
 }
 
 type indexFile struct {
@@ -159,6 +176,14 @@ func (s *Store) Ensure() error {
 		}
 		id := entry.Name()
 		if _, err := os.Stat(filepath.Join(s.Paths.SessionDir(id), "session.json")); err == nil {
+			// session.json is authoritative and index.json is rebuildable. Repair
+			// an interrupted/migrated catalog instead of leaving the session hidden
+			// from CLI consumers.
+			if meta, getErr := s.Get(id); getErr == nil {
+				if err := s.upsertIndex(meta); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		events := filepath.Join(s.Paths.SessionDir(id), "events.jsonl")
@@ -203,7 +228,26 @@ func (s *Store) List() ([]IndexEntry, error) {
 	if err := json.Unmarshal(data, &idx); err != nil {
 		return nil, err
 	}
-	entries := idx.Sessions
+	// The catalog is derived. Merge authoritative session documents on every
+	// read so a stale/interrupted concurrent index write cannot hide sessions.
+	byID := make(map[string]Meta, len(idx.Sessions))
+	for _, meta := range idx.Sessions {
+		byID[meta.ID] = meta
+	}
+	if dirs, readErr := os.ReadDir(s.Paths.SessionsDir); readErr == nil {
+		for _, dir := range dirs {
+			if !dir.IsDir() || strings.HasPrefix(dir.Name(), ".") {
+				continue
+			}
+			if meta, getErr := s.Get(dir.Name()); getErr == nil && meta.ID != "" {
+				byID[meta.ID] = meta
+			}
+		}
+	}
+	entries := make([]Meta, 0, len(byID))
+	for _, meta := range byID {
+		entries = append(entries, meta)
+	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].StartedAt.After(entries[j].StartedAt)
 	})
@@ -217,6 +261,7 @@ type ListItem struct {
 	Turns       int      `json:"turns"`       // user prompt markers in transcript
 	Files       []string `json:"files,omitempty"`
 	Match       string   `json:"match,omitempty"` // why this row matched a search query
+	hasActivity bool
 }
 
 // ListDetailed returns top-level sessions (subagents nested under a parent
@@ -385,7 +430,7 @@ func (s *Store) enrich(meta Meta) ListItem {
 		}
 	}
 
-	item.Turns, item.Model = s.scanTranscript(dir, meta.Model)
+	item.Turns, item.Model, item.hasActivity = s.scanTranscript(dir, meta.Model)
 	if item.Model != "" && meta.Model == "" {
 		item.Meta.Model = item.Model
 	}
@@ -407,27 +452,26 @@ func countCheckpointDirs(dir string) int {
 	return n
 }
 
-func (s *Store) scanTranscript(dir, existingModel string) (checkpoints int, model string) {
+func (s *Store) scanTranscript(dir, existingModel string) (turns int, model string, hasActivity bool) {
 	model = existingModel
 	f, err := os.Open(filepath.Join(dir, "events.jsonl"))
 	if err != nil {
-		return 0, model
+		return 0, model, false
 	}
 	defer f.Close()
+	spans := make([]tracestore.Span, 0)
 
 	dec := json.NewDecoder(f)
 	for {
-		var sp struct {
-			Name       string            `json:"name"`
-			Attributes map[string]string `json:"attributes"`
-		}
+		var sp tracestore.Span
 		if err := dec.Decode(&sp); err != nil {
 			break
 		}
+		spans = append(spans, sp)
 		attrs := sp.Attributes
 		name := strings.ToLower(sp.Name)
 		if strings.Contains(name, "user_prompt") || strings.Contains(name, "user.prompt") {
-			checkpoints++
+			turns++
 			continue
 		}
 		if attrs == nil {
@@ -441,18 +485,26 @@ func (s *Store) scanTranscript(dir, existingModel string) (checkpoints int, mode
 			}
 		}
 		if attrs["gen_ai.prompt"] != "" || attrs["gen_ai.content.prompt"] != "" {
-			checkpoints++
+			turns++
 			continue
 		}
 		if raw := attrs["gen_ai.input.messages"]; raw != "" {
 			low := strings.ToLower(raw)
 			if strings.Contains(low, `"role":"user"`) || strings.Contains(low, `"role": "user"`) ||
 				strings.Contains(low, `"role":"user_prompt"`) {
-				checkpoints++
+				turns++
 			}
 		}
 	}
-	return checkpoints, model
+	if turns == 0 {
+		for _, sp := range spans {
+			name := strings.ToLower(sp.Name)
+			if name == "coding_agent.llm.turn" || strings.Contains(name, "completion") {
+				turns++
+			}
+		}
+	}
+	return turns, model, SpansHaveActivity(spans)
 }
 
 func (s *Store) matchQuery(item ListItem, needle string) string {
@@ -905,6 +957,7 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 	}
 	enc := json.NewEncoder(tf)
 	foot := map[string]*FootprintFile{}
+	retrievals := []MemoryRetrieval{}
 	for _, sp := range spans {
 		safe := sp
 		if len(sp.Attributes) > 0 {
@@ -914,6 +967,17 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 			}
 		}
 		_ = enc.Encode(safe)
+		if sp.Name == "superopen.memory.retrieved" {
+			retrievals = append(retrievals, MemoryRetrieval{
+				PatternIDs:      parseStringList(safe.Attributes["superopen.memory.pattern_ids"]),
+				Scores:          parseStringList(safe.Attributes["superopen.memory.scores"]),
+				Reasons:         parseStringList(safe.Attributes["superopen.memory.reasons"]),
+				TargetPaths:     parseStringList(safe.Attributes["superopen.memory.target_paths"]),
+				EstimatedTokens: parseInt64(safe.Attributes["superopen.memory.estimated_tokens"]),
+				TurnID:          safe.Attributes["superopen.memory.turn_id"], Delivery: safe.Attributes["superopen.memory.delivery"],
+				At: time.Unix(0, sp.StartTimeUnixN).UTC(),
+			})
+		}
 		if meta.Vendor == "" || meta.Vendor == "unknown" {
 			if v := VendorFromAttrs(sp.Attributes); v != "" {
 				meta.Vendor = v
@@ -998,13 +1062,30 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 		EnsureTitle(&meta, nil) // vendor lookup only; LLM fill happens via FillMissingTitles
 	}
 
-	if err := s.writeDocument(id, func(d *Document) { d.Meta = meta; d.Footprint = fp }); err != nil {
+	if err := s.writeDocument(id, func(d *Document) { d.Meta = meta; d.Footprint = fp; d.MemoryRetrievals = retrievals }); err != nil {
 		return Meta{}, err
 	}
 	if err := s.upsertIndex(meta); err != nil {
 		return Meta{}, err
 	}
 	return meta, nil
+}
+
+func parseStringList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var values []string
+	if json.Unmarshal([]byte(raw), &values) == nil {
+		return values
+	}
+	return []string{raw}
+}
+
+func parseInt64(raw string) int64 {
+	var value int64
+	_, _ = fmt.Sscan(raw, &value)
+	return value
 }
 
 func (s *Store) upsertIndex(meta Meta) error {

@@ -1,14 +1,19 @@
 package hook
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/audit"
+	"github.com/ishanjainn/superopen/internal/coding/normalize"
+	"github.com/ishanjainn/superopen/internal/coding/pricing"
+	"github.com/ishanjainn/superopen/internal/coding/sessionstate"
 	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/execx"
 	"github.com/ishanjainn/superopen/internal/guardrails"
@@ -19,6 +24,232 @@ import (
 	"github.com/ishanjainn/superopen/internal/runtimestate"
 	"github.com/ishanjainn/superopen/internal/session"
 )
+
+const dynamicMemorySessionTokens = 2000
+
+// maybeInjectDynamicMemory performs bounded, local-only recall on model-visible
+// prompt and file hooks. It is intentionally fail-open: any unsupported vendor,
+// missing state, parse failure, or budget exhaustion returns no hook output.
+func maybeInjectDynamicMemory(vendor, event, sessionID, cwd string, probe peekedContext, cached *sessionstate.State, emit normalize.Emitter) {
+	if sessionID == "" || cached == nil {
+		return
+	}
+	root := findRepoRoot(cwd)
+	paths := harness.Resolve(root)
+	if !paths.Exists() {
+		return
+	}
+	if cfg, err := config.Load(paths.Config); err == nil && !cfg.MemoryEnabled() {
+		return
+	}
+
+	e := strings.ToLower(strings.TrimSpace(event))
+	isPrompt := isPromptRecallEvent(vendor, e)
+	isFile := isFileRecallEvent(vendor, e) && strings.TrimSpace(probe.ToolPath) != ""
+	observedFile := isFileObservationEvent(vendor, e) && strings.TrimSpace(probe.ToolPath) != ""
+	if observedFile {
+		cached.RecentPaths = appendRecentPath(cached.RecentPaths, repoPath(root, probe.ToolPath), 32)
+	}
+	if !isPrompt && !isFile {
+		if observedFile {
+			sessionstate.Save(sessionID, vendor, cached)
+		}
+		return
+	}
+	remaining := dynamicMemorySessionTokens - int(cached.MemoryTokens)
+	if remaining <= 0 {
+		return
+	}
+	maxTokens := memory.DefaultTurnTokens
+	queryText := probe.Prompt
+	queryPaths := append([]string(nil), cached.RecentPaths...)
+	if isFile {
+		maxTokens = memory.DefaultFileTokens
+		queryPaths = []string{repoPath(root, probe.ToolPath)}
+	}
+	if isPrompt {
+		if probe.TransformedPrompt != "" {
+			queryText = probe.TransformedPrompt
+		}
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(queryText)))
+		if hash == cached.LastPromptHash {
+			return
+		}
+		cached.LastPromptHash = hash
+		cached.MemoryTurnID = nonEmptyTurnID(probe.TurnID, hash)
+		cached.MemoryTurnTokens = 0
+	}
+	turnRemaining := memory.DefaultTurnTokens - int(cached.MemoryTurnTokens)
+	if maxTokens > turnRemaining {
+		maxTokens = turnRemaining
+	}
+	if maxTokens > remaining {
+		maxTokens = remaining
+	}
+	if maxTokens <= 0 {
+		sessionstate.Save(sessionID, vendor, cached)
+		return
+	}
+	if cached.MemorySeen == nil {
+		cached.MemorySeen = map[string]string{}
+	}
+	hits, err := memory.NewStore(paths).Retrieve(memory.RetrievalQuery{
+		Text: queryText, Vendor: vendor, Paths: queryPaths, Seen: cached.MemorySeen,
+		Branch: cached.Branch, Worktree: root,
+		MaxTokens: maxTokens, MaxResults: memory.DefaultTurnHits, FileOnly: isFile,
+	})
+	if err != nil || len(hits) == 0 {
+		sessionstate.Save(sessionID, vendor, cached)
+		return
+	}
+	// Cursor exposes this prompt boundary for observation but not same-turn
+	// model context. Ranking occurs for diagnostics, while no retrieval event,
+	// token use, or injection claim is recorded.
+	if vendor == "cursor" {
+		sessionstate.Save(sessionID, vendor, cached)
+		return
+	}
+	text := memory.FormatRetrieval(hits)
+	if text == "" {
+		return
+	}
+	var used int64
+	var ids, reasons, targets []string
+	for _, hit := range hits {
+		cached.MemorySeen[hit.Fingerprint] = hit.ContentID
+		used += hit.EstimatedTokens
+		ids = append(ids, hit.Fingerprint)
+		reasons = append(reasons, strings.Join(hit.Reasons, "+"))
+		if hit.TargetPath != "" {
+			targets = append(targets, hit.TargetPath)
+		}
+	}
+	cached.MemoryTokens += used
+	cached.MemoryTurnTokens += used
+	sessionstate.Save(sessionID, vendor, cached)
+	_ = emit.EmitEvent(normalize.EventEmission{SessionID: sessionID, Name: "superopen.memory.retrieved", At: time.Now(), Attrs: map[string]any{
+		"coding_agent.client": vendor, "superopen.memory.pattern_ids": ids,
+		"superopen.memory.scores": retrievalScores(hits), "superopen.memory.reasons": reasons,
+		"superopen.memory.estimated_tokens": used, "superopen.memory.target_paths": targets,
+		"superopen.memory.turn_id": nonEmptyTurnID(probe.TurnID, cached.MemoryTurnID), "superopen.memory.delivery": deliveryFor(vendor, isFile),
+	}})
+	writeDynamicContext(vendor, event, probe, text, isFile)
+}
+
+func nonEmptyTurnID(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return "unresolved"
+}
+
+func isPromptRecallEvent(vendor, event string) bool {
+	switch vendor {
+	case "claude-code", "codex":
+		return event == "userpromptsubmit" || event == "user_prompt_submit"
+	case "gemini":
+		return event == "beforeagent"
+	case "opencode":
+		return strings.Contains(event, "message.updated") || event == "chat.message"
+	case "pi":
+		return event == "before_agent_start" || event == "turn_start"
+	case "copilot-cli":
+		return event == "userprompttransformed"
+	case "cursor":
+		return event == "beforesubmitprompt"
+	}
+	return false
+}
+
+func isFileRecallEvent(vendor, event string) bool {
+	switch vendor {
+	case "claude-code", "codex":
+		return event == "pretooluse"
+	case "gemini":
+		return event == "beforetool"
+	case "copilot-cli":
+		return event == "posttooluse"
+	case "opencode":
+		return strings.Contains(event, "tool.execute.before")
+	}
+	return false
+}
+
+func isFileObservationEvent(vendor, event string) bool {
+	if isFileRecallEvent(vendor, event) {
+		return true
+	}
+	switch vendor {
+	case "cursor":
+		return event == "pretooluse" || event == "beforereadfile"
+	case "pi":
+		return strings.Contains(event, "tool_execution_start") || strings.Contains(event, "tool.execute.before")
+	}
+	return false
+}
+
+func writeDynamicContext(vendor, event string, probe peekedContext, text string, file bool) {
+	switch vendor {
+	case "opencode", "pi":
+		_ = writeHookJSON(map[string]any{"inject_context": text, "additional_context": text})
+	case "copilot-cli":
+		if file {
+			_ = writeHookJSON(map[string]any{"additionalContext": text})
+			return
+		}
+		base := probe.TransformedPrompt
+		if base == "" {
+			base = probe.Prompt
+		}
+		_ = writeHookJSON(map[string]any{"modifiedTransformedPrompt": base + "\n\n" + text})
+	default:
+		_ = writeHookJSON(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": event, "additionalContext": text, "permissionDecision": "allow"}, "additionalContext": text, "additional_context": text})
+	}
+}
+
+func retrievalScores(hits []memory.RetrievalHit) []string {
+	out := make([]string, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, fmt.Sprintf("%.3f", h.Score))
+	}
+	return out
+}
+func deliveryFor(vendor string, file bool) string {
+	if file {
+		return vendor + ":file"
+	}
+	return vendor + ":prompt"
+}
+func appendRecentPath(paths []string, path string, limit int) []string {
+	if path == "" {
+		return paths
+	}
+	out := []string{path}
+	for _, p := range paths {
+		if p != path {
+			out = append(out, p)
+		}
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+func repoPath(root, path string) string {
+	if path == "" {
+		return ""
+	}
+	if !filepath.IsAbs(path) {
+		return filepath.ToSlash(filepath.Clean(path))
+	}
+	rel, err := filepath.Rel(root, path)
+	if err == nil && !strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(path)
+}
 
 // maybeInjectMemory injects Active Context and any pending Port resume on SessionStart.
 func maybeInjectMemory(vendor, event, sessionID, cwd string) {
@@ -48,7 +279,7 @@ func maybeInjectMemory(vendor, event, sessionID, cwd string) {
 	var charCount int
 	if memoryOn {
 		store := memory.NewStore(paths)
-		pack, err := store.BuildSessionContext(12000, "", memory.ModePersistent)
+		pack, err := store.BuildSessionContextForVendor(1500, "", memory.ModePersistent, vendor)
 		if err == nil {
 			packText = pack.Text
 			sections = pack.Sections
@@ -71,6 +302,8 @@ func maybeInjectMemory(vendor, event, sessionID, cwd string) {
 		}
 		charCount = len(packText)
 	}
+	packText = capEstimatedTokens(packText, 1500)
+	charCount = len(packText)
 	if strings.TrimSpace(packText) == "" {
 		return
 	}
@@ -117,6 +350,23 @@ func maybeInjectMemory(vendor, event, sessionID, cwd string) {
 			"context":            packText,
 		})
 	}
+}
+
+func capEstimatedTokens(text string, limit int64) string {
+	if pricing.EstimateTokens(text) <= limit {
+		return text
+	}
+	runes := []rune(text)
+	lo, hi := 0, len(runes)
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if pricing.EstimateTokens(string(runes[:mid])+"\n…[startup context truncated]") <= limit {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return string(runes[:lo]) + "\n…[startup context truncated]"
 }
 
 func maybeHarvestOnSessionEnd(vendor, event, sessionID, cwd string) {

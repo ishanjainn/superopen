@@ -430,7 +430,7 @@ func extendSessionsCmd(c *cobra.Command) {
 			}
 			cfg, _ := config.Load(paths.Config)
 			if cfg.MemoryEnabled() {
-				_, _ = memory.NewStore(paths).BuildSessionContext(12000, "", memory.ModePersistent)
+				_, _ = memory.NewStore(paths).BuildSessionContext(1500, "", memory.ModePersistent)
 			}
 			vendorFlag, _ := cmd.Flags().GetString("vendor")
 			vendor := strings.ToLower(m.Vendor)

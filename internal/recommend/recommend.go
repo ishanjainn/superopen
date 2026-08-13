@@ -119,6 +119,18 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 		vendorLabel = "unknown"
 	}
 	patterns := RecordFindings(paths, sessionID, vendorLabel, evalRes.Findings)
+	if doc, err := session.NewStore(paths).ReadDocument(sessionID); err == nil {
+		var ids, edited []string
+		for _, retrieval := range doc.MemoryRetrievals {
+			ids = append(ids, retrieval.PatternIDs...)
+		}
+		for _, file := range doc.Footprint.Files {
+			if file.State == "edited" {
+				edited = append(edited, file.Path)
+			}
+		}
+		_ = memory.NewStore(paths).ConsolidateRetrievals(sessionID, vendorLabel, ids, edited, evalRes.Verified)
+	}
 	for _, d := range evalRes.Drafts {
 		pattern := patterns[d.Fingerprint]
 		title := strings.TrimSpace(d.Title)
@@ -246,22 +258,46 @@ func Generate(paths harness.Paths, sessionID string, evalRes eval.Result, _ inte
 // when automatic recommendation generation is disabled.
 func RecordFindings(paths harness.Paths, sessionID, vendor string, findings []session.ReviewFinding) map[string]memory.Pattern {
 	store := memory.NewStore(paths)
+	footprint, _ := session.NewStore(paths).GetFootprint(sessionID)
+	modified := map[string]bool{}
+	for _, file := range footprint.Files {
+		if file.State == "edited" {
+			modified[filepath.ToSlash(file.Path)] = true
+		}
+	}
 	out := map[string]memory.Pattern{}
 	for _, finding := range findings {
 		if harness.NormalizeVendorKind(finding.Vendor) != harness.NormalizeVendorKind(vendor) {
 			continue
 		}
+		if finding.Kind == "failure" && finding.TargetPath != "" {
+			_ = store.RecordContradiction(sessionID, vendor, finding.TargetPath)
+		}
 		pattern, err := store.UpsertPattern(memory.Pattern{
 			Fingerprint: finding.Fingerprint, Vendor: vendor, Kind: finding.Kind,
 			ChangeKind: finding.ChangeKind, TargetType: finding.TargetType, TargetPath: finding.TargetPath,
 			Summary: finding.Summary, Evidence: finding.Evidence, Confidence: finding.Confidence,
-			ExplicitWorkflow: finding.ExplicitWorkflow,
+			ExplicitWorkflow: finding.ExplicitWorkflow, Scope: findingScope(finding),
+			Paths: mergeSessions(nonEmpty(finding.TargetPath), finding.Paths), Keywords: append(finding.Keywords, strings.Fields(finding.Summary)...),
+			Symbols: finding.Symbols, ErrorSignatures: finding.ErrorSignatures, Applicability: finding.Applicability,
+			SourceSHA256: fileSHA256(filepath.Join(paths.RepoRoot, filepath.FromSlash(finding.TargetPath))),
+			EvidenceRefs: []memory.EvidenceRef{{SessionID: sessionID, EventIDs: finding.EventIDs, Summary: finding.Summary, Modified: modified[filepath.ToSlash(finding.TargetPath)], SessionFileCount: len(footprint.Files)}},
 		}, sessionID, finding.Verified)
 		if err == nil {
 			out[finding.Fingerprint] = pattern
 		}
 	}
 	return out
+}
+
+func findingScope(f session.ReviewFinding) string {
+	if !f.ExplicitWorkflow {
+		return "vendor"
+	}
+	if f.TargetType == "memory" || (f.TargetType == "docs" && strings.EqualFold(filepath.Base(f.TargetPath), "AGENTS.md")) {
+		return "shared"
+	}
+	return "vendor"
 }
 
 func enrichRecommendation(paths harness.Paths, sessionID, vendor string, rec *Recommendation, known map[string]memory.Pattern) {
@@ -277,7 +313,8 @@ func enrichRecommendation(paths harness.Paths, sessionID, vendor string, rec *Re
 			ChangeKind: nonEmptyString(rec.ChangeKind, inferChangeKind(rec.ProposedPath)),
 			TargetType: rec.Type, TargetPath: repoRelative(paths.RepoRoot, rec.ProposedPath),
 			Summary: rec.Rationale, Evidence: rec.Evidence, Confidence: nonZeroFloat(rec.Confidence, 0.65),
-			ExplicitWorkflow: rec.ExplicitWorkflow,
+			ExplicitWorkflow: rec.ExplicitWorkflow, Paths: nonEmpty(repoRelative(paths.RepoRoot, rec.ProposedPath)),
+			Keywords: strings.Fields(rec.Rationale), EvidenceRefs: []memory.EvidenceRef{{SessionID: sessionID, Summary: rec.Rationale}},
 		}, sessionID, verified)
 	}
 	rec.Vendor = vendor
@@ -834,7 +871,7 @@ func Revert(paths harness.Paths, id string, decision Decision) error {
 	hist[found].DecisionReason = decision.Reason
 	hist[found].DecisionActor = decision.Actor
 	hist[found].DecisionAt = time.Now().UTC()
-	_ = memory.NewStore(paths).SetPatternStatus(hist[found].Fingerprint, hist[found].Vendor, "pending")
+	_ = memory.NewStore(paths).RecordPatternRevert(hist[found].Fingerprint, hist[found].Vendor, decision.Reason)
 	return saveOne(paths, hist[found])
 }
 

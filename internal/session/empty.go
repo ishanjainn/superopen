@@ -50,6 +50,9 @@ func SpansHaveActivity(spans []tracestore.Span) bool {
 
 // IsEmptyListItem is true when a session never got real turns/work.
 func IsEmptyListItem(item ListItem) bool {
+	if item.hasActivity {
+		return false
+	}
 	if item.Turns > 0 || item.Tokens > 0 || item.Checkpoints > 0 {
 		return false
 	}

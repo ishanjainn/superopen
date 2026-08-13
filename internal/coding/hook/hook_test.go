@@ -2,6 +2,7 @@ package hook
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -59,6 +60,26 @@ func TestIsClaudeCodeVendor(t *testing.T) {
 				t.Fatalf("isClaudeCodeVendor(%q) = %v, want %v", tc.vendor, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestProgressiveMemoryVendorHookContracts(t *testing.T) {
+	prompts := map[string]string{"claude-code": "UserPromptSubmit", "codex": "UserPromptSubmit", "gemini": "BeforeAgent", "opencode": "chat.message", "pi": "before_agent_start", "copilot-cli": "userPromptTransformed", "cursor": "beforeSubmitPrompt"}
+	for vendor, event := range prompts {
+		if !isPromptRecallEvent(vendor, strings.ToLower(event)) {
+			t.Errorf("missing prompt contract %s/%s", vendor, event)
+		}
+	}
+	files := map[string]string{"claude-code": "PreToolUse", "codex": "PreToolUse", "gemini": "BeforeTool", "opencode": "tool.execute.before", "copilot-cli": "postToolUse"}
+	for vendor, event := range files {
+		if !isFileRecallEvent(vendor, strings.ToLower(event)) {
+			t.Errorf("missing file contract %s/%s", vendor, event)
+		}
+	}
+	for vendor, event := range map[string]string{"pi": "tool_execution_start", "cursor": "beforeReadFile"} {
+		if !isFileObservationEvent(vendor, strings.ToLower(event)) || isFileRecallEvent(vendor, strings.ToLower(event)) {
+			t.Errorf("%s must observe without claiming file injection", vendor)
+		}
 	}
 }
 

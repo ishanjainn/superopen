@@ -104,7 +104,7 @@ func writeMemoryPack(cmd *cobra.Command, agent string) error {
 		return fmt.Errorf("no .so harness in %s (run so init)", wd)
 	}
 	store := memory.NewStore(paths)
-	pack, err := store.BuildSessionContext(12000, "", memory.ModePersistent)
+	pack, err := store.BuildSessionContext(1500, "", memory.ModePersistent)
 	if err != nil {
 		return err
 	}

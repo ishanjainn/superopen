@@ -2,6 +2,7 @@ package memory
 
 import (
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -13,9 +14,11 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/artifactmeta"
 	"github.com/ishanjainn/superopen/internal/audit"
+	"github.com/ishanjainn/superopen/internal/coding/pricing"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/harnessvalid"
 	"github.com/ishanjainn/superopen/internal/llm"
+	"github.com/ishanjainn/superopen/internal/redact"
 )
 
 // Mode controls read/write of durable memory for a session.
@@ -55,23 +58,48 @@ type EpisodicEntry struct {
 // file bodies stay in the originating session; memory keeps only the evidence
 // summary and counters needed to decide whether a recommendation is recurring.
 type Pattern struct {
-	Fingerprint      string                `json:"fingerprint"`
-	Vendor           string                `json:"vendor"`
-	Kind             string                `json:"kind"`
-	ChangeKind       string                `json:"change_kind,omitempty"`
-	TargetType       string                `json:"target_type,omitempty"`
-	TargetPath       string                `json:"target_path,omitempty"`
-	Summary          string                `json:"summary"`
-	Evidence         []string              `json:"evidence,omitempty"`
-	Occurrences      int                   `json:"occurrences"`
-	SessionIDs       []string              `json:"session_ids,omitempty"`
-	VerifiedSessions []string              `json:"verified_sessions,omitempty"`
-	Confidence       float64               `json:"confidence,omitempty"`
-	ExplicitWorkflow bool                  `json:"explicit_workflow,omitempty"`
-	Status           string                `json:"status"` // pending | applied | dismissed | superseded
-	FirstObservedAt  time.Time             `json:"first_observed_at"`
-	LastObservedAt   time.Time             `json:"last_observed_at"`
-	Verification     []PatternVerification `json:"verification,omitempty"`
+	Fingerprint       string                `json:"fingerprint"`
+	Vendor            string                `json:"vendor"`
+	Scope             string                `json:"scope,omitempty"` // vendor | shared
+	Kind              string                `json:"kind"`
+	ChangeKind        string                `json:"change_kind,omitempty"`
+	TargetType        string                `json:"target_type,omitempty"`
+	TargetPath        string                `json:"target_path,omitempty"`
+	Summary           string                `json:"summary"`
+	Evidence          []string              `json:"evidence,omitempty"`
+	Occurrences       int                   `json:"occurrences"`
+	SessionIDs        []string              `json:"session_ids,omitempty"`
+	VerifiedSessions  []string              `json:"verified_sessions,omitempty"`
+	Confidence        float64               `json:"confidence,omitempty"`
+	ExplicitWorkflow  bool                  `json:"explicit_workflow,omitempty"`
+	Status            string                `json:"status"` // pending | applied | dismissed | superseded
+	FirstObservedAt   time.Time             `json:"first_observed_at"`
+	LastObservedAt    time.Time             `json:"last_observed_at"`
+	Verification      []PatternVerification `json:"verification,omitempty"`
+	Keywords          []string              `json:"keywords,omitempty"`
+	Paths             []string              `json:"paths,omitempty"`
+	Symbols           []string              `json:"symbols,omitempty"`
+	ErrorSignatures   []string              `json:"error_signatures,omitempty"`
+	Applicability     string                `json:"applicability,omitempty"`
+	EvidenceRefs      []EvidenceRef         `json:"evidence_refs,omitempty"`
+	SourceSHA256      string                `json:"source_sha256,omitempty"`
+	GuidanceSHA256    string                `json:"guidance_sha256,omitempty"`
+	RetrievalCount    int                   `json:"retrieval_count,omitempty"`
+	RetrievalSessions []string              `json:"retrieval_sessions,omitempty"`
+	HelpfulCount      int                   `json:"helpful_count,omitempty"`
+	IncorrectCount    int                   `json:"incorrect_count,omitempty"`
+	Contradictions    int                   `json:"contradiction_count,omitempty"`
+	LastRetrievedAt   *time.Time            `json:"last_retrieved_at,omitempty"`
+	LastVerifiedAt    *time.Time            `json:"last_verified_at,omitempty"`
+	StatusReason      string                `json:"status_reason,omitempty"`
+}
+
+type EvidenceRef struct {
+	SessionID        string   `json:"session_id"`
+	EventIDs         []string `json:"event_ids,omitempty"`
+	Summary          string   `json:"summary,omitempty"`
+	Modified         bool     `json:"modified,omitempty"`
+	SessionFileCount int      `json:"session_file_count,omitempty"`
 }
 
 type PatternVerification struct {
@@ -109,6 +137,7 @@ type RefreshState struct {
 
 type stateFile struct {
 	About       artifactmeta.About `json:"_about"`
+	Version     int                `json:"schema_version,omitempty"`
 	Lessons     []Lesson           `json:"lessons,omitempty"`
 	Semantic    []SemanticEntry    `json:"semantic,omitempty"`
 	Episodic    []EpisodicEntry    `json:"episodic,omitempty"`
@@ -136,22 +165,28 @@ func (s *Store) Ensure() error {
 	if _, err := os.Stat(s.statePath()); err == nil {
 		return nil
 	}
-	return s.writeState(stateFile{About: memoryAbout, Preferences: defaultTemplate("preferences.md"), Projects: defaultTemplate("projects.md")})
+	unlock, err := acquireDirLock(s.stateLockPath(), stateLockWait)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if _, err := os.Stat(s.statePath()); err == nil {
+		return nil
+	}
+	return s.writeState(stateFile{About: memoryAbout, Version: 2, Preferences: defaultTemplate("preferences.md"), Projects: defaultTemplate("projects.md")})
 }
 
 // repairMemoryStructure normalizes preferences/projects without wiping bullets.
 func (s *Store) repairMemoryStructure() error {
-	st, err := s.readState()
-	if err != nil {
-		return err
-	}
-	if harnessvalid.ValidatePreferences(st.Preferences) != nil {
-		st.Preferences = harnessvalid.NormalizePreferences(st.Preferences)
-	}
-	if harnessvalid.ValidateProjects(st.Projects) != nil {
-		st.Projects = harnessvalid.NormalizeProjects(st.Projects)
-	}
-	return s.writeState(st)
+	return s.mutateState(func(st *stateFile) error {
+		if harnessvalid.ValidatePreferences(st.Preferences) != nil {
+			st.Preferences = harnessvalid.NormalizePreferences(st.Preferences)
+		}
+		if harnessvalid.ValidateProjects(st.Projects) != nil {
+			st.Projects = harnessvalid.NormalizeProjects(st.Projects)
+		}
+		return nil
+	})
 }
 
 func (s *Store) statePath() string { return filepath.Join(s.Paths.MemoryDir, "state.json") }
@@ -170,12 +205,7 @@ func (s *Store) SaveRefreshState(refresh RefreshState) error {
 	if err := s.Ensure(); err != nil {
 		return err
 	}
-	st, err := s.readState()
-	if err != nil {
-		return err
-	}
-	st.Refresh = &refresh
-	return s.writeState(st)
+	return s.mutateState(func(st *stateFile) error { st.Refresh = &refresh; return nil })
 }
 
 // UpsertPattern records one session occurrence. A session contributes at most
@@ -188,59 +218,86 @@ func (s *Store) UpsertPattern(p Pattern, sessionID string, verified bool) (Patte
 	p.Vendor = harness.NormalizeVendorKind(p.Vendor)
 	p.Summary = truncate(p.Summary, 320)
 	p.Evidence = compactStrings(p.Evidence, 6, 240)
+	p.Keywords = compactStrings(p.Keywords, 24, 80)
+	p.Paths = compactStrings(p.Paths, 32, 240)
+	p.Symbols = compactStrings(p.Symbols, 24, 120)
+	p.ErrorSignatures = compactStrings(p.ErrorSignatures, 12, 160)
+	if p.Scope == "" {
+		p.Scope = "vendor"
+	}
+	if p.Scope == "shared" && (!p.ExplicitWorkflow || p.TargetType == "skill" || p.TargetType == "rules") {
+		p.Scope = "vendor"
+	}
 	sessionID = strings.TrimSpace(sessionID)
 	if p.Fingerprint == "" || p.Vendor == "" || p.Summary == "" || sessionID == "" {
 		return Pattern{}, fmt.Errorf("pattern requires fingerprint, supported vendor, summary, and session")
 	}
 	now := time.Now().UTC()
-	st, err := s.readState()
-	if err != nil {
-		return Pattern{}, err
-	}
-	for i := range st.Patterns {
-		cur := &st.Patterns[i]
-		if cur.Fingerprint != p.Fingerprint || cur.Vendor != p.Vendor {
-			continue
+	var result Pattern
+	err := s.mutateState(func(st *stateFile) error {
+		for i := range st.Patterns {
+			cur := &st.Patterns[i]
+			if cur.Fingerprint != p.Fingerprint || cur.Vendor != p.Vendor {
+				continue
+			}
+			if !containsString(cur.SessionIDs, sessionID) {
+				cur.SessionIDs = append(cur.SessionIDs, sessionID)
+				cur.Occurrences++
+			}
+			if verified && !containsString(cur.VerifiedSessions, sessionID) {
+				cur.VerifiedSessions = append(cur.VerifiedSessions, sessionID)
+				cur.Verification = append(cur.Verification, PatternVerification{SessionID: sessionID, Outcome: "passed", At: now})
+			}
+			cur.Confidence = maxFloat(cur.Confidence, p.Confidence)
+			cur.ExplicitWorkflow = cur.ExplicitWorkflow || p.ExplicitWorkflow
+			cur.LastObservedAt = now
+			if p.Summary != "" {
+				cur.Summary = p.Summary
+			}
+			cur.Evidence = compactStrings(append(cur.Evidence, p.Evidence...), 6, 240)
+			cur.Keywords = compactStrings(append(cur.Keywords, p.Keywords...), 24, 80)
+			cur.Paths = compactStrings(append(cur.Paths, p.Paths...), 32, 240)
+			cur.Symbols = compactStrings(append(cur.Symbols, p.Symbols...), 24, 120)
+			cur.ErrorSignatures = compactStrings(append(cur.ErrorSignatures, p.ErrorSignatures...), 12, 160)
+			cur.EvidenceRefs = compactEvidenceRefs(append(cur.EvidenceRefs, p.EvidenceRefs...), 12)
+			if p.Applicability != "" {
+				cur.Applicability = truncate(p.Applicability, 240)
+			}
+			if p.SourceSHA256 != "" {
+				cur.SourceSHA256 = p.SourceSHA256
+			}
+			if p.GuidanceSHA256 != "" {
+				cur.GuidanceSHA256 = p.GuidanceSHA256
+			}
+			if p.Scope == "shared" {
+				cur.Scope = "shared"
+			}
+			if cur.Status == "" {
+				cur.Status = "pending"
+			}
+			if verified {
+				cur.LastVerifiedAt = &now
+			}
+			result = *cur
+			return nil
 		}
-		if !containsString(cur.SessionIDs, sessionID) {
-			cur.SessionIDs = append(cur.SessionIDs, sessionID)
-			cur.Occurrences++
+		p.Occurrences = 1
+		p.SessionIDs = []string{sessionID}
+		p.FirstObservedAt = now
+		p.LastObservedAt = now
+		if p.Status == "" {
+			p.Status = "pending"
 		}
-		if verified && !containsString(cur.VerifiedSessions, sessionID) {
-			cur.VerifiedSessions = append(cur.VerifiedSessions, sessionID)
-			cur.Verification = append(cur.Verification, PatternVerification{SessionID: sessionID, Outcome: "passed", At: now})
+		if verified {
+			p.VerifiedSessions = []string{sessionID}
+			p.Verification = []PatternVerification{{SessionID: sessionID, Outcome: "passed", At: now}}
+			p.LastVerifiedAt = &now
 		}
-		cur.Confidence = maxFloat(cur.Confidence, p.Confidence)
-		cur.ExplicitWorkflow = cur.ExplicitWorkflow || p.ExplicitWorkflow
-		cur.LastObservedAt = now
-		if p.Summary != "" {
-			cur.Summary = p.Summary
-		}
-		cur.Evidence = compactStrings(append(cur.Evidence, p.Evidence...), 6, 240)
-		if cur.Status == "" {
-			cur.Status = "pending"
-		}
-		if err := s.writeState(st); err != nil {
-			return Pattern{}, err
-		}
-		return *cur, nil
-	}
-	p.Occurrences = 1
-	p.SessionIDs = []string{sessionID}
-	p.FirstObservedAt = now
-	p.LastObservedAt = now
-	if p.Status == "" {
-		p.Status = "pending"
-	}
-	if verified {
-		p.VerifiedSessions = []string{sessionID}
-		p.Verification = []PatternVerification{{SessionID: sessionID, Outcome: "passed", At: now}}
-	}
-	st.Patterns = append(st.Patterns, p)
-	if err := s.writeState(st); err != nil {
-		return Pattern{}, err
-	}
-	return p, nil
+		st.Patterns = append(st.Patterns, p)
+		result = p
+		return nil
+	})
+	return result, err
 }
 
 func (s *Store) ListPatterns() ([]Pattern, error) {
@@ -249,50 +306,57 @@ func (s *Store) ListPatterns() ([]Pattern, error) {
 }
 
 func (s *Store) SetPatternStatus(fingerprint, vendor, status string) error {
-	st, err := s.readState()
-	if err != nil {
-		return err
-	}
 	vendor = harness.NormalizeVendorKind(vendor)
-	for i := range st.Patterns {
-		if st.Patterns[i].Fingerprint == fingerprint && st.Patterns[i].Vendor == vendor {
-			st.Patterns[i].Status = status
-			return s.writeState(st)
+	return s.mutateState(func(st *stateFile) error {
+		for i := range st.Patterns {
+			if st.Patterns[i].Fingerprint == fingerprint && st.Patterns[i].Vendor == vendor {
+				st.Patterns[i].Status = status
+				if status == "applied" {
+					path := st.Patterns[i].TargetPath
+					if path != "" && !filepath.IsAbs(path) {
+						path = filepath.Join(s.Paths.RepoRoot, filepath.FromSlash(path))
+					}
+					if body, err := os.ReadFile(path); err == nil {
+						sum := sha256.Sum256(body)
+						st.Patterns[i].GuidanceSHA256 = hex.EncodeToString(sum[:])
+					}
+				}
+				return nil
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // RemoveSessionReferences prevents retention from leaving pointers to deleted
 // session artifacts. Aggregate occurrence counts and redacted summaries remain
 // durable so previously learned recurrence is not forgotten.
 func (s *Store) RemoveSessionReferences(sessionID string) error {
-	st, err := s.readState()
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	changed := false
-	for i := range st.Patterns {
-		before := len(st.Patterns[i].SessionIDs) + len(st.Patterns[i].VerifiedSessions) + len(st.Patterns[i].Verification)
-		st.Patterns[i].SessionIDs = withoutString(st.Patterns[i].SessionIDs, sessionID)
-		st.Patterns[i].VerifiedSessions = withoutString(st.Patterns[i].VerifiedSessions, sessionID)
-		verification := st.Patterns[i].Verification[:0]
-		for _, v := range st.Patterns[i].Verification {
-			if v.SessionID != sessionID {
-				verification = append(verification, v)
-			}
-		}
-		st.Patterns[i].Verification = verification
-		after := len(st.Patterns[i].SessionIDs) + len(st.Patterns[i].VerifiedSessions) + len(st.Patterns[i].Verification)
-		changed = changed || before != after
-	}
-	if !changed {
+	if _, err := os.Stat(s.statePath()); os.IsNotExist(err) {
 		return nil
 	}
-	return s.writeState(st)
+	return s.mutateState(func(st *stateFile) error {
+		for i := range st.Patterns {
+			st.Patterns[i].SessionIDs = withoutString(st.Patterns[i].SessionIDs, sessionID)
+			st.Patterns[i].VerifiedSessions = withoutString(st.Patterns[i].VerifiedSessions, sessionID)
+			st.Patterns[i].RetrievalSessions = withoutString(st.Patterns[i].RetrievalSessions, sessionID)
+			verification := st.Patterns[i].Verification[:0]
+			for _, v := range st.Patterns[i].Verification {
+				if v.SessionID != sessionID {
+					verification = append(verification, v)
+				}
+			}
+			st.Patterns[i].Verification = verification
+			refs := st.Patterns[i].EvidenceRefs[:0]
+			for _, ref := range st.Patterns[i].EvidenceRefs {
+				if ref.SessionID != sessionID {
+					refs = append(refs, ref)
+				}
+			}
+			st.Patterns[i].EvidenceRefs = refs
+		}
+		return nil
+	})
 }
 
 func (s *Store) ActivePath() string {
@@ -335,12 +399,7 @@ func (s *Store) AddLesson(l Lesson, mode Mode) error {
 	if l.CreatedAt.IsZero() {
 		l.CreatedAt = time.Now().UTC()
 	}
-	st, err := s.readState()
-	if err != nil {
-		return err
-	}
-	st.Lessons = append(st.Lessons, l)
-	if err := s.writeState(st); err != nil {
+	if err := s.mutateState(func(st *stateFile) error { st.Lessons = append(st.Lessons, l); return nil }); err != nil {
 		return err
 	}
 	_ = audit.Append(s.Paths, audit.Event{
@@ -363,28 +422,22 @@ func (s *Store) DeleteLesson(id string) error {
 	if id == "" {
 		return fmt.Errorf("empty lesson id")
 	}
-	lessons, err := s.ListLessons()
-	if err != nil {
-		return err
-	}
-	var kept []Lesson
-	found := false
-	for _, l := range lessons {
-		if l.ID == id {
-			found = true
-			continue
+	if err := s.mutateState(func(st *stateFile) error {
+		kept := st.Lessons[:0]
+		found := false
+		for _, l := range st.Lessons {
+			if l.ID == id {
+				found = true
+			} else {
+				kept = append(kept, l)
+			}
 		}
-		kept = append(kept, l)
-	}
-	if !found {
-		return fmt.Errorf("lesson not found: %s", id)
-	}
-	st, err := s.readState()
-	if err != nil {
-		return err
-	}
-	st.Lessons = kept
-	if err := s.writeState(st); err != nil {
+		if !found {
+			return fmt.Errorf("lesson not found: %s", id)
+		}
+		st.Lessons = kept
+		return nil
+	}); err != nil {
 		return err
 	}
 	_ = audit.Append(s.Paths, audit.Event{Action: "delete", Type: "lesson", Key: id})
@@ -405,27 +458,15 @@ func (s *Store) UpdateLesson(id, text string) error {
 	if ContainsInjection(text) {
 		return fmt.Errorf("lesson blocked by injection screen")
 	}
-	lessons, err := s.ListLessons()
-	if err != nil {
-		return err
-	}
-	found := false
-	for i := range lessons {
-		if lessons[i].ID == id {
-			lessons[i].Text = text
-			found = true
-			break
+	if err := s.mutateState(func(st *stateFile) error {
+		for i := range st.Lessons {
+			if st.Lessons[i].ID == id {
+				st.Lessons[i].Text = text
+				return nil
+			}
 		}
-	}
-	if !found {
 		return fmt.Errorf("lesson not found: %s", id)
-	}
-	st, err := s.readState()
-	if err != nil {
-		return err
-	}
-	st.Lessons = lessons
-	if err := s.writeState(st); err != nil {
+	}); err != nil {
 		return err
 	}
 	_ = audit.Append(s.Paths, audit.Event{Action: "update", Type: "lesson", Key: id, Detail: truncate(text, 160)})
@@ -448,20 +489,16 @@ func (s *Store) UpsertSemantic(e SemanticEntry, mode Mode) error {
 		return err
 	}
 	e.UpdatedAt = time.Now().UTC()
-	existing, _ := s.ListSemantic()
-	var kept []SemanticEntry
-	for _, x := range existing {
-		if x.Key != e.Key {
-			kept = append(kept, x)
+	if err := s.mutateState(func(st *stateFile) error {
+		kept := st.Semantic[:0]
+		for _, x := range st.Semantic {
+			if x.Key != e.Key {
+				kept = append(kept, x)
+			}
 		}
-	}
-	kept = append(kept, e)
-	st, err := s.readState()
-	if err != nil {
-		return err
-	}
-	st.Semantic = kept
-	if err := s.writeState(st); err != nil {
+		st.Semantic = append(kept, e)
+		return nil
+	}); err != nil {
 		return err
 	}
 	_ = audit.Append(s.Paths, audit.Event{Action: "update", Type: "semantic", Key: e.Key, Detail: truncate(e.Value, 120)})
@@ -491,12 +528,7 @@ func (s *Store) AddEpisodic(e EpisodicEntry, mode Mode) error {
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = time.Now().UTC()
 	}
-	st, err := s.readState()
-	if err != nil {
-		return err
-	}
-	st.Episodic = append(st.Episodic, e)
-	return s.writeState(st)
+	return s.mutateState(func(st *stateFile) error { st.Episodic = append(st.Episodic, e); return nil })
 }
 
 func (s *Store) ListEpisodic() ([]EpisodicEntry, error) {
@@ -508,15 +540,13 @@ func (s *Store) AppendHistory(summary string) error {
 	if err := s.Ensure(); err != nil {
 		return err
 	}
-	st, err := s.readState()
-	if err != nil {
-		return err
-	}
-	st.History = append(st.History, fmt.Sprintf("### %s\n%s", time.Now().UTC().Format(time.RFC3339), strings.TrimSpace(summary)))
-	if len(st.History) > 100 {
-		st.History = st.History[len(st.History)-100:]
-	}
-	return s.writeState(st)
+	return s.mutateState(func(st *stateFile) error {
+		st.History = append(st.History, fmt.Sprintf("### %s\n%s", time.Now().UTC().Format(time.RFC3339), strings.TrimSpace(summary)))
+		if len(st.History) > 100 {
+			st.History = st.History[len(st.History)-100:]
+		}
+		return nil
+	})
 }
 
 func (s *Store) Search(q string, limit int) ([]SearchHit, error) {
@@ -569,6 +599,10 @@ func (s *Store) Search(q string, limit int) ([]SearchHit, error) {
 		for i, h := range st.History {
 			add("history", fmt.Sprintf("history-%d", i), h, score(h))
 		}
+		for _, p := range st.Patterns {
+			text := strings.Join(append([]string{p.Summary, p.Applicability, p.TargetPath}, append(p.Keywords, append(p.Paths, p.Symbols...)...)...), " ")
+			add("pattern", p.Fingerprint, text, score(text)+p.Confidence)
+		}
 	}
 	// sort by score desc
 	for i := 0; i < len(hits); i++ {
@@ -586,17 +620,23 @@ func (s *Store) Search(q string, limit int) ([]SearchHit, error) {
 
 // BuildSessionContext assembles a capped memory pack for SessionStart / start-from-memory.
 func (s *Store) BuildSessionContext(budget int, query string, mode Mode) (ContextPack, error) {
+	return s.BuildSessionContextForVendor(budget, query, mode, "")
+}
+
+// BuildSessionContextForVendor creates the startup pack using estimated token
+// limits and includes only shared or same-vendor durable patterns.
+func (s *Store) BuildSessionContextForVendor(budget int, query string, mode Mode, vendor string) (ContextPack, error) {
 	if err := s.Ensure(); err != nil {
 		return ContextPack{}, err
 	}
 	if budget <= 0 {
-		budget = 12000
+		budget = 1500
 	}
 	pack := ContextPack{Mode: mode, Sections: map[string]int{}, ActivePath: s.ActivePath()}
 	if mode == ModeTemporary {
 		pack.Text = "<!-- Superopen generated session context. This is derived from approved memory and project guidance and may be regenerated. -->\n<!-- Updated by session review and memory consolidation. -->\n# Superopen memory\n\n(temporary mode - no memory injected)\n"
 		pack.CharCount = len(pack.Text)
-		_ = os.WriteFile(s.ActivePath(), []byte(pack.Text), 0o644)
+		_ = atomicWriteFile(s.ActivePath(), []byte(pack.Text), 0o644)
 		return pack, nil
 	}
 
@@ -615,7 +655,7 @@ func (s *Store) BuildSessionContext(budget int, query string, mode Mode) (Contex
 			body = body[:capn] + "\n…[truncated]"
 		}
 		sec := fmt.Sprintf("## [%s]\n\n%s\n\n", title, body)
-		if b.Len()+len(sec) > budget {
+		if pricing.EstimateTokens(b.String()+sec) > int64(budget) {
 			return
 		}
 		b.WriteString(sec)
@@ -625,6 +665,9 @@ func (s *Store) BuildSessionContext(budget int, query string, mode Mode) (Contex
 	st, _ := s.readState()
 	writeSection("Preferences", st.Preferences, 2000)
 	writeSection("Projects", st.Projects, 2500)
+	if patterns, err := s.StartupPatterns(vendor, budget/2); err == nil {
+		writeSection("Durable patterns", FormatRetrieval(patterns), 3500)
+	}
 	writeSection("History", s.readRecentHistory(14), 2600)
 
 	if sem, err := s.ListSemantic(); err == nil && len(sem) > 0 {
@@ -697,7 +740,7 @@ func (s *Store) BuildSessionContext(budget int, query string, mode Mode) (Contex
 
 	pack.Text = b.String()
 	pack.CharCount = len(pack.Text)
-	_ = os.WriteFile(s.ActivePath(), []byte(pack.Text), 0o644)
+	_ = atomicWriteFile(s.ActivePath(), []byte(pack.Text), 0o644)
 	return pack, nil
 }
 
@@ -734,14 +777,13 @@ func (s *Store) Consolidate(sessionSummary string, completer llm.Completer) (hin
 
 	if completer == nil || !completer.Available() {
 		if summary != "" {
-			st, _ := s.readState()
-			updated := harnessvalid.AppendToProjectsSection(st.Projects, "Notes",
-				fmt.Sprintf("%s - %s", time.Now().UTC().Format("2006-01-02"), truncate(summary, 200)))
-			st.Projects = updated
-			_ = s.writeState(st)
+			_ = s.mutateState(func(st *stateFile) error {
+				st.Projects = harnessvalid.AppendToProjectsSection(st.Projects, "Notes", fmt.Sprintf("%s - %s", time.Now().UTC().Format("2006-01-02"), truncate(summary, 200)))
+				return nil
+			})
 			s.heuristicSemanticFromSummary(summary)
 		}
-		_, _ = s.BuildSessionContext(12000, "", ModePersistent)
+		_, _ = s.BuildSessionContext(1500, "", ModePersistent)
 		return "Install/login Claude Code or Codex for richer consolidation, or set an API key.", nil
 	}
 	st, _ := s.readState()
@@ -756,7 +798,7 @@ projects_md MUST start with "# Projects" and include H2 sections exactly: "## Cu
 	)
 	if err != nil {
 		s.heuristicSemanticFromSummary(summary)
-		_, _ = s.BuildSessionContext(12000, "", ModePersistent)
+		_, _ = s.BuildSessionContext(1500, "", ModePersistent)
 		return "consolidation model error: " + err.Error(), nil
 	}
 	raw := llm.ExtractJSON(out)
@@ -770,7 +812,7 @@ projects_md MUST start with "# Projects" and include H2 sections exactly: "## Cu
 	}
 	if json.Unmarshal([]byte(raw), &parsed) != nil {
 		s.heuristicSemanticFromSummary(summary)
-		_, _ = s.BuildSessionContext(12000, "", ModePersistent)
+		_, _ = s.BuildSessionContext(1500, "", ModePersistent)
 		return "consolidation parse failed; kept heuristic history only", nil
 	}
 	if strings.TrimSpace(parsed.PreferencesMD) != "" {
@@ -788,7 +830,11 @@ projects_md MUST start with "# Projects" and include H2 sections exactly: "## Cu
 			st.Projects = norm
 		}
 	}
-	_ = s.writeState(st)
+	_ = s.mutateState(func(current *stateFile) error {
+		current.Preferences = st.Preferences
+		current.Projects = st.Projects
+		return nil
+	})
 	n := 0
 	for _, e := range parsed.Semantic {
 		k := strings.TrimSpace(e.Key)
@@ -806,7 +852,7 @@ projects_md MUST start with "# Projects" and include H2 sections exactly: "## Cu
 		s.heuristicSemanticFromSummary(summary)
 	}
 	_ = audit.Append(s.Paths, audit.Event{Action: "update", Type: "memory", Detail: "consolidate via " + completer.Backend()})
-	_, _ = s.BuildSessionContext(12000, "", ModePersistent)
+	_, _ = s.BuildSessionContext(1500, "", ModePersistent)
 	return "", nil
 }
 
@@ -890,6 +936,9 @@ func (s *Store) exportLessonsMarkdown() error {
 
 func (s *Store) readState() (stateFile, error) {
 	var st stateFile
+	if info, err := os.Stat(s.statePath()); err == nil && info.Size() > 16<<20 {
+		return st, fmt.Errorf("memory state exceeds 16 MiB safety limit")
+	}
 	data, err := os.ReadFile(s.statePath())
 	if err != nil {
 		return st, err
@@ -900,6 +949,9 @@ func (s *Store) readState() (stateFile, error) {
 
 func (s *Store) writeState(st stateFile) error {
 	st.About = memoryAbout
+	if st.Version == 0 {
+		st.Version = 2
+	}
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
@@ -907,39 +959,66 @@ func (s *Store) writeState(st stateFile) error {
 	if err := os.MkdirAll(s.Paths.MemoryDir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(s.statePath(), append(b, '\n'), 0o644)
+	return atomicWriteFile(s.statePath(), append(b, '\n'), 0o644)
 }
 
 func (s *Store) AppendPreferenceText(text string) error {
 	if err := s.Ensure(); err != nil {
 		return err
 	}
-	st, err := s.readState()
-	if err != nil {
-		return err
-	}
-	updated := harnessvalid.AppendPreferencesBullet(st.Preferences, strings.TrimSpace(text))
-	if err := harnessvalid.ValidatePreferences(updated); err != nil {
-		return err
-	}
-	st.Preferences = updated
-	return s.writeState(st)
+	return s.mutateState(func(st *stateFile) error {
+		updated := harnessvalid.AppendPreferencesBullet(st.Preferences, strings.TrimSpace(text))
+		if err := harnessvalid.ValidatePreferences(updated); err != nil {
+			return err
+		}
+		st.Preferences = updated
+		return nil
+	})
 }
 
 func (s *Store) AppendProjectNote(text string) error {
 	if err := s.Ensure(); err != nil {
 		return err
 	}
-	st, err := s.readState()
-	if err != nil {
+	return s.mutateState(func(st *stateFile) error {
+		updated := harnessvalid.AppendToProjectsSection(st.Projects, "Notes", strings.TrimSpace(text))
+		if err := harnessvalid.ValidateProjects(updated); err != nil {
+			return err
+		}
+		st.Projects = updated
+		return nil
+	})
+}
+
+// ReplaceDocument validates and atomically replaces one consolidated Markdown
+// section. It is the write path used by both the CLI and the UI.
+func (s *Store) ReplaceDocument(kind, body string) error {
+	if err := s.Ensure(); err != nil {
 		return err
 	}
-	updated := harnessvalid.AppendToProjectsSection(st.Projects, "Notes", strings.TrimSpace(text))
-	if err := harnessvalid.ValidateProjects(updated); err != nil {
-		return err
+	body = redact.StringFull(body)
+	switch kind {
+	case "preferences":
+		body = harnessvalid.NormalizePreferences(body)
+		if err := harnessvalid.ValidatePreferences(body); err != nil {
+			return err
+		}
+	case "projects":
+		body = harnessvalid.NormalizeProjects(body)
+		if err := harnessvalid.ValidateProjects(body); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("document kind must be preferences or projects")
 	}
-	st.Projects = updated
-	return s.writeState(st)
+	return s.mutateState(func(st *stateFile) error {
+		if kind == "preferences" {
+			st.Preferences = body
+		} else {
+			st.Projects = body
+		}
+		return nil
+	})
 }
 
 func truncate(s string, n int) string {
@@ -961,6 +1040,25 @@ func compactStrings(values []string, limit, maxLen int) []string {
 		seen[value] = true
 		out = append(out, value)
 		if len(out) == limit {
+			break
+		}
+	}
+	return out
+}
+
+func compactEvidenceRefs(values []EvidenceRef, limit int) []EvidenceRef {
+	seen := map[string]bool{}
+	out := make([]EvidenceRef, 0, limit)
+	for _, ref := range values {
+		ref.SessionID = strings.TrimSpace(ref.SessionID)
+		if ref.SessionID == "" || seen[ref.SessionID] {
+			continue
+		}
+		seen[ref.SessionID] = true
+		ref.EventIDs = compactStrings(ref.EventIDs, 8, 80)
+		ref.Summary = truncate(redact.StringFull(ref.Summary), 240)
+		out = append(out, ref)
+		if len(out) >= limit {
 			break
 		}
 	}

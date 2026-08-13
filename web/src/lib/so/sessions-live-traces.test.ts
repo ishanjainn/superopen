@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { countTurnsFromSpans, mergeTraceSpans } from "./sessions";
+import {
+  countTurnsFromSpans,
+  mergeTraceSpans,
+  spansHaveActivity,
+} from "./sessions";
 
 describe("mergeTraceSpans", () => {
   it("adds live spans that are newer than a materialized transcript", () => {
@@ -47,5 +51,37 @@ describe("file-backed active sessions", () => {
         },
       ])
     ).toBe(1);
+  });
+
+  it("keeps a live vendor session visible when the vendor omits prompt spans", () => {
+    const spans: Parameters<typeof spansHaveActivity>[0] = [
+      {
+        name: "coding_agent.llm.turn",
+        attributes: {
+          "gen_ai.output.messages": '[{"role":"assistant"}]',
+        },
+      },
+      {
+        name: "coding_agent.tool.call",
+        attributes: {
+          "gen_ai.tool.name": "Write",
+          "code.file.path": "internal/session/store.go",
+        },
+      },
+    ];
+
+    expect(countTurnsFromSpans(spans)).toBe(1);
+    expect(spansHaveActivity(spans)).toBe(true);
+  });
+
+  it("still treats lifecycle-only telemetry as empty", () => {
+    expect(
+      spansHaveActivity([
+        {
+          name: "coding_agent.session",
+          attributes: { "coding_agent.client": "cursor" },
+        },
+      ]),
+    ).toBe(false);
   });
 });

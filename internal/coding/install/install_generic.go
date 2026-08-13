@@ -115,14 +115,15 @@ func copilotManifest(soBin string) (string, error) {
 	doc := map[string]any{
 		"version": 1,
 		"hooks": map[string]any{
-			"sessionStart":        []any{hook("coding hook --vendor=copilot-cli --event=sessionStart")},
-			"sessionEnd":          []any{hook("coding hook --vendor=copilot-cli --event=sessionEnd"), hook("sessions finalize --detach")},
-			"userPromptSubmitted": []any{hook("coding hook --vendor=copilot-cli --event=userPromptSubmitted")},
-			"preToolUse":          []any{hook("coding hook --vendor=copilot-cli --event=preToolUse")},
-			"postToolUse":         []any{hook("coding hook --vendor=copilot-cli --event=postToolUse")},
-			"postToolUseFailure":  []any{hook("coding hook --vendor=copilot-cli --event=postToolUseFailure")},
-			"errorOccurred":       []any{hook("coding hook --vendor=copilot-cli --event=errorOccurred")},
-			"agentStop":           []any{hook("coding hook --vendor=copilot-cli --event=agentStop"), hook("sessions finalize --detach")},
+			"sessionStart":          []any{hook("coding hook --vendor=copilot-cli --event=sessionStart")},
+			"sessionEnd":            []any{hook("coding hook --vendor=copilot-cli --event=sessionEnd"), hook("sessions finalize --detach")},
+			"userPromptSubmitted":   []any{hook("coding hook --vendor=copilot-cli --event=userPromptSubmitted")},
+			"userPromptTransformed": []any{hook("coding hook --vendor=copilot-cli --event=userPromptTransformed")},
+			"preToolUse":            []any{hook("coding hook --vendor=copilot-cli --event=preToolUse")},
+			"postToolUse":           []any{hook("coding hook --vendor=copilot-cli --event=postToolUse")},
+			"postToolUseFailure":    []any{hook("coding hook --vendor=copilot-cli --event=postToolUseFailure")},
+			"errorOccurred":         []any{hook("coding hook --vendor=copilot-cli --event=errorOccurred")},
+			"agentStop":             []any{hook("coding hook --vendor=copilot-cli --event=agentStop"), hook("sessions finalize --detach")},
 		},
 	}
 	body, err := json.MarshalIndent(doc, "", "  ")

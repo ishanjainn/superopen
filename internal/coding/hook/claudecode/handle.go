@@ -41,7 +41,8 @@ type claudePayload struct {
 	// UserPromptSubmit specific. Claude Code sends the entire user
 	// prompt verbatim on this event. We only stamp the body when
 	// content_capture_mode == "full" - otherwise just the length.
-	Prompt string `json:"prompt"`
+	Prompt       string `json:"prompt"`
+	GenerationID string `json:"generation_id"`
 
 	// SubagentStop adds these (matcher + a short blurb). Documented
 	// at https://code.claude.com/docs/en/hooks#subagentstop-input.
@@ -458,6 +459,7 @@ func emitUserPrompt(in normalize.Input, p claudePayload) error {
 	turn := normalize.LLMTurn{
 		SessionID:      p.SessionID,
 		ConversationID: p.SessionID,
+		GenerationID:   p.GenerationID,
 		Vendor:         in.Vendor,
 		StartedAt:      now,
 		EndedAt:        now,

@@ -39,10 +39,15 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 	cwd := str(payload, "cwd", "working_directory")
 	model := str(payload, "model", "model_id")
 	prompt := str(payload, "prompt", "message", "content", "text")
+	generationID := str(payload, "generation_id", "turn_id", "message_id", "request_id")
 	ev := strings.ToLower(in.Event)
 	now := time.Now().UTC()
 
 	switch {
+	case ev == "userprompttransformed":
+		// The submitted event is the sole authoritative prompt trace. This
+		// model-facing hook exists only to deliver locally retrieved context.
+		return nil
 	case ev == "sessionstart" || ev == "session_start":
 		return in.Emit.EmitSession(normalize.Session{
 			SessionID: sid,
@@ -64,7 +69,7 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 			return nil
 		}
 		return in.Emit.EmitLLMTurn(normalize.LLMTurn{
-			SessionID: sid, Vendor: a.name, Model: model, Prompt: prompt, StartedAt: now,
+			SessionID: sid, Vendor: a.name, Model: model, Prompt: prompt, GenerationID: generationID, StartedAt: now,
 		})
 	case ev == "afteragent" || ev == "agentstop":
 		response := str(payload, "prompt_response", "response", "output", "text")

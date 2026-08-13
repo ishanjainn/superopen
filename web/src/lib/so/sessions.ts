@@ -448,8 +448,12 @@ function listCheckpoints(
 
 export function countTurnsFromSpans(spans: TraceSpan[]): number {
   let n = 0;
+  let llmTurns = 0;
   for (const sp of spans) {
     const name = String(sp.name || "").toLowerCase();
+    if (name === "coding_agent.llm.turn" || name.includes("completion")) {
+      llmTurns++;
+    }
     if (name.includes("user_prompt") || name.includes("user.prompt")) {
       n++;
       continue;
@@ -469,7 +473,42 @@ export function countTurnsFromSpans(spans: TraceSpan[]): number {
       n++;
     }
   }
-  return n;
+  // Some vendors expose model responses and tool activity but no separate
+  // prompt event. In that case response turns are the best live approximation.
+  return n || llmTurns;
+}
+
+/** True when the repository-local stream contains real coding-agent work. */
+export function spansHaveActivity(spans: TraceSpan[]): boolean {
+  return spans.some((sp) => {
+    const name = String(sp.name || "").toLowerCase();
+    const attrs = sp.attributes || {};
+    if (
+      attrs["gen_ai.prompt"] ||
+      attrs["gen_ai.content.prompt"] ||
+      attrs["gen_ai.input.messages"] ||
+      attrs["coding_agent.file_path"] ||
+      attrs["code.file.path"] ||
+      attrs["coding_agent.command"] ||
+      attrs["coding_agent.tool.command"] ||
+      attrs["gen_ai.tool.name"]
+    ) {
+      return true;
+    }
+    return [
+      "prompt",
+      "llm.turn",
+      "completion",
+      "tool",
+      "edit",
+      "write",
+      "read",
+      "search",
+      "grep",
+      "glob",
+      "exec",
+    ].some((marker) => name.includes(marker));
+  });
 }
 
 function loadTranscriptSpans(sessionPath: string): TraceSpan[] {
@@ -544,11 +583,21 @@ function codexRolloutUpdatedAt(sessionId: string): number {
 function enrichSessionStats(
   sessionPath: string,
   meta: SessionMeta,
-): { turns: number; checkpoints: number } {
+): { turns: number; checkpoints: number; hasActivity: boolean; files: string[] } {
   const spans = mergeTraceSpans(loadTranscriptSpans(sessionPath));
+  const files = new Set<string>();
+  for (const span of spans) {
+    const attrs = span.attributes || {};
+    for (const key of FILE_ATTR_KEYS) {
+      const value = String(attrs[key] || "").trim();
+      if (value) files.add(value);
+    }
+  }
   return {
     turns: countTurnsFromSpans(spans),
     checkpoints: countCheckpointDirs(sessionPath),
+    hasActivity: spansHaveActivity(spans),
+    files: Array.from(files),
   };
 }
 
@@ -752,11 +801,14 @@ function listSessionsInSo(soDir: string, projectId: string): ListItem[] {
       join(sessionPath, "session.json"),
     );
     const footprint = sessionDoc?.footprint;
-    const files = (footprint?.files || []).map((f) => f.path).filter(Boolean);
+    const materializedFiles = (footprint?.files || [])
+      .map((f) => f.path)
+      .filter(Boolean);
     const title = displayTitle(meta);
     const user =
       String(meta.user || "").trim() || users.get(meta.id) || undefined;
     const stats = enrichSessionStats(sessionPath, meta);
+    const files = Array.from(new Set([...materializedFiles, ...stats.files]));
     const item: ListItem = {
       ...meta,
       user,
@@ -769,7 +821,7 @@ function listSessionsInSo(soDir: string, projectId: string): ListItem[] {
       turns: stats.turns,
       files,
     };
-    if (isEmptySession(item)) continue;
+    if (!stats.hasActivity && isEmptySession(item)) continue;
     items.push(item);
   }
   return items;
@@ -929,6 +981,7 @@ export function getSessionDetail(id: string, projectFilter = "") {
       footprint?: unknown;
       evaluation?: unknown;
       review?: { findings?: unknown[] };
+	  memory_retrievals?: unknown[];
     }>(join(sessionPath, "session.json"));
     const footprint = sessionDoc?.footprint;
     // Hooks append directly to this file, including during active chats.
@@ -999,6 +1052,7 @@ export function getSessionDetail(id: string, projectFilter = "") {
       findings: Array.isArray(sessionDoc?.review?.findings)
         ? sessionDoc.review.findings
         : [],
+	  memory_retrievals: Array.isArray(sessionDoc?.memory_retrievals) ? sessionDoc.memory_retrievals : [],
       subagents,
     };
   }

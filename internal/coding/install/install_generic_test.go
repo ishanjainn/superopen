@@ -136,7 +136,7 @@ func TestGenericVendorHonorsConfigOverrides(t *testing.T) {
 	if !strings.Contains(string(body), `"version": 1`) {
 		t.Fatalf("Copilot hook manifest lacks version: %s", body)
 	}
-	for _, field := range []string{`"bash":`, `"powershell":`, `"timeoutSec": 5`} {
+	for _, field := range []string{`"bash":`, `"powershell":`, `"timeoutSec": 5`, `"userPromptTransformed":`} {
 		if !strings.Contains(string(body), field) {
 			t.Fatalf("Copilot hook manifest lacks %s: %s", field, body)
 		}

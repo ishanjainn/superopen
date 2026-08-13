@@ -40,3 +40,44 @@ func TestEnsureRepairsEventStreamWithoutSessionDocument(t *testing.T) {
 		t.Fatalf("repaired index = %#v, %v", entries, err)
 	}
 }
+
+func TestEnsureRepairsIndexFromExistingSessionDocument(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(paths)
+	if err := store.Start(Meta{ID: "recorded", Vendor: "codex", Status: StatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.SessionsIndex, []byte(`{"_about":{},"sessions":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := store.List()
+	if err != nil || len(entries) != 1 || entries[0].ID != "recorded" {
+		t.Fatalf("repaired index = %#v, %v", entries, err)
+	}
+}
+
+func TestListUsesSessionDocumentsWhenIndexIsStale(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(paths)
+	if err := store.Start(Meta{ID: "recorded", Vendor: "codex", Status: StatusActive}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.SessionsIndex, []byte(`{"_about":{},"sessions":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := store.List()
+	if err != nil || len(entries) != 1 || entries[0].ID != "recorded" {
+		t.Fatalf("derived list = %#v, %v", entries, err)
+	}
+}

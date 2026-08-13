@@ -28,6 +28,7 @@ type payload struct {
 	Content      any             `json:"content"` // string | parts[]
 	Role         string          `json:"role"`
 	MessageID    string          `json:"message_id"`
+	GenerationID string          `json:"generation_id"`
 	ToolName     string          `json:"tool_name"`
 	ToolID       string          `json:"tool_use_id"`
 	ToolInput    json.RawMessage `json:"tool_input"`
@@ -117,7 +118,7 @@ func handle(in normalize.Input) error {
 		if role == "user" || (p.Prompt != "" && role != "assistant" && len(p.Tools) == 0) {
 			return in.Emit.EmitLLMTurn(normalize.LLMTurn{
 				SessionID: sid, Vendor: in.Vendor, Model: model, StartedAt: now,
-				Prompt: capture(in, text),
+				Prompt: capture(in, text), GenerationID: firstNonEmpty(p.GenerationID, p.MessageID),
 			})
 		}
 		turn := normalize.LLMTurn{
