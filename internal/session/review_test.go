@@ -47,7 +47,10 @@ func TestPreviousReviewContextIsShortAndSameVendor(t *testing.T) {
 	if err := store.Start(Meta{ID: "cursor-old", Vendor: "cursor", StartedAt: now.Add(-time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.WriteDocument("cursor-old", func(d *Document) { d.Review.Status = "pending" }); err != nil {
+	if err := store.WriteDocument("cursor-old", func(d *Document) {
+		d.Review.Status = "pending"
+		d.Footprint.Files = []FootprintFile{{Path: "internal/service.go", State: "edited", Count: 1}}
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got := store.PreviousReviewContext("cursor", "cursor-new")
@@ -56,6 +59,18 @@ func TestPreviousReviewContextIsShortAndSameVendor(t *testing.T) {
 	}
 	if strings.Contains(got, "REDACTED SESSION TEXT") {
 		t.Fatal("must not inject full evidence")
+	}
+}
+
+func TestReviewEligibleRejectsHarnessOnlySessions(t *testing.T) {
+	for _, path := range []string{".so/config.yaml", "AGENTS.md", ".claude/skills/so/SKILL.md"} {
+		d := Document{Footprint: Footprint{Files: []FootprintFile{{Path: path, State: "edited"}}}}
+		if ReviewEligible(d) {
+			t.Errorf("harness-only edit %q must not schedule review", path)
+		}
+	}
+	if !ReviewEligible(Document{Footprint: Footprint{Files: []FootprintFile{{Path: "internal/service.go", State: "edited"}}}}) {
+		t.Fatal("repository source edit should be review eligible")
 	}
 }
 

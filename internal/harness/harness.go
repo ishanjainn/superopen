@@ -83,7 +83,7 @@ func Resolve(repoRoot string) Paths {
 		AgentBrief:      "",
 		GraphDir:        filepath.Join(root, "graph"),
 		GraphJSON:       filepath.Join(root, "graph", "graph.json"),
-		GraphReport:     "",
+		GraphReport:     filepath.Join(root, "graph", "GRAPH_REPORT.md"),
 		GraphCorpus:     filepath.Join(root, "graph", "corpus.json"),
 		GraphHTML:       filepath.Join(root, "graph", "graph.html"),
 		GraphState:      filepath.Join(root, "graph", "state.json"),
@@ -121,7 +121,7 @@ func (p Paths) Exists() bool {
 // directories and checkpoints are still created only when a session exists.
 func (p Paths) EnsureDirs() error {
 	dirs := []string{
-		p.Root, p.GraphDir, p.SessionsDir, p.MemoryDir, p.AuditDir,
+		p.Root, p.GraphDir, filepath.Join(p.GraphDir, "cache"), filepath.Join(p.GraphDir, "converted"), filepath.Join(p.GraphDir, "wiki"), filepath.Join(p.GraphDir, "obsidian"), filepath.Join(p.GraphDir, "exports"), filepath.Join(p.GraphDir, "reflections"), p.SessionsDir, p.MemoryDir, p.AuditDir,
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o755); err != nil {

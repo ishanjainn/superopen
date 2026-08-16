@@ -3,6 +3,7 @@ Copyright 2026 Superopen Contributors
 
 This product includes software derived from:
 
-Graphify (Apache-2.0 / MIT)
+Graphify 0.9.44 (Apache-2.0)
   https://github.com/Graphify-Labs/graphify
-  Repository knowledge graph extraction concepts and always-on injection patterns.
+  Invoked as the pinned repository graph extraction, analysis, query, and export runtime.
+  Graphify's license and NOTICE terms apply to its separately installed Python package.

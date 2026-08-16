@@ -31,6 +31,10 @@ func Install(repoRoot string, vendors []string) error {
 			v = "copilot-cli"
 		case "agents", "":
 			continue
+		case "kilo", "aider", "claw", "openclaw", "droid", "factory", "trae", "trae-cn", "hermes", "kiro", "devin", "codebuddy", "kimi", "amp", "antigravity", "vscode", "windows":
+			// These agents consume the project/global /so skill and AGENTS-style
+			// guidance. They do not expose a stable telemetry hook contract yet.
+			continue
 		}
 		if seen[v] {
 			continue

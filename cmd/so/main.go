@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,6 +37,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/nativedocs"
 	"github.com/ishanjainn/superopen/internal/projects"
 	"github.com/ishanjainn/superopen/internal/recommend"
+	"github.com/ishanjainn/superopen/internal/redact"
 	"github.com/ishanjainn/superopen/internal/seed"
 	"github.com/ishanjainn/superopen/internal/session"
 	"github.com/ishanjainn/superopen/internal/sync"
@@ -154,7 +157,7 @@ vendor's telemetry hooks or plugin. Shared Agent Skills requires --shared-agents
 Default: install globally into your home directory AND into the current git project.
 This does NOT create .so/ or build a graph - run so init for that.
 
-Also best-effort ensures the graphify CLI is on PATH (used later by so init / so graph).`,
+Also installs and validates the pinned Graphify runtime in an isolated Python 3.12 environment.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !global && !project {
 				global, project = true, true
@@ -183,7 +186,9 @@ Also best-effort ensures the graphify CLI is on PATH (used later by so init / so
 					fmt.Println("Installed coding-agent hooks/plugins for:", strings.Join(selected, ", "))
 				}
 			}
-			ensureGraphifyy()
+			if err := ensureGraphifyy(); err != nil {
+				return err
+			}
 			fmt.Println()
 			fmt.Println("Reload Cursor / your agent if /so is not listed yet.")
 			fmt.Println("Then try:  /so")
@@ -300,14 +305,12 @@ Use so coding uninstall if you only want to strip hooks.`,
 	return c
 }
 
-func ensureGraphifyy() {
-	if err := graph.EnsureTool(); err != nil {
-		fmt.Printf("graphify: %v\n", err)
-	}
+func ensureGraphifyy() error {
+	return graph.EnsureTool()
 }
 
 func cmdInit() *cobra.Command {
-	var codeOnly, force, useLLM, noLLM, sharedAgents bool
+	var codeOnly, force, useLLM, noLLM, sharedAgents, agent bool
 	var vendors []string
 	c := &cobra.Command{
 		Use:   "init",
@@ -323,6 +326,10 @@ func cmdInit() *cobra.Command {
 					return fmt.Errorf("LLM required (--llm) but no API key / gateway configured")
 				}
 			}
+			initWriter := io.Writer(os.Stdout)
+			if axiFlags.JSON {
+				initWriter = io.Discard
+			}
 			rep, err := initcmd.Run(initcmd.Options{
 				RepoRoot:     repoRoot(),
 				CodeOnly:     codeOnly,
@@ -331,6 +338,8 @@ func cmdInit() *cobra.Command {
 				NoLLM:        noLLM,
 				Vendors:      vendors,
 				SharedAgents: sharedAgents,
+				Agent:        agent,
+				Writer:       initWriter,
 			})
 			if err != nil {
 				return err
@@ -340,7 +349,7 @@ func cmdInit() *cobra.Command {
 			if rep.Graph.HasHTML {
 				html = "UI graph.html ready"
 			}
-			fmt.Printf("Graph: %d nodes, %d edges (%s · %s)\n", rep.Graph.NodeCount, rep.Graph.EdgeCount, rep.Graph.Source, html)
+			fmt.Printf("Graph: %d nodes, %d edges (%s %s · %s)\n", rep.Graph.NodeCount, rep.Graph.EdgeCount, rep.Graph.Engine, rep.Graph.EngineVersion, html)
 			fmt.Printf("Agent sources: %d · derived rules: %d → guardrails/evals\n", rep.Agents, rep.Rules)
 			if rep.LLM.Used {
 				fmt.Printf("LLM upgrade: %d guardrails, %d checks\n", rep.LLM.Rules, rep.LLM.Checks)
@@ -353,6 +362,7 @@ func cmdInit() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&codeOnly, "code-only", false, "Skip Graphify semantic/docs pass")
+	c.Flags().BoolVar(&agent, "agent", false, "Use the active coding agent for resumable semantic extraction")
 	c.Flags().BoolVar(&force, "force", false, "Overwrite existing docs/guardrails/evals with fresh heuristic seed")
 	c.Flags().BoolVar(&useLLM, "llm", false, "Require headless API-key LLM upgrade (fails without a configured LLM)")
 	c.Flags().BoolVar(&noLLM, "no-llm", false, "Skip API-key LLM upgrade (default path for /so init in assistants)")
@@ -439,6 +449,10 @@ func cmdSync() *cobra.Command {
 				RepoRoot: repoRoot(), Semantic: semantic, SkipGraph: skipGraph,
 				Vendors: vendors, SharedAgents: sharedAgents, SetSharedAgents: cmd.Flags().Changed("shared-agents"),
 			}); err != nil {
+				var continuation *sync.GraphContinuationError
+				if errors.As(err, &continuation) {
+					return axi.Continuation("graph semantic refresh requires the coding agent", "resume with `so graph semantic briefs --run "+continuation.RunID+"`")
+				}
 				return err
 			}
 			return out().HumanOrJSON("result", func() {
@@ -474,64 +488,14 @@ func cmdRefresh() *cobra.Command {
 }
 
 func cmdGraph() *cobra.Command {
-	c := &cobra.Command{Use: "graph", Short: "Repository graph operations"}
-	var codeOnly bool
-	rebuild := &cobra.Command{
-		Use:   "rebuild",
-		Short: "Rebuild graph (JSON + graph.html for the UI)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			root := repoRoot()
-			paths := harness.Resolve(root)
-			cfg, _ := config.Load(paths.Config)
-			_ = graph.EnsureTool()
-			onlyCode := codeOnly || !cfg.Graph.Semantic
-			res, err := graph.RefreshAtomic(root, paths, onlyCode, cfg.Graph.SemanticBackend)
-			if err != nil {
-				return err
-			}
-			html := "no html"
-			if res.HasHTML {
-				html = "graph.html"
-			}
-			fmt.Printf("Wrote %s (%d nodes, %d edges, %s, %s)\n", res.Path, res.NodeCount, res.EdgeCount, res.Source, html)
-			return nil
-		},
-	}
-	rebuild.Flags().BoolVar(&codeOnly, "code-only", false, "AST-only extract (skip semantic LLM pass)")
-	c.AddCommand(rebuild)
-	c.AddCommand(queryCmd())
-	return c
+	return newGraphCommand()
 }
 
 func cmdQuery() *cobra.Command {
-	c := queryCmd()
+	c := graphQueryCommand()
 	c.Use = "query [question]"
 	c.Short = "Query the local graph (alias for `so graph query`)"
 	return c
-}
-
-func queryCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "query [question]",
-		Short: "Query the local graph",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			o := out()
-			answer, err := graph.Query(repoRoot(), strings.Join(args, " "))
-			if err != nil {
-				return axi.Err(err)
-			}
-			preview := answer
-			if !o.Flags.Full {
-				preview = o.Truncate(answer, 500)
-			}
-			payload := map[string]any{"answer": preview, "truncated": preview != answer}
-			o.Next("so graph rebuild", "so retrieve ...")
-			return o.HumanOrJSON("graph_query", func() {
-				fmt.Fprintln(o.W, preview)
-			}, payload)
-		},
-	}
 }
 
 func cmdSessions() *cobra.Command {
@@ -621,6 +585,17 @@ Pass --no-cli to skip sealed CLI review (SessionStart materialize of a previous 
 	finalizeCmd.Flags().Bool("detach", false, "Return immediately; run finalize in a background process")
 	finalizeCmd.Flags().Bool("no-cli", false, "Materialize only; do not spawn sealed CLI review")
 	c.AddCommand(finalizeCmd)
+	c.AddCommand(&cobra.Command{
+		Use:    "reconcile-lifecycle",
+		Short:  "Retry stale graph maintenance at coding-session start",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			paths := harness.Resolve(repoRoot())
+			cfg, _ := config.Load(paths.Config)
+			return reconcileLifecycleGraph(repoRoot(), paths, cfg, "session_start", "")
+		},
+	})
 	reviewCmd := &cobra.Command{
 		Use:   "review [session-id]",
 		Short: "Run sealed CLI review for a pending session",
@@ -974,10 +949,12 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) (retErr error
 			}
 		}
 		if !latestSpan.After(*existing.EndedAt) && doc.Review.Status == "complete" {
+			_ = reconcileLifecycleGraph(root, paths, cfg, "session_start_retry", latestID)
 			fmt.Printf("Session %s is already finalized; no new evaluation was created\n", latestID)
 			return nil
 		}
 		if !latestSpan.After(*existing.EndedAt) && (doc.Review.Status == "pending" || doc.Review.Status == "running" || doc.Review.Status == "failed") {
+			_ = reconcileLifecycleGraph(root, paths, cfg, "session_start_retry", latestID)
 			if o.SpawnCLIReview && doc.Review.Status == "pending" {
 				maybeSpawnCLIReview(root, latestID, cfg)
 			}
@@ -1002,25 +979,17 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) (retErr error
 		meta.ProjectID = p.ID
 	}
 	_ = sess.UpdateMeta(meta)
-	if fp, err := sess.GetFootprint(latestID); err == nil {
-		changed := false
-		for _, f := range fp.Files {
-			if f.State == "edited" {
-				changed = true
-				break
-			}
-		}
-		if changed {
-			_, _ = graph.RefreshAtomic(root, paths, !cfg.Graph.Semantic, cfg.Graph.SemanticBackend)
-		}
-	}
+	// Vendor hooks already launch finalization in a detached process. Refresh
+	// here, before evaluation, so both observe the same repository version and
+	// refresh failures are durable instead of disappearing in another child.
+	_ = reconcileLifecycleGraph(root, paths, cfg, "session_end", latestID)
 	_, _ = checkpoint.NewStore(paths).CreateFromFootprint(latestID, root, "finalize")
 	_ = session.NewStateStore(paths).End(latestID)
 	if _, err := viz.BuildReplayFromSpans(paths, latestID, ss); err != nil {
 		return err
 	}
 	doc, _ := sess.ReadDocument(latestID)
-	if doc.Review.Status != "complete" && doc.Review.Status != "running" {
+	if session.ReviewEligible(doc) && doc.Review.Status != "complete" && doc.Review.Status != "running" {
 		_ = sess.WriteDocument(latestID, func(d *session.Document) {
 			if d.Review.Status == "complete" || d.Review.Status == "running" {
 				return
@@ -1030,12 +999,13 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) (retErr error
 			d.Review.Error = ""
 		})
 	}
-	if cfg.ExplicitHeuristics() && (cfg.Evals.OnSessionEnd || cfg.Evals.Auto) {
+	reviewEligible := session.ReviewEligible(doc)
+	if reviewEligible && cfg.ExplicitHeuristics() && (cfg.Evals.OnSessionEnd || cfg.Evals.Auto) {
 		ev, err := eval.Run(paths, cfg, latestID, ss, nil, eval.RunOptions{Final: true})
 		if err == nil {
 			_ = persistReviewSideEffects(root, paths, cfg, latestID, ev, o.SkipTrackedMutations)
 		}
-	} else if o.SpawnCLIReview && !o.SkipTrackedMutations {
+	} else if reviewEligible && o.SpawnCLIReview && !o.SkipTrackedMutations {
 		maybeSpawnCLIReview(root, latestID, cfg)
 	}
 	_, _ = harvest.Run(paths, cfg, latestID, harvest.TriggerFinalize, harvest.RunOpts{
@@ -1043,8 +1013,64 @@ func finalizeSession(root, sessionID string, opts ...finalizeOpts) (retErr error
 		LocalOnly:      true,
 	})
 	_, _ = gitruntime.SnapshotSessionDir(root, paths.SessionDir(latestID), latestID)
-	fmt.Printf("Finalized session %s (review pending)\n", meta.ID)
+	if reviewEligible {
+		fmt.Printf("Finalized session %s (review pending)\n", meta.ID)
+	} else {
+		fmt.Printf("Finalized session %s (review skipped: no repository source edits)\n", meta.ID)
+	}
 	return nil
+}
+
+var lifecycleGraphUpdate = graph.UpdateAtomic
+
+func graphLifecycleRefreshEnabled(cfg config.Config) bool {
+	return !strings.EqualFold(strings.TrimSpace(cfg.Graph.RefreshPolicy), "manual")
+}
+
+// reconcileLifecycleGraph is shared by SessionEnd and the next SessionStart.
+// Source fingerprints make it idempotent, and the runtime lock prevents
+// overlapping vendor events from running Graphify concurrently. Agent semantic
+// work remains a resumable continuation rather than blocking the next session.
+func reconcileLifecycleGraph(root string, paths harness.Paths, cfg config.Config, trigger, sessionID string) error {
+	if !graphLifecycleRefreshEnabled(cfg) || !graph.NeedsRefresh(root, paths) {
+		return nil
+	}
+	release, claimed := graph.ClaimLifecycleRefresh(root)
+	if !claimed {
+		return nil
+	}
+	defer release()
+	if !graph.NeedsRefresh(root, paths) {
+		return nil
+	}
+	started := time.Now().UTC()
+	if sessionID != "" {
+		_ = session.NewStore(paths).WriteDocument(sessionID, func(d *session.Document) {
+			d.GraphRefresh = session.GraphRefreshState{Status: "running", Trigger: trigger, StartedAt: &started}
+		})
+	}
+	codeOnly := !cfg.Graph.Semantic || cfg.Graph.SemanticBackend == "none"
+	res, err := lifecycleGraphUpdate(context.Background(), root, paths, codeOnly, cfg.Graph.SemanticBackend)
+	completed := time.Now().UTC()
+	if sessionID != "" {
+		_ = session.NewStore(paths).WriteDocument(sessionID, func(d *session.Document) {
+			d.GraphRefresh.CompletedAt = &completed
+			if err != nil {
+				d.GraphRefresh.Status = "failed"
+				d.GraphRefresh.Error = redact.StringFull(err.Error())
+				return
+			}
+			status := res.Status
+			if status == "needs_agent_semantic" {
+				status = "continuation_required"
+			}
+			d.GraphRefresh.Status = status
+			d.GraphRefresh.RunID = res.RunID
+			d.GraphRefresh.GraphSHA256 = graph.GraphHash(root)
+			d.GraphRefresh.Error = ""
+		})
+	}
+	return err
 }
 
 // refreshSession materializes the latest trace snapshot without declaring the

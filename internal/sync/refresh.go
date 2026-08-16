@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -69,8 +70,8 @@ func Refresh(opts RefreshOptions) error {
 
 	builtGraph := false
 	if !opts.SkipGraph && (sharedChanged || sourceChanged || opts.Force) {
-		codeOnly := !cfg.Graph.Semantic
-		if _, err := graph.Build(root, paths, codeOnly, cfg.Graph.SemanticBackend); err != nil {
+		codeOnly := !cfg.Graph.Semantic || cfg.Graph.SemanticBackend == "none"
+		if _, err := graph.UpdateAtomic(context.Background(), root, paths, codeOnly, cfg.Graph.SemanticBackend); err != nil {
 			return fmt.Errorf("graph: %w", err)
 		}
 		builtGraph = true

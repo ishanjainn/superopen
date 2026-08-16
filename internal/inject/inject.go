@@ -1,6 +1,7 @@
 package inject
 
 import (
+	"crypto/sha256"
 	_ "embed"
 	"fmt"
 	"os"
@@ -12,6 +13,37 @@ import (
 	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/userpaths"
 )
+
+// SkillScopeDrift reports stale global skills that may shadow the current
+// project copy. The reinstall command intentionally refreshes both scopes.
+func SkillScopeDrift(repoRoot string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	want := sha256.Sum256([]byte(embeddedSkillMD))
+	pairs := [][2]string{
+		{filepath.Join(home, ".claude", "skills", "so", "SKILL.md"), filepath.Join(repoRoot, ".claude", "skills", "so", "SKILL.md")},
+		{filepath.Join(home, ".cursor", "skills", "so", "SKILL.md"), filepath.Join(repoRoot, ".cursor", "skills", "so", "SKILL.md")},
+		{filepath.Join(home, ".codex", "skills", "so", "SKILL.md"), filepath.Join(repoRoot, ".codex", "skills", "so", "SKILL.md")},
+		{filepath.Join(home, ".gemini", "skills", "so", "SKILL.md"), filepath.Join(repoRoot, ".gemini", "skills", "so", "SKILL.md")},
+		{filepath.Join(home, ".config", "opencode", "skills", "so", "SKILL.md"), filepath.Join(repoRoot, ".opencode", "skills", "so", "SKILL.md")},
+		{filepath.Join(home, ".pi", "agent", "skills", "so", "SKILL.md"), filepath.Join(repoRoot, ".pi", "skills", "so", "SKILL.md")},
+	}
+	warnings := []string{}
+	for _, pair := range pairs {
+		globalBody, globalErr := os.ReadFile(pair[0])
+		projectBody, projectErr := os.ReadFile(pair[1])
+		if globalErr != nil || projectErr != nil {
+			continue
+		}
+		globalHash, projectHash := sha256.Sum256(globalBody), sha256.Sum256(projectBody)
+		if globalHash != want || globalHash != projectHash {
+			warnings = append(warnings, pair[0]+" differs from the current project skill; run `so install --global --project`")
+		}
+	}
+	return warnings
+}
 
 //go:embed skill.md
 var embeddedSkillMD string
@@ -44,6 +76,7 @@ func Brief() string {
 		"This project uses Superopen. Prefer AGENTS.md (including nested dir/AGENTS.md), existing vendor rules & skills dirs when present, and `so graph query` before raw exploration.",
 		"",
 		"Invoke with `/so` (Claude Code, Cursor, Gemini, Copilot, OpenCode, Pi) or `$so` (Codex):",
+		"Chat syntax and shell syntax are different: `/so ...` invokes the chat skill; inside Bash or a terminal, always run `so ...` with no leading slash.",
 		"- `/so` - help",
 		"- `/so init` - bootstrap Superopen if missing",
 		"- `/so graph query \"<question>\"` - ask the repo knowledge graph",
@@ -51,6 +84,7 @@ func Brief() string {
 		"- `/so doctor` - health check",
 		"",
 		"Rules:",
+		"- Never type `/so ...` into Bash; the leading slash is only for chat skill invocation.",
 		"- For codebase questions, run `so graph query \"<question>\"` when `.so/graph/graph.json` exists.",
 		"- Read `AGENTS.md` (and nested `*/AGENTS.md`), project rules, and matching skills for the task.",
 		"- When updating guidance: edit existing rule/skill files in the dirs this repo already uses; prune obsolete lines instead of only appending.",
@@ -266,6 +300,30 @@ func writeSkillBundleFor(root, skillBody string, vendors []string, sharedAgents,
 			}
 		case "agents":
 			rel = filepath.Join(".agents", "skills")
+		case "kilo":
+			rel = filepath.Join(".kilo", "skills")
+		case "aider":
+			rel = filepath.Join(".aider")
+		case "claw", "openclaw":
+			rel = filepath.Join(".openclaw", "skills")
+		case "droid", "factory":
+			rel = filepath.Join(".factory", "skills")
+		case "trae":
+			rel = filepath.Join(".trae", "skills")
+		case "trae-cn":
+			rel = filepath.Join(".trae-cn", "skills")
+		case "hermes":
+			rel = filepath.Join(".hermes", "skills")
+		case "kiro":
+			rel = filepath.Join(".kiro", "skills")
+		case "devin":
+			rel = filepath.Join(".devin", "skills")
+		case "codebuddy":
+			rel = filepath.Join(".codebuddy", "skills")
+		case "kimi":
+			rel = filepath.Join(".kimi", "skills")
+		case "amp", "antigravity", "vscode", "windows":
+			rel = filepath.Join(".agents", "skills")
 		}
 		if rel != "" {
 			skillTargets = append(skillTargets, filepath.Join(root, rel, "so", "SKILL.md"))
@@ -312,6 +370,30 @@ func globalSkillTarget(vendor, fallbackHome string) string {
 			}
 		}
 		return filepath.Join(fallbackHome, ".copilot", "skills", "so", "SKILL.md")
+	case "kilo":
+		return filepath.Join(fallbackHome, ".config", "kilo", "skills", "so", "SKILL.md")
+	case "aider":
+		return filepath.Join(fallbackHome, ".aider", "so", "SKILL.md")
+	case "claw", "openclaw":
+		return filepath.Join(fallbackHome, ".openclaw", "skills", "so", "SKILL.md")
+	case "droid", "factory":
+		return filepath.Join(fallbackHome, ".factory", "skills", "so", "SKILL.md")
+	case "trae":
+		return filepath.Join(fallbackHome, ".trae", "skills", "so", "SKILL.md")
+	case "trae-cn":
+		return filepath.Join(fallbackHome, ".trae-cn", "skills", "so", "SKILL.md")
+	case "hermes":
+		return filepath.Join(fallbackHome, ".hermes", "skills", "so", "SKILL.md")
+	case "kiro":
+		return filepath.Join(fallbackHome, ".kiro", "skills", "so", "SKILL.md")
+	case "devin":
+		return filepath.Join(fallbackHome, ".config", "devin", "skills", "so", "SKILL.md")
+	case "codebuddy":
+		return filepath.Join(fallbackHome, ".codebuddy", "skills", "so", "SKILL.md")
+	case "kimi":
+		return filepath.Join(fallbackHome, ".kimi", "skills", "so", "SKILL.md")
+	case "amp", "antigravity", "vscode", "windows", "agents":
+		return filepath.Join(fallbackHome, ".agents", "skills", "so", "SKILL.md")
 	}
 	return ""
 }
@@ -320,7 +402,13 @@ func globalSkillTarget(vendor, fallbackHome string) string {
 // an existing native project directory. Shared .agents is never auto-detected.
 func DetectVendors(root string) []string {
 	type probe struct{ name, bin, dir string }
-	probes := []probe{{"claude-code", "claude", ".claude"}, {"cursor", "cursor", ".cursor"}, {"codex", "codex", ".codex"}, {"gemini", "gemini", ".gemini"}, {"opencode", "opencode", ".opencode"}, {"copilot-cli", "copilot", filepath.Join(".github", "skills")}, {"pi", "pi", ".pi"}}
+	probes := []probe{
+		{"claude-code", "claude", ".claude"}, {"cursor", "cursor", ".cursor"}, {"codex", "codex", ".codex"}, {"gemini", "gemini", ".gemini"},
+		{"opencode", "opencode", ".opencode"}, {"copilot-cli", "copilot", filepath.Join(".github", "skills")}, {"pi", "pi", ".pi"},
+		{"kilo", "kilo", ".kilo"}, {"aider", "aider", ".aider"}, {"claw", "openclaw", ".openclaw"}, {"droid", "droid", ".factory"},
+		{"trae", "trae", ".trae"}, {"trae-cn", "trae", ".trae-cn"}, {"hermes", "hermes", ".hermes"}, {"kiro", "kiro", ".kiro"},
+		{"devin", "devin", ".devin"}, {"codebuddy", "codebuddy", ".codebuddy"}, {"kimi", "kimi", ".kimi"}, {"amp", "amp", ".agents"},
+	}
 	var out []string
 	for _, p := range probes {
 		_, binErr := exec.LookPath(p.bin)

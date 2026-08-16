@@ -53,6 +53,20 @@ type EpisodicEntry struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type GraphOutcome struct {
+	ID            string    `json:"id"`
+	QueryType     string    `json:"query_type,omitempty"`
+	Question      string    `json:"question"`
+	AnswerSummary string    `json:"answer_summary"`
+	SourceNodes   []string  `json:"source_nodes"`
+	Outcome       string    `json:"outcome"`
+	Correction    string    `json:"correction,omitempty"`
+	SessionID     string    `json:"session_id,omitempty"`
+	GraphSHA256   string    `json:"graph_sha256"`
+	CreatedAt     time.Time `json:"created_at"`
+	Stale         bool      `json:"stale,omitempty"`
+}
+
 // Pattern is durable, compact evidence that the same harness improvement has
 // appeared across coding sessions. Full prompts, tool output, and proposed
 // file bodies stay in the originating session; memory keeps only the evidence
@@ -136,17 +150,18 @@ type RefreshState struct {
 }
 
 type stateFile struct {
-	About       artifactmeta.About `json:"_about"`
-	Version     int                `json:"schema_version,omitempty"`
-	Lessons     []Lesson           `json:"lessons,omitempty"`
-	Semantic    []SemanticEntry    `json:"semantic,omitempty"`
-	Episodic    []EpisodicEntry    `json:"episodic,omitempty"`
-	Preferences string             `json:"preferences,omitempty"`
-	Projects    string             `json:"projects,omitempty"`
-	History     []string           `json:"history,omitempty"`
-	Harvest     map[string]any     `json:"harvest,omitempty"`
-	Refresh     *RefreshState      `json:"refresh,omitempty"`
-	Patterns    []Pattern          `json:"patterns,omitempty"`
+	About         artifactmeta.About `json:"_about"`
+	Version       int                `json:"schema_version,omitempty"`
+	Lessons       []Lesson           `json:"lessons,omitempty"`
+	Semantic      []SemanticEntry    `json:"semantic,omitempty"`
+	Episodic      []EpisodicEntry    `json:"episodic,omitempty"`
+	Preferences   string             `json:"preferences,omitempty"`
+	Projects      string             `json:"projects,omitempty"`
+	History       []string           `json:"history,omitempty"`
+	Harvest       map[string]any     `json:"harvest,omitempty"`
+	Refresh       *RefreshState      `json:"refresh,omitempty"`
+	Patterns      []Pattern          `json:"patterns,omitempty"`
+	GraphOutcomes []GraphOutcome     `json:"graph_outcomes,omitempty"`
 }
 
 var memoryAbout = artifactmeta.About{
@@ -414,6 +429,48 @@ func (s *Store) AddLesson(l Lesson, mode Mode) error {
 func (s *Store) ListLessons() ([]Lesson, error) {
 	st, err := s.readState()
 	return st.Lessons, err
+}
+
+func (s *Store) AddGraphOutcome(outcome GraphOutcome) (GraphOutcome, error) {
+	if err := s.Ensure(); err != nil {
+		return GraphOutcome{}, err
+	}
+	outcome.Question = strings.TrimSpace(outcome.Question)
+	outcome.Question = redact.StringFull(outcome.Question)
+	outcome.AnswerSummary = redact.StringFull(strings.TrimSpace(outcome.AnswerSummary))
+	outcome.Correction = redact.StringFull(strings.TrimSpace(outcome.Correction))
+	outcome.Outcome = strings.TrimSpace(outcome.Outcome)
+	if outcome.Question == "" || outcome.AnswerSummary == "" || outcome.GraphSHA256 == "" {
+		return GraphOutcome{}, fmt.Errorf("graph outcome requires question, answer summary, and graph hash")
+	}
+	if outcome.Outcome != "useful" && outcome.Outcome != "dead_end" && outcome.Outcome != "corrected" {
+		return GraphOutcome{}, fmt.Errorf("outcome must be useful, dead_end, or corrected")
+	}
+	if outcome.Outcome == "corrected" && strings.TrimSpace(outcome.Correction) == "" {
+		return GraphOutcome{}, fmt.Errorf("corrected outcome requires correction")
+	}
+	if outcome.ID == "" {
+		sum := sha256.Sum256([]byte(outcome.GraphSHA256 + "\x00" + outcome.Question + "\x00" + outcome.AnswerSummary))
+		outcome.ID = "graph_" + hex.EncodeToString(sum[:8])
+	}
+	if outcome.CreatedAt.IsZero() {
+		outcome.CreatedAt = time.Now().UTC()
+	}
+	err := s.mutateState(func(st *stateFile) error {
+		for _, cur := range st.GraphOutcomes {
+			if cur.ID == outcome.ID {
+				return fmt.Errorf("graph outcome already exists: %s", outcome.ID)
+			}
+		}
+		st.GraphOutcomes = append(st.GraphOutcomes, outcome)
+		return nil
+	})
+	return outcome, err
+}
+
+func (s *Store) ListGraphOutcomes() ([]GraphOutcome, error) {
+	st, err := s.readState()
+	return st.GraphOutcomes, err
 }
 
 // DeleteLesson removes a lesson by id and refreshes lessons.md.

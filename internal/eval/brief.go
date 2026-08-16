@@ -158,6 +158,6 @@ func PendingReviewInstruction(vendor, sessionID, status string) string {
 	case "running":
 		return fmt.Sprintf("## Previous %s session review\n\nReview for `%s` is running; skip `so apply-review` and continue the user's task.", kind, sessionID)
 	default:
-		return fmt.Sprintf("## Previous %s session review\n\nSession `%s` is pending review. Run `so review-brief %s`, produce the JSON with your model, then `so apply-review %s`. Then continue the user's task. Skip if status is complete or running.", kind, sessionID, sessionID, sessionID)
+		return fmt.Sprintf("## Previous %s session review\n\nSession `%s` is eligible for review after the current user task. First run `so review-brief %s` and produce its JSON, then invoke `so apply-review %s` with that JSON. Skip if status is complete or running.", kind, sessionID, sessionID, sessionID)
 	}
 }

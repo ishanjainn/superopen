@@ -1,12 +1,15 @@
 package initcmd
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/audit"
+	"github.com/ishanjainn/superopen/internal/axi"
 	"github.com/ishanjainn/superopen/internal/coding"
 	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/discover"
@@ -33,6 +36,8 @@ type Options struct {
 	SkipInject   bool
 	Vendors      []string
 	SharedAgents bool
+	Agent        bool // host coding agent will complete Graphify semantic work
+	Writer       io.Writer
 }
 
 type Report struct {
@@ -45,6 +50,10 @@ type Report struct {
 }
 
 func Run(opts Options) (Report, error) {
+	w := opts.Writer
+	if w == nil {
+		w = os.Stdout
+	}
 	root := opts.RepoRoot
 	if root == "" {
 		wd, err := os.Getwd()
@@ -89,9 +98,6 @@ func Run(opts Options) (Report, error) {
 			return Report{}, err
 		}
 	}
-	if opts.CodeOnly {
-		cfg.Graph.Semantic = false
-	}
 	enabled := append([]string{}, inject.DetectVendors(root)...)
 	enabled = append(enabled, opts.Vendors...)
 	cfg.Vendors.Enabled = uniqueStrings(enabled)
@@ -102,13 +108,27 @@ func Run(opts Options) (Report, error) {
 	}
 
 	// 1) Graph first - install Graphify if needed, then build (JSON + HTML for UI).
-	fmt.Println("→ ensuring Graphify…")
+	fmt.Fprintln(w, "→ ensuring Graphify…")
 	if err := graph.EnsureTool(); err != nil {
-		fmt.Printf("  warning: %v\n", err)
+		return Report{}, fmt.Errorf("graph toolchain: %w", err)
 	}
-	codeOnly := opts.CodeOnly || !cfg.Graph.Semantic
-	fmt.Println("→ building repository graph…")
-	gr, err := graph.Build(root, paths, codeOnly, cfg.Graph.SemanticBackend)
+	codeOnly := opts.CodeOnly || !cfg.Graph.Semantic || cfg.Graph.SemanticBackend == "none"
+	fmt.Fprintln(w, "→ building repository graph…")
+	var gr graph.Result
+	var err error
+	if !codeOnly && cfg.Graph.SemanticBackend == "agent" {
+		if existing, ok := graph.ExistingSemanticResult(paths); ok {
+			gr = existing
+		} else {
+			run, startErr := graph.StartSemanticRunWithOptions(context.Background(), root, graph.SemanticStartOptions{Deep: strings.EqualFold(strings.TrimSpace(cfg.Graph.Mode), "deep")})
+			if startErr != nil {
+				return Report{}, fmt.Errorf("start agent semantic graph: %w", startErr)
+			}
+			return Report{}, axi.Continuation("Graphify semantic extraction requires the coding agent", "run `so graph semantic briefs --run "+run.RunID+"`, apply every chunk, finalize, label, publish, then rerun `so init --agent`")
+		}
+	} else {
+		gr, err = graph.RefreshAtomic(root, paths, codeOnly, cfg.Graph.SemanticBackend)
+	}
 	if err != nil {
 		return Report{}, fmt.Errorf("graph: %w", err)
 	}
@@ -116,20 +136,20 @@ func Run(opts Options) (Report, error) {
 	if gr.HasHTML {
 		htmlNote = "graph.html ready"
 	}
-	fmt.Printf("  graph: %d nodes, %d edges (%s, %s)\n", gr.NodeCount, gr.EdgeCount, gr.Source, htmlNote)
+	fmt.Fprintf(w, "  graph: %d nodes, %d edges (%s %s, %s)\n", gr.NodeCount, gr.EdgeCount, gr.Engine, gr.EngineVersion, htmlNote)
 
 	// 2) Read existing agent instruction files (AGENTS.md, CLAUDE.md, Cursor rules, …).
-	fmt.Println("→ reading existing agent instruction files…")
+	fmt.Fprintln(w, "→ reading existing agent instruction files…")
 	structure := detectStructure(root)
 	stack := detectStack(root)
 	profile := discover.BuildProfile(root, paths, stack, structure)
-	fmt.Printf("  found %d agent source(s), %d derived rules\n", len(profile.Agents), len(profile.DerivedRules))
+	fmt.Fprintf(w, "  found %d agent source(s), %d derived rules\n", len(profile.Agents), len(profile.DerivedRules))
 
 	// 3) Heuristic seed (always) - works offline / without API key.
 	if opts.TemplateRoot == "" {
 		opts.TemplateRoot = findTemplates()
 	}
-	fmt.Println("→ seeding shared docs, guardrails, and evals…")
+	fmt.Fprintln(w, "→ seeding shared docs, guardrails, and evals…")
 	if err := seed.Seed(paths, seed.SeedOptions{
 		TemplateRoot: opts.TemplateRoot,
 		Profile:      profile,
@@ -149,7 +169,7 @@ func Run(opts Options) (Report, error) {
 	wantLLM := !opts.NoLLM && (opts.UseLLM || (cfg.HasExplicitLLM() && cfg.HasLLM()))
 	if wantLLM {
 		resolved := cfg.ResolveLLM()
-		fmt.Printf("→ upgrading harness with LLM (%s via %s)…\n", resolved.Provider, orEmpty(resolved.Source, resolved.BaseURL))
+		fmt.Fprintf(w, "→ upgrading harness with LLM (%s via %s)…\n", resolved.Provider, orEmpty(resolved.Source, resolved.BaseURL))
 		client := llm.NewFromConfig(cfg)
 		var err error
 		up, err = seed.UpgradeWithLLM(paths, profile, client, opts.UseLLM)
@@ -157,22 +177,22 @@ func Run(opts Options) (Report, error) {
 			return Report{}, err
 		}
 		if up.Used {
-			fmt.Printf("  llm: wrote %d guardrails, %d eval checks", up.Rules, up.Checks)
+			fmt.Fprintf(w, "  llm: wrote %d guardrails, %d eval checks", up.Rules, up.Checks)
 			if up.MCP > 0 || up.Skills > 0 {
-				fmt.Printf(", %d mcp, %d skills", up.MCP, up.Skills)
+				fmt.Fprintf(w, ", %d mcp, %d skills", up.MCP, up.Skills)
 			}
-			fmt.Println()
+			fmt.Fprintln(w)
 		} else {
-			fmt.Printf("  llm skipped: %s\n", up.Reason)
+			fmt.Fprintf(w, "  llm skipped: %s\n", up.Reason)
 		}
 	} else {
 		up = seed.UpgradeResult{Used: false, Reason: "assistant or API key"}
 		if opts.NoLLM {
-			fmt.Println("→ heuristic harness ready (--no-llm); run `so upgrade-brief` to print the assistant prompt")
+			fmt.Fprintln(w, "→ heuristic harness ready (--no-llm); run `so upgrade-brief` to print the assistant prompt")
 		} else {
-			fmt.Println("→ heuristic harness ready (no API key)")
-			fmt.Println("  In Cursor/Claude/Codex: use `so upgrade-brief`, then pipe the JSON to `so apply-upgrade`")
-			fmt.Println("  Headless/CI: set an API key and run `so init --llm`, or `so apply-upgrade` with JSON")
+			fmt.Fprintln(w, "→ heuristic harness ready (no API key)")
+			fmt.Fprintln(w, "  In Cursor/Claude/Codex: use `so upgrade-brief`, then pipe the JSON to `so apply-upgrade`")
+			fmt.Fprintln(w, "  Headless/CI: set an API key and run `so init --llm`, or `so apply-upgrade` with JSON")
 		}
 	}
 

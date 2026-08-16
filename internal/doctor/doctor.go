@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,8 +42,12 @@ func Run(repoRoot string) []Check {
 		checks = append(checks, Check{Name: "config", OK: true, Detail: paths.Config})
 	}
 
-	_, err = os.Stat(paths.GraphJSON)
-	checks = append(checks, Check{Name: "graph", OK: err == nil, Detail: paths.GraphJSON})
+	err = graph.ValidateQueryableGraph(repoRoot)
+	graphDetail := paths.GraphJSON
+	if err != nil {
+		graphDetail = err.Error()
+	}
+	checks = append(checks, Check{Name: "graph", OK: err == nil, Detail: graphDetail})
 
 	for name, path := range map[string]string{
 		"graph_html":  paths.GraphHTML,
@@ -53,10 +58,44 @@ func Run(repoRoot string) []Check {
 		checks = append(checks, Check{Name: name, OK: statErr == nil, Detail: path})
 	}
 
-	if _, err := exec.LookPath("graphify"); err == nil {
-		checks = append(checks, Check{Name: "graphify", OK: true, Detail: "on PATH"})
+	tool := graph.Status()
+	if tool.Available {
+		detail := fmt.Sprintf("%s version=%s managed=%t", tool.Binary, tool.Version, tool.Managed)
+		if tool.Interpreter != "" {
+			detail += " python=" + tool.Interpreter
+		}
+		checks = append(checks, Check{Name: "graphify", OK: true, Detail: detail})
+		if tool.Managed {
+			checks = append(checks,
+				Check{Name: "graphify_module", OK: tool.ModuleOK, Detail: map[bool]string{true: "python -m graphify exact pin validated", false: tool.ValidationError}[tool.ModuleOK]},
+				Check{Name: "graphify_console", OK: tool.ConsoleOK, Detail: map[bool]string{true: "final-location console script validated", false: tool.ValidationError}[tool.ConsoleOK]},
+			)
+		}
 	} else {
-		checks = append(checks, Check{Name: "graphify", OK: false, Detail: "not found (stub graph used)"})
+		checks = append(checks, Check{Name: "graphify", OK: false, Detail: "required Graphify " + graph.PinnedVersion + " missing; run so install"})
+	}
+	if data, readErr := os.ReadFile(paths.GraphState); readErr == nil {
+		var state struct {
+			Status            string `json:"status"`
+			LastBuildResult   string `json:"last_build_result"`
+			PendingRunID      string `json:"pending_semantic_run_id"`
+			PendingCount      int    `json:"pending_semantic_source_count"`
+			SourceFingerprint string `json:"source_file_fingerprint"`
+		}
+		if json.Unmarshal(data, &state) == nil {
+			if state.LastBuildResult == "continuation_required" {
+				checks = append(checks, Check{Name: "graph_refresh", OK: true, Warn: true, Detail: fmt.Sprintf("published graph remains usable; semantic run %s pending for %d source(s)", state.PendingRunID, state.PendingCount)})
+			} else if state.LastBuildResult == "failed" {
+				checks = append(checks, Check{Name: "graph_refresh", OK: true, Warn: true, Detail: "last refresh failed; previous published graph remains usable"})
+			}
+			if state.SourceFingerprint != "" && state.SourceFingerprint != graph.SourceFingerprint(repoRoot) {
+				checks = append(checks, Check{Name: "graph_freshness", OK: true, Warn: true, Detail: "repository sources are newer than the published graph; run so graph update"})
+			}
+		}
+	}
+	for _, external := range []string{"gh", "gws"} {
+		_, err := exec.LookPath(external)
+		checks = append(checks, Check{Name: "graph_external:" + external, OK: err == nil, Warn: err != nil, Detail: map[bool]string{true: "available", false: "missing (dependent features unavailable)"}[err == nil]})
 	}
 
 	r := cfg.ResolveLLM()
@@ -98,6 +137,9 @@ func Run(repoRoot string) []Check {
 	}
 	for name, ok := range inject.StatusFor(repoRoot, cfg.Vendors.Enabled, cfg.Vendors.SharedAgents) {
 		checks = append(checks, Check{Name: "inject:" + name, OK: ok, Detail: ""})
+	}
+	for _, detail := range inject.SkillScopeDrift(repoRoot) {
+		checks = append(checks, Check{Name: "skill_scope", OK: true, Warn: true, Detail: detail})
 	}
 
 	// Memory pack

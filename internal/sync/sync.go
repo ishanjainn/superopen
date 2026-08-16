@@ -1,9 +1,11 @@
 package sync
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/ishanjainn/superopen/internal/audit"
 	"github.com/ishanjainn/superopen/internal/coding"
@@ -29,6 +31,19 @@ type Options struct {
 	SharedAgents    bool
 	SetSharedAgents bool
 }
+
+type GraphContinuationError struct{ RunID string }
+
+func (e *GraphContinuationError) Error() string {
+	return "graph semantic continuation required for run " + e.RunID
+}
+
+var (
+	existingSemanticGraph = graph.ExistingSemanticResult
+	startSemanticGraph    = graph.StartSemanticRunWithOptions
+	updateSemanticGraph   = graph.UpdateAtomic
+	refreshGraph          = graph.RefreshAtomic
+)
 
 func Run(opts Options) error {
 	root := opts.RepoRoot
@@ -89,11 +104,11 @@ func Run(opts Options) error {
 	_, _ = projects.Register(root, paths.Root, "")
 
 	if !opts.SkipGraph {
-		codeOnly := !cfg.Graph.Semantic && !opts.Semantic
+		codeOnly := (!cfg.Graph.Semantic || cfg.Graph.SemanticBackend == "none") && !opts.Semantic
 		if opts.Semantic {
 			codeOnly = false
 		}
-		if _, err := graph.Build(root, paths, codeOnly, cfg.Graph.SemanticBackend); err != nil {
+		if err := syncGraph(context.Background(), root, paths, codeOnly, cfg.Graph.SemanticBackend, cfg.Graph.Mode); err != nil {
 			return fmt.Errorf("graph: %w", err)
 		}
 	}
@@ -107,4 +122,29 @@ func Run(opts Options) error {
 		return fmt.Errorf("retrieve index: %w", err)
 	}
 	return nil
+}
+
+func syncGraph(ctx context.Context, root string, paths harness.Paths, codeOnly bool, backend, mode string) error {
+	if !codeOnly && backend == "agent" {
+		if runID := graph.PendingSemanticRunID(paths); runID != "" {
+			return &GraphContinuationError{RunID: runID}
+		}
+		if _, ok := existingSemanticGraph(paths); !ok {
+			run, err := startSemanticGraph(ctx, root, graph.SemanticStartOptions{Deep: strings.EqualFold(strings.TrimSpace(mode), "deep")})
+			if err != nil {
+				return err
+			}
+			return &GraphContinuationError{RunID: run.RunID}
+		}
+		res, err := updateSemanticGraph(ctx, root, paths, false, backend)
+		if err != nil {
+			return err
+		}
+		if res.Status == "needs_agent_semantic" {
+			return &GraphContinuationError{RunID: res.RunID}
+		}
+		return nil
+	}
+	_, err := refreshGraph(root, paths, codeOnly, backend)
+	return err
 }

@@ -53,10 +53,10 @@ func TestLLMSetupGuide(t *testing.T) {
 	}
 }
 
-func TestDefaultConfigDoesNotAdvertiseAPIProvider(t *testing.T) {
+func TestDefaultConfigUsesHostAgentWithoutAdvertisingAPIProvider(t *testing.T) {
 	cfg := config.Default()
-	if cfg.Graph.Semantic {
-		t.Fatal("fresh config must not enable network-backed semantic extraction")
+	if !cfg.Graph.Semantic || cfg.Graph.SemanticBackend != "agent" {
+		t.Fatalf("fresh config must enable host-agent semantic extraction: %+v", cfg.Graph)
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := config.Save(path, cfg); err != nil {
@@ -67,11 +67,36 @@ func TestDefaultConfigDoesNotAdvertiseAPIProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.Contains(text, "semantic: false") {
-		t.Fatalf("fresh config does not record the code-only default:\n%s", text)
+	if !strings.Contains(text, "semantic: true") || !strings.Contains(text, "semantic_backend: agent") {
+		t.Fatalf("fresh config does not record the host-agent default:\n%s", text)
 	}
 	if strings.Contains(text, "\nllm:") || strings.Contains(text, "provider: openai") || strings.Contains(text, "SUPEROPEN_LLM_API_KEY") {
 		t.Fatalf("fresh config contains unused API configuration:\n%s", text)
+	}
+}
+
+func TestLoadMigratesLegacyGraphAutoBackend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("layout_version: 2\ngraph:\n  semantic: true\n  semantic_backend: auto\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Graph.SemanticBackend != "agent" {
+		t.Fatalf("semantic backend = %q", cfg.Graph.SemanticBackend)
+	}
+}
+
+func TestLoadRejectsUnknownGraphRefreshPolicy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("layout_version: 2\ngraph:\n  refresh_policy: every_prompt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := config.Load(path)
+	if err == nil || !strings.Contains(err.Error(), "graph.refresh_policy") {
+		t.Fatalf("expected refresh-policy validation error, got %v", err)
 	}
 }
 

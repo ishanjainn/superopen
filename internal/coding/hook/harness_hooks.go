@@ -16,8 +16,8 @@ import (
 	"github.com/ishanjainn/superopen/internal/coding/pricing"
 	"github.com/ishanjainn/superopen/internal/coding/sessionstate"
 	"github.com/ishanjainn/superopen/internal/config"
-	"github.com/ishanjainn/superopen/internal/eval"
 	"github.com/ishanjainn/superopen/internal/execx"
+	"github.com/ishanjainn/superopen/internal/graph"
 	"github.com/ishanjainn/superopen/internal/guardrails"
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/harvest"
@@ -26,7 +26,6 @@ import (
 	"github.com/ishanjainn/superopen/internal/redact"
 	"github.com/ishanjainn/superopen/internal/runtimestate"
 	"github.com/ishanjainn/superopen/internal/session"
-	"github.com/ishanjainn/superopen/internal/tracestore"
 )
 
 const dynamicMemorySessionTokens = 2000
@@ -327,7 +326,11 @@ func maybeInjectMemory(vendor, event, sessionID, cwd string) {
 	if !liveAgent && (strings.Contains(reviewExtra, "pending review") || strings.Contains(reviewExtra, "is running")) {
 		reviewExtra = ""
 	}
-	if !memoryOn && portExtra == "" && reviewExtra == "" {
+	pendingGraph := pendingGraphContinuation(paths)
+	if !liveAgent {
+		pendingGraph = ""
+	}
+	if !memoryOn && portExtra == "" && reviewExtra == "" && pendingGraph == "" {
 		return
 	}
 
@@ -351,6 +354,14 @@ func maybeInjectMemory(vendor, event, sessionID, cwd string) {
 			sections = pack.Sections
 			charCount = pack.CharCount
 		}
+	}
+	if pendingGraph != "" {
+		if packText != "" {
+			packText = pendingGraph + "\n\n" + packText
+		} else {
+			packText = pendingGraph
+		}
+		charCount = len(packText)
 	}
 	if portExtra != "" {
 		if packText != "" {
@@ -418,6 +429,22 @@ func maybeInjectMemory(vendor, event, sessionID, cwd string) {
 	}
 }
 
+func pendingGraphContinuation(paths harness.Paths) string {
+	body, err := os.ReadFile(paths.GraphState)
+	if err != nil {
+		return ""
+	}
+	var state struct {
+		LastBuildResult string `json:"last_build_result"`
+		RunID           string `json:"pending_semantic_run_id"`
+		Count           int    `json:"pending_semantic_source_count"`
+	}
+	if json.Unmarshal(body, &state) != nil || state.LastBuildResult != "continuation_required" || state.RunID == "" {
+		return ""
+	}
+	return fmt.Sprintf("## Pending graph semantic refresh\n\nThe published graph remains usable, but %d changed semantic source(s) are queued in `%s`. Resume with `so graph semantic status --run %s`, then briefs/apply/finalize/labels/publish before widening exploration.", state.Count, state.RunID, state.RunID)
+}
+
 func capEstimatedTokens(text string, limit int64) string {
 	if pricing.EstimateTokens(text) <= limit {
 		return text
@@ -446,6 +473,11 @@ func maybeHarvestOnSessionEnd(vendor, event, sessionID, cwd string) {
 		// review so Codex/Pi chats get footprint/graph. The live agent owns review.
 		if previous := harvest.PendingVendor(paths, sessionID, vendor); previous != "" {
 			scheduleFinalize(root, previous, true)
+		} else {
+			// SessionEnd delivery is best-effort across vendors and process exits.
+			// Retry stale graph maintenance at the next start; the command is
+			// fingerprint-idempotent and process-locked.
+			scheduleLifecycleReconcile(root)
 		}
 		return
 	}
@@ -485,6 +517,14 @@ var spawnFinalizeFn = func(repoRoot, sessionID string, noCLI bool) {
 	execx.SpawnSO(repoRoot, args...)
 }
 
+func scheduleLifecycleReconcile(repoRoot string) {
+	spawnLifecycleReconcileFn(repoRoot)
+}
+
+var spawnLifecycleReconcileFn = func(repoRoot string) {
+	execx.SpawnSO(repoRoot, "sessions", "reconcile-lifecycle")
+}
+
 func isSessionEndEvent(event string) bool {
 	e := strings.ToLower(strings.TrimSpace(event))
 	switch e {
@@ -516,24 +556,10 @@ func isTurnBoundaryHarvestEvent(vendor, event string) bool {
 }
 
 func midSessionReviewInject(vendor, sessionID string, paths harness.Paths) string {
-	if sessionID == "" || !paths.Exists() {
-		return ""
-	}
-	cfg, err := config.Load(paths.Config)
-	if err != nil || !cfg.LiveAgentEnabled() || !cfg.MidSessionEnabled() || cfg.ExplicitHeuristics() {
-		return ""
-	}
-	sess := session.NewStore(paths)
-	doc, err := sess.ReadDocument(sessionID)
-	if err == nil && (doc.Review.Status == "complete" || doc.Review.Status == "running" || doc.Review.MidSessionInjected) {
-		return ""
-	}
-	store := tracestore.NewLocalJSONL(paths.TracesDir)
-	spans, _ := store.Query(tracestore.QueryFilter{SessionID: sessionID})
-	if !eval.ConsiderableWork(spans, cfg.MidSessionMinEdits(), cfg.MidSessionMinTools()) {
-		return ""
-	}
-	return fmt.Sprintf("## This session review\n\nThis session `%s` has enough work for a one-shot review. Run `so review-brief %s`, produce the JSON with your model, then `so apply-review %s`. Then continue the user's task. Skip if status is complete or running.", sessionID, sessionID, sessionID)
+	// Reviews are continuation work for completed sessions only. Injecting them
+	// after a tool-count threshold competes with the user's task and can consume
+	// the final-answer budget before coding has started.
+	return ""
 }
 
 func markMidSessionInjected(sessionID string, paths harness.Paths) {
@@ -573,6 +599,113 @@ func maybeEnforceGuardrails(vendor, event string, payload []byte, cwd string) bo
 	})
 	writeDeny(vendor, event, dec)
 	return true
+}
+
+// maybeEnforceGraphOrientation nudges a coding agent toward the scoped graph
+// before its first broad source read/search. Strict mode denies that first
+// attempt once per session; subsequent attempts remain fail-open so a stale or
+// incomplete graph can never trap the agent.
+func maybeEnforceGraphOrientation(vendor, event string, payload []byte, sessionID, cwd string, cached *sessionstate.State) bool {
+	if cached == nil || sessionID == "" || !isToolGateEvent(event) {
+		return false
+	}
+	root := findRepoRoot(cwd)
+	paths := harness.Resolve(root)
+	cfg, err := config.Load(paths.Config)
+	enforcement := strings.ToLower(strings.TrimSpace(cfg.Graph.QueryEnforcement))
+	if override := strings.TrimSpace(os.Getenv("SUPEROPEN_GRAPH_STRICT")); override == "1" {
+		enforcement = "strict"
+	} else if override == "0" {
+		enforcement = "off"
+	}
+	if err != nil || enforcement == "off" {
+		return false
+	}
+	if _, err := os.Stat(paths.GraphJSON); err != nil {
+		return false
+	}
+	tool, command, path := extractToolTargets(payload)
+	if !cached.SessionStartedAt.IsZero() && graph.HasCurrentQueryStampSince(root, cached.SessionStartedAt) {
+		cached.GraphOriented = true
+		sessionstate.Save(sessionID, vendor, cached)
+		return false
+	}
+	if cached.GraphOriented || !isBroadSourceRead(tool, command, path) {
+		return false
+	}
+	if strings.TrimSpace(path) != "" {
+		indexed, stale := graphTargetState(paths, root, cwd, path)
+		if !indexed {
+			return false
+		}
+		if stale {
+			reason := "This indexed file is newer than the published graph. The read is allowed; verify directly and run `so graph update` so later graph queries are fresh."
+			if writeDynamicContext(vendor, event, peekedContext{}, reason, true) == nil {
+				_ = audit.Append(paths, audit.Event{Action: "nudge", Type: "graph_stale", Vendor: vendor, Session: sessionID, Detail: reason})
+				return true
+			}
+			return false
+		}
+	}
+	reason := "In Bash, run `so graph query \"<question>\"` with no leading slash (or use `so graph path`, `so graph explain`, or `so graph affected`) before broad source search; verify returned source locations before editing. `/so` is chat skill syntax, not a shell command."
+	if enforcement == "strict" && !cached.GraphStrictBlock {
+		cached.GraphStrictBlock = true
+		cached.GraphNudged = true
+		sessionstate.Save(sessionID, vendor, cached)
+		_ = audit.Append(paths, audit.Event{Action: "deny", Type: "graph_orientation", Vendor: vendor, Session: sessionID, Detail: reason})
+		writeDeny(vendor, event, guardrails.Decision{Allow: false, Rule: "graph.query_enforcement=strict", Reason: reason})
+		return true
+	}
+	if cached.GraphNudged {
+		return false
+	}
+	if err := writeDynamicContext(vendor, event, peekedContext{}, reason, true); err != nil {
+		return false
+	}
+	cached.GraphNudged = true
+	sessionstate.Save(sessionID, vendor, cached)
+	_ = audit.Append(paths, audit.Event{Action: "nudge", Type: "graph_orientation", Vendor: vendor, Session: sessionID, Detail: reason})
+	return true
+}
+
+func graphTargetState(paths harness.Paths, root, cwd, target string) (indexed, stale bool) {
+	p := filepath.Clean(target)
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(cwd, p)
+	}
+	rel, err := filepath.Rel(root, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false, false
+	}
+	var manifest map[string]json.RawMessage
+	body, err := os.ReadFile(filepath.Join(paths.GraphDir, "manifest.json"))
+	if err != nil || json.Unmarshal(body, &manifest) != nil {
+		return false, false
+	}
+	_, indexed = manifest[filepath.ToSlash(rel)]
+	if !indexed {
+		return false, false
+	}
+	sourceInfo, sourceErr := os.Stat(p)
+	graphInfo, graphErr := os.Stat(paths.GraphJSON)
+	return true, sourceErr == nil && graphErr == nil && sourceInfo.ModTime().After(graphInfo.ModTime())
+}
+
+func isBroadSourceRead(tool, command, path string) bool {
+	t := strings.ToLower(tool)
+	if strings.Contains(t, "grep") || strings.Contains(t, "glob") || strings.Contains(t, "search") {
+		return true
+	}
+	if strings.Contains(t, "read") && strings.TrimSpace(path) != "" {
+		return true
+	}
+	c := strings.ToLower(strings.TrimSpace(command))
+	for _, marker := range []string{"rg ", "grep ", "find ", "git grep", "sed -n", "head ", "tail "} {
+		if strings.HasPrefix(c, marker) || strings.Contains(c, "; "+marker) || strings.Contains(c, "&& "+marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // decideGuardrail evaluates command/path against guardrails.

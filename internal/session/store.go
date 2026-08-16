@@ -66,6 +66,27 @@ type Footprint struct {
 	Files []FootprintFile `json:"files"`
 }
 
+// ReviewEligible requires an actual repository source edit. Harness/bootstrap,
+// graph, telemetry, generated guidance, and dependency-vendor activity is not
+// useful evidence for a coding-session review.
+func ReviewEligible(d Document) bool {
+	for _, f := range d.Footprint.Files {
+		if f.State != "edited" {
+			continue
+		}
+		p := filepath.ToSlash(filepath.Clean(f.Path))
+		p = strings.TrimPrefix(p, "./")
+		if p == ".so" || strings.HasPrefix(p, ".so/") || p == "AGENTS.md" || p == "CLAUDE.md" ||
+			strings.HasPrefix(p, ".claude/") || strings.HasPrefix(p, ".cursor/") || strings.HasPrefix(p, ".codex/") ||
+			strings.HasPrefix(p, ".agents/") || strings.HasPrefix(p, ".gemini/") || strings.HasPrefix(p, ".opencode/") ||
+			strings.HasPrefix(p, ".pi/") {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 type IndexEntry = Meta
 
 type ReviewState struct {
@@ -80,6 +101,19 @@ type ReviewState struct {
 	HarvestTrigger       string          `json:"harvest_trigger,omitempty"`
 	Findings             []ReviewFinding `json:"findings,omitempty"`
 	MidSessionInjected   bool            `json:"mid_session_injected,omitempty"`
+}
+
+// GraphRefreshState records the graph side of the post-session lifecycle next
+// to the evaluation it accompanies. The graph itself remains authoritative in
+// .so/graph; this is observability for retries and the Sessions UI.
+type GraphRefreshState struct {
+	Status      string     `json:"status,omitempty"` // running | ready | continuation_required | failed
+	Trigger     string     `json:"trigger,omitempty"`
+	RunID       string     `json:"run_id,omitempty"`
+	GraphSHA256 string     `json:"graph_sha256,omitempty"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	Error       string     `json:"error,omitempty"`
 }
 
 // ReviewFinding is compact, redacted evidence from one session review. It
@@ -125,6 +159,7 @@ type Document struct {
 	Replay           json.RawMessage   `json:"replay,omitempty"`
 	Port             json.RawMessage   `json:"port,omitempty"`
 	Review           ReviewState       `json:"review,omitempty"`
+	GraphRefresh     GraphRefreshState `json:"graph_refresh,omitempty"`
 	MemoryRetrievals []MemoryRetrieval `json:"memory_retrievals,omitempty"`
 }
 
@@ -1168,9 +1203,12 @@ func (s *Store) PreviousReviewContext(vendor, exceptID string) string {
 		if err != nil {
 			continue
 		}
+		if !ReviewEligible(d) {
+			continue
+		}
 		switch d.Review.Status {
 		case "pending", "failed":
-			return fmt.Sprintf("## Previous %s session review\n\nSession `%s` is pending review. Run `so review-brief %s`, produce the JSON with your model, then `so apply-review %s`. Then continue the user's task. Skip if status is complete or running.", kind, m.ID, m.ID, m.ID)
+			return fmt.Sprintf("## Previous %s session review\n\nSession `%s` is eligible for review after the current user task. First produce the JSON from `so review-brief %s`, then invoke `so apply-review %s` with that JSON. Skip if status is complete or running.", kind, m.ID, m.ID, m.ID)
 		case "running":
 			return fmt.Sprintf("## Previous %s session review\n\nReview for `%s` is running; skip `so apply-review` and continue the user's task.", kind, m.ID)
 		case "complete":

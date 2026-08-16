@@ -201,6 +201,9 @@ type State struct {
 	MemoryTurnID     string            `json:"memory_turn_id,omitempty"`
 	MemoryTurnTokens int64             `json:"memory_turn_tokens,omitempty"`
 	RecentPaths      []string          `json:"recent_paths,omitempty"`
+	GraphOriented    bool              `json:"graph_oriented,omitempty"`
+	GraphNudged      bool              `json:"graph_nudged,omitempty"`
+	GraphStrictBlock bool              `json:"graph_strict_block,omitempty"`
 
 	// LastSessionRootEmitAt is the wall-clock of the most recent
 	// `coding_agent.session` span emission. Used by Codex (which has
