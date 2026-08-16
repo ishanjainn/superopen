@@ -329,7 +329,11 @@ d['total_files']=sum(len(v) for v in d.get('files',{}).values())
 files=[]
 for f in d.get('files',{}).get('code',[]):
  p=Path(f); files.extend(collect_files(p) if p.is_dir() else [p])
-r=extract(files,cache_root=root,max_workers=%s) if files else {'nodes':[],'edges':[],'input_tokens':0,'output_tokens':0}
+if files:
+ with contextlib.redirect_stdout(sys.stderr):
+  r=extract(files,cache_root=root,max_workers=%s)
+else:
+ r={'nodes':[],'edges':[],'input_tokens':0,'output_tokens':0}
 (out/'.graphify_ast.json').write_text(json.dumps(r,ensure_ascii=False),encoding='utf-8')
 os.environ['GRAPHIFY_WHISPER_MODEL']=%s
 prompt=build_whisper_prompt(r.get('nodes',[])) if r.get('nodes') else 'Use proper punctuation and paragraph breaks.'
@@ -544,18 +548,14 @@ func ApplySemanticChunk(paths harness.Paths, id string, number int, data []byte)
 		s, _ := e["source"].(string)
 		t, _ := e["target"].(string)
 		sf, _ := e["source_file"].(string)
-		confidence, _ := e["confidence"].(string)
-		score, ok := e["confidence_score"].(float64)
-		if isHarnessSource(run.RepoRoot, sf) || s == "" || t == "" || !ids[s] || !ids[t] || !allowed[filepath.Clean(sf)] || !ok || !validConfidence(confidence, score) {
+		if isHarnessSource(run.RepoRoot, sf) || s == "" || t == "" || !ids[s] || !ids[t] || !allowed[filepath.Clean(sf)] || !normalizeConfidence(e) {
 			return fail(fmt.Errorf("edge is not bound to this chunk's evidence or has invalid confidence"))
 		}
 	}
 	for _, h := range raw.Hyperedges {
 		members, _ := h["nodes"].([]any)
 		sf, _ := h["source_file"].(string)
-		confidence, _ := h["confidence"].(string)
-		score, ok := h["confidence_score"].(float64)
-		if isHarnessSource(run.RepoRoot, sf) || len(members) < 3 || !allowed[filepath.Clean(sf)] || !ok || !validConfidence(confidence, score) {
+		if isHarnessSource(run.RepoRoot, sf) || len(members) < 3 || !allowed[filepath.Clean(sf)] || !normalizeConfidence(h) {
 			return fail(fmt.Errorf("invalid hyperedge"))
 		}
 		for _, member := range members {
@@ -634,12 +634,45 @@ func knownSemanticNodeIDs(dir string) map[string]bool {
 	}
 	return known
 }
-func validConfidence(kind string, score float64) bool {
+
+func normalizeConfidence(item map[string]any) bool {
+	kind, _ := item["confidence"].(string)
+	score, ok := item["confidence_score"].(float64)
+	if !ok || score < 0 || score > 1 {
+		return false
+	}
 	switch kind {
 	case "EXTRACTED":
-		return score == 1
+		// The enum is authoritative. Models commonly pair EXTRACTED with a
+		// high-but-not-exact score even though Graphify requires exactly 1.0.
+		if score < .5 {
+			return false
+		}
+		item["confidence_score"] = 1.0
+		return true
 	case "INFERRED":
-		return score == .95 || score == .85 || score == .75 || score == .65 || score == .55
+		if score < .5 || score >= 1 {
+			return false
+		}
+		// Graphify stores inferred confidence in discrete buckets. Accept a
+		// model's continuous score and canonicalize it to the nearest bucket.
+		buckets := [...]float64{.95, .85, .75, .65, .55}
+		best := buckets[0]
+		bestDistance := score - best
+		if bestDistance < 0 {
+			bestDistance = -bestDistance
+		}
+		for _, candidate := range buckets[1:] {
+			distance := score - candidate
+			if distance < 0 {
+				distance = -distance
+			}
+			if distance < bestDistance {
+				best, bestDistance = candidate, distance
+			}
+		}
+		item["confidence_score"] = best
+		return true
 	case "AMBIGUOUS":
 		return score >= .1 && score <= .3
 	}

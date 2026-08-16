@@ -69,6 +69,52 @@ func TestSemanticApplyValidatesEvidenceAndResumes(t *testing.T) {
 	}
 }
 
+func TestSemanticApplyCanonicalizesModelConfidenceScores(t *testing.T) {
+	repo := t.TempDir()
+	paths := harness.Resolve(repo)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	doc := filepath.Join(repo, "design.md")
+	if err := os.WriteFile(doc, []byte("design"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := SemanticRun{SchemaVersion: 3, RunID: "run-confidence", Status: "needs_agent_semantic", RepoRoot: repo, EngineVersion: PinnedVersion, Chunks: []SemanticChunk{{Number: 1, Files: []string{doc}}}, CreatedAt: time.Now().UTC()}
+	dir, _ := runDir(paths, run.RunID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveSemanticRun(dir, run); err != nil {
+		t.Fatal(err)
+	}
+	payload := map[string]any{
+		"nodes": []map[string]any{
+			{"id": "design_source", "label": "Source", "source_file": doc},
+			{"id": "design_target", "label": "Target", "source_file": doc},
+			{"id": "design_third", "label": "Third", "source_file": doc},
+		},
+		"edges":      []map[string]any{{"source": "design_source", "target": "design_target", "relation": "references", "confidence": "INFERRED", "confidence_score": .9, "source_file": doc}},
+		"hyperedges": []map[string]any{{"id": "design_group", "nodes": []string{"design_source", "design_target", "design_third"}, "relation": "form", "confidence": "EXTRACTED", "confidence_score": .95, "source_file": doc}},
+	}
+	body, _ := json.Marshal(payload)
+	if err := ApplySemanticChunk(paths, run.RunID, 1, body); err != nil {
+		t.Fatal(err)
+	}
+	var saved struct {
+		Edges      []map[string]any `json:"edges"`
+		Hyperedges []map[string]any `json:"hyperedges"`
+	}
+	if err := json.Unmarshal(mustRead(t, filepath.Join(dir, ".graphify_chunk_01.json")), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if got := saved.Edges[0]["confidence_score"]; got != .95 {
+		t.Fatalf("inferred confidence was not canonicalized: %v", got)
+	}
+	if got := saved.Hyperedges[0]["confidence_score"]; got != 1.0 {
+		t.Fatalf("extracted confidence was not canonicalized: %v", got)
+	}
+}
+
 func TestSemanticApplyRejectsForbiddenSourceAndInjection(t *testing.T) {
 	repo := t.TempDir()
 	paths := harness.Resolve(repo)

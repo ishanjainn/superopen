@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -211,8 +212,15 @@ func TestAgentSemanticBriefSmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package demo\nfunc Alpha(){}\n"), 0o644); err != nil {
-		t.Fatal(err)
+	// Cross Graphify's progress-reporting threshold. The embedded JSON
+	// protocol must keep extraction progress off stdout or a fresh, nontrivial
+	// repository will fail before the agent receives semantic briefs.
+	for i := 0; i < 110; i++ {
+		name := fmt.Sprintf("file_%03d.go", i)
+		body := fmt.Sprintf("package demo\nfunc Symbol%03d(){}\n", i)
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(root, "architecture.md"), []byte("Alpha owns request routing and calls the durable store."), 0o644); err != nil {
 		t.Fatal(err)
