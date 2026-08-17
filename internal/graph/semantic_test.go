@@ -36,6 +36,27 @@ func TestRunPythonKeepsDiagnosticsOutOfProtocolOutput(t *testing.T) {
 	}
 }
 
+func TestRunPythonPassesArgumentsWithoutSourceInterpolation(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	want := `quote's \\ path "value"`
+	out, err := runPython(context.Background(), python, t.TempDir(), t.TempDir(), `import sys; print(sys.argv[1])`, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(out)) != want {
+		t.Fatalf("argument changed across Python boundary: got %q want %q", strings.TrimSpace(string(out)), want)
+	}
+}
+
+func TestSemanticSourceKeyNormalizesSeparators(t *testing.T) {
+	if semanticSourceKey(`repo/media/demo.txt`) != semanticSourceKey(`repo\media\demo.txt`) {
+		t.Fatal("slash and backslash source paths must resolve to the same evidence key")
+	}
+}
+
 func TestMeasureUsageDistinguishesUnavailableFromZero(t *testing.T) {
 	start := time.Now().UTC()
 	end := start.Add(time.Minute)

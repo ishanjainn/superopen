@@ -110,14 +110,11 @@ func ExportCanvas(ctx context.Context, repoRoot, output string) error {
 	if err != nil {
 		return err
 	}
-	graphJSON, _ := json.Marshal(paths.GraphJSON)
-	labelsJSON, _ := json.Marshal(filepath.Join(paths.GraphDir, ".graphify_labels.json"))
-	outputJSON, _ := json.Marshal(output)
-	script := fmt.Sprintf(`import json
+	script := `import json,sys
 from pathlib import Path
 from networkx.readwrite import json_graph
 from graphify.export import to_canvas
-gp=Path(%s);raw=json.loads(gp.read_text(encoding='utf-8'))
+gp=Path(sys.argv[1]);raw=json.loads(gp.read_text(encoding='utf-8'))
 if 'links' not in raw and 'edges' in raw: raw=dict(raw,links=raw['edges'])
 try:G=json_graph.node_link_graph(raw,edges='links')
 except TypeError:G=json_graph.node_link_graph(raw)
@@ -125,9 +122,9 @@ communities={}
 for node,data in G.nodes(data=True):
  cid=data.get('community')
  if cid is not None: communities.setdefault(int(cid),[]).append(str(node))
-lp=Path(%s);labels={int(k):v for k,v in json.loads(lp.read_text(encoding='utf-8')).items()} if lp.exists() else {}
-to_canvas(G,communities,%s,community_labels=labels or None)`, string(graphJSON), string(labelsJSON), string(outputJSON))
-	_, err = runPython(ctx, python, repoRoot, paths.GraphDir, script)
+lp=Path(sys.argv[2]);labels={int(k):v for k,v in json.loads(lp.read_text(encoding='utf-8')).items()} if lp.exists() else {}
+to_canvas(G,communities,sys.argv[3],community_labels=labels or None)`
+	_, err = runPython(ctx, python, repoRoot, paths.GraphDir, script, paths.GraphJSON, filepath.Join(paths.GraphDir, ".graphify_labels.json"), output)
 	return err
 }
 

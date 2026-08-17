@@ -213,8 +213,9 @@ func extractionPromptPath() (string, error) {
 	return found, nil
 }
 
-func runPython(ctx context.Context, python, cwd, outDir, script string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, python, "-c", script)
+func runPython(ctx context.Context, python, cwd, outDir, script string, args ...string) ([]byte, error) {
+	cmdArgs := append([]string{"-c", script}, args...)
+	cmd := exec.CommandContext(ctx, python, cmdArgs...)
 	cmd.Dir = cwd
 	cmd.Env = graphifyEnv(outDir)
 	var stdout, stderr bytes.Buffer
@@ -288,47 +289,39 @@ func StartSemanticRunWithOptions(ctx context.Context, repoRoot string, opts Sema
 	if err != nil {
 		return SemanticRun{}, err
 	}
-	repoJSON, _ := json.Marshal(target)
-	dirJSON, _ := json.Marshal(dir)
-	promptJSON, _ := json.Marshal(prompt)
 	structuralExtensions := make([]string, 0, len(structuralDocumentExtensions))
 	for ext := range structuralDocumentExtensions {
 		structuralExtensions = append(structuralExtensions, ext)
 	}
 	sort.Strings(structuralExtensions)
-	structuralJSON, _ := json.Marshal(structuralExtensions)
 	whisperModel := strings.TrimSpace(opts.WhisperModel)
 	if whisperModel == "" {
 		whisperModel = "base"
 	}
-	whisperJSON, _ := json.Marshal(whisperModel)
-	incrementalPython := "False"
-	if opts.Incremental {
-		incrementalPython = "True"
-	}
-	excludesJSON, _ := json.Marshal(append(append([]string{}, managedGraphExcludes...), opts.Excludes...))
-	managedJSON, _ := json.Marshal(managedGraphExcludes)
-	googlePython := "False"
-	if opts.GoogleWorkspace {
-		googlePython = "True"
-	}
-	gitignorePython := "True"
-	if opts.NoGitignore {
-		gitignorePython = "False"
-	}
-	maxWorkersPython := "None"
+	var maxWorkers any
 	if opts.MaxWorkers > 0 {
-		maxWorkersPython = strconv.Itoa(opts.MaxWorkers)
+		maxWorkers = opts.MaxWorkers
 	}
-	script := fmt.Sprintf(`import contextlib,json,os,sys
+	configJSON, err := json.Marshal(map[string]any{
+		"root": target, "out": dir, "incremental": opts.Incremental,
+		"excludes": append(append([]string{}, managedGraphExcludes...), opts.Excludes...),
+		"managed":  managedGraphExcludes, "structural_exts": structuralExtensions,
+		"deep": opts.Deep, "google_workspace": opts.GoogleWorkspace,
+		"gitignore": !opts.NoGitignore, "max_workers": maxWorkers,
+		"whisper_model": whisperModel, "prompt_file": prompt,
+	})
+	if err != nil {
+		return SemanticRun{}, err
+	}
+	script := `import contextlib,json,os,sys
 from pathlib import Path
 from graphify.detect import detect,detect_incremental
 from graphify.extract import collect_files, extract
 from graphify.cache import check_semantic_cache
 from graphify.transcribe import build_whisper_prompt,transcribe
-root=Path(%s); out=Path(%s); out.mkdir(parents=True,exist_ok=True); incremental=%s; excludes=json.loads(%q); managed=json.loads(%q); structural_exts=set(json.loads(%q)); deep=%s
-raw=detect_incremental(root,manifest_path=str(out/'manifest.json'),extra_excludes=excludes,google_workspace=%s,gitignore=%s) if incremental else None
-d={'files':raw.get('new_files',{}),'all_files':raw.get('files',{}),'total_files':raw.get('new_total',0),'total_words':raw.get('total_words',0),'skipped_sensitive':raw.get('skipped_sensitive',[]),'deleted_files':raw.get('deleted_files',[])} if incremental else detect(root,extra_excludes=excludes,google_workspace=%s,gitignore=%s,cache_root=out)
+cfg=json.loads(sys.argv[1]);root=Path(cfg['root']);out=Path(cfg['out']);out.mkdir(parents=True,exist_ok=True);incremental=cfg['incremental'];excludes=cfg['excludes'];managed=cfg['managed'];structural_exts=set(cfg['structural_exts']);deep=cfg['deep']
+raw=detect_incremental(root,manifest_path=str(out/'manifest.json'),extra_excludes=excludes,google_workspace=cfg['google_workspace'],gitignore=cfg['gitignore']) if incremental else None
+d={'files':raw.get('new_files',{}),'all_files':raw.get('files',{}),'total_files':raw.get('new_total',0),'total_words':raw.get('total_words',0),'skipped_sensitive':raw.get('skipped_sensitive',[]),'deleted_files':raw.get('deleted_files',[])} if incremental else detect(root,extra_excludes=excludes,google_workspace=cfg['google_workspace'],gitignore=cfg['gitignore'],cache_root=out)
 def allowed_source(value):
  try:
   p=Path(value)
@@ -350,11 +343,11 @@ for f in d.get('files',{}).get('document',[]):
  if p.suffix.lower() in structural_exts: files.append(p)
 if files:
  with contextlib.redirect_stdout(sys.stderr):
-  r=extract(files,cache_root=root,max_workers=%s)
+  r=extract(files,cache_root=root,max_workers=cfg['max_workers'])
 else:
  r={'nodes':[],'edges':[],'input_tokens':0,'output_tokens':0}
 (out/'.graphify_ast.json').write_text(json.dumps(r,ensure_ascii=False),encoding='utf-8')
-os.environ['GRAPHIFY_WHISPER_MODEL']=%s
+os.environ['GRAPHIFY_WHISPER_MODEL']=cfg['whisper_model']
 prompt=build_whisper_prompt(r.get('nodes',[])) if r.get('nodes') else 'Use proper punctuation and paragraph breaks.'
 transcripts=[];transcription_failures=[];generated_sources={}
 for media in d.get('files',{}).get('video',[]):
@@ -379,10 +372,10 @@ for kind in ('document','paper'):
     if len(matches)==1: generated_sources[str(f)]=str(matches[0])
   except (ValueError,OSError): pass
 semantic=[f for kind in ('document','paper','image') for f in d.get('files',{}).get(kind,[]) if (allowed_source(f) or str(f) in generated_sources) and (deep or str(f) in generated_sources or kind != 'document' or Path(f).suffix.lower() not in structural_exts)]
-cn,ce,ch,uncached=check_semantic_cache(semantic,root=root,prompt_file=%s)
+cn,ce,ch,uncached=check_semantic_cache(semantic,root=root,prompt_file=cfg['prompt_file'])
 (out/'.graphify_cached.json').write_text(json.dumps({'nodes':cn,'edges':ce,'hyperedges':ch},ensure_ascii=False),encoding='utf-8')
-print(json.dumps({'detect':d,'uncached':uncached,'generated_sources':generated_sources,'transcription_failures':transcription_failures,'ast_nodes':len(r.get('nodes',[])),'ast_edges':len(r.get('edges',[]))}))`, string(repoJSON), string(dirJSON), incrementalPython, string(excludesJSON), string(managedJSON), string(structuralJSON), pythonBool(opts.Deep), googlePython, gitignorePython, googlePython, gitignorePython, maxWorkersPython, string(whisperJSON), string(promptJSON))
-	out, err := runPython(ctx, python, repoRoot, dir, script)
+print(json.dumps({'detect':d,'uncached':uncached,'generated_sources':generated_sources,'transcription_failures':transcription_failures,'ast_nodes':len(r.get('nodes',[])),'ast_edges':len(r.get('edges',[]))}))`
+	out, err := runPython(ctx, python, repoRoot, dir, script, string(configJSON))
 	if err != nil {
 		return SemanticRun{}, err
 	}
@@ -558,20 +551,24 @@ func ApplySemanticChunk(paths harness.Paths, id string, number int, data []byte)
 	if memory.ContainsInjection(string(data)) {
 		return fail(fmt.Errorf("chunk rejected by prompt-injection sentinel"))
 	}
+	generatedSources := make(map[string]string, len(run.GeneratedSources))
+	for generated, original := range run.GeneratedSources {
+		generatedSources[semanticSourceKey(generated)] = filepath.ToSlash(original)
+	}
 	allowed := map[string]bool{}
 	for _, f := range run.Chunks[idx].Files {
-		original, generated := run.GeneratedSources[f]
+		original, generated := generatedSources[semanticSourceKey(f)]
 		if isHarnessSource(run.RepoRoot, f) && !generated {
 			return fail(fmt.Errorf("chunk contains forbidden .so source %q", f))
 		}
-		allowed[filepath.Clean(f)] = true
+		allowed[semanticSourceKey(f)] = true
 		if generated {
-			allowed[filepath.Clean(original)] = true
+			allowed[semanticSourceKey(original)] = true
 		}
 	}
 	remapSource := func(item map[string]any) {
 		if sf, _ := item["source_file"].(string); sf != "" {
-			if original, ok := run.GeneratedSources[sf]; ok {
+			if original, ok := generatedSources[semanticSourceKey(sf)]; ok {
 				item["source_file"] = original
 			}
 		}
@@ -590,7 +587,7 @@ func ApplySemanticChunk(paths harness.Paths, id string, number int, data []byte)
 	for _, n := range raw.Nodes {
 		id, _ := n["id"].(string)
 		sf, _ := n["source_file"].(string)
-		if isHarnessSource(run.RepoRoot, sf) || !idPattern.MatchString(id) || !allowed[filepath.Clean(sf)] {
+		if isHarnessSource(run.RepoRoot, sf) || !idPattern.MatchString(id) || !allowed[semanticSourceKey(sf)] {
 			return fail(fmt.Errorf("node has invalid id or source_file"))
 		}
 		ids[id] = true
@@ -599,14 +596,14 @@ func ApplySemanticChunk(paths harness.Paths, id string, number int, data []byte)
 		s, _ := e["source"].(string)
 		t, _ := e["target"].(string)
 		sf, _ := e["source_file"].(string)
-		if isHarnessSource(run.RepoRoot, sf) || s == "" || t == "" || !ids[s] || !ids[t] || !allowed[filepath.Clean(sf)] || !normalizeConfidence(e) {
+		if isHarnessSource(run.RepoRoot, sf) || s == "" || t == "" || !ids[s] || !ids[t] || !allowed[semanticSourceKey(sf)] || !normalizeConfidence(e) {
 			return fail(fmt.Errorf("edge is not bound to this chunk's evidence or has invalid confidence"))
 		}
 	}
 	for _, h := range raw.Hyperedges {
 		members, _ := h["nodes"].([]any)
 		sf, _ := h["source_file"].(string)
-		if isHarnessSource(run.RepoRoot, sf) || len(members) < 3 || !allowed[filepath.Clean(sf)] || !normalizeConfidence(h) {
+		if isHarnessSource(run.RepoRoot, sf) || len(members) < 3 || !allowed[semanticSourceKey(sf)] || !normalizeConfidence(h) {
 			return fail(fmt.Errorf("invalid hyperedge"))
 		}
 		for _, member := range members {
@@ -626,6 +623,11 @@ func ApplySemanticChunk(paths harness.Paths, id string, number int, data []byte)
 		run.Status = "ready_to_finalize"
 	}
 	return saveSemanticRun(dir, run)
+}
+
+func semanticSourceKey(path string) string {
+	path = strings.ReplaceAll(path, `\`, "/")
+	return filepath.Clean(filepath.FromSlash(path))
 }
 
 func rebaseSemanticRun(paths harness.Paths, old SemanticRun, oldDir string) error {
@@ -738,13 +740,6 @@ func allChunksDone(run SemanticRun) bool {
 	return true
 }
 
-func pythonBool(value bool) string {
-	if value {
-		return "True"
-	}
-	return "False"
-}
-
 func FinalizeSemantic(ctx context.Context, paths harness.Paths, id string) error {
 	run, dir, err := loadSemanticRun(paths, id)
 	if err != nil {
@@ -761,33 +756,30 @@ func FinalizeSemantic(ctx context.Context, paths harness.Paths, id string) error
 	if graphRoot == "" {
 		graphRoot = run.RepoRoot
 	}
-	repoJSON, _ := json.Marshal(graphRoot)
-	dirJSON, _ := json.Marshal(dir)
-	promptJSON, _ := json.Marshal(run.PromptPath)
 	allowedFiles := []string{}
 	for _, chunk := range run.Chunks {
 		allowedFiles = append(allowedFiles, chunk.Files...)
 	}
-	allowedJSON, _ := json.Marshal(allowedFiles)
-	incrementalPython := "False"
-	if run.Kind == "incremental" {
-		incrementalPython = "True"
-	}
-	baseGraphJSON, _ := json.Marshal(paths.GraphJSON)
-	deletedJSON, _ := json.Marshal(run.DeletedFiles)
-	directedPython := pythonBool(run.Options.Directed)
-	noClusterPython := pythonBool(run.Options.NoCluster)
 	resolution := run.Options.Resolution
 	if resolution <= 0 {
 		resolution = 1
 	}
-	excludeHubsPython := "None"
+	var excludeHubs any
 	if run.Options.ExcludeHubs > 0 {
-		excludeHubsPython = strconv.FormatFloat(run.Options.ExcludeHubs, 'f', -1, 64)
+		excludeHubs = run.Options.ExcludeHubs
 	}
-	postgresJSON, _ := json.Marshal(run.Options.PostgresDSN)
-	cargoPython := pythonBool(run.Options.Cargo)
-	script := fmt.Sprintf(`import json,glob
+	configJSON, err := json.Marshal(map[string]any{
+		"root": graphRoot, "out": dir, "incremental": run.Kind == "incremental",
+		"base_graph": paths.GraphJSON, "deleted": run.DeletedFiles,
+		"directed": run.Options.Directed, "no_cluster": run.Options.NoCluster,
+		"resolution": resolution, "exclude_hubs": excludeHubs,
+		"postgres": run.Options.PostgresDSN, "use_cargo": run.Options.Cargo,
+		"allowed_source_files": allowedFiles, "prompt_file": run.PromptPath,
+	})
+	if err != nil {
+		return err
+	}
+	script := `import json,glob,sys
 from pathlib import Path
 from graphify.build import build_from_json,build_merge
 from graphify.cluster import cluster,score_all
@@ -795,11 +787,11 @@ from graphify.analyze import god_nodes,surprising_connections,suggest_questions
 from graphify.report import generate
 from graphify.export import to_json
 from graphify.cache import save_semantic_cache
-root=Path(%s);out=Path(%s);incremental=%s;base_graph=%s;deleted=json.loads(%q);directed=%s;no_cluster=%s;resolution=%s;exclude_hubs=%s;postgres=%s;use_cargo=%s
+cfg=json.loads(sys.argv[1]);root=Path(cfg['root']);out=Path(cfg['out']);incremental=cfg['incremental'];base_graph=cfg['base_graph'];deleted=cfg['deleted'];directed=cfg['directed'];no_cluster=cfg['no_cluster'];resolution=cfg['resolution'];exclude_hubs=cfg['exclude_hubs'];postgres=cfg['postgres'];use_cargo=cfg['use_cargo']
 ast=json.loads((out/'.graphify_ast.json').read_text()); chunks=[json.loads(Path(p).read_text()) for p in sorted(glob.glob(str(out/'.graphify_chunk_*.json')))];cached=json.loads((out/'.graphify_cached.json').read_text()) if (out/'.graphify_cached.json').exists() else {'nodes':[],'edges':[],'hyperedges':[]}
 sem={'nodes':cached.get('nodes',[])+sum((c.get('nodes',[]) for c in chunks),[]),'edges':cached.get('edges',[])+sum((c.get('edges',[]) for c in chunks),[]),'hyperedges':cached.get('hyperedges',[])+sum((c.get('hyperedges',[]) for c in chunks),[]),'input_tokens':sum(c.get('input_tokens',0) for c in chunks),'output_tokens':sum(c.get('output_tokens',0) for c in chunks)}
 new={'nodes':sum((c.get('nodes',[]) for c in chunks),[]),'edges':sum((c.get('edges',[]) for c in chunks),[]),'hyperedges':sum((c.get('hyperedges',[]) for c in chunks),[])}
-save_semantic_cache(new['nodes'],new['edges'],new['hyperedges'],root=root,allowed_source_files=%s,prompt_file=%s)
+save_semantic_cache(new['nodes'],new['edges'],new['hyperedges'],root=root,allowed_source_files=cfg['allowed_source_files'],prompt_file=cfg['prompt_file'])
 (out/'.graphify_semantic.json').write_text(json.dumps(sem,ensure_ascii=False))
 seen={n['id'] for n in ast['nodes']};nodes=list(ast['nodes'])
 for n in sem['nodes']:
@@ -819,8 +811,8 @@ cs={} if no_cluster else cluster(G,resolution=resolution,exclude_hubs_percentile
 if not to_json(G,cs,out/'graph.json',community_labels=labels):raise SystemExit('graph shrink guard refused publication')
 (out/'.graphify_analysis.json').write_text(json.dumps({'communities':{str(k):v for k,v in cs.items()},'cohesion':{str(k):v for k,v in co.items()},'gods':gods,'surprises':sur,'questions':qs},ensure_ascii=False))
 (out/'.graphify_labels.json').write_text(json.dumps({str(k):v for k,v in labels.items()}))
-(out/'GRAPH_REPORT.md').write_text(generate(G,cs,co,labels,gods,sur,det,{'input':sem['input_tokens'],'output':sem['output_tokens']},str(root),suggested_questions=qs))`, string(repoJSON), string(dirJSON), incrementalPython, string(baseGraphJSON), string(deletedJSON), directedPython, noClusterPython, strconv.FormatFloat(resolution, 'f', -1, 64), excludeHubsPython, string(postgresJSON), cargoPython, string(allowedJSON), string(promptJSON))
-	if _, err := runPython(ctx, python, graphRoot, dir, script); err != nil {
+(out/'GRAPH_REPORT.md').write_text(generate(G,cs,co,labels,gods,sur,det,{'input':sem['input_tokens'],'output':sem['output_tokens']},str(root),suggested_questions=qs))`
+	if _, err := runPython(ctx, python, graphRoot, dir, script, string(configJSON)); err != nil {
 		return err
 	}
 	run.Status = "needs_agent_labels"
@@ -884,19 +876,20 @@ func ApplyLabels(paths harness.Paths, id string, data []byte) error {
 	if graphRoot == "" {
 		graphRoot = run.RepoRoot
 	}
-	repoJSON, _ := json.Marshal(graphRoot)
-	dirJSON, _ := json.Marshal(dir)
-	labelsJSON, _ := json.Marshal(labels)
-	script := fmt.Sprintf(`import json
+	configJSON, err := json.Marshal(map[string]any{"root": graphRoot, "out": dir, "labels": labels, "directed": run.Options.Directed})
+	if err != nil {
+		return err
+	}
+	script := `import json,sys
 from pathlib import Path
 from graphify.build import build_from_json
 from graphify.analyze import suggest_questions
 from graphify.report import generate
 from graphify.export import to_json
-root=Path(%s);out=Path(%s);labels={int(k):v for k,v in %s.items()};ex=json.loads((out/'.graphify_extract.json').read_text());det=json.loads((out/'.graphify_detect.json').read_text());an=json.loads((out/'.graphify_analysis.json').read_text());G=build_from_json(ex,root=root,directed=%s);cs={int(k):v for k,v in an['communities'].items()};co={int(k):v for k,v in an['cohesion'].items()};qs=suggest_questions(G,cs,labels)
+cfg=json.loads(sys.argv[1]);root=Path(cfg['root']);out=Path(cfg['out']);labels={int(k):v for k,v in cfg['labels'].items()};ex=json.loads((out/'.graphify_extract.json').read_text());det=json.loads((out/'.graphify_detect.json').read_text());an=json.loads((out/'.graphify_analysis.json').read_text());G=build_from_json(ex,root=root,directed=cfg['directed']);cs={int(k):v for k,v in an['communities'].items()};co={int(k):v for k,v in an['cohesion'].items()};qs=suggest_questions(G,cs,labels)
 if not to_json(G,cs,out/'graph.json',community_labels=labels):raise SystemExit('graph shrink guard refused labels')
-(out/'GRAPH_REPORT.md').write_text(generate(G,cs,co,labels,an['gods'],an['surprises'],det,{'input':ex.get('input_tokens',0),'output':ex.get('output_tokens',0)},str(root),suggested_questions=qs))`, string(repoJSON), string(dirJSON), string(labelsJSON), pythonBool(run.Options.Directed))
-	if _, err := runPython(context.Background(), python, graphRoot, dir, script); err != nil {
+(out/'GRAPH_REPORT.md').write_text(generate(G,cs,co,labels,an['gods'],an['surprises'],det,{'input':ex.get('input_tokens',0),'output':ex.get('output_tokens',0)},str(root),suggested_questions=qs))`
+	if _, err := runPython(context.Background(), python, graphRoot, dir, script, string(configJSON)); err != nil {
 		return err
 	}
 	run.Status = "ready_to_publish"
@@ -923,14 +916,16 @@ func PublishSemantic(ctx context.Context, paths harness.Paths, id string) (Resul
 	if pyErr != nil {
 		return Result{}, pyErr
 	}
-	repoJSON, _ := json.Marshal(run.RepoRoot)
-	dirJSON, _ := json.Marshal(dir)
-	manifestScript := fmt.Sprintf(`import json
+	configJSON, err := json.Marshal(map[string]any{"root": run.RepoRoot, "out": dir, "run_id": run.RunID})
+	if err != nil {
+		return Result{}, err
+	}
+	manifestScript := `import json,sys
 from pathlib import Path
 from datetime import datetime,timezone
 from graphify.detect import save_manifest
-root=Path(%s);out=Path(%s);det=json.loads((out/'.graphify_detect.json').read_text());ex=json.loads((out/'.graphify_extract.json').read_text());save_manifest(det.get('all_files',det.get('files',{})),root=root,scan_corpus={f for files in det.get('all_files',det.get('files',{})).values() for f in files});cost={'measurement':'unavailable','session_id':None,'run_id':%q,'phases':{'initialization':None,'semantic_extraction':{'input_tokens':None,'output_tokens':None,'cache_tokens':None,'cost':None,'measurement':'unavailable','payload_metadata':{'input_tokens':ex.get('input_tokens'),'output_tokens':ex.get('output_tokens')}},'labeling':None,'upgrade':None,'query':None,'coding_task':None},'amortized':{'successful_graph_assisted_tasks':0,'initialization_cost_per_successful_task':None}};(out/'cost.json').write_text(json.dumps(cost,indent=2))`, string(repoJSON), string(dirJSON), run.RunID)
-	if _, err := runPython(ctx, python, run.RepoRoot, dir, manifestScript); err != nil {
+cfg=json.loads(sys.argv[1]);root=Path(cfg['root']);out=Path(cfg['out']);det=json.loads((out/'.graphify_detect.json').read_text());ex=json.loads((out/'.graphify_extract.json').read_text());save_manifest(det.get('all_files',det.get('files',{})),root=root,scan_corpus={f for files in det.get('all_files',det.get('files',{})).values() for f in files});cost={'measurement':'unavailable','session_id':None,'run_id':cfg['run_id'],'phases':{'initialization':None,'semantic_extraction':{'input_tokens':None,'output_tokens':None,'cache_tokens':None,'cost':None,'measurement':'unavailable','payload_metadata':{'input_tokens':ex.get('input_tokens'),'output_tokens':ex.get('output_tokens')}},'labeling':None,'upgrade':None,'query':None,'coding_task':None},'amortized':{'successful_graph_assisted_tasks':0,'initialization_cost_per_successful_task':None}};(out/'cost.json').write_text(json.dumps(cost,indent=2))`
+	if _, err := runPython(ctx, python, run.RepoRoot, dir, manifestScript, string(configJSON)); err != nil {
 		return Result{}, err
 	}
 	if err := writeHostSemanticCost(paths, dir, run); err != nil {

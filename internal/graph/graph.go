@@ -631,18 +631,16 @@ func rebuildDirectedGraph(root, outDir string) error {
 	if err != nil {
 		return err
 	}
-	rootJSON, _ := json.Marshal(root)
-	outJSON, _ := json.Marshal(outDir)
-	script := fmt.Sprintf(`import json
+	script := `import json,sys
 from pathlib import Path
 from graphify.build import build_from_json
 from graphify.export import to_json
-root=Path(%s);out=Path(%s);extract=out/'.graphify_extract.json'
+root=Path(sys.argv[1]);out=Path(sys.argv[2]);extract=out/'.graphify_extract.json'
 raw=json.loads(extract.read_text()) if extract.exists() else json.loads((out/'graph.json').read_text())
 if 'edges' not in raw: raw['edges']=raw.get('links',[])
 G=build_from_json(raw,root=root,directed=True)
-if not to_json(G,{},out/'graph.json'): raise SystemExit('directed graph shrink guard refused output')`, string(rootJSON), string(outJSON))
-	if _, err := runPython(context.Background(), python, root, outDir, script); err != nil {
+if not to_json(G,{},out/'graph.json'): raise SystemExit('directed graph shrink guard refused output')`
+	if _, err := runPython(context.Background(), python, root, outDir, script, root, outDir); err != nil {
 		return fmt.Errorf("Graphify directed build: %w", err)
 	}
 	return nil
