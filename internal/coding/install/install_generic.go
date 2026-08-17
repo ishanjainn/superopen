@@ -109,7 +109,7 @@ func copilotManifest(soBin string) (string, error) {
 		bash := posixQuote(posixPath) + " " + args
 		powershell := "& '" + strings.ReplaceAll(soBin, "'", "''") + "' " + args
 		return map[string]any{
-			"type": "command", "bash": bash, "powershell": powershell, "timeoutSec": 5,
+			"type": "command", "bash": bash, "powershell": powershell, "timeoutSec": 15,
 		}
 	}
 	doc := map[string]any{
@@ -155,7 +155,7 @@ func installGeminiHooks(path, soBin string) ([]string, error) {
 		existing = stripOwnedGeminiGroups(existing)
 		entries := make([]any, 0, len(commands))
 		for _, command := range commands {
-			entry := map[string]any{"type": "command", "command": command, "timeout": 5000}
+			entry := map[string]any{"type": "command", "command": command, "timeout": 15000}
 			entries = append(entries, entry)
 		}
 		existing = append(existing, map[string]any{"hooks": entries, "sequential": true})

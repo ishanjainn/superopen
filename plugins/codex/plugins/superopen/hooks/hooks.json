@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "so coding hook --vendor=codex --event=SessionStart",
-            "timeout": 10
+            "timeout": 15
           }
         ]
       }
@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "so coding hook --vendor=codex --event=UserPromptSubmit",
-            "timeout": 10
+            "timeout": 15
           }
         ]
       }
@@ -30,7 +30,7 @@
           {
             "type": "command",
             "command": "so coding hook --vendor=codex --event=PreToolUse",
-            "timeout": 10
+            "timeout": 15
           }
         ]
       }
@@ -42,7 +42,7 @@
           {
             "type": "command",
             "command": "so coding hook --vendor=codex --event=PostToolUse",
-            "timeout": 10
+            "timeout": 15
           }
         ]
       }

@@ -14,6 +14,14 @@ import (
 	"github.com/ishanjainn/superopen/internal/tracestore"
 )
 
+func TestAsciiDocExtensionsAreStructurallyIndexed(t *testing.T) {
+	for _, ext := range []string{".adoc", ".asciidoc"} {
+		if !structuralDocumentExtensions[ext] {
+			t.Errorf("%s is not structurally indexed", ext)
+		}
+	}
+}
+
 func TestRunPythonKeepsDiagnosticsOutOfProtocolOutput(t *testing.T) {
 	python, err := exec.LookPath("python3")
 	if err != nil {
@@ -40,6 +48,50 @@ func TestMeasureUsageDistinguishesUnavailableFromZero(t *testing.T) {
 	got := measureUsage(spans, "s1", start, end)
 	if got.Measurement != "host_session" || got.InputTokens == nil || *got.InputTokens != 120 || got.CacheTokens == nil || *got.CacheTokens != 80 || got.CostUSD == nil || *got.CostUSD != .004 {
 		t.Fatalf("bad host measurement: %+v", got)
+	}
+}
+
+func TestSemanticBriefsPreserveChunkNumbersAndDiscard(t *testing.T) {
+	repo := t.TempDir()
+	paths := harness.Resolve(repo)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	prompt := filepath.Join(repo, "prompt.txt")
+	if err := os.WriteFile(prompt, []byte("chunk CHUNK_NUM/TOTAL_CHUNKS files=FILE_LIST deep=DEEP_MODE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := SemanticRun{
+		SchemaVersion: 3, RunID: "run-numbered", Status: "needs_agent_semantic", RepoRoot: repo,
+		EngineVersion: PinnedVersion, PromptPath: prompt, Options: SemanticStartOptions{Deep: true},
+		Chunks: []SemanticChunk{{Number: 1, Files: []string{"done.md"}, Done: true}, {Number: 2, Files: []string{"next.pdf"}}}, CreatedAt: time.Now().UTC(),
+	}
+	dir, _ := runDir(paths, run.RunID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveSemanticRun(dir, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.GraphJSON, []byte(`{"nodes":[],"links":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.GraphState, []byte(`{"status":"ready","last_build_result":"continuation_required","pending_semantic_run_id":"run-numbered"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	briefs, err := SemanticBriefs(paths, run.RunID)
+	if err != nil || len(briefs) != 1 || briefs[0].Number != 2 || !strings.Contains(briefs[0].Prompt, "chunk 2/2") {
+		t.Fatalf("briefs=%+v err=%v", briefs, err)
+	}
+	if err := DiscardSemanticRun(paths, run.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("discard left staging directory: %v", err)
+	}
+	state := string(mustRead(t, paths.GraphState))
+	if strings.Contains(state, "pending_semantic_run_id") || !strings.Contains(state, `"last_build_result": "success"`) {
+		t.Fatalf("discard left pending graph state: %s", state)
 	}
 }
 

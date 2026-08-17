@@ -3,7 +3,7 @@ Copyright 2026 Superopen Contributors
 
 This product includes software derived from:
 
-Graphify 0.9.44 (Apache-2.0)
+Graphify 0.9.45 (Apache-2.0)
   https://github.com/Graphify-Labs/graphify
   Invoked as the pinned repository graph extraction, analysis, query, and export runtime.
   Graphify's license and NOTICE terms apply to its separately installed Python package.

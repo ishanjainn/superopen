@@ -30,6 +30,16 @@ type SemanticChunk struct {
 	Attempts int      `json:"attempts"`
 }
 
+type SemanticBrief struct {
+	Number int    `json:"number"`
+	Prompt string `json:"prompt"`
+}
+
+var structuralDocumentExtensions = map[string]bool{
+	".md": true, ".mdx": true, ".qmd": true, ".markdown": true, ".rst": true, ".txt": true,
+	".adoc": true, ".asciidoc": true,
+}
+
 type SemanticRun struct {
 	SchemaVersion       int                  `json:"schema_version"`
 	RunID               string               `json:"run_id"`
@@ -281,6 +291,12 @@ func StartSemanticRunWithOptions(ctx context.Context, repoRoot string, opts Sema
 	repoJSON, _ := json.Marshal(target)
 	dirJSON, _ := json.Marshal(dir)
 	promptJSON, _ := json.Marshal(prompt)
+	structuralExtensions := make([]string, 0, len(structuralDocumentExtensions))
+	for ext := range structuralDocumentExtensions {
+		structuralExtensions = append(structuralExtensions, ext)
+	}
+	sort.Strings(structuralExtensions)
+	structuralJSON, _ := json.Marshal(structuralExtensions)
 	whisperModel := strings.TrimSpace(opts.WhisperModel)
 	if whisperModel == "" {
 		whisperModel = "base"
@@ -310,7 +326,7 @@ from graphify.detect import detect,detect_incremental
 from graphify.extract import collect_files, extract
 from graphify.cache import check_semantic_cache
 from graphify.transcribe import build_whisper_prompt,transcribe
-root=Path(%s); out=Path(%s); out.mkdir(parents=True,exist_ok=True); incremental=%s; excludes=json.loads(%q); managed=json.loads(%q)
+root=Path(%s); out=Path(%s); out.mkdir(parents=True,exist_ok=True); incremental=%s; excludes=json.loads(%q); managed=json.loads(%q); structural_exts=set(json.loads(%q)); deep=%s
 raw=detect_incremental(root,manifest_path=str(out/'manifest.json'),extra_excludes=excludes,google_workspace=%s,gitignore=%s) if incremental else None
 d={'files':raw.get('new_files',{}),'all_files':raw.get('files',{}),'total_files':raw.get('new_total',0),'total_words':raw.get('total_words',0),'skipped_sensitive':raw.get('skipped_sensitive',[]),'deleted_files':raw.get('deleted_files',[])} if incremental else detect(root,extra_excludes=excludes,google_workspace=%s,gitignore=%s,cache_root=out)
 def allowed_source(value):
@@ -329,6 +345,9 @@ d['total_files']=sum(len(v) for v in d.get('files',{}).values())
 files=[]
 for f in d.get('files',{}).get('code',[]):
  p=Path(f); files.extend(collect_files(p) if p.is_dir() else [p])
+for f in d.get('files',{}).get('document',[]):
+ p=Path(f)
+ if p.suffix.lower() in structural_exts: files.append(p)
 if files:
  with contextlib.redirect_stdout(sys.stderr):
   r=extract(files,cache_root=root,max_workers=%s)
@@ -359,10 +378,10 @@ for kind in ('document','paper'):
     matches=list(root.rglob(m.group(1).strip())) if m else []
     if len(matches)==1: generated_sources[str(f)]=str(matches[0])
   except (ValueError,OSError): pass
-semantic=[f for kind in ('document','paper','image') for f in d.get('files',{}).get(kind,[]) if allowed_source(f) or str(f) in generated_sources]
+semantic=[f for kind in ('document','paper','image') for f in d.get('files',{}).get(kind,[]) if (allowed_source(f) or str(f) in generated_sources) and (deep or str(f) in generated_sources or kind != 'document' or Path(f).suffix.lower() not in structural_exts)]
 cn,ce,ch,uncached=check_semantic_cache(semantic,root=root,prompt_file=%s)
 (out/'.graphify_cached.json').write_text(json.dumps({'nodes':cn,'edges':ce,'hyperedges':ch},ensure_ascii=False),encoding='utf-8')
-print(json.dumps({'detect':d,'uncached':uncached,'generated_sources':generated_sources,'transcription_failures':transcription_failures,'ast_nodes':len(r.get('nodes',[])),'ast_edges':len(r.get('edges',[]))}))`, string(repoJSON), string(dirJSON), incrementalPython, string(excludesJSON), string(managedJSON), googlePython, gitignorePython, googlePython, gitignorePython, maxWorkersPython, string(whisperJSON), string(promptJSON))
+print(json.dumps({'detect':d,'uncached':uncached,'generated_sources':generated_sources,'transcription_failures':transcription_failures,'ast_nodes':len(r.get('nodes',[])),'ast_edges':len(r.get('edges',[]))}))`, string(repoJSON), string(dirJSON), incrementalPython, string(excludesJSON), string(managedJSON), string(structuralJSON), pythonBool(opts.Deep), googlePython, gitignorePython, googlePython, gitignorePython, maxWorkersPython, string(whisperJSON), string(promptJSON))
 	out, err := runPython(ctx, python, repoRoot, dir, script)
 	if err != nil {
 		return SemanticRun{}, err
@@ -440,7 +459,7 @@ print(json.dumps({'detect':d,'uncached':uncached,'generated_sources':generated_s
 	return run, nil
 }
 
-func SemanticBriefs(paths harness.Paths, id string) ([]string, error) {
+func SemanticBriefs(paths harness.Paths, id string) ([]SemanticBrief, error) {
 	run, dir, err := loadSemanticRun(paths, id)
 	if err != nil {
 		return nil, err
@@ -452,7 +471,7 @@ func SemanticBriefs(paths harness.Paths, id string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	briefs := []string{}
+	briefs := []SemanticBrief{}
 	for _, ch := range run.Chunks {
 		if ch.Done {
 			continue
@@ -463,9 +482,41 @@ func SemanticBriefs(paths harness.Paths, id string) ([]string, error) {
 		p = strings.ReplaceAll(p, "CHUNK_NUM", fmt.Sprint(ch.Number))
 		p = strings.ReplaceAll(p, "TOTAL_CHUNKS", fmt.Sprint(len(run.Chunks)))
 		p = strings.ReplaceAll(p, "DEEP_MODE", strconv.FormatBool(run.Options.Deep))
-		briefs = append(briefs, p)
+		briefs = append(briefs, SemanticBrief{Number: ch.Number, Prompt: p})
 	}
 	return briefs, nil
+}
+
+func DiscardSemanticRun(paths harness.Paths, id string) error {
+	run, dir, err := loadSemanticRun(paths, id)
+	if err != nil {
+		return err
+	}
+	if run.Status == "published" {
+		return fmt.Errorf("semantic run %s is already published", id)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	stateBody, stateErr := os.ReadFile(paths.GraphState)
+	if stateErr != nil {
+		return nil
+	}
+	var state map[string]any
+	if json.Unmarshal(stateBody, &state) != nil || state["pending_semantic_run_id"] != id {
+		return nil
+	}
+	if _, graphErr := os.Stat(paths.GraphJSON); graphErr != nil {
+		return os.Remove(paths.GraphState)
+	}
+	delete(state, "pending_semantic_run_id")
+	state["status"] = "ready"
+	state["last_build_result"] = "success"
+	updated, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return replaceBytes(paths.GraphState, append(updated, '\n'))
 }
 
 func SemanticStatus(paths harness.Paths, id string) (SemanticRun, string, error) {

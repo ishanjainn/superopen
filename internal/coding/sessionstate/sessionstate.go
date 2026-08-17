@@ -204,6 +204,7 @@ type State struct {
 	GraphOriented    bool              `json:"graph_oriented,omitempty"`
 	GraphNudged      bool              `json:"graph_nudged,omitempty"`
 	GraphStrictBlock bool              `json:"graph_strict_block,omitempty"`
+	GraphQuery       string            `json:"graph_query,omitempty"`
 
 	// LastSessionRootEmitAt is the wall-clock of the most recent
 	// `coding_agent.session` span emission. Used by Codex (which has

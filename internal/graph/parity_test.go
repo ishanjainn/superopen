@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ishanjainn/superopen/internal/config"
 	"github.com/ishanjainn/superopen/internal/harness"
 )
 
@@ -225,7 +226,7 @@ func TestAgentSemanticBriefSmoke(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "architecture.md"), []byte("Alpha owns request routing and calls the durable store."), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run, err := StartSemanticRun(context.Background(), root)
+	run, err := StartSemanticRunWithOptions(context.Background(), root, SemanticStartOptions{Deep: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +237,7 @@ func TestAgentSemanticBriefSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(briefs) != 1 || len(briefs[0]) < 100 {
+	if len(briefs) != 1 || briefs[0].Number != 1 || len(briefs[0].Prompt) < 100 {
 		t.Fatalf("unexpected briefs: %d", len(briefs))
 	}
 }
@@ -254,6 +255,11 @@ func TestIncrementalAgentQueuesOnlySemanticChanges(t *testing.T) {
 	}
 	paths := harness.Resolve(root)
 	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Graph.Mode = "deep"
+	if err := config.Save(paths.Config, cfg); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := RefreshAtomic(root, paths, true, "none"); err != nil {
@@ -324,6 +330,46 @@ func TestIncrementalAgentQueuesOnlySemanticChanges(t *testing.T) {
 	}
 	if published.Status != "ready" || !strings.Contains(string(mustRead(t, paths.GraphJSON)), "architecture_alpha") {
 		t.Fatalf("incremental semantic graph did not publish: %+v", published)
+	}
+}
+
+func TestStandardMarkdownRefreshAndDepthQueryUseNoSemanticContinuation(t *testing.T) {
+	if os.Getenv("SUPEROPEN_GRAPHIFY_PARITY_TEST") != "1" {
+		t.Skip("set SUPEROPEN_GRAPHIFY_PARITY_TEST=1 for structural document and query parity")
+	}
+	if err := EnsureTool(); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package demo\nfunc Alpha(){ Beta() }\nfunc Beta(){}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	paths := harness.Resolve(root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RefreshAtomic(root, paths, true, "none"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "architecture.md"), []byte("# Routing Architecture\n\n[Storage](./storage.md)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := UpdateAtomic(context.Background(), root, paths, false, "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ready" || result.RunID != "" {
+		t.Fatalf("standard Markdown refresh unexpectedly required semantic work: %+v", result)
+	}
+	if !strings.Contains(string(mustRead(t, paths.GraphJSON)), "Routing Architecture") {
+		t.Fatal("deterministic Markdown heading missing from graph")
+	}
+	answer, err := QueryWithDepth(root, "what calls Beta", []string{"--budget", "400"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(answer, "depth=1") || !strings.Contains(answer, "EDGE ") {
+		t.Fatalf("depth adapter omitted traversal depth or relationships:\n%s", answer)
 	}
 }
 

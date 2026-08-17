@@ -40,7 +40,7 @@ func TestQueryPreservesGraphifyRepositoryCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(graphDir, "graph.json"), []byte(`{"nodes":[{"id":"a"},{"id":"b"}],"edges":[{"source":"a","target":"b"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(graphDir, "state.json"), []byte(`{"schema_version":3,"engine":"graphify","engine_version":"0.9.44","graph_sha256":"abc"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(graphDir, "state.json"), []byte(`{"schema_version":3,"engine":"graphify","engine_version":"0.9.45","graph_sha256":"abc"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SUPEROPEN_GRAPHIFY_BIN", fakeGraphify(t))
@@ -64,7 +64,7 @@ func TestQueryPreservesGraphifyRepositoryCache(t *testing.T) {
 
 func TestWriteGraphVocabularyIsCompactAndExcludesHarnessSources(t *testing.T) {
 	dir := t.TempDir()
-	data := []byte(`{"nodes":[{"id":"service_run","label":"Run","community_name":"Core","source_file":"internal/service.go"},{"id":"bad","source_file":".so/memory/context.md"}],"links":[{"source":"service_run","target":"bad","relation":"calls"}]}`)
+	data := []byte(`{"nodes":[{"id":"service_run","label":"HTTPServerRun","community_name":"Core","source_file":"internal/service.go"},{"id":"unicode","label":"Überprüfung 東京都","source_file":"internal/check.go"},{"id":"bad","label":"SecretHarnessThing","source_file":".so/memory/context.md"}],"links":[{"source":"service_run","target":"bad","relation":"calls"}]}`)
 	if err := writeGraphVocabulary(dir, data); err != nil {
 		t.Fatal(err)
 	}
@@ -73,18 +73,48 @@ func TestWriteGraphVocabularyIsCompactAndExcludesHarnessSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(body)
-	for _, want := range []string{"service_run", "Run", "Core", "internal/service.go", "calls"} {
+	for _, want := range []string{"http", "server", "run", "überprüfung", "東京都"} {
 		if !strings.Contains(got, want+"\n") {
 			t.Errorf("vocabulary missing %q: %s", want, got)
 		}
 	}
-	if strings.Contains(got, ".so/") {
-		t.Fatalf("harness source leaked into vocabulary: %s", got)
+	for _, unwanted := range []string{"service_run", "internal/service.go", "calls", "secret", ".so/"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("non-label or harness content %q leaked into vocabulary: %s", unwanted, got)
+		}
+	}
+}
+
+func TestCompactGraphQueryOutputKeepsRelationshipsAndSemanticSeedContext(t *testing.T) {
+	dir := t.TempDir()
+	graphPath := filepath.Join(dir, "graph.json")
+	graphBody := []byte(`{"nodes":[{"id":"router","label":"Router","summary":"Routes requests safely"},{"id":"store","label":"Store"}],"links":[]}`)
+	if err := os.WriteFile(graphPath, graphBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw := "Traversal: BFS depth=1 | Start: ['Router'] | 2 nodes found\n\n" +
+		"NODE Router [src=router.go loc=L10 community=core]\n" +
+		"NODE Store [src=store.go loc=L5 community=data]\n" +
+		"EDGE Router --calls [EXTRACTED]--> Store at=router.go:L12\n"
+	got := compactGraphQueryOutput(graphPath, raw, 100)
+	if !strings.Contains(got, "summary=\"Routes requests safely\"") || !strings.Contains(got, "EDGE Router --calls") {
+		t.Fatalf("compact query omitted useful seed context or relationship:\n%s", got)
+	}
+	if strings.Index(got, "EDGE Router --calls") > strings.Index(got, "NODE Store") {
+		t.Fatalf("relationship was not prioritized ahead of expansion nodes:\n%s", got)
+	}
+}
+
+func TestQueryTokenBudgetExpansionPreservesOtherArguments(t *testing.T) {
+	extra := withQueryTokenBudget([]string{"--dfs", "--budget", "900", "--context", "call"}, 7200)
+	got := strings.Join(extra, " ")
+	if got != "--dfs --budget 7200 --context call" || queryTokenBudget(extra) != 7200 {
+		t.Fatalf("expanded args=%q budget=%d", got, queryTokenBudget(extra))
 	}
 }
 
 func TestValidateNoHarnessSourcesRejectsEveryManagedSource(t *testing.T) {
-	for _, source := range []string{".so/memory/context.md", ".mcp.json", ".cursor/mcp.json", "AGENTS.md", ".codex/skills/so/SKILL.md", "/tmp/repo/.factory/skills/so/SKILL.md"} {
+	for _, source := range []string{".so/memory/context.md", ".mcp.json", ".cursor/mcp.json", "AGENTS.md", ".codex/skills/so/SKILL.md", "/tmp/repo/.factory/skills/so/SKILL.md", `C:\repo\.so\config.yaml`, `C:\repo\.codex\skills\so\SKILL.md`} {
 		data, _ := json.Marshal(map[string]any{"nodes": []map[string]any{{"id": "bad", "source_file": source}}})
 		if err := validateNoHarnessSources(data); err == nil {
 			t.Errorf("managed source %q was accepted", source)
@@ -92,6 +122,9 @@ func TestValidateNoHarnessSourcesRejectsEveryManagedSource(t *testing.T) {
 	}
 	if err := validateNoHarnessSources([]byte(`{"nodes":[{"id":"ok","source_file":"internal/service.go"}]}`)); err != nil {
 		t.Fatalf("ordinary source rejected: %v", err)
+	}
+	if err := validateNoHarnessSources([]byte(`{"nodes":[{"id":"workflow","source_file":".github\\workflows\\ci.yml"}]}`)); err != nil {
+		t.Fatalf("ordinary GitHub workflow rejected: %v", err)
 	}
 }
 
@@ -192,6 +225,22 @@ func TestQueryStampCanBeScopedToSessionStart(t *testing.T) {
 	if HasCurrentQueryStampSince(repo, time.Now().UTC().Add(time.Second)) {
 		t.Fatal("query stamp from an earlier session was accepted")
 	}
+	stampPath := filepath.Join(paths.GraphDir, "cache", "last_query_stamp")
+	writeStamp := func(createdAt time.Time) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"graph_sha256": "abc", "created_at": createdAt})
+		if err := os.WriteFile(stampPath, body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeStamp(time.Now().UTC().Add(10 * time.Minute))
+	if HasCurrentQueryStamp(repo) {
+		t.Fatal("query stamp too far in the future was accepted")
+	}
+	writeStamp(time.Now().UTC().Add(30 * time.Second))
+	if !HasCurrentQueryStamp(repo) {
+		t.Fatal("small clock skew should be tolerated")
+	}
 }
 
 func TestSweepStaleGraphWorkRemovesSiblingTempDirs(t *testing.T) {
@@ -266,7 +315,7 @@ func fakeGraphify(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "graphify")
 	script := `#!/bin/sh
-if [ "$1" = "--version" ]; then echo 'graphify 0.9.44'; exit 0; fi
+if [ "$1" = "--version" ]; then echo 'graphify 0.9.45'; exit 0; fi
 if [ "$1" = "query" ]; then echo 'query result from graph'; exit 0; fi
 /bin/mkdir -p "$GRAPHIFY_OUT"
 if [ "$1" = "extract" ]; then
@@ -283,7 +332,7 @@ exit 0
 	if runtime.GOOS == "windows" {
 		bin += ".cmd"
 		script = `@echo off
-if "%1"=="--version" echo graphify 0.9.44& exit /b 0
+if "%1"=="--version" echo graphify 0.9.45& exit /b 0
 if "%1"=="query" echo query result from graph& exit /b 0
 if not exist "%GRAPHIFY_OUT%" mkdir "%GRAPHIFY_OUT%"
 if "%1"=="extract" echo {"nodes":[{"id":"a","community":0},{"id":"b","community":0}],"edges":[{"source":"a","target":"b"}]} > "%GRAPHIFY_OUT%\graph.json"

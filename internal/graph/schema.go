@@ -1,6 +1,6 @@
 package graph
 
-// FlagSchema is the reviewed Graphify 0.9.44 façade contract. It is kept in
+// FlagSchema is the reviewed Graphify 0.9.45 façade contract. It is kept in
 // compiled code so dependency upgrades cannot silently add executable surface.
 type FlagSchema struct {
 	Name          string
@@ -29,7 +29,7 @@ var CommandSchema = map[string]CommandSchemaEntry{
 		{"code-only", "bool", false, "Local AST only", "", ""}, {"postgres", "string", "", "PostgreSQL schema DSN", "postgres", ""}, {"cargo", "bool", false, "Cargo workspace metadata", "", ""},
 	}},
 	"update":            {Native: "update", Flags: []FlagSchema{{"force", "bool", false, "Allow intentional graph shrink", "", ""}, {"no-cluster", "bool", false, "Skip clustering", "", ""}}},
-	"query":             {Native: "query", Flags: []FlagSchema{{"dfs", "bool", false, "Depth-first traversal", "", ""}, {"context", "stringSlice", nil, "Edge context filter", "", ""}, {"budget", "int", 2000, "Output token budget", "", ""}, {"term", "stringSlice", nil, "Superopen exact vocabulary term", "", ""}, {"original-question", "string", "", "Superopen AXI question metadata", "", ""}}},
+	"query":             {Native: "query", Flags: []FlagSchema{{"dfs", "bool", false, "Depth-first traversal", "", ""}, {"depth", "int", 2, "Traversal depth (1-6)", "", ""}, {"context", "stringSlice", nil, "Edge context filter", "", ""}, {"budget", "int", 1200, "Output token budget", "", ""}, {"term", "stringSlice", nil, "Optional vocabulary expansion term", "", ""}, {"original-question", "string", "", "Superopen AXI question metadata", "", ""}}},
 	"stats":             {Alias: "superopen-state"},
 	"serve":             {Alias: "graphify-mcp", RequiredExtra: "mcp"},
 	"watch":             {Native: "watch", RequiredExtra: "watch"},

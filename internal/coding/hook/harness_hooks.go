@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -30,6 +31,9 @@ import (
 
 const dynamicMemorySessionTokens = 2000
 
+var graphOrientationQuery = graph.QueryForOrientation
+var recordGraphOrientation = graph.RecordQueryStamp
+
 // maybeInjectDynamicMemory performs bounded, local-only recall on model-visible
 // prompt and file hooks. It is intentionally fail-open: any unsupported vendor,
 // missing state, parse failure, or budget exhaustion returns no hook output.
@@ -47,6 +51,10 @@ func maybeInjectDynamicMemory(vendor, event, sessionID, cwd string, probe peeked
 
 	e := strings.ToLower(strings.TrimSpace(event))
 	isPrompt := isPromptRecallEvent(vendor, e)
+	if isPrompt {
+		cached.GraphQuery = truncate(dynamicMemoryQueryText(probe), 1000)
+		sessionstate.Save(sessionID, vendor, cached)
+	}
 	midReview := ""
 	if isPrompt {
 		midReview = midSessionReviewInject(vendor, sessionID, paths)
@@ -647,6 +655,24 @@ func maybeEnforceGraphOrientation(vendor, event string, payload []byte, sessionI
 			return false
 		}
 	}
+	if enforcement == "auto" && strings.TrimSpace(cached.GraphQuery) != "" {
+		answer, queryErr := graphOrientationQuery(root, cached.GraphQuery, 800, 1)
+		if queryErr == nil && strings.TrimSpace(answer) != "" {
+			text := "Superopen graph orientation for the current task:\n\n" + answer + "\n\nVerify the surfaced source locations before editing."
+			if writeDynamicContext(vendor, event, peekedContext{}, text, true) == nil {
+				if recordGraphOrientation(root, "auto_query") == nil {
+					cached.GraphOriented = true
+					cached.GraphNudged = true
+					sessionstate.Save(sessionID, vendor, cached)
+					_ = audit.Append(paths, audit.Event{Action: "inject", Type: "graph_orientation", Vendor: vendor, Session: sessionID, Detail: "automatic depth-1 graph query"})
+					return true
+				}
+			}
+		}
+		// Automatic orientation is opportunistic. Fall back to the existing
+		// one-shot nudge when the graph, query adapter, or hook delivery fails.
+		enforcement = "nudge"
+	}
 	reason := "In Bash, run `so graph query \"<question>\"` with no leading slash (or use `so graph path`, `so graph explain`, or `so graph affected`) before broad source search; verify returned source locations before editing. `/so` is chat skill syntax, not a shell command."
 	if enforcement == "strict" && !cached.GraphStrictBlock {
 		cached.GraphStrictBlock = true
@@ -682,9 +708,20 @@ func graphTargetState(paths harness.Paths, root, cwd, target string) (indexed, s
 	if err != nil || json.Unmarshal(body, &manifest) != nil {
 		return false, false
 	}
-	_, indexed = manifest[filepath.ToSlash(rel)]
+	entry, indexed := manifest[filepath.ToSlash(rel)]
 	if !indexed {
 		return false, false
+	}
+	var recorded struct {
+		ASTHash string `json:"ast_hash"`
+	}
+	if json.Unmarshal(entry, &recorded) == nil && recorded.ASTHash != "" {
+		body, readErr := os.ReadFile(p)
+		if readErr != nil {
+			return true, true
+		}
+		sum := fmt.Sprintf("%x", md5.Sum(body)) // Graphify manifest content identity, not a security primitive.
+		return true, !strings.EqualFold(sum, recorded.ASTHash)
 	}
 	sourceInfo, sourceErr := os.Stat(p)
 	graphInfo, graphErr := os.Stat(paths.GraphJSON)

@@ -18,6 +18,7 @@ var (
 	awsAccessKeyFake = "AKIA" + strings.Repeat("A", 16)
 	awsSecretKeyFake = `aws_secret_access_key="` + strings.Repeat("a", 40) + `"`
 	ghPatFake        = "ghp_" + strings.Repeat("a", 36)
+	gitlabPatFake    = "glpat-" + strings.Repeat("a", 24)
 	openaiSkFake     = "sk-proj-" + strings.Repeat("a", 10) + "-secrets-living-here-now"
 	anthropicSkFake  = "sk-ant-" + strings.Repeat("a", 6) + "-secrets-456-zzz"
 	googleAPIKeyFake = "AIza" + strings.Repeat("0", 35)
@@ -42,6 +43,7 @@ var shouldRedactTier1 = []struct {
 	{"aws_access_key_id", awsAccessKeyFake + " inside a sentence"},
 	{"aws_secret_access_key_assignment", awsSecretKeyFake},
 	{"gh_pat", ghPatFake},
+	{"gitlab_pat", gitlabPatFake},
 	{"openai_sk", openaiSkFake},
 	{"anthropic_sk", anthropicSkFake},
 	{"google_api_key", googleAPIKeyFake},
@@ -90,6 +92,7 @@ func TestStringTier1LeavesNonSecretsAlone(t *testing.T) {
 		"no secrets here, just an explanation about authentication",
 		"sk-",   // too short to match
 		"AKIA1", // too short to match
+		"glpat-short",
 	}
 	for _, s := range cases {
 		if got := String(s); got != s {

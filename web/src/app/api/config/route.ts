@@ -149,8 +149,11 @@ vendors:
 graph:
   code: true
   semantic: true
-  semantic_backend: auto
+  semantic_backend: agent
+  mode: standard
   refresh_policy: after_changed_session
+  query_budget: 1200
+  query_enforcement: auto
 memory:
   enabled: true
   idle_harvest_hours: 6

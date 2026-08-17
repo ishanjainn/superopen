@@ -70,16 +70,31 @@ type Footprint struct {
 // graph, telemetry, generated guidance, and dependency-vendor activity is not
 // useful evidence for a coding-session review.
 func ReviewEligible(d Document) bool {
+	generatedSkillRoots := []string{
+		".github/skills/so", ".openclaw/skills/so", ".factory/skills/so", ".trae/skills/so",
+		".trae-cn/skills/so", ".hermes/skills/so", ".kiro/skills/so", ".devin/skills/so",
+		".codebuddy/skills/so", ".kimi/skills/so", ".kilo/skills/so", ".aider/so",
+	}
 	for _, f := range d.Footprint.Files {
 		if f.State != "edited" {
 			continue
 		}
-		p := filepath.ToSlash(filepath.Clean(f.Path))
+		p := filepath.ToSlash(filepath.Clean(strings.ReplaceAll(f.Path, `\`, "/")))
 		p = strings.TrimPrefix(p, "./")
 		if p == ".so" || strings.HasPrefix(p, ".so/") || p == "AGENTS.md" || p == "CLAUDE.md" ||
 			strings.HasPrefix(p, ".claude/") || strings.HasPrefix(p, ".cursor/") || strings.HasPrefix(p, ".codex/") ||
 			strings.HasPrefix(p, ".agents/") || strings.HasPrefix(p, ".gemini/") || strings.HasPrefix(p, ".opencode/") ||
 			strings.HasPrefix(p, ".pi/") {
+			continue
+		}
+		managed := false
+		for _, root := range generatedSkillRoots {
+			if p == root || strings.HasPrefix(p, root+"/") {
+				managed = true
+				break
+			}
+		}
+		if managed {
 			continue
 		}
 		return true

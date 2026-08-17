@@ -89,13 +89,7 @@ func updateAtomic(ctx context.Context, repoRoot, target string, paths harness.Pa
 			recordRefreshFailure(paths, err)
 			return Result{}, err
 		}
-		semanticChanges := 0
-		for kind, files := range run.ChangedFiles {
-			if kind != "code" {
-				semanticChanges += len(files)
-			}
-		}
-		if semanticChanges > 0 {
+		if len(run.Chunks) > 0 {
 			// Graphify update is itself the local AST/deletion refresh. Publish it
 			// first so coding sessions see current code while semantic work waits.
 			if _, updateErr := updateAtomic(ctx, repoRoot, target, paths, true, backend, flags); updateErr != nil {

@@ -235,11 +235,11 @@ Session 3D replay lives in `web/src/map`.
 
 ## Attribution, contributing, and security
 
-Repository graphs are powered by the exact pinned [Graphify 0.9.44](https://github.com/Graphify-Labs/graphify/releases/tag/v0.9.44) runtime. `so install` creates an isolated Python 3.12 environment with every platform-compatible `graphifyy` extra (`all` on Windows; the equivalent set excluding Windows-only DreamMaker elsewhere); `so graph …` is the supported façade. Superopen never substitutes a stub graph when the runtime or extraction fails.
+Repository graphs are powered by the exact pinned [Graphify 0.9.45](https://github.com/Graphify-Labs/graphify/releases/tag/v0.9.45) runtime. `so install` creates an isolated Python 3.12 environment with every platform-compatible `graphifyy` extra (`all` on Windows; the equivalent set excluding Windows-only DreamMaker elsewhere); `so graph …` is the supported façade. Superopen never substitutes a stub graph when the runtime or extraction fails.
 
-Graph builds exclude `.so/**` completely. Incremental code edits refresh locally; changed docs/media queue a resumable coding-agent semantic continuation while the last valid graph stays queryable. Agents orient with exact terms from `.so/graph/cache/vocab.txt`, a focused 800–1200 token query, and source-location verification before editing.
+Graph builds exclude `.so/**` completely. Code plus Markdown-family document structure is extracted deterministically without model tokens. Incremental code and structural-document edits refresh locally; opaque documents and media queue a resumable coding-agent semantic continuation while the last valid graph stays queryable. Agents start with the original question and a focused 800–1200 token graph query; compact vocabulary terms are an audited fallback for ambiguous matches.
 
-Release cost/effectiveness claims use the opt-in [16-task paired Claude Haiku gate](docs/haiku-release-gate.md); Superopen does not label Graphify's ERPNext question benchmark as SWE-bench.
+Release cost/effectiveness claims use the opt-in [model-neutral paired lifecycle gate](docs/haiku-release-gate.md). It reports initialization separately, measures cost per successful result and break-even over repeated sessions, and does not label Graphify's ERPNext question benchmark as SWE-bench.
 
 Superopen is Apache-2.0 licensed; see [LICENSE](LICENSE) and [NOTICE](NOTICE). Contributions are welcome—start with [CONTRIBUTING.md](CONTRIBUTING.md), then read [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening an issue or pull request.
 

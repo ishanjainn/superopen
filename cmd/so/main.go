@@ -310,7 +310,7 @@ func ensureGraphifyy() error {
 }
 
 func cmdInit() *cobra.Command {
-	var codeOnly, force, useLLM, noLLM, sharedAgents, agent bool
+	var codeOnly, discardSemanticRun, force, useLLM, noLLM, sharedAgents, agent bool
 	var vendors []string
 	c := &cobra.Command{
 		Use:   "init",
@@ -331,15 +331,16 @@ func cmdInit() *cobra.Command {
 				initWriter = io.Discard
 			}
 			rep, err := initcmd.Run(initcmd.Options{
-				RepoRoot:     repoRoot(),
-				CodeOnly:     codeOnly,
-				Force:        force,
-				UseLLM:       useLLM,
-				NoLLM:        noLLM,
-				Vendors:      vendors,
-				SharedAgents: sharedAgents,
-				Agent:        agent,
-				Writer:       initWriter,
+				RepoRoot:           repoRoot(),
+				CodeOnly:           codeOnly,
+				Force:              force,
+				UseLLM:             useLLM,
+				NoLLM:              noLLM,
+				Vendors:            vendors,
+				SharedAgents:       sharedAgents,
+				Agent:              agent,
+				DiscardSemanticRun: discardSemanticRun,
+				Writer:             initWriter,
 			})
 			if err != nil {
 				return err
@@ -362,6 +363,7 @@ func cmdInit() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&codeOnly, "code-only", false, "Skip Graphify semantic/docs pass")
+	c.Flags().BoolVar(&discardSemanticRun, "discard-semantic-run", false, "Explicitly discard pending semantic work with --code-only")
 	c.Flags().BoolVar(&agent, "agent", false, "Use the active coding agent for resumable semantic extraction")
 	c.Flags().BoolVar(&force, "force", false, "Overwrite existing docs/guardrails/evals with fresh heuristic seed")
 	c.Flags().BoolVar(&useLLM, "llm", false, "Require headless API-key LLM upgrade (fails without a configured LLM)")

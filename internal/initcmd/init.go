@@ -26,18 +26,19 @@ import (
 )
 
 type Options struct {
-	RepoRoot     string
-	CodeOnly     bool
-	Force        bool // reseed discovery-driven guardrails/evals/docs
-	UseLLM       bool // force LLM upgrade (error if no key)
-	NoLLM        bool // skip LLM even if key present
-	TemplateRoot string
-	SkipHooks    bool
-	SkipInject   bool
-	Vendors      []string
-	SharedAgents bool
-	Agent        bool // host coding agent will complete Graphify semantic work
-	Writer       io.Writer
+	RepoRoot           string
+	CodeOnly           bool
+	Force              bool // reseed discovery-driven guardrails/evals/docs
+	UseLLM             bool // force LLM upgrade (error if no key)
+	NoLLM              bool // skip LLM even if key present
+	TemplateRoot       string
+	SkipHooks          bool
+	SkipInject         bool
+	Vendors            []string
+	SharedAgents       bool
+	Agent              bool // host coding agent will complete Graphify semantic work
+	DiscardSemanticRun bool
+	Writer             io.Writer
 }
 
 type Report struct {
@@ -113,6 +114,16 @@ func Run(opts Options) (Report, error) {
 		return Report{}, fmt.Errorf("graph toolchain: %w", err)
 	}
 	codeOnly := opts.CodeOnly || !cfg.Graph.Semantic || cfg.Graph.SemanticBackend == "none"
+	if opts.CodeOnly {
+		if pending := graph.PendingSemanticRunID(paths); pending != "" {
+			if !opts.DiscardSemanticRun {
+				return Report{}, fmt.Errorf("semantic run %s is pending; resume it or pass --discard-semantic-run with --code-only", pending)
+			}
+			if err := graph.DiscardSemanticRun(paths, pending); err != nil {
+				return Report{}, err
+			}
+		}
+	}
 	fmt.Fprintln(w, "→ building repository graph…")
 	var gr graph.Result
 	var err error

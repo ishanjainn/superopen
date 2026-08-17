@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "so coding hook --vendor=cc --event=SessionStart",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }
@@ -17,7 +17,7 @@
           {
             "type": "command",
             "command": "so coding hook --vendor=cc --event=UserPromptSubmit",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }
@@ -29,7 +29,7 @@
           {
             "type": "command",
             "command": "so coding hook --vendor=cc --event=PreToolUse",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }
@@ -41,7 +41,7 @@
           {
             "type": "command",
             "command": "so coding hook --vendor=cc --event=PostToolUse",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }
@@ -52,7 +52,7 @@
           {
             "type": "command",
             "command": "so coding hook --vendor=cc --event=Stop",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }
@@ -63,7 +63,7 @@
           {
             "type": "command",
             "command": "so coding hook --vendor=cc --event=SubagentStop",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }
@@ -74,12 +74,12 @@
           {
             "type": "command",
             "command": "so coding hook --vendor=cc --event=SessionEnd",
-            "timeout": 5
+            "timeout": 15
           },
           {
             "type": "command",
             "command": "so sessions finalize --detach",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }

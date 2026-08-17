@@ -100,6 +100,19 @@ func TestGraphFacadePinnedSurface(t *testing.T) {
 	}
 }
 
+func TestGraphQueryExposesBoundedDepth(t *testing.T) {
+	root := newGraphCommand()
+	query, _, err := root.Find([]string{"query"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	depth := query.Flags().Lookup("depth")
+	budget := query.Flags().Lookup("budget")
+	if depth == nil || depth.DefValue != "2" || budget == nil || budget.DefValue != "1200" {
+		t.Fatalf("query defaults depth=%v budget=%v", depth, budget)
+	}
+}
+
 func TestSemanticOptionsUsesConfiguredDeepMode(t *testing.T) {
 	root := newGraphCommand()
 	extract, _, err := root.Find([]string{"extract"})
@@ -119,12 +132,16 @@ func TestValidateDSNRejectsCredentials(t *testing.T) {
 	for _, dsn := range []string{
 		"postgres://user:secret@localhost/db",
 		"postgres://localhost/db?password=secret",
+		"postgres://localhost/db?apikey=secret",
+		"postgres://localhost/db?api-key=secret",
+		"postgres://localhost/db?Credential=secret",
+		"postgres://localhost/db?AUTH=secret",
 	} {
 		if err := validateDSN(dsn, "postgres"); err == nil {
 			t.Errorf("credential-bearing DSN was accepted: %s", dsn)
 		}
 	}
-	if err := validateDSN("postgres://localhost/db?sslmode=require", "postgres"); err != nil {
+	if err := validateDSN("postgres://localhost/db?sslmode=require&application_name=superopen", "postgres"); err != nil {
 		t.Fatalf("safe DSN rejected: %v", err)
 	}
 }

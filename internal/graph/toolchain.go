@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	PinnedVersion = "0.9.44"
+	PinnedVersion = "0.9.45"
 )
 
 var supportedExtras = []string{"mcp", "neo4j", "falkordb", "pdf", "watch", "svg", "leiden", "office", "google", "postgres", "video", "kimi", "ollama", "bedrock", "anthropic", "gemini", "openai", "chinese", "sql", "pascal", "terraform", "ocaml"}

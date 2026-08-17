@@ -37,6 +37,7 @@ func newGraphCommand() *cobra.Command {
 	}
 	for _, cmd := range []*cobra.Command{root, extract, rebuild} {
 		cmd.Flags().Bool("code-only", false, "Build a real AST graph without semantic extraction")
+		cmd.Flags().Bool("discard-semantic-run", false, "Explicitly discard pending semantic work before a code-only build")
 		cmd.Flags().String("backend", "", "Configured semantic backend")
 		cmd.Flags().String("model", "", "Semantic backend model")
 		cmd.Flags().String("mode", "", "Extraction mode")
@@ -95,7 +96,7 @@ func newGraphCommand() *cobra.Command {
 
 func graphBenchmarkCommand() *cobra.Command {
 	var ledger string
-	c := &cobra.Command{Use: "benchmark [graph.json]", Short: "Benchmark graph retrieval or evaluate the paired Haiku release ledger", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	c := &cobra.Command{Use: "benchmark [graph.json]", Short: "Benchmark graph retrieval or evaluate a paired agent release ledger", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if ledger != "" {
 			path, err := filepath.Abs(ledger)
 			if err != nil {
@@ -106,7 +107,10 @@ func graphBenchmarkCommand() *cobra.Command {
 				return err
 			}
 			return out().HumanOrJSON("graph_benchmark_gate", func() {
-				fmt.Fprintf(cmd.OutOrStdout(), "Agent benchmark gate pass=%t success=%d/%d control=%d/%d cost_reduction=%.1f%% graph_adoption=%.1f%%\n", result.Pass, result.TreatmentSuccesses, 16, result.ControlSuccesses, 16, result.CostReduction*100, result.GraphAdoption*100)
+				fmt.Fprintf(cmd.OutOrStdout(), "Agent benchmark gate pass=%t success=%d control=%d legacy_cost_reduction=%.1f%% graph_adoption=%.1f%%\n", result.Pass, result.TreatmentSuccesses, result.ControlSuccesses, result.CostReduction*100, result.GraphAdoption*100)
+				if result.BreakEvenSessions != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "break_even_sessions=%d lifecycle_cost_per_success_25=$%.6f control=$%.6f\n", *result.BreakEvenSessions, result.LifecycleCostPerSuccessUSD["treatment_25"], result.LifecycleCostPerSuccessUSD["control_25"])
+				}
 				for _, failure := range result.Failures {
 					fmt.Fprintln(cmd.OutOrStdout(), "- "+failure)
 				}
@@ -150,6 +154,17 @@ func runGraphBuild(cmd *cobra.Command, args []string) error {
 	}
 	cfg, _ := config.Load(paths.Config)
 	codeOnly, _ := cmd.Flags().GetBool("code-only")
+	discardSemantic, _ := cmd.Flags().GetBool("discard-semantic-run")
+	if codeOnly {
+		if pending := graph.PendingSemanticRunID(paths); pending != "" {
+			if !discardSemantic {
+				return fmt.Errorf("semantic run %s is pending; resume it or pass --discard-semantic-run with --code-only", pending)
+			}
+			if err := graph.DiscardSemanticRun(paths, pending); err != nil {
+				return err
+			}
+		}
+	}
 	backend, _ := cmd.Flags().GetString("backend")
 	if backend == "" {
 		backend = cfg.Graph.SemanticBackend
@@ -274,7 +289,8 @@ func validateDSN(raw, want string) error {
 	}
 	for key := range u.Query() {
 		lower := strings.ToLower(key)
-		if strings.Contains(lower, "password") || strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "api_key") {
+		compact := strings.NewReplacer("_", "", "-", "").Replace(lower)
+		if strings.Contains(lower, "password") || strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(compact, "apikey") || strings.Contains(lower, "credential") || lower == "auth" {
 			return fmt.Errorf("PostgreSQL DSN must not contain credential query parameters; use PostgreSQL environment variables")
 		}
 	}
@@ -287,6 +303,7 @@ func graphQueryCommand() *cobra.Command {
 	var terms []string
 	var originalQuestion string
 	var budget int
+	var depth int
 	c := &cobra.Command{Use: "query <question>", Short: "BFS/DFS-scoped graph retrieval", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		root := repoRoot()
 		question := strings.Join(args, " ")
@@ -303,7 +320,7 @@ func graphQueryCommand() *cobra.Command {
 		}
 		graphQuestion := question
 		if len(terms) > 0 {
-			graphQuestion = strings.Join(terms, " ")
+			graphQuestion = strings.TrimSpace(question + " " + strings.Join(terms, " "))
 		}
 		if !cmd.Flags().Changed("budget") {
 			if cfg, err := config.Load(harness.Resolve(root).Config); err == nil && cfg.Graph.QueryBudget > 0 {
@@ -317,13 +334,13 @@ func graphQueryCommand() *cobra.Command {
 		for _, c := range contexts {
 			extra = append(extra, "--context", c)
 		}
-		answer, err := graph.QueryWithArgs(root, graphQuestion, extra)
+		answer, err := graph.QueryWithDepth(root, graphQuestion, extra, depth)
 		if err != nil {
 			return axi.Err(err)
 		}
 		o := out()
 		truncated := strings.Contains(strings.ToLower(answer), "truncated")
-		payload := map[string]any{"answer": answer, "question": originalQuestion, "selected_terms": terms, "mode": map[bool]string{true: "dfs", false: "bfs"}[dfs], "budget": budget, "graph_sha256": graph.GraphHash(root), "engine_version": graph.PinnedVersion, "truncated": truncated}
+		payload := map[string]any{"answer": answer, "question": originalQuestion, "selected_terms": terms, "mode": map[bool]string{true: "dfs", false: "bfs"}[dfs], "depth": depth, "budget": budget, "graph_sha256": graph.GraphHash(root), "engine_version": graph.PinnedVersion, "truncated": truncated}
 		return o.HumanOrJSON("graph_query", func() {
 			if len(terms) > 0 {
 				fmt.Fprintf(o.W, "Selected graph terms: %s\n", strings.Join(terms, ", "))
@@ -335,7 +352,8 @@ func graphQueryCommand() *cobra.Command {
 	c.Flags().StringSliceVar(&contexts, "context", nil, "Restrict to graph context (repeatable)")
 	c.Flags().StringSliceVar(&terms, "term", nil, "Exact graph vocabulary term selected by the agent (repeatable, max 12)")
 	c.Flags().StringVar(&originalQuestion, "original-question", "", "Preserve the user's unexpanded question in AXI output")
-	c.Flags().IntVar(&budget, "budget", 2000, "Graphify result token budget")
+	c.Flags().IntVar(&budget, "budget", 1200, "Graphify result token budget")
+	c.Flags().IntVar(&depth, "depth", 2, "Traversal depth (1-6)")
 	return c
 }
 
@@ -796,6 +814,7 @@ func graphSemanticCommand() *cobra.Command {
 	status.Flags().String("run", "", "Run id")
 	briefs := &cobra.Command{Use: "briefs", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		runID, _ := cmd.Flags().GetString("run")
+		next, _ := cmd.Flags().GetBool("next")
 		items, err := graph.SemanticBriefs(harness.Resolve(repoRoot()), runID)
 		if err != nil {
 			var rebased *graph.SemanticRebasedError
@@ -804,13 +823,17 @@ func graphSemanticCommand() *cobra.Command {
 			}
 			return err
 		}
+		if next && len(items) > 1 {
+			items = items[:1]
+		}
 		return out().HumanOrJSON("graph_semantic_briefs", func() {
-			for i, b := range items {
-				fmt.Printf("--- chunk %d ---\n%s\n", i+1, b)
+			for _, item := range items {
+				fmt.Fprintf(cmd.OutOrStdout(), "--- chunk %d ---\n%s\n", item.Number, item.Prompt)
 			}
 		}, map[string]any{"run_id": runID, "briefs": items})
 	}}
 	briefs.Flags().String("run", "", "Run id")
+	briefs.Flags().Bool("next", false, "Return only the next unfinished numbered brief")
 	apply := &cobra.Command{Use: "apply [file|-]", Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		runID, _ := cmd.Flags().GetString("run")
 		chunk, _ := cmd.Flags().GetInt("chunk")
@@ -832,7 +855,12 @@ func graphSemanticCommand() *cobra.Command {
 		return graph.FinalizeSemantic(cmd.Context(), harness.Resolve(repoRoot()), runID)
 	}}
 	finalize.Flags().String("run", "", "Run id")
-	c.AddCommand(status, briefs, apply, finalize)
+	discard := &cobra.Command{Use: "discard", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		runID, _ := cmd.Flags().GetString("run")
+		return graph.DiscardSemanticRun(harness.Resolve(repoRoot()), runID)
+	}}
+	discard.Flags().String("run", "", "Run id")
+	c.AddCommand(status, briefs, apply, finalize, discard)
 	return c
 }
 

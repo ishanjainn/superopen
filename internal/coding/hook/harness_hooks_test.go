@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"crypto/md5"
 	"errors"
 	"fmt"
 	"io"
@@ -21,6 +22,40 @@ import (
 	"github.com/ishanjainn/superopen/internal/session"
 	"github.com/ishanjainn/superopen/internal/tracestore"
 )
+
+func TestGraphTargetStateUsesContentHashBeforeMtime(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(root, "service.go")
+	body := []byte("package demo\n")
+	if err := os.WriteFile(source, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.GraphJSON, []byte(`{"nodes":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := fmt.Sprintf("%x", md5.Sum(body))
+	manifest := []byte(fmt.Sprintf(`{"service.go":{"ast_hash":%q}}`, sum))
+	if err := os.WriteFile(filepath.Join(paths.GraphDir, "manifest.json"), manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(source, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if indexed, stale := graphTargetState(paths, root, root, source); !indexed || stale {
+		t.Fatalf("unchanged content with newer mtime = indexed %t stale %t", indexed, stale)
+	}
+	if err := os.WriteFile(source, []byte("package changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if indexed, stale := graphTargetState(paths, root, root, source); !indexed || !stale {
+		t.Fatalf("changed content = indexed %t stale %t", indexed, stale)
+	}
+}
 
 type hookMemoryEmitter struct{ events []normalize.EventEmission }
 
@@ -357,6 +392,56 @@ func TestDynamicMemoryQuerySanitizesPrivateAndSecretText(t *testing.T) {
 	}
 	if !strings.Contains(got, "[EXCLUDED_PRIVATE]") || !strings.Contains(got, "[REDACTED]") {
 		t.Fatalf("retrieval query did not use central sanitizer: %q", got)
+	}
+}
+
+func TestAutomaticGraphOrientationInjectsOnceWithoutBlockingTool(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	if cfg.Graph.QueryEnforcement != "auto" {
+		t.Fatalf("new repositories must default to automatic graph orientation: %q", cfg.Graph.QueryEnforcement)
+	}
+	if err := config.Save(paths.Config, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.GraphJSON, []byte(`{"nodes":[],"links":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previousQuery, previousRecord := graphOrientationQuery, recordGraphOrientation
+	queryCalls, recordCalls := 0, 0
+	graphOrientationQuery = func(repo, question string, budget, depth int) (string, error) {
+		queryCalls++
+		if repo != root || question != "how does routing work" || budget != 800 || depth != 1 {
+			t.Fatalf("unexpected automatic query: repo=%q question=%q budget=%d depth=%d", repo, question, budget, depth)
+		}
+		return "NODE Router [src=router.go loc=L10]", nil
+	}
+	recordGraphOrientation = func(repo, command string) error {
+		recordCalls++
+		return nil
+	}
+	t.Cleanup(func() { graphOrientationQuery, recordGraphOrientation = previousQuery, previousRecord })
+	var buf strings.Builder
+	previousOutput := hookJSONOutput
+	hookJSONOutput = func() io.Writer { return &buf }
+	t.Cleanup(func() { hookJSONOutput = previousOutput })
+	cached := &sessionstate.State{GraphQuery: "how does routing work"}
+	payload := []byte(`{"tool_name":"Bash","tool_input":{"command":"rg -n routing ."}}`)
+	if !maybeEnforceGraphOrientation("claude-code", "PreToolUse", payload, "session-1", root, cached) {
+		t.Fatal("automatic graph context was not delivered")
+	}
+	if !cached.GraphOriented || queryCalls != 1 || recordCalls != 1 || !strings.Contains(buf.String(), "NODE Router") {
+		t.Fatalf("automatic orientation state calls=%d/%d cached=%+v output=%s", queryCalls, recordCalls, cached, buf.String())
+	}
+	if maybeEnforceGraphOrientation("claude-code", "PreToolUse", payload, "session-1", root, cached) {
+		t.Fatal("automatic graph orientation repeated in one session")
+	}
+	if queryCalls != 1 {
+		t.Fatalf("automatic query calls=%d, want 1", queryCalls)
 	}
 }
 

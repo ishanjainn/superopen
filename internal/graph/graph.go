@@ -10,8 +10,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/ishanjainn/superopen/internal/harness"
 	"github.com/ishanjainn/superopen/internal/memory"
@@ -363,25 +366,13 @@ func writeGraphVocabulary(graphDir string, data []byte) error {
 		return fmt.Errorf("build graph vocabulary: %w", err)
 	}
 	terms := map[string]bool{}
-	add := func(v any) {
-		s, ok := v.(string)
-		s = strings.TrimSpace(s)
-		if ok && isManagedGraphSourcePath(s) {
-			return
-		}
-		if ok && s != "" {
-			terms[s] = true
-		}
-	}
 	for _, n := range raw.Nodes {
-		for _, key := range []string{"id", "label", "norm_label", "community_name", "source_file"} {
-			add(n[key])
+		if source, _ := n["source_file"].(string); isManagedGraphSourcePath(source) {
+			continue
 		}
-	}
-	links := append(raw.Links, raw.Edges...)
-	for _, e := range links {
-		for _, key := range []string{"relation", "context", "source_file"} {
-			add(e[key])
+		label, _ := n["label"].(string)
+		for _, term := range graphVocabularyTokens(label) {
+			terms[term] = true
 		}
 	}
 	list := make([]string, 0, len(terms))
@@ -394,6 +385,38 @@ func writeGraphVocabulary(graphDir string, data []byte) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(cache, "vocab.txt"), []byte(strings.Join(list, "\n")+"\n"), 0o644)
+}
+
+func graphVocabularyTokens(label string) []string {
+	words := strings.FieldsFunc(label, func(r rune) bool { return !unicode.IsLetter(r) })
+	seen := map[string]bool{}
+	var out []string
+	for _, word := range words {
+		runes := []rune(word)
+		start := 0
+		for i := 1; i < len(runes); i++ {
+			boundary := unicode.IsLower(runes[i-1]) && unicode.IsUpper(runes[i])
+			if i+1 < len(runes) && unicode.IsUpper(runes[i-1]) && unicode.IsUpper(runes[i]) && unicode.IsLower(runes[i+1]) {
+				boundary = true
+			}
+			if boundary {
+				out = appendVocabularyToken(out, seen, string(runes[start:i]))
+				start = i
+			}
+		}
+		out = appendVocabularyToken(out, seen, string(runes[start:]))
+	}
+	return out
+}
+
+func appendVocabularyToken(out []string, seen map[string]bool, value string) []string {
+	term := strings.ToLower(strings.TrimSpace(value))
+	size := utf8.RuneCountInString(term)
+	if size < 3 || size > 30 || seen[term] {
+		return out
+	}
+	seen[term] = true
+	return append(out, term)
 }
 
 // RecordQueryStamp records successful graph orientation. Failed commands must
@@ -436,6 +459,9 @@ func HasCurrentQueryStampSince(repoRoot string, since time.Time) bool {
 		CreatedAt   time.Time `json:"created_at"`
 	}
 	if json.Unmarshal(body, &stamp) != nil || stamp.GraphSHA256 == "" || stamp.GraphSHA256 != GraphHash(repoRoot) {
+		return false
+	}
+	if stamp.CreatedAt.IsZero() || stamp.CreatedAt.After(time.Now().UTC().Add(5*time.Minute)) {
 		return false
 	}
 	return since.IsZero() || (!stamp.CreatedAt.IsZero() && !stamp.CreatedAt.Before(since))
@@ -951,7 +977,12 @@ func sanitizeManagedGraphArtifacts(dir string) (bool, error) {
 }
 
 func isManagedGraphSourcePath(source string) bool {
-	slash := strings.TrimPrefix(filepath.ToSlash(filepath.Clean(strings.TrimSpace(source))), "./")
+	slash := strings.ReplaceAll(strings.TrimSpace(source), `\`, "/")
+	if len(slash) >= 2 && slash[1] == ':' && ((slash[0] >= 'A' && slash[0] <= 'Z') || (slash[0] >= 'a' && slash[0] <= 'z')) {
+		slash = slash[2:]
+	}
+	slash = strings.TrimPrefix(filepath.ToSlash(filepath.Clean(slash)), "/")
+	slash = strings.TrimPrefix(slash, "./")
 	if slash == "" || slash == "." {
 		return false
 	}
@@ -1145,14 +1176,218 @@ func Query(repoRoot, question string) (string, error) {
 }
 
 func QueryWithArgs(repoRoot, question string, extra []string) (string, error) {
+	return QueryWithDepth(repoRoot, question, extra, 2)
+}
+
+func QueryWithDepth(repoRoot, question string, extra []string, depth int) (string, error) {
+	return queryWithDepth(repoRoot, question, extra, depth, true)
+}
+
+func QueryForOrientation(repoRoot, question string, budget, depth int) (string, error) {
+	return queryWithDepth(repoRoot, question, []string{"--budget", strconv.Itoa(budget)}, depth, false)
+}
+
+func queryWithDepth(repoRoot, question string, extra []string, depth int, recordStamp bool) (string, error) {
 	graphPath := filepath.Join(repoRoot, ".so", "graph", "graph.json")
 	_, _ = runtimestate.TouchIfStale(repoRoot, "graph_query", 0)
 	if err := ValidateQueryableGraph(repoRoot); err != nil {
 		return "", err
 	}
-	bin, prefix, err := resolveGraphify()
+	if depth < 1 || depth > 6 {
+		return "", fmt.Errorf("graph query depth must be between 1 and 6")
+	}
+	var out []byte
+	var err error
+	displayBudget := queryTokenBudget(extra)
+	engineBudget := displayBudget * 8
+	if engineBudget > 32000 {
+		engineBudget = 32000
+	}
+	engineExtra := withQueryTokenBudget(extra, engineBudget)
+	if depth != 2 {
+		out, err = queryGraphifyAtDepth(repoRoot, graphPath, question, engineExtra, depth)
+	} else {
+		out, err = queryGraphifyCLI(repoRoot, graphPath, question, engineExtra)
+	}
 	if err != nil {
 		return "", err
+	}
+	if len(strings.TrimSpace(string(out))) == 0 {
+		return "", fmt.Errorf("Graphify returned an empty query result")
+	}
+	if recordStamp {
+		if err := RecordQueryStamp(repoRoot, "query"); err != nil {
+			return "", err
+		}
+	}
+	answer := compactGraphQueryOutput(graphPath, redact.StringFull(string(out)), displayBudget)
+	return annotateQuery(repoRoot, question, answer), nil
+}
+
+func queryTokenBudget(extra []string) int {
+	budget := 1200
+	for i := 0; i+1 < len(extra); i++ {
+		if extra[i] == "--budget" {
+			if parsed, err := strconv.Atoi(extra[i+1]); err == nil && parsed > 0 {
+				budget = parsed
+			}
+			i++
+		}
+	}
+	return budget
+}
+
+func withQueryTokenBudget(extra []string, budget int) []string {
+	out := make([]string, 0, len(extra)+2)
+	found := false
+	for i := 0; i < len(extra); i++ {
+		if extra[i] == "--budget" && i+1 < len(extra) {
+			out = append(out, "--budget", strconv.Itoa(budget))
+			i++
+			found = true
+			continue
+		}
+		out = append(out, extra[i])
+	}
+	if !found {
+		out = append(out, "--budget", strconv.Itoa(budget))
+	}
+	return out
+}
+
+func compactGraphQueryOutput(graphPath, raw string, tokenBudget int) string {
+	lines := strings.Split(strings.TrimSpace(raw), "\n")
+	header, nodes, edges := []string{}, []string{}, []string{}
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "NODE "):
+			nodes = append(nodes, line)
+		case strings.HasPrefix(line, "EDGE "):
+			edges = append(edges, line)
+		case strings.HasPrefix(line, "[!] TRUNCATED"), strings.HasPrefix(line, "... (truncated"), strings.TrimSpace(line) == "":
+			continue
+		default:
+			header = append(header, line)
+		}
+	}
+	if len(nodes) == 0 || len(edges) == 0 {
+		return strings.TrimSpace(raw)
+	}
+	seedCount := graphQuerySeedCount(header, nodes)
+	nodes = enrichSeedNodeLines(graphPath, nodes, seedCount)
+	ordered := append([]string{}, header...)
+	usedEdges := map[int]bool{}
+	for i := 0; i < seedCount; i++ {
+		ordered = append(ordered, nodes[i])
+		label := graphNodeLineLabel(nodes[i])
+		for j, edge := range edges {
+			if !usedEdges[j] && graphEdgeTouchesLabel(edge, label) {
+				ordered = append(ordered, edge)
+				usedEdges[j] = true
+				break
+			}
+		}
+	}
+	mandatoryCount := len(ordered)
+	ordered = append(ordered, nodes[seedCount:]...)
+	for i, edge := range edges {
+		if !usedEdges[i] {
+			ordered = append(ordered, edge)
+		}
+	}
+	limit := tokenBudget * 3
+	kept, chars, shownNodes, shownEdges := []string{}, 0, 0, 0
+	for i, line := range ordered {
+		add := len(line) + 1
+		if i >= mandatoryCount && len(kept) > 0 && chars+add > limit {
+			break
+		}
+		kept = append(kept, line)
+		chars += add
+		if strings.HasPrefix(line, "NODE ") {
+			shownNodes++
+		} else if strings.HasPrefix(line, "EDGE ") {
+			shownEdges++
+		}
+	}
+	omittedNodes, omittedEdges := len(nodes)-shownNodes, len(edges)-shownEdges
+	result := strings.Join(kept, "\n")
+	if omittedNodes > 0 || omittedEdges > 0 {
+		result = fmt.Sprintf("[!] TRUNCATED: omitted %d nodes and %d edges (~%d-token budget); narrow the query or raise --budget.\n\n%s", omittedNodes, omittedEdges, tokenBudget, result)
+	}
+	return result
+}
+
+func graphQuerySeedCount(header, nodes []string) int {
+	joined := strings.Join(header, " ")
+	count := 0
+	for count < len(nodes) && count < 12 {
+		label := graphNodeLineLabel(nodes[count])
+		if !strings.Contains(joined, "'"+label+"'") && !strings.Contains(joined, `"`+label+`"`) {
+			break
+		}
+		count++
+	}
+	if count == 0 && len(nodes) > 0 {
+		return 1
+	}
+	return count
+}
+
+func graphEdgeTouchesLabel(edge, label string) bool {
+	if label == "" {
+		return false
+	}
+	return strings.HasPrefix(edge, "EDGE "+label+" --") || strings.Contains(edge, "]--> "+label+" at=") || strings.HasSuffix(edge, "]--> "+label)
+}
+
+func graphNodeLineLabel(line string) string {
+	line = strings.TrimPrefix(line, "NODE ")
+	if i := strings.Index(line, " ["); i >= 0 {
+		return line[:i]
+	}
+	return line
+}
+
+func enrichSeedNodeLines(graphPath string, lines []string, count int) []string {
+	body, err := os.ReadFile(graphPath)
+	if err != nil {
+		return lines
+	}
+	var raw struct {
+		Nodes []map[string]any `json:"nodes"`
+	}
+	if json.Unmarshal(body, &raw) != nil {
+		return lines
+	}
+	byLabel := map[string]string{}
+	for _, node := range raw.Nodes {
+		label, _ := node["label"].(string)
+		value, _ := node["summary"].(string)
+		if strings.TrimSpace(value) == "" {
+			value, _ = node["rationale"].(string)
+		}
+		value = strings.Join(strings.Fields(redact.StringFull(value)), " ")
+		if runes := []rune(value); len(runes) > 180 {
+			value = string(runes[:180]) + "…"
+		}
+		if label != "" && value != "" && !memory.ContainsInjection(value) {
+			byLabel[label] = value
+		}
+	}
+	out := append([]string{}, lines...)
+	for i := 0; i < count; i++ {
+		if value := byLabel[graphNodeLineLabel(out[i])]; value != "" {
+			out[i] += " summary=" + strconv.Quote(value)
+		}
+	}
+	return out
+}
+
+func queryGraphifyCLI(repoRoot, graphPath, question string, extra []string) ([]byte, error) {
+	bin, prefix, err := resolveGraphify()
+	if err != nil {
+		return nil, err
 	}
 	args := append(append([]string{}, prefix...), "query", question, "--graph", graphPath)
 	args = append(args, extra...)
@@ -1162,17 +1397,60 @@ func QueryWithArgs(repoRoot, question string, extra []string) (string, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("graphify query: %w (%s)", err, truncateOut(ee.Stderr, 800))
+			return nil, fmt.Errorf("graphify query: %w (%s)", err, truncateOut(ee.Stderr, 800))
 		}
-		return "", fmt.Errorf("graphify query: %w", err)
+		return nil, fmt.Errorf("graphify query: %w", err)
 	}
-	if len(strings.TrimSpace(string(out))) == 0 {
-		return "", fmt.Errorf("Graphify returned an empty query result")
+	return out, nil
+}
+
+func queryGraphifyAtDepth(repoRoot, graphPath, question string, extra []string, depth int) ([]byte, error) {
+	python, err := graphifyPython()
+	if err != nil {
+		return nil, err
 	}
-	if err := RecordQueryStamp(repoRoot, "query"); err != nil {
-		return "", err
+	mode, budget := "bfs", 2000
+	contexts := []string{}
+	for i := 0; i < len(extra); i++ {
+		switch extra[i] {
+		case "--dfs":
+			mode = "dfs"
+		case "--budget":
+			if i+1 < len(extra) {
+				i++
+				if parsed, parseErr := strconv.Atoi(extra[i]); parseErr == nil {
+					budget = parsed
+				}
+			}
+		case "--context":
+			if i+1 < len(extra) {
+				i++
+				contexts = append(contexts, extra[i])
+			}
+		}
 	}
-	return annotateQuery(repoRoot, question, redact.StringFull(string(out))), nil
+	contextJSON, _ := json.Marshal(contexts)
+	script := `import json,sys
+from networkx.readwrite import json_graph
+from graphify.serve import _query_graph_text
+raw=json.loads(open(sys.argv[1],encoding='utf-8').read())
+for link in raw.get('links',[]):
+ link['_src']=link.get('_src',link.get('source')); link['_tgt']=link.get('_tgt',link.get('target'))
+try: graph=json_graph.node_link_graph(raw,edges='links')
+except TypeError: graph=json_graph.node_link_graph(raw)
+contexts=json.loads(sys.argv[6])
+print(_query_graph_text(graph,sys.argv[2],mode=sys.argv[3],depth=int(sys.argv[4]),token_budget=int(sys.argv[5]),context_filters=contexts or None))`
+	cmd := exec.Command(python, "-c", script, graphPath, question, mode, strconv.Itoa(depth), strconv.Itoa(budget), string(contextJSON))
+	cmd.Dir = repoRoot
+	cmd.Env = graphifyEnv(filepath.Dir(graphPath))
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("graphify query depth adapter: %w (%s)", err, truncateOut(ee.Stderr, 800))
+		}
+		return nil, fmt.Errorf("graphify query depth adapter: %w", err)
+	}
+	return out, nil
 }
 
 func annotateQuery(repoRoot, question, answer string) string {

@@ -24,7 +24,7 @@ func TestFreshInitCreatesOnlyDescribedV2HarnessFiles(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	graphify := filepath.Join(t.TempDir(), "graphify")
 	script := `#!/bin/sh
-if [ "$1" = "--version" ]; then echo 'graphify 0.9.44'; exit 0; fi
+if [ "$1" = "--version" ]; then echo 'graphify 0.9.45'; exit 0; fi
 if [ "$1" = "query" ]; then echo 'query result from graph'; exit 0; fi
 /bin/mkdir -p "$GRAPHIFY_OUT"
 if [ "$1" = "extract" ]; then printf '%s\n' '{"nodes":[{"id":"a","community":0,"community_name":"Core"},{"id":"b","community":0,"community_name":"Core"}],"edges":[{"source":"a","target":"b"}]}' > "$GRAPHIFY_OUT/graph.json"; fi
@@ -35,7 +35,7 @@ exit 0
 	if runtime.GOOS == "windows" {
 		graphify += ".cmd"
 		script = `@echo off
-if "%1"=="--version" echo graphify 0.9.44& exit /b 0
+if "%1"=="--version" echo graphify 0.9.45& exit /b 0
 if "%1"=="query" echo query result from graph& exit /b 0
 if not exist "%GRAPHIFY_OUT%" mkdir "%GRAPHIFY_OUT%"
 if "%1"=="extract" echo {"nodes":[{"id":"a","community":0},{"id":"b","community":0}],"edges":[{"source":"a","target":"b"}]} > "%GRAPHIFY_OUT%\graph.json"

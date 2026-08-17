@@ -28,10 +28,10 @@ func TestInstallCommandRegistersCodexHooks(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
 	t.Setenv("PATH", binDir)
 	graphify := filepath.Join(binDir, "graphify")
-	scriptBody := "#!/bin/sh\necho 'graphify 0.9.44'\n"
+	scriptBody := "#!/bin/sh\necho 'graphify 0.9.45'\n"
 	if runtime.GOOS == "windows" {
 		graphify += ".cmd"
-		scriptBody = "@echo off\r\necho graphify 0.9.44\r\n"
+		scriptBody = "@echo off\r\necho graphify 0.9.45\r\n"
 	}
 	if err := os.WriteFile(graphify, []byte(scriptBody), 0o755); err != nil {
 		t.Fatal(err)

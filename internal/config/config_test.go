@@ -58,6 +58,9 @@ func TestDefaultConfigUsesHostAgentWithoutAdvertisingAPIProvider(t *testing.T) {
 	if !cfg.Graph.Semantic || cfg.Graph.SemanticBackend != "agent" {
 		t.Fatalf("fresh config must enable host-agent semantic extraction: %+v", cfg.Graph)
 	}
+	if cfg.Graph.QueryEnforcement != "auto" || cfg.Graph.QueryBudget != 1200 {
+		t.Fatalf("fresh config must use bounded automatic orientation: %+v", cfg.Graph)
+	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := config.Save(path, cfg); err != nil {
 		t.Fatal(err)
@@ -97,6 +100,19 @@ func TestLoadRejectsUnknownGraphRefreshPolicy(t *testing.T) {
 	_, err := config.Load(path)
 	if err == nil || !strings.Contains(err.Error(), "graph.refresh_policy") {
 		t.Fatalf("expected refresh-policy validation error, got %v", err)
+	}
+}
+
+func TestLoadRejectsNonPositiveGraphQueryBudget(t *testing.T) {
+	for _, budget := range []string{"0", "-1"} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		body := "layout_version: 2\ngraph:\n  query_budget: " + budget + "\n"
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := config.Load(path); err == nil || !strings.Contains(err.Error(), "graph.query_budget") {
+			t.Fatalf("query budget %s accepted: %v", budget, err)
+		}
 	}
 }
 

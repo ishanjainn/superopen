@@ -71,10 +71,10 @@ so --json init --agent --no-llm
 
 ```bash
 so --json graph semantic status --run RUN_ID
-so --json graph semantic briefs --run RUN_ID
+so --json graph semantic briefs --next --run RUN_ID
 ```
 
-   Dispatch one worker per brief in parallel when the host supports workers; otherwise process them sequentially. Each worker must read only its listed files and return only Graphify extraction JSON. Apply every response with `so graph semantic apply --run RUN_ID --chunk N`; retry invalid chunks at most twice. Then run `so graph semantic finalize --run RUN_ID`. The run is durable: after interruption, use `semantic status` and dispatch only unfinished chunks. Never fabricate a partial graph, bypass a failed chunk, or retry with `--code-only` unless the user explicitly requested `--code-only`. If finalize/labels/publish fails, report the resumable run id instead of claiming initialization completed.
+   Process exactly the numbered brief returned, reading only its listed files and returning only Graphify extraction JSON. Apply it with `so graph semantic apply --run RUN_ID --chunk N`, then request `briefs --next` again until none remain; retry an invalid chunk at most twice. Then run `so graph semantic finalize --run RUN_ID`. The run is durable: after interruption, use `semantic status` and continue with only the next unfinished chunk. Never fabricate a partial graph, bypass a failed chunk, discard a pending run, or retry with `--code-only` unless the user explicitly requested the matching discard option. If finalize/labels/publish fails, report the resumable run id instead of claiming initialization completed.
 
 4. Run `so graph labels brief --run RUN_ID`, produce the requested JSON map with one concise label per community, apply it with `so graph labels apply --run RUN_ID`, then atomically publish with `so graph publish --run RUN_ID`. Rerun `so init --agent --no-llm`; it will reuse the ready graph and continue harness setup. A `--code-only` request skips this semantic continuation but still produces a real Graphify AST graph.
 
@@ -125,13 +125,12 @@ Before broad exploration:
 1. If `.so/graph/graph.json` exists and the user asked a natural-language question about the codebase (how X works, what calls Y, where is Z) **and** did not ask to rebuild: run:
 
 ```bash
-sed -n '1,240p' .so/graph/cache/vocab.txt
-so graph query "TERM1 TERM2" --term "TERM1" --term "TERM2" --original-question "<question>" --budget 1000
+so graph query "<question>" --budget 1000 --depth 1
 ```
 
-Select at most 12 exact terms from `vocab.txt` that match the user's intent and emit those selected terms for auditability. Use BFS query for neighborhood/orientation questions, DFS or `path` for chains, `explain` for one concept, and `affected` before changing a dependency. Start with an 800–1200 token budget; widen only when output reports unresolved truncation. Prefer that answer over broad Grep/Glob, then open the surfaced source locations and verify them against source before editing.
+Use the original natural-language question first. If it returns no match or ambiguous seeds, search the compact token list in `.so/graph/cache/vocab.txt` and retry with at most 12 exact `--term` values; those terms augment rather than replace the question and are emitted for auditability. Use BFS query for neighborhood/orientation questions, DFS or `path` for chains, `explain` for one concept, and `affected` before changing a dependency. Start at depth 1 with an 800–1200 token budget; widen only when output reports unresolved truncation. Prefer that answer over broad Grep/Glob, then open the surfaced source locations and verify them against source before editing.
 
-When delegating codebase exploration to subagents, include the same vocabulary-first orientation requirement and the graph hash in their prompt; do not make each worker rediscover the repository broadly.
+When delegating codebase exploration to subagents, include the same graph-first orientation requirement and graph hash in their prompt; do not make each worker rediscover the repository broadly.
 
 If graph state reports `pending_semantic_run_id`, resume only unfinished chunks with `so graph semantic status/briefs`; the previously published graph remains usable until atomic publication.
 

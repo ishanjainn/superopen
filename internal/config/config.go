@@ -173,8 +173,8 @@ func Default() Config {
 			SemanticBackend:  "agent",
 			Mode:             "standard",
 			RefreshPolicy:    "after_changed_session",
-			QueryBudget:      2000,
-			QueryEnforcement: "nudge",
+			QueryBudget:      1200,
+			QueryEnforcement: "auto",
 		},
 		Evals: EvalsConfig{
 			Auto:               true,
@@ -465,10 +465,10 @@ func (c Config) validateGraph() error {
 		return fmt.Errorf("graph.refresh_policy must be after_changed_session or manual")
 	}
 	enforcement := strings.ToLower(strings.TrimSpace(c.Graph.QueryEnforcement))
-	if enforcement != "" && enforcement != "off" && enforcement != "nudge" && enforcement != "strict" {
-		return fmt.Errorf("graph.query_enforcement must be off, nudge, or strict")
+	if enforcement != "" && enforcement != "off" && enforcement != "auto" && enforcement != "nudge" && enforcement != "strict" {
+		return fmt.Errorf("graph.query_enforcement must be off, auto, nudge, or strict")
 	}
-	if c.Graph.QueryBudget < 0 {
+	if c.Graph.QueryBudget <= 0 {
 		return fmt.Errorf("graph.query_budget must be positive")
 	}
 	return nil
