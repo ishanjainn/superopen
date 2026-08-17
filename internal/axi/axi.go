@@ -16,10 +16,11 @@ import (
 
 // Exit codes (stable for agents).
 const (
-	ExitOK       = 0
-	ExitFail     = 1
-	ExitUsage    = 2
-	ExitNotFound = 3
+	ExitOK                   = 0
+	ExitFail                 = 1
+	ExitUsage                = 2
+	ExitNotFound             = 3
+	ExitContinuationRequired = 4
 )
 
 // DefaultTruncate is the default rune budget for string fields unless --full.
@@ -301,3 +302,7 @@ func Usage(msg, hint string) error { return Fail(ExitUsage, msg, hint) }
 
 // NotFound returns an ExitNotFound error.
 func NotFound(msg, hint string) error { return Fail(ExitNotFound, msg, hint) }
+
+// Continuation tells a coding-agent caller that the command made durable
+// progress and must be resumed through the machine-readable protocol.
+func Continuation(msg, hint string) error { return Fail(ExitContinuationRequired, msg, hint) }

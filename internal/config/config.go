@@ -46,10 +46,13 @@ func (c Config) HasExplicitLLM() bool {
 }
 
 type GraphConfig struct {
-	Code            bool   `yaml:"code"`
-	Semantic        bool   `yaml:"semantic"`
-	SemanticBackend string `yaml:"semantic_backend"`
-	RefreshPolicy   string `yaml:"refresh_policy"`
+	Code             bool   `yaml:"code"`
+	Semantic         bool   `yaml:"semantic"`
+	SemanticBackend  string `yaml:"semantic_backend"`
+	Mode             string `yaml:"mode"`
+	RefreshPolicy    string `yaml:"refresh_policy"`
+	QueryBudget      int    `yaml:"query_budget"`
+	QueryEnforcement string `yaml:"query_enforcement"`
 }
 
 type EvalsConfig struct {
@@ -165,10 +168,13 @@ func Default() Config {
 		LayoutVersion: 2,
 		Vendors:       VendorsConfig{},
 		Graph: GraphConfig{
-			Code:            true,
-			Semantic:        false,
-			SemanticBackend: "auto",
-			RefreshPolicy:   "after_changed_session",
+			Code:             true,
+			Semantic:         true,
+			SemanticBackend:  "agent",
+			Mode:             "standard",
+			RefreshPolicy:    "after_changed_session",
+			QueryBudget:      1200,
+			QueryEnforcement: "auto",
 		},
 		Evals: EvalsConfig{
 			Auto:               true,
@@ -431,8 +437,41 @@ func Load(path string) (Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
+	// `auto` was the pre-Graphify-platform value. Preserve old repositories by
+	// migrating it to the host-agent protocol; never restore ambient API-key
+	// provider selection.
+	if strings.EqualFold(strings.TrimSpace(cfg.Graph.SemanticBackend), "auto") {
+		cfg.Graph.SemanticBackend = "agent"
+	}
+	if err := cfg.validateGraph(); err != nil {
+		return Config{}, err
+	}
 	cfg.normalizeObservability()
 	return cfg, nil
+}
+
+func (c Config) validateGraph() error {
+	backend := strings.ToLower(strings.TrimSpace(c.Graph.SemanticBackend))
+	allowed := map[string]bool{"agent": true, "gemini": true, "kimi": true, "claude": true, "openai": true, "deepseek": true, "ollama": true, "bedrock": true, "azure": true, "claude-cli": true, "none": true}
+	if backend != "" && !allowed[backend] {
+		return fmt.Errorf("graph.semantic_backend %q is unsupported", c.Graph.SemanticBackend)
+	}
+	mode := strings.ToLower(strings.TrimSpace(c.Graph.Mode))
+	if mode != "" && mode != "standard" && mode != "deep" {
+		return fmt.Errorf("graph.mode must be standard or deep")
+	}
+	refresh := strings.ToLower(strings.TrimSpace(c.Graph.RefreshPolicy))
+	if refresh != "" && refresh != "after_changed_session" && refresh != "manual" {
+		return fmt.Errorf("graph.refresh_policy must be after_changed_session or manual")
+	}
+	enforcement := strings.ToLower(strings.TrimSpace(c.Graph.QueryEnforcement))
+	if enforcement != "" && enforcement != "off" && enforcement != "auto" && enforcement != "nudge" && enforcement != "strict" {
+		return fmt.Errorf("graph.query_enforcement must be off, auto, nudge, or strict")
+	}
+	if c.Graph.QueryBudget <= 0 {
+		return fmt.Errorf("graph.query_budget must be positive")
+	}
+	return nil
 }
 
 // normalizeObservability keeps a single local_jsonl file exporter. The UI

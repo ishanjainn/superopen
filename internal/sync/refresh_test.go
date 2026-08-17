@@ -1,11 +1,48 @@
 package sync
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/ishanjainn/superopen/internal/graph"
+	"github.com/ishanjainn/superopen/internal/harness"
 )
+
+func TestSyncGraphStartsAgentContinuationInsteadOfDirectRefresh(t *testing.T) {
+	repo := t.TempDir()
+	paths := harness.Resolve(repo)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	previousExisting := existingSemanticGraph
+	previousStart := startSemanticGraph
+	previousRefresh := refreshGraph
+	existingSemanticGraph = func(harness.Paths) (graph.Result, bool) { return graph.Result{}, false }
+	startSemanticGraph = func(_ context.Context, _ string, opts graph.SemanticStartOptions) (graph.SemanticRun, error) {
+		if !opts.Deep {
+			t.Fatal("configured deep mode was not propagated through sync")
+		}
+		return graph.SemanticRun{RunID: "run-test"}, nil
+	}
+	refreshGraph = func(string, harness.Paths, bool, string) (graph.Result, error) {
+		t.Fatal("agent-backed sync called direct RefreshAtomic")
+		return graph.Result{}, nil
+	}
+	t.Cleanup(func() {
+		existingSemanticGraph = previousExisting
+		startSemanticGraph = previousStart
+		refreshGraph = previousRefresh
+	})
+	err := syncGraph(context.Background(), repo, paths, false, "agent", "deep")
+	var continuation *GraphContinuationError
+	if !errors.As(err, &continuation) || continuation.RunID != "run-test" {
+		t.Fatalf("syncGraph error = %v, want run-test continuation", err)
+	}
+}
 
 func TestIsIndexablePath(t *testing.T) {
 	cases := []struct {

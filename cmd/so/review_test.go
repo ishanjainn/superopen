@@ -74,7 +74,7 @@ func TestApplyReviewLosesClaimRace(t *testing.T) {
 	}
 }
 
-func TestFinalizeLeavesReviewPendingWithoutCLI(t *testing.T) {
+func TestFinalizeDoesNotReviewPromptOnlySession(t *testing.T) {
 	root := t.TempDir()
 	paths := harness.Resolve(root)
 	if err := paths.EnsureDirs(); err != nil {
@@ -101,7 +101,7 @@ func TestFinalizeLeavesReviewPendingWithoutCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Review.Status != "pending" {
-		t.Fatalf("SessionEnd without CLI should leave pending, got %q backend=%q", doc.Review.Status, doc.Review.Backend)
+	if doc.Review.Status != "" {
+		t.Fatalf("prompt-only session must not schedule review, got %q backend=%q", doc.Review.Status, doc.Review.Backend)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -21,6 +22,33 @@ func TestFreshInitCreatesOnlyDescribedV2HarnessFiles(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	graphify := filepath.Join(t.TempDir(), "graphify")
+	script := `#!/bin/sh
+if [ "$1" = "--version" ]; then echo 'graphify 0.9.45'; exit 0; fi
+if [ "$1" = "query" ]; then echo 'query result from graph'; exit 0; fi
+/bin/mkdir -p "$GRAPHIFY_OUT"
+if [ "$1" = "extract" ]; then printf '%s\n' '{"nodes":[{"id":"a","community":0,"community_name":"Core"},{"id":"b","community":0,"community_name":"Core"}],"edges":[{"source":"a","target":"b"}]}' > "$GRAPHIFY_OUT/graph.json"; fi
+if [ "$1" = "cluster-only" ]; then printf '%s\n' '{"0":"Core"}' > "$GRAPHIFY_OUT/.graphify_labels.json"; printf '%s\n' '{"communities":{"0":["a","b"]}}' > "$GRAPHIFY_OUT/.graphify_analysis.json"; fi
+if [ "$1" = "export" ]; then printf '%s\n' '<!doctype html><script>const LEGEND = [{"cid":0,"label":"Core","count":2}];</script>' > "$GRAPHIFY_OUT/graph.html"; fi
+exit 0
+`
+	if runtime.GOOS == "windows" {
+		graphify += ".cmd"
+		script = `@echo off
+if "%1"=="--version" echo graphify 0.9.45& exit /b 0
+if "%1"=="query" echo query result from graph& exit /b 0
+if not exist "%GRAPHIFY_OUT%" mkdir "%GRAPHIFY_OUT%"
+if "%1"=="extract" echo {"nodes":[{"id":"a","community":0},{"id":"b","community":0}],"edges":[{"source":"a","target":"b"}]} > "%GRAPHIFY_OUT%\graph.json"
+if "%1"=="cluster-only" echo {"0":"Core"} > "%GRAPHIFY_OUT%\.graphify_labels.json"
+if "%1"=="cluster-only" echo {"communities":{"0":["a","b"]}} > "%GRAPHIFY_OUT%\.graphify_analysis.json"
+if "%1"=="export" echo ^<!doctype html^>^<script^>const LEGEND = [{"cid":0,"label":"Core","count":2}];^</script^> > "%GRAPHIFY_OUT%\graph.html"
+exit /b 0
+`
+	}
+	if err := os.WriteFile(graphify, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SUPEROPEN_GRAPHIFY_BIN", graphify)
 
 	_, err := initcmd.Run(initcmd.Options{
 		RepoRoot: repo, CodeOnly: true, NoLLM: true, SkipHooks: true, SkipInject: true,
@@ -37,8 +65,10 @@ func TestFreshInitCreatesOnlyDescribedV2HarnessFiles(t *testing.T) {
 		}
 		rel, _ := filepath.Rel(filepath.Join(repo, ".so"), path)
 		files = append(files, filepath.ToSlash(rel))
-		if err := artifactmeta.Validate(path); err != nil {
-			t.Errorf("description contract: %v", err)
+		if !strings.HasPrefix(filepath.Base(path), ".graphify_") {
+			if err := artifactmeta.Validate(path); err != nil {
+				t.Errorf("description contract: %v", err)
+			}
 		}
 		return nil
 	})
@@ -47,8 +77,8 @@ func TestFreshInitCreatesOnlyDescribedV2HarnessFiles(t *testing.T) {
 	}
 	sort.Strings(files)
 	want := []string{
-		".gitignore", "audit/events.jsonl", "config.yaml", "evals.yaml", "graph/corpus.json",
-		"graph/graph.html", "graph/graph.json", "graph/state.json", "guardrails.yaml",
+		".gitignore", "audit/events.jsonl", "config.yaml", "evals.yaml", "graph/.graphify_analysis.json",
+		"graph/.graphify_labels.json", "graph/corpus.json", "graph/graph.html", "graph/graph.json", "graph/state.json", "guardrails.yaml",
 		"memory/context.md", "memory/state.json", "sessions/index.json",
 	}
 	if !reflect.DeepEqual(files, want) {

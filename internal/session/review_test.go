@@ -47,7 +47,10 @@ func TestPreviousReviewContextIsShortAndSameVendor(t *testing.T) {
 	if err := store.Start(Meta{ID: "cursor-old", Vendor: "cursor", StartedAt: now.Add(-time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.WriteDocument("cursor-old", func(d *Document) { d.Review.Status = "pending" }); err != nil {
+	if err := store.WriteDocument("cursor-old", func(d *Document) {
+		d.Review.Status = "pending"
+		d.Footprint.Files = []FootprintFile{{Path: "internal/service.go", State: "edited", Count: 1}}
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got := store.PreviousReviewContext("cursor", "cursor-new")
@@ -56,6 +59,27 @@ func TestPreviousReviewContextIsShortAndSameVendor(t *testing.T) {
 	}
 	if strings.Contains(got, "REDACTED SESSION TEXT") {
 		t.Fatal("must not inject full evidence")
+	}
+}
+
+func TestReviewEligibleRejectsHarnessOnlySessions(t *testing.T) {
+	for _, path := range []string{
+		".so/config.yaml", "AGENTS.md", ".claude/skills/so/SKILL.md", ".github/skills/so/SKILL.md",
+		".openclaw/skills/so/SKILL.md", ".factory/skills/so/SKILL.md", ".trae/skills/so/SKILL.md",
+		".trae-cn/skills/so/SKILL.md", ".hermes/skills/so/SKILL.md", ".kiro/skills/so/SKILL.md",
+		".devin/skills/so/SKILL.md", ".codebuddy/skills/so/SKILL.md", ".kimi/skills/so/SKILL.md",
+		".kilo/skills/so/SKILL.md", ".aider/so/SKILL.md", `.factory\skills\so\SKILL.md`,
+	} {
+		d := Document{Footprint: Footprint{Files: []FootprintFile{{Path: path, State: "edited"}}}}
+		if ReviewEligible(d) {
+			t.Errorf("harness-only edit %q must not schedule review", path)
+		}
+	}
+	if !ReviewEligible(Document{Footprint: Footprint{Files: []FootprintFile{{Path: "internal/service.go", State: "edited"}}}}) {
+		t.Fatal("repository source edit should be review eligible")
+	}
+	if !ReviewEligible(Document{Footprint: Footprint{Files: []FootprintFile{{Path: ".github/workflows/ci.yml", State: "edited"}}}}) {
+		t.Fatal("non-generated GitHub source should be review eligible")
 	}
 }
 

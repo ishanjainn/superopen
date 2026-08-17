@@ -1,6 +1,6 @@
 ---
 name: so
-description: "Superopen - Open source Agent Harness Engineering. Use when the user types /so or $so, wants to bootstrap a repo with so init, asks about architecture, or when .so/ exists - prefer graph query, context, rules, skills, and guardrails before broad Grep/Glob."
+description: "Superopen agent-harness operations. Use for explicit /so or $so commands, Superopen install/init/sync/diagnostics, and codebase architecture, dependency, impact, or data-flow questions when a Superopen graph is present."
 ---
 
 # /so
@@ -11,13 +11,18 @@ The `/so` skill is registered with **`so install`** (after installing the CLI). 
 
 ## Usage
 
+`/so ...` below is **chat skill syntax**. Inside Bash, a shell, or a terminal, always use `so ...` with no leading slash. Never execute `/so ...` as a filesystem path.
+
 ```
 /so                                              # show this help (skill); CLI bare `so` = status snapshot
-/so init                                         # bootstrap .so/ + upgrade with YOUR model (no API key)
+/so init                                         # bootstrap .so/ + full Graphify graph with YOUR model
 /so init --force                                 # also overwrite existing heuristic templates
 /so init --code-only                             # skip Graphify semantic/docs pass
 /so graph                                        # rebuild repository graph into .so/graph/
 /so graph query "<question>"                     # ask the local knowledge graph
+/so graph path "<A>" "<B>"                       # connection between two graph nodes
+/so graph explain "<node>"                       # focused neighborhood and evidence
+/so graph affected "<node>"                      # downstream impact before an edit
 /so query "<question>"                           # alias for graph query
 /so knowledge                                     # show AGENTS.md + discovered rules/skills roots
 /so rules                                        # point at this repo's rules dir (Cursor or .agents)
@@ -54,17 +59,27 @@ If the user invoked `/so`, `/so --help`, `/so -h`, or `$so` with no other argume
 **Do not ask the user for an API key.** Code/graph mapping is local; harness doc upgrade uses **your** model (same pattern as `/graphify`).
 
 1. Ensure `so` is on PATH (`which so` or `$(go env GOPATH)/bin/so`).
-2. Run heuristic bootstrap (no headless API):
+2. Start the full graph build with the host-agent continuation protocol:
 
 ```bash
-so init --no-llm
+so --json init --agent --no-llm
 ```
 
-   (Add `--force` / `--code-only` if the user passed those flags.)
+   (Add `--force` / `--code-only` if the user passed those flags.) Exit code 4 is a normal `continuation_required` result, not a failed initialization. Read the run id from its hint.
 
-3. Run `so upgrade-brief` to print the system instructions and repository profile without creating a persistent artifact. The profile includes **Automation candidates** (MCP servers and guardrails) derived from stack signals after the graph build.
-4. **Using your own model**, produce the JSON object described in that brief (`architecture_md`, `conventions_md`, `guardrails`, `evals`, `brief`, optional `mcp`, optional `skills`). Stay faithful to the profile - invent no secrets, env blocks, or fake paths. Pick the top 1–2 MCP from the candidates list; pin package versions (never `@latest`); never recommend Memory MCP (Superopen memory already covers recall). Include `skills` only when the profile shows a concrete repo-specific workflow — do not emit generic templates (`gen-test`, `pr-check`, `frontend-design`). Omit the array when there is nothing specific. Do **not** reuse upgrade JSON from another project.
-5. Apply it with **exactly one** input method (never both — the CLI errors if a path and a heredoc/stdin redirect are combined):
+3. When semantic work is required, inspect status and obtain the exact prompts shipped by the pinned Graphify runtime:
+
+```bash
+so --json graph semantic status --run RUN_ID
+so --json graph semantic briefs --next --run RUN_ID
+```
+
+   Process exactly the numbered brief returned, reading only its listed files and returning only Graphify extraction JSON. Apply it with `so graph semantic apply --run RUN_ID --chunk N`, then request `briefs --next` again until none remain; retry an invalid chunk at most twice. Then run `so graph semantic finalize --run RUN_ID`. The run is durable: after interruption, use `semantic status` and continue with only the next unfinished chunk. Never fabricate a partial graph, bypass a failed chunk, discard a pending run, or retry with `--code-only` unless the user explicitly requested the matching discard option. If finalize/labels/publish fails, report the resumable run id instead of claiming initialization completed.
+
+4. Run `so graph labels brief --run RUN_ID`, produce the requested JSON map with one concise label per community, apply it with `so graph labels apply --run RUN_ID`, then atomically publish with `so graph publish --run RUN_ID`. Rerun `so init --agent --no-llm`; it will reuse the ready graph and continue harness setup. A `--code-only` request skips this semantic continuation but still produces a real Graphify AST graph.
+
+5. Run `so upgrade-brief` to print the system instructions and repository profile. Using your own model, produce the JSON object described in that brief (`architecture_md`, `conventions_md`, `guardrails`, `evals`, `brief`, optional `mcp`, optional `skills`). Stay faithful to the profile - invent no secrets, env blocks, or fake paths. Pick the top 1–2 MCP from the candidates list; pin package versions (never `@latest`); never recommend Memory MCP. Include skills only for concrete repo-specific workflows.
+6. Apply it with exactly one input method:
 
 ```bash
 so apply-upgrade <<'EOF'
@@ -74,13 +89,13 @@ EOF
 
    Or write a temp file and `so apply-upgrade /tmp/so-upgrade.json` (no heredoc on that command).
 
-6. Tell the user briefly: Superopen at `.so/`, graph node/edge counts, and that **AGENTS.md**, guardrails, evals, optional **mcp** (`.so/config.yaml` + projected `.mcp.json` / `.cursor/mcp.json`), and any repo-specific project skills were upgraded with the assistant model. Suggest `so doctor`, `so sync`, or `so dev` next. Leftover high-signal guardrails may appear under `so recommend list` for HITL.
+7. Tell the user briefly: Superopen at `.so/`, graph node/edge counts, and that **AGENTS.md**, guardrails, evals, optional MCP, and any repo-specific project skills were upgraded with the assistant model. Suggest `so doctor`, `so sync`, or `so dev` next.
 
 If `.so/` already exists and the user only wanted a refresh of context/guardrails/automations, skip step 2’s full rebuild when possible: run `so upgrade-brief`, then steps 4-5 (apply merges MCP servers additively).
 
 ### Review - live-agent session review (no API key)
 
-If `so review-brief` (or a SessionStart / skill inject) prints a **pending** session, review it with **your** model before the user's new task:
+Only review a **completed prior session with repository source edits and sufficient evidence**. Bootstrap, graph-only, sync-only, harness-only, and no-source-edit sessions are ineligible. A pending review never takes precedence over the user's current task merely because a tool-count threshold was crossed.
 
 1. Run `so review-brief <session-id>` (default: previous pending same-vendor session).
 2. If it says status is `complete` or `running`, skip apply-review and continue the user's task.
@@ -95,7 +110,7 @@ EOF
 
    Or `so apply-review <session-id> /tmp/so-review.json` (no heredoc on that command).
 
-5. Then continue the user's task. Soft recs may auto-apply; guardrails, eval-policy, removals, and restructures stay pending for `so recommend apply`.
+5. Apply eligible review work after completing the user's requested task. Soft recs may auto-apply; guardrails, eval-policy, removals, and restructures stay pending for `so recommend apply`.
 
 Skip if review status is already complete or running. Cursor often cannot consume hook `additional_context` same-turn — this skill is the reliable path.
 
@@ -110,10 +125,18 @@ Before broad exploration:
 1. If `.so/graph/graph.json` exists and the user asked a natural-language question about the codebase (how X works, what calls Y, where is Z) **and** did not ask to rebuild: run:
 
 ```bash
-so graph query "<question>"
+so graph query "<question>" --budget 1000 --depth 1
 ```
 
-Prefer that answer over Grep/Glob when it is useful. You may still open a few specific files the query surfaces.
+Use the original natural-language question first. If it returns no match or ambiguous seeds, search the compact token list in `.so/graph/cache/vocab.txt` and retry with at most 12 exact `--term` values; those terms augment rather than replace the question and are emitted for auditability. Use BFS query for neighborhood/orientation questions, DFS or `path` for chains, `explain` for one concept, and `affected` before changing a dependency. Start at depth 1 with an 800–1200 token budget; widen only when output reports unresolved truncation. Prefer that answer over broad Grep/Glob, then open the surfaced source locations and verify them against source before editing.
+
+When delegating codebase exploration to subagents, include the same graph-first orientation requirement and graph hash in their prompt; do not make each worker rediscover the repository broadly.
+
+If graph state reports `pending_semantic_run_id`, resume only unfinished chunks with `so graph semantic status/briefs`; the previously published graph remains usable until atomic publication.
+
+After a materially useful, dead-end, or corrected graph result, record the outcome explicitly with `so graph result save`; ordinary queries are not automatically useful. Run `so graph update` after edits that change source relationships. `so graph reflect` derives graph lessons without mutating structural graph nodes or edges.
+
+At a true SessionEnd, Superopen's detached finalizer refreshes the graph before evaluating the completed session. Vendors without a reliable end event get the same idempotent maintenance at the next SessionStart. If semantic files changed, continue the injected semantic run; do not start a competing rebuild. Evaluation/review work remains after the user's current task.
 
 2. For conventions / review rules, read `AGENTS.md` (and nested `*/AGENTS.md`), the active vendor's rules dir, and `.so/guardrails.yaml` before inventing process. When updating guidance, prune obsolete lines — do not only append.
 
@@ -143,6 +166,8 @@ Map `/so …` arguments to the `so` CLI on PATH (or `$(go env GOPATH)/bin/so` if
 | `/so memory search …` | `so memory search …` |
 | `/so eval …` | `so eval …` |
 | `/so recommend …` | `so recommend …` |
+
+If `so sync` returns exit code 4, treat it as durable semantic continuation work: use the run id from its hint and complete briefs/apply/finalize/labels/publish. Never replace that continuation with a direct AST-only rebuild.
 
 ### Headless / CI only
 

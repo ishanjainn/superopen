@@ -43,6 +43,28 @@ func TestBuildSessionContextAndLesson(t *testing.T) {
 	}
 }
 
+func TestGraphOutcomeRequiresExplicitSignal(t *testing.T) {
+	paths := harness.Resolve(t.TempDir())
+	store := NewStore(paths)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddGraphOutcome(GraphOutcome{Question: "where", AnswerSummary: "answer", Outcome: "queried", GraphSHA256: "abc"}); err == nil {
+		t.Fatal("ordinary queries must not become useful automatically")
+	}
+	saved, err := store.AddGraphOutcome(GraphOutcome{Question: "where", AnswerSummary: "answer", Outcome: "useful", SourceNodes: []string{"node"}, GraphSHA256: "abc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.ID == "" {
+		t.Fatal("missing durable id")
+	}
+	items, err := store.ListGraphOutcomes()
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%v err=%v", items, err)
+	}
+}
+
 func TestTemporaryMode(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "repo")

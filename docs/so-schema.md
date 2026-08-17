@@ -24,7 +24,19 @@ Superopen keeps shared policy compact and separates vendor-owned guidance. Runti
 │   ├── graph.json
 │   ├── corpus.json
 │   ├── graph.html
-│   └── state.json
+│   ├── GRAPH_REPORT.md
+│   ├── manifest.json
+│   ├── cost.json
+│   ├── .graphify_analysis.json
+│   ├── .graphify_labels.json
+│   ├── .graphify_learning.json
+│   ├── cache/
+│   ├── converted/
+│   ├── wiki/
+│   ├── obsidian/
+│   ├── exports/
+│   ├── reflections/LESSONS.md
+│   └── state.json                 # graph state schema v3
 ├── audit/
 │   └── events.jsonl                 # repository-level audit history
 ├── sessions/
@@ -47,8 +59,17 @@ Every Superopen-created file says why it exists, its authority, and its updater:
 - JSONL begins with a `superopen.file_manifest` record.
 - HTML and Markdown use a leading HTML comment.
 - Checkpoint payloads retain exact source bytes; `checkpoints/manifest.json` documents them.
+- Graphify-owned sidecars retain their native schema; `graph/state.json` documents their ownership instead of mutating them.
 
-Committed policy is `.so/config.yaml` (including optional `mcp.servers`), `.so/guardrails.yaml`, and `.so/evals.yaml`. Graph, audit, session, and memory data stays local and rebuildable where applicable. Applied project skills live under vendor trees (for example `.claude/skills/`, `.cursor/skills/`) and are not gitignored. Project MCP projections (repo-root `.mcp.json`, `.cursor/mcp.json`) are written by `so sync` / `so apply-upgrade` from `mcp:` in config and should be committed so teammates share the same servers. The stable directories and their root files are created by `so init`; only unresolved telemetry, per-session directories, and checkpoints are event-driven. Graphify caches, server PID/locks, and port ledgers live in OS cache/runtime directories. Graph refreshes stage under `.so/graph/.staging-*` and publish into `.so/graph/`; Superopen does not leave `.graph-v2-*` siblings beside `graph/`. Small debounce and sweep timestamps share one self-described OS-cache `runtime/state.json`; Superopen does not create `finalize-pending`, `pending-harvest.json`, `approval-mismatch-at`, or `idle-sweep-at`. UI preferences live in browser local storage. `so dev` only serves these files; graph refreshes run after changed sessions or through explicit CLI commands.
+Committed policy is `.so/config.yaml` (including optional `mcp.servers`), `.so/guardrails.yaml`, and `.so/evals.yaml`. Graph, audit, session, and memory data stays local and rebuildable where applicable. Applied project skills live under vendor trees (for example `.claude/skills/`, `.cursor/skills/`) and are not gitignored. Project MCP projections (repo-root `.mcp.json`, `.cursor/mcp.json`) are written by `so sync` / `so apply-upgrade` from `mcp:` in config and should be committed so teammates share the same servers. The stable directories and their root files are created by `so init`; only unresolved telemetry, per-session directories, and checkpoints are event-driven. Graphify's graph cache and manifest remain under `.so/graph/`; its isolated Python runtime, server PID/locks, and port ledgers live in OS cache/runtime directories. Graph refreshes stage under `.so/graph/.staging-*`, assemble a sibling publication, and swap the complete graph directory with rollback. Resumable semantic runs and durable reflection/export artifacts survive the swap until explicitly replaced or expired. Superopen does not leave `.graph-v2-*`, `.graph-publish-*`, or rollback siblings beside `graph/`. Small debounce and sweep timestamps share one self-described OS-cache `runtime/state.json`; Superopen does not create `finalize-pending`, `pending-harvest.json`, `approval-mismatch-at`, or `idle-sweep-at`. UI preferences live in browser local storage. `so dev` only serves these files; graph refreshes run after changed sessions or through explicit CLI commands.
+
+Graph state uses schema version 3 with `status`, exact engine/version, run id, repository and source fingerprints, graph hash/counts, semantic progress, schema-derived capabilities, timestamps, and the last build result. For agent-backed incremental semantic work, canonical `status` remains `ready`, `last_build_result` is `continuation_required`, and `pending_semantic_run_id` identifies the resumable staging run. A failed fresh build publishes no `graph.json`; a failed refresh retains the previous valid graph and records the failure. Legacy stub-shaped graphs are rejected and require `so graph rebuild`.
+
+`.so/**`, agent instructions, managed vendor skills/rules, and project MCP projections are never part of Graphify detection, AST extraction, semantic work, manifests, source fingerprints, or structural graph publication. Final publication independently validates both graph evidence and manifest keys. Memory remains a query-time overlay. Every successful publication regenerates `graph/cache/vocab.txt` as compact lowercase label tokens. Queries preserve the original question; optional audited `--term` values only augment it. Successful query/path/explain/affected calls write a graph-hash-bound `last_query_stamp` that becomes invalid when the graph changes and is accepted for orientation only when it was created during the current coding session. New repositories default to `graph.query_enforcement: auto`: the first broad source exploration receives a depth-1 graph orientation without blocking the requested tool, and failures remain fail-open.
+
+`so sync` follows the same host-agent semantic contract as initialization and incremental updates. Standard mode extracts Markdown, MDX, QMD, RST, and text structure deterministically and reserves agent semantics for opaque documents and media. `graph.mode: deep` also semantically enriches those structural documents. With `semantic_backend: agent`, sync returns exit code 4 when semantic work must be resumed instead of publishing an AST-only graph as semantically complete. `so graph semantic briefs --next` returns one correctly numbered unfinished brief; a pending run can be abandoned only through the explicit discard command or `--discard-semantic-run` paired with `--code-only`. PostgreSQL schema extraction rejects DSNs containing user-info or credential query parameters; credentials must come from standard PostgreSQL environment variables.
+
+`graph/cost.json` separates initialization, semantic extraction, labeling, upgrade, query, and coding-task phases. Host-agent usage is `measurement: host_session` only when telemetry can attribute it; otherwise token and cost fields are `null`, never synthetic zeroes. Graphify extraction payload counters are retained only as payload metadata.
 
 ### MCP team policy
 
@@ -71,7 +92,7 @@ Fresh configuration does not advertise an API provider or model. Reviews use the
 
 Telemetry writes full secret-redacted local events directly to `<session-id>/events.jsonl`; there is no reduced-content capture setting. `session.json` materializes metadata, footprint, evaluation, recommendations, replay, port provenance, review state, and compact evidence references. Repository-level audit events live separately in `audit/events.jsonl`; session-associated audit events stay in that session's `events.jsonl`.
 
-Materialize is not review. On a true SessionEnd, Superopen writes `session.json`, footprint, replay, and graph-on-edits, then sets `review.status=pending`. ClaimReview wraps only apply-review (live agent or sealed CLI), not materialize. Vendors without SessionEnd (Codex, Pi) stay active until the next same-vendor SessionStart materializes the previous chat (`--no-cli`) or idle handling runs. Stop / turn_end / agentStop are every assistant turn and must not finalize.
+Materialize is not review. On a true SessionEnd, Superopen writes `session.json`, footprint, and replay, then completes an idempotent Graphify refresh before evaluating the same repository version. `session.json.graph_refresh` records `running|ready|continuation_required|failed`, trigger, run ID, graph hash, timestamps, and a redacted error. A changed semantic corpus records a resumable continuation while preserving the valid published graph. The next SessionStart retries stale maintenance when an end event was missed; a source fingerprint and process lock prevent duplicate Graphify work. Set `graph.refresh_policy: manual` to disable lifecycle refresh; the default is `after_changed_session`. Superopen sets `review.status=pending` only for completed sessions with repository source edits; bootstrap, graph-only, sync-only, harness-only, and no-edit sessions are ineligible. Reviews are never injected mid-task from tool-count thresholds, and eligible continuation instructions tell the next agent to finish the current user task before review. ClaimReview wraps only apply-review (live agent or sealed CLI), not materialize. Vendors without SessionEnd (Codex, Pi) stay active until the next same-vendor SessionStart materializes the previous chat (`--no-cli`) or idle handling runs. Stop / turn_end / agentStop are every assistant turn and must not finalize.
 
 A review is complete only after a model reviewer: live agent (`live_agent:<vendor>`), sealed CLI (`agent_cli:claude` / `agent_cli:codex` / `agent_cli:opencode` / `agent_cli:pi`), or an explicit `llm:` / `evals.backend: llm_api` path. Heuristics complete a review only when `evals.backend` is explicitly `heuristics`. Ended + pending is valid (wait for the next live agent). Idle sweep retries sealed CLI on pending-ended sessions and never heuristic-completes under `auto`.
 
@@ -79,7 +100,7 @@ Startup checks only the immediately preceding same-vendor session and injects a 
 
 One ClaimReview lock prevents duplicate live vs CLI apply-review workers. The same review classifies corrections, recurring workflows, failures, successful verification, and guidance gaps. Durable counters and redacted summaries are consolidated into `memory/state.json`; proposed bodies remain only in recommendation records. Soft recommendations may update the originating vendor's existing rules/skills and managed shared `AGENTS.md` sections. New skills remain visible after their first supporting session and auto-create only after three same-vendor sessions with successful verification, or an explicit durable user workflow. Removals, restructures, guardrails, and evaluation-policy changes always require approval.
 
-If a session edited source files, the worker builds Graphify and the corpus in a temporary directory, validates the described JSON/HTML plus query behavior, then atomically swaps the graph. Failures preserve the previous valid graph. Documentation-only changes rebuild `graph/corpus.json` without repeating the source graph.
+If a session edited source files, the worker runs Graphify's incremental classifier. Code changes, deletions, and standard-mode structural-document changes publish an atomic deterministic refresh without an LLM. Changed opaque documents, papers, images, or media create a resumable host-agent semantic run containing only changed semantic sources; deep mode also queues changed structural documents. The prior graph remains usable and the continuation is injected into the next supported coding-agent session. Publication rejects an obsolete source fingerprint or base graph hash. Failures preserve the previous valid graph.
 
 ## Observability
 

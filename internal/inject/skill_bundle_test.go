@@ -110,3 +110,22 @@ func TestEmbeddedSkillContainsLiveAgentReview(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentGuidanceDistinguishesChatFromShellSyntax(t *testing.T) {
+	for _, needle := range []string{
+		"always use `so ...` with no leading slash",
+		"Never execute `/so ...` as a filesystem path",
+	} {
+		if !strings.Contains(embeddedSkillMD, needle) {
+			t.Fatalf("skill.md missing shell-syntax warning %q", needle)
+		}
+	}
+	for _, needle := range []string{
+		"always run `so ...` with no leading slash",
+		"Never type `/so ...` into Bash",
+	} {
+		if !strings.Contains(Brief(), needle) {
+			t.Fatalf("generated agent brief missing shell-syntax warning %q", needle)
+		}
+	}
+}

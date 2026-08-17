@@ -127,6 +127,38 @@ func mergeFile(repoRoot, path string, servers map[string]map[string]any) error {
 	return os.WriteFile(path, append(out, '\n'), 0o644)
 }
 
+// RemoveManaged removes only one Superopen-owned entry and preserves all other
+// human or tool-managed MCP servers.
+func RemoveManaged(repoRoot, name string) error {
+	for _, path := range []string{filepath.Join(repoRoot, ".mcp.json"), filepath.Join(repoRoot, ".cursor", "mcp.json")} {
+		if err := rejectUserGlobalPath(repoRoot, path); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(data, &doc); err != nil {
+			return fmt.Errorf("parse %s: %w", path, err)
+		}
+		servers, _ := doc["mcpServers"].(map[string]any)
+		if servers == nil {
+			continue
+		}
+		delete(servers, name)
+		doc["mcpServers"] = servers
+		out, _ := json.MarshalIndent(doc, "", "  ")
+		if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // rejectUserGlobalPath blocks ~/.mcp.json and other home-scoped configs.
 // Repos that live under $HOME are allowed; using $HOME itself as the repo is not.
 // Containment uses filepath.Rel (Windows-safe, no /work vs /workother prefix bugs).

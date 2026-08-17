@@ -96,6 +96,7 @@ var tier1Patterns = []*regexp.Regexp{
 	// GitHub tokens.
 	regexp.MustCompile(`gh[opsu]_[A-Za-z0-9]{16,}`),
 	regexp.MustCompile(`github_pat_[A-Za-z0-9_]{20,}`),
+	regexp.MustCompile(`glpat-[A-Za-z0-9_\-]{20,}`),
 
 	// OpenAI / Anthropic / generic provider keys.
 	regexp.MustCompile(`sk-(?:proj-)?[A-Za-z0-9_\-]{20,}`),

@@ -92,6 +92,12 @@ func enableClaudeCodePlugin() error {
 		}
 	}
 
+	// Claude caches installed plugin contents by manifest version. Re-running
+	// `plugin install` returns "already installed" and leaves stale hook commands
+	// behind even though our local marketplace was refreshed. This plugin is
+	// wholly Superopen-owned, so replace it on explicit `so install`.
+	uninstall := exec.Command(claudeBin, "plugin", "uninstall", "superopen-cc@superopen", "--scope", "user") //nolint:gosec
+	_, _ = uninstall.CombinedOutput()
 	inst := exec.Command(claudeBin, "plugin", "install", "superopen-cc@superopen", "--scope", "user") //nolint:gosec
 	if out, err := inst.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))

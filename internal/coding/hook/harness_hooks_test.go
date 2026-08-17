@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"crypto/md5"
 	"errors"
 	"fmt"
 	"io"
@@ -21,6 +22,40 @@ import (
 	"github.com/ishanjainn/superopen/internal/session"
 	"github.com/ishanjainn/superopen/internal/tracestore"
 )
+
+func TestGraphTargetStateUsesContentHashBeforeMtime(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(root, "service.go")
+	body := []byte("package demo\n")
+	if err := os.WriteFile(source, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.GraphJSON, []byte(`{"nodes":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := fmt.Sprintf("%x", md5.Sum(body))
+	manifest := []byte(fmt.Sprintf(`{"service.go":{"ast_hash":%q}}`, sum))
+	if err := os.WriteFile(filepath.Join(paths.GraphDir, "manifest.json"), manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(source, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if indexed, stale := graphTargetState(paths, root, root, source); !indexed || stale {
+		t.Fatalf("unchanged content with newer mtime = indexed %t stale %t", indexed, stale)
+	}
+	if err := os.WriteFile(source, []byte("package changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if indexed, stale := graphTargetState(paths, root, root, source); !indexed || !stale {
+		t.Fatalf("changed content = indexed %t stale %t", indexed, stale)
+	}
+}
 
 type hookMemoryEmitter struct{ events []normalize.EventEmission }
 
@@ -45,6 +80,26 @@ func TestDecideGuardrailAllowsEmptyTargets(t *testing.T) {
 	dec, matcher, deny := decideGuardrail(eng, "", "", "")
 	if deny || !dec.Allow || matcher != "" {
 		t.Fatalf("empty targets must allow, got deny=%v dec=%#v matcher=%q", deny, dec, matcher)
+	}
+}
+
+func TestBroadSourceReadDetection(t *testing.T) {
+	tests := []struct {
+		name, tool, command, path string
+		want                      bool
+	}{
+		{"read file", "Read", "", "/repo/main.go", true},
+		{"ripgrep", "Bash", "rg -n handler .", "", true},
+		{"git grep", "exec", "git grep Auth", "", true},
+		{"scoped graph", "Bash", "so graph query auth", "", false},
+		{"edit", "Edit", "", "/repo/main.go", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isBroadSourceRead(tt.tool, tt.command, tt.path); got != tt.want {
+				t.Fatalf("isBroadSourceRead() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -188,6 +243,23 @@ func TestPiTurnEndDoesNotFinalizeAndSessionStartMaterializes(t *testing.T) {
 	}
 }
 
+func TestSessionStartReconcilesGraphWhenNoPriorSessionNeedsFinalize(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	var roots []string
+	previous := spawnLifecycleReconcileFn
+	spawnLifecycleReconcileFn = func(repoRoot string) { roots = append(roots, repoRoot) }
+	t.Cleanup(func() { spawnLifecycleReconcileFn = previous })
+
+	maybeHarvestOnSessionEnd("codex", "session_start", "new-session", root)
+	if len(roots) != 1 || roots[0] != root {
+		t.Fatalf("SessionStart lifecycle reconciliation = %+v, want [%s]", roots, root)
+	}
+}
+
 func TestSessionStartReviewInjectIsShortInstruction(t *testing.T) {
 	root := t.TempDir()
 	paths := harness.Resolve(root)
@@ -198,7 +270,10 @@ func TestSessionStartReviewInjectIsShortInstruction(t *testing.T) {
 	if err := store.Start(session.Meta{ID: "cursor-old", Vendor: "cursor", StartedAt: time.Now().UTC().Add(-time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.WriteDocument("cursor-old", func(d *session.Document) { d.Review.Status = "pending" }); err != nil {
+	if err := store.WriteDocument("cursor-old", func(d *session.Document) {
+		d.Review.Status = "pending"
+		d.Footprint.Files = []session.FootprintFile{{Path: "internal/service.go", State: "edited", Count: 1}}
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Start(session.Meta{ID: "cursor-new", Vendor: "cursor", StartedAt: time.Now().UTC()}); err != nil {
@@ -222,7 +297,7 @@ func TestSessionStartReviewInjectIsShortInstruction(t *testing.T) {
 
 const ReviewerSystemPromptSnippet = "Review one coding-agent session and return JSON only"
 
-func TestMidSessionInjectOffByDefaultAndOnceWhenEnabled(t *testing.T) {
+func TestMidSessionReviewNeverPreemptsUserTask(t *testing.T) {
 	root := t.TempDir()
 	paths := harness.Resolve(root)
 	if err := paths.EnsureDirs(); err != nil {
@@ -258,8 +333,8 @@ func TestMidSessionInjectOffByDefaultAndOnceWhenEnabled(t *testing.T) {
 	if err := config.Save(paths.Config, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if got := midSessionReviewInject("claude-code", "mid-1", paths); got == "" || !strings.Contains(got, "so review-brief mid-1") {
-		t.Fatalf("enabled mid_session should inject, got %q", got)
+	if got := midSessionReviewInject("claude-code", "mid-1", paths); got != "" {
+		t.Fatalf("enabled legacy threshold must not preempt the user task, got %q", got)
 	}
 
 	var buf strings.Builder
@@ -270,12 +345,12 @@ func TestMidSessionInjectOffByDefaultAndOnceWhenEnabled(t *testing.T) {
 	maybeInjectDynamicMemory("claude-code", "UserPromptSubmit", "mid-1", root, peekedContext{
 		CWD: root, Prompt: "continue the work", TurnID: "t1",
 	}, cached, &hookMemoryEmitter{})
-	if !strings.Contains(buf.String(), "so apply-review mid-1") {
-		t.Fatalf("expected mid-session inject in hook output, got %s", buf.String())
+	if strings.Contains(buf.String(), "so apply-review mid-1") {
+		t.Fatalf("unexpected mid-session review inject in hook output: %s", buf.String())
 	}
 	doc, err := store.ReadDocument("mid-1")
-	if err != nil || !doc.Review.MidSessionInjected {
-		t.Fatalf("expected MidSessionInjected, got %+v err=%v", doc.Review, err)
+	if err != nil || doc.Review.MidSessionInjected {
+		t.Fatalf("review should remain uninjected, got %+v err=%v", doc.Review, err)
 	}
 	if second := midSessionReviewInject("claude-code", "mid-1", paths); second != "" {
 		t.Fatalf("mid-session inject must be once, got %q", second)
@@ -317,6 +392,56 @@ func TestDynamicMemoryQuerySanitizesPrivateAndSecretText(t *testing.T) {
 	}
 	if !strings.Contains(got, "[EXCLUDED_PRIVATE]") || !strings.Contains(got, "[REDACTED]") {
 		t.Fatalf("retrieval query did not use central sanitizer: %q", got)
+	}
+}
+
+func TestAutomaticGraphOrientationInjectsOnceWithoutBlockingTool(t *testing.T) {
+	root := t.TempDir()
+	paths := harness.Resolve(root)
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	if cfg.Graph.QueryEnforcement != "auto" {
+		t.Fatalf("new repositories must default to automatic graph orientation: %q", cfg.Graph.QueryEnforcement)
+	}
+	if err := config.Save(paths.Config, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.GraphJSON, []byte(`{"nodes":[],"links":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previousQuery, previousRecord := graphOrientationQuery, recordGraphOrientation
+	queryCalls, recordCalls := 0, 0
+	graphOrientationQuery = func(repo, question string, budget, depth int) (string, error) {
+		queryCalls++
+		if repo != root || question != "how does routing work" || budget != 800 || depth != 1 {
+			t.Fatalf("unexpected automatic query: repo=%q question=%q budget=%d depth=%d", repo, question, budget, depth)
+		}
+		return "NODE Router [src=router.go loc=L10]", nil
+	}
+	recordGraphOrientation = func(repo, command string) error {
+		recordCalls++
+		return nil
+	}
+	t.Cleanup(func() { graphOrientationQuery, recordGraphOrientation = previousQuery, previousRecord })
+	var buf strings.Builder
+	previousOutput := hookJSONOutput
+	hookJSONOutput = func() io.Writer { return &buf }
+	t.Cleanup(func() { hookJSONOutput = previousOutput })
+	cached := &sessionstate.State{GraphQuery: "how does routing work"}
+	payload := []byte(`{"tool_name":"Bash","tool_input":{"command":"rg -n routing ."}}`)
+	if !maybeEnforceGraphOrientation("claude-code", "PreToolUse", payload, "session-1", root, cached) {
+		t.Fatal("automatic graph context was not delivered")
+	}
+	if !cached.GraphOriented || queryCalls != 1 || recordCalls != 1 || !strings.Contains(buf.String(), "NODE Router") {
+		t.Fatalf("automatic orientation state calls=%d/%d cached=%+v output=%s", queryCalls, recordCalls, cached, buf.String())
+	}
+	if maybeEnforceGraphOrientation("claude-code", "PreToolUse", payload, "session-1", root, cached) {
+		t.Fatal("automatic graph orientation repeated in one session")
+	}
+	if queryCalls != 1 {
+		t.Fatalf("automatic query calls=%d, want 1", queryCalls)
 	}
 }
 

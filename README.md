@@ -180,7 +180,7 @@ Set `heuristics` only when you want zero judging cost. `live_agent: false` is CL
 | `so` | Harness status snapshot |
 | `so install` | Register `/so` with coding agents |
 | `so init` | Bootstrap the harness and install observability hooks |
-| `so sync` | Refresh injectors, graph, and session map |
+| `so sync` | Refresh injectors, graph, and session map; exit 4 resumes agent-semantic work when required |
 | `so dev` | Run the lightweight Next.js UI on `:4444` (`-d` to detach, `stop` to stop) |
 | `so graph query` | Query the repository graph |
 | `so sessions` | List, finalize, and demo sessions |
@@ -235,7 +235,11 @@ Session 3D replay lives in `web/src/map`.
 
 ## Attribution, contributing, and security
 
-Repository graphs are powered by [Graphify](https://github.com/Graphify-Labs/graphify).
+Repository graphs are powered by the exact pinned [Graphify 0.9.45](https://github.com/Graphify-Labs/graphify/releases/tag/v0.9.45) runtime. `so install` creates an isolated Python 3.12 environment with every platform-compatible `graphifyy` extra (`all` on Windows; the equivalent set excluding Windows-only DreamMaker elsewhere); `so graph …` is the supported façade. Superopen never substitutes a stub graph when the runtime or extraction fails.
+
+Graph builds exclude `.so/**` completely. Code plus Markdown-family document structure is extracted deterministically without model tokens. Incremental code and structural-document edits refresh locally; opaque documents and media queue a resumable coding-agent semantic continuation while the last valid graph stays queryable. Agents start with the original question and a focused 800–1200 token graph query; compact vocabulary terms are an audited fallback for ambiguous matches.
+
+Release cost/effectiveness claims use the opt-in [model-neutral paired lifecycle gate](docs/haiku-release-gate.md). It reports initialization separately, measures cost per successful result and break-even over repeated sessions, and does not label Graphify's ERPNext question benchmark as SWE-bench.
 
 Superopen is Apache-2.0 licensed; see [LICENSE](LICENSE) and [NOTICE](NOTICE). Contributions are welcome—start with [CONTRIBUTING.md](CONTRIBUTING.md), then read [SECURITY.md](SECURITY.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening an issue or pull request.
 

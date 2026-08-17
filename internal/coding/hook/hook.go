@@ -481,8 +481,11 @@ func run(cmd *cobra.Command, vendor, event string) (rerr error) {
 	if cwd == "" {
 		cwd = cached.CWD
 	}
-	maybeInjectDynamicMemory(adapter.Vendor(), event, sessionID, cwd, probe, cached, emit)
-	maybeInjectMemory(adapter.Vendor(), event, sessionID, cwd)
+	graphControlWritten := maybeEnforceGraphOrientation(adapter.Vendor(), event, payload, sessionID, cwd, cached)
+	if !graphControlWritten {
+		maybeInjectDynamicMemory(adapter.Vendor(), event, sessionID, cwd, probe, cached, emit)
+		maybeInjectMemory(adapter.Vendor(), event, sessionID, cwd)
+	}
 	maybeHarvestOnSessionEnd(adapter.Vendor(), event, sessionID, cwd)
 
 	// Always succeed back to the agent.
