@@ -295,13 +295,60 @@ jobs:
   homebrew:
     name: Publish / Homebrew
     if: needs.prepare.outputs.publisher == 'cli' && needs.prepare.outputs.dry_run != 'true'
-    needs: [prepare, github-release]
+    needs: [prepare, bump, github-release]
     runs-on: ubuntu-24.04
     steps:
-      - name: Update Homebrew tap
-        uses: dawidd6/action-homebrew-bump-formula@a0e064e08103c01870c6d1b05168d1b726aab119 # v8
+      - name: Checkout release source
+        uses: actions/checkout@v7
         with:
+          ref: ${{ needs.bump.outputs.release_sha }}
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v7
+        with:
+          repository: ishanjainn/homebrew-superopen
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          tap: ishanjainn/homebrew-superopen
-          formula: so
-          tag: ${{ needs.prepare.outputs.tag }}
+          path: homebrew-tap
+          fetch-depth: 0
+
+      - name: Download release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-checksums
+          gh release download "$RELEASE_TAG" \
+            --repo "$REPOSITORY" \
+            --dir release-checksums \
+            --pattern 'so-darwin-arm64.tar.gz.sha256' \
+            --pattern 'so-darwin-amd64.tar.gz.sha256' \
+            --pattern 'so-linux-arm64.tar.gz.sha256' \
+            --pattern 'so-linux-amd64.tar.gz.sha256'
+
+      - name: Generate and validate formula
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/release-packages.py homebrew-formula \
+            --version "$RELEASE_VERSION" \
+            --checksums-dir release-checksums \
+            --output homebrew-tap/Formula/so.rb
+          ruby -c homebrew-tap/Formula/so.rb
+
+      - name: Publish formula to tap
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          if git -C homebrew-tap diff --quiet -- Formula/so.rb; then
+            echo "Homebrew formula is already current"
+            exit 0
+          fi
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-tap add Formula/so.rb
+          git -C homebrew-tap commit -m "so ${RELEASE_VERSION}"
+          git -C homebrew-tap push origin HEAD:main

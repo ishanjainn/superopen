@@ -1,49 +1,22 @@
+# typed: strict
+# frozen_string_literal: true
+
 # Homebrew formula for the Superopen CLI (`so`).
 #
-# Prefer the published tap once releases exist:
+# Development-only formula. Released binaries live in the published tap:
 #   brew install ishanjainn/superopen/so
-#
-# Or install from this file / HEAD:
+# To build the current checkout instead:
 #   brew install --HEAD ./scripts/so.rb
-#
-# Curl installer (no Homebrew required):
-#   curl -fsSL https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.sh | sh
 class So < Formula
   desc "Superopen - harness engineering for AI coding agents"
   homepage "https://github.com/ishanjainn/superopen"
   license "Apache-2.0"
-  version "0.1.0"
+  head "https://github.com/ishanjainn/superopen.git", branch: "main"
 
-  on_macos do
-    on_arm do
-      url "https://github.com/ishanjainn/superopen/releases/download/cli-#{version}/so-darwin-arm64.tar.gz"
-      # sha256 updated by the CLI release workflow / tap bump
-    end
-    on_intel do
-      url "https://github.com/ishanjainn/superopen/releases/download/cli-#{version}/so-darwin-amd64.tar.gz"
-    end
-  end
-
-  on_linux do
-    on_arm do
-      url "https://github.com/ishanjainn/superopen/releases/download/cli-#{version}/so-linux-arm64.tar.gz"
-    end
-    on_intel do
-      url "https://github.com/ishanjainn/superopen/releases/download/cli-#{version}/so-linux-amd64.tar.gz"
-    end
-  end
-
-  head do
-    url "https://github.com/ishanjainn/superopen.git", branch: "main"
-    depends_on "go" => :build
-  end
+  depends_on "go" => :build
 
   def install
-    if build.head?
-      system "go", "build", "-o", bin/"so", "./cmd/so"
-    else
-      bin.install Dir["so*"].first => "so"
-    end
+    system "go", "build", "-o", bin/"so", "./cmd/so"
   end
 
   test do

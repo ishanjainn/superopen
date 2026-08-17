@@ -46,6 +46,9 @@ class ReleaseTests(unittest.TestCase):
             publisher = tool["publisher"]
             self.assertIn(f"./.github/workflows/release-{publisher}.yml", orchestrator)
             self.assertIn(f"- {tool['display_name']}", orchestrator)
+        self.assertNotIn("action-homebrew-bump-formula", orchestrator)
+        self.assertIn("release-packages.py homebrew-formula", orchestrator)
+        self.assertIn("repository: ishanjainn/homebrew-superopen", orchestrator)
 
         pr_summary = (workflow_directory / "admin-pr-summary.yml").read_text(encoding="utf-8")
         self.assertIn("pull-requests: write", pr_summary)
@@ -418,6 +421,45 @@ class ReleaseTests(unittest.TestCase):
             path.write_text("package version\n", encoding="utf-8")
             with self.assertRaisesRegex(release.ReleaseError, "uniquely"):
                 release.replace_go_version(path, "0.2.0")
+
+    def test_homebrew_formula_requires_and_renders_every_native_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checksum_dir = Path(directory)
+            expected = {}
+            for index, (operating_system, architecture) in enumerate(
+                release.HOMEBREW_ASSETS, start=1
+            ):
+                checksum = f"{index:064x}"
+                asset = f"so-{operating_system}-{architecture}.tar.gz"
+                (checksum_dir / f"{asset}.sha256").write_text(
+                    f"{checksum}  {asset}\n", encoding="utf-8"
+                )
+                expected[(operating_system, architecture)] = checksum
+
+            checksums = release.load_homebrew_checksums(checksum_dir)
+            self.assertEqual(checksums, expected)
+            formula = release.render_homebrew_formula("0.3.0", checksums)
+            self.assertIn('version "0.3.0"', formula)
+            for (operating_system, architecture), checksum in expected.items():
+                self.assertIn(f"so-{operating_system}-{architecture}.tar.gz", formula)
+                self.assertIn(f'sha256 "{checksum}"', formula)
+
+    def test_homebrew_formula_rejects_missing_or_mislabeled_checksums(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checksum_dir = Path(directory)
+            with self.assertRaisesRegex(release.ReleaseError, "missing Homebrew checksum"):
+                release.load_homebrew_checksums(checksum_dir)
+
+            for operating_system, architecture in release.HOMEBREW_ASSETS:
+                asset = f"so-{operating_system}-{architecture}.tar.gz"
+                (checksum_dir / f"{asset}.sha256").write_text(
+                    f"{'a' * 64}  {asset}\n", encoding="utf-8"
+                )
+            first_os, first_arch = release.HOMEBREW_ASSETS[0]
+            first = checksum_dir / f"so-{first_os}-{first_arch}.tar.gz.sha256"
+            first.write_text(f"{'a' * 64}  wrong.tar.gz\n", encoding="utf-8")
+            with self.assertRaisesRegex(release.ReleaseError, "wrong asset"):
+                release.load_homebrew_checksums(checksum_dir)
 
     def test_bump_rejects_changes_outside_configured_version_files(self):
         with tempfile.TemporaryDirectory() as directory:
