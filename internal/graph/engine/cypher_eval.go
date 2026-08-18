@@ -246,17 +246,18 @@ func evalCypherCall(call cy.CallExpr, binding cypherBinding, params map[string]a
 		return nil, nil
 	case "substring":
 		text := []rune(fmt.Sprint(arg(0)))
-		start := clampFloatToInt(numericValueOrZero(arg(1)))
+		start := cypherIntArg(arg(1))
 		if start < 0 || start > len(text) {
 			return "", nil
 		}
 		end := len(text)
 		if len(args) > 2 {
-			length := clampFloatToInt(numericValueOrZero(arg(2)))
+			length := cypherIntArg(arg(2))
 			if length < 0 {
 				length = 0
 			}
-			if length < end-start {
+			remaining := end - start
+			if length < remaining {
 				end = start + length
 			}
 		}
@@ -278,12 +279,12 @@ func evalCypherCall(call cy.CallExpr, binding cypherBinding, params map[string]a
 		return string(runes), nil
 	case "left":
 		runes := []rune(fmt.Sprint(arg(0)))
-		length := maxInt(0, clampFloatToInt(numericValueOrZero(arg(1))))
+		length := maxInt(0, cypherIntArg(arg(1)))
 		end := minInt(len(runes), length)
 		return string(runes[:end]), nil
 	case "right":
 		runes := []rune(fmt.Sprint(arg(0)))
-		length := maxInt(0, clampFloatToInt(numericValueOrZero(arg(1))))
+		length := maxInt(0, cypherIntArg(arg(1)))
 		start := maxInt(0, len(runes)-length)
 		return string(runes[start:]), nil
 	case "replace":
@@ -396,15 +397,55 @@ func numericValue(value any) (float64, bool) {
 	}
 }
 
-func numericValueOrZero(value any) float64 {
-	parsed, _ := numericValue(value)
-	return parsed
+// cypherIntArg converts Cypher numeric arguments to int with constant bounds
+// checks so int64 values from ParseInt/literals cannot silently truncate.
+func cypherIntArg(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return clampInt64ToInt(v)
+	case float64:
+		return clampFloat64ToInt(v)
+	case json.Number:
+		if parsed, err := v.Int64(); err == nil {
+			return clampInt64ToInt(parsed)
+		}
+		parsed, err := v.Float64()
+		if err != nil {
+			return 0
+		}
+		return clampFloat64ToInt(parsed)
+	case string:
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return clampInt64ToInt(parsed)
+		}
+		parsed, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return 0
+		}
+		return clampFloat64ToInt(parsed)
+	default:
+		parsed, ok := numericValue(value)
+		if !ok {
+			return 0
+		}
+		return clampFloat64ToInt(parsed)
+	}
 }
 
-// clampFloatToInt converts a float64 into int with explicit bounds checks so
-// large Cypher numeric arguments cannot truncate into a smaller int silently.
-func clampFloatToInt(value float64) int {
-	if math.IsNaN(value) {
+func clampInt64ToInt(value int64) int {
+	if value > math.MaxInt {
+		return math.MaxInt
+	}
+	if value < math.MinInt {
+		return math.MinInt
+	}
+	return int(value)
+}
+
+func clampFloat64ToInt(value float64) int {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return 0
 	}
 	if value >= float64(math.MaxInt) {
@@ -413,7 +454,7 @@ func clampFloatToInt(value float64) int {
 	if value <= float64(math.MinInt) {
 		return math.MinInt
 	}
-	return int(value)
+	return clampInt64ToInt(int64(value))
 }
 
 func cypherEqual(left, right any) bool {

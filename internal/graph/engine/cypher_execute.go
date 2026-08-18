@@ -377,18 +377,19 @@ func projectCypherBindings(ctx context.Context, input []cypherBinding, projectio
 	}
 	total := len(rows)
 	start := minInt(projection.Skip, len(rows))
-	end := len(rows)
 	limit := projection.Limit
-	if limit == 0 || limit > ceiling {
+	if limit <= 0 || limit > ceiling {
 		limit = ceiling
 	}
-	// Match applyCypherSlice: compare against remaining length so start+limit
-	// cannot overflow before the capacity calculation below.
-	if limit < end-start {
-		end = start + limit
+	limit = minInt(limit, cypherBindingCap)
+	// Cap by remaining rows without computing start+limit for capacity, so the
+	// allocation size cannot overflow.
+	count := len(rows) - start
+	if limit < count {
+		count = limit
 	}
-	result := make([]cypherBinding, 0, end-start)
-	for _, row := range rows[start:end] {
+	result := make([]cypherBinding, 0, count)
+	for _, row := range rows[start : start+count] {
 		result = append(result, row.binding)
 	}
 	return result, columns, total, nil
