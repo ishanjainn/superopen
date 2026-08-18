@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -245,16 +246,21 @@ func evalCypherCall(call cy.CallExpr, binding cypherBinding, params map[string]a
 		return nil, nil
 	case "substring":
 		text := []rune(fmt.Sprint(arg(0)))
-		start, _ := numericValue(arg(1))
-		if start < 0 || int(start) > len(text) {
+		start := clampFloatToInt(numericValueOrZero(arg(1)))
+		if start < 0 || start > len(text) {
 			return "", nil
 		}
 		end := len(text)
 		if len(args) > 2 {
-			length, _ := numericValue(arg(2))
-			end = minInt(end, int(start+length))
+			length := clampFloatToInt(numericValueOrZero(arg(2)))
+			if length < 0 {
+				length = 0
+			}
+			if length < end-start {
+				end = start + length
+			}
 		}
-		return string(text[int(start):end]), nil
+		return string(text[start:end]), nil
 	case "size", "length":
 		switch value := arg(0).(type) {
 		case string:
@@ -272,13 +278,13 @@ func evalCypherCall(call cy.CallExpr, binding cypherBinding, params map[string]a
 		return string(runes), nil
 	case "left":
 		runes := []rune(fmt.Sprint(arg(0)))
-		length, _ := numericValue(arg(1))
-		end := minInt(len(runes), maxInt(0, int(length)))
+		length := maxInt(0, clampFloatToInt(numericValueOrZero(arg(1))))
+		end := minInt(len(runes), length)
 		return string(runes[:end]), nil
 	case "right":
 		runes := []rune(fmt.Sprint(arg(0)))
-		length, _ := numericValue(arg(1))
-		start := maxInt(0, len(runes)-maxInt(0, int(length)))
+		length := maxInt(0, clampFloatToInt(numericValueOrZero(arg(1))))
+		start := maxInt(0, len(runes)-length)
 		return string(runes[start:]), nil
 	case "replace":
 		return strings.ReplaceAll(fmt.Sprint(arg(0)), fmt.Sprint(arg(1)), fmt.Sprint(arg(2))), nil
@@ -388,6 +394,26 @@ func numericValue(value any) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func numericValueOrZero(value any) float64 {
+	parsed, _ := numericValue(value)
+	return parsed
+}
+
+// clampFloatToInt converts a float64 into int with explicit bounds checks so
+// large Cypher numeric arguments cannot truncate into a smaller int silently.
+func clampFloatToInt(value float64) int {
+	if math.IsNaN(value) {
+		return 0
+	}
+	if value >= float64(math.MaxInt) {
+		return math.MaxInt
+	}
+	if value <= float64(math.MinInt) {
+		return math.MinInt
+	}
+	return int(value)
 }
 
 func cypherEqual(left, right any) bool {

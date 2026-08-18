@@ -382,7 +382,9 @@ func projectCypherBindings(ctx context.Context, input []cypherBinding, projectio
 	if limit == 0 || limit > ceiling {
 		limit = ceiling
 	}
-	if end > start+limit {
+	// Match applyCypherSlice: compare against remaining length so start+limit
+	// cannot overflow before the capacity calculation below.
+	if limit < end-start {
 		end = start + limit
 	}
 	result := make([]cypherBinding, 0, end-start)

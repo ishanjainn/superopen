@@ -70,3 +70,22 @@ func TestCodeSearchReturnsEmptyWithoutMatches(t *testing.T) {
 		t.Fatalf("matches = %#v", result.Matches)
 	}
 }
+
+func TestCodeSearchFallbackFindsMatchesWithoutRipgrep(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(path, []byte("package main\nfunc HelloWorld() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir()) // ensure LookPath("rg") fails
+	result, err := CodeSearch(context.Background(), root, api.CodeSearchRequest{Pattern: "HelloWorld", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Matches) != 1 {
+		t.Fatalf("matches = %#v", result.Matches)
+	}
+	if result.Matches[0].Location.File != "main.go" {
+		t.Fatalf("file = %q", result.Matches[0].Location.File)
+	}
+}
