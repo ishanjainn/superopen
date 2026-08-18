@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/session/agentlinks"
-	"github.com/ishanjainn/superopen/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/session/trace"
 )
 
 func TestUpsertActiveFromSpansDoesNotPoisonParentWithSubagentType(t *testing.T) {
 	root := t.TempDir()
-	paths := harness.Paths{
+	paths := paths.Paths{
 		Root:          filepath.Join(root, ".so"),
 		SessionsDir:   filepath.Join(root, ".so", "sessions"),
 		SessionsIndex: filepath.Join(root, ".so", "sessions", "index.json"),
@@ -26,7 +26,7 @@ func TestUpsertActiveFromSpansDoesNotPoisonParentWithSubagentType(t *testing.T) 
 
 	// Parent chat emits a subagent span ON ITS OWN session id (Cursor Task marker).
 	// That must not mark the parent as is_subagent / hide it from the list.
-	store.UpsertActiveFromSpans([]tracestore.Span{
+	store.UpsertActiveFromSpans([]trace.Span{
 		{
 			Name:           "coding_agent.session",
 			StartTimeUnixN: now,
@@ -73,7 +73,7 @@ func TestUpsertActiveFromSpansDoesNotPoisonParentWithSubagentType(t *testing.T) 
 
 func TestResolveNestedParentClearsOrphanSubagentFlag(t *testing.T) {
 	root := t.TempDir()
-	paths := harness.Paths{
+	paths := paths.Paths{
 		Root:          filepath.Join(root, ".so"),
 		SessionsDir:   filepath.Join(root, ".so", "sessions"),
 		SessionsIndex: filepath.Join(root, ".so", "sessions", "index.json"),
@@ -110,7 +110,7 @@ func TestResolveNestedParentClearsOrphanSubagentFlag(t *testing.T) {
 
 func TestUpsertActiveFromSpansNestsSubagents(t *testing.T) {
 	root := t.TempDir()
-	paths := harness.Paths{
+	paths := paths.Paths{
 		Root:          filepath.Join(root, ".so"),
 		SessionsDir:   filepath.Join(root, ".so", "sessions"),
 		SessionsIndex: filepath.Join(root, ".so", "sessions", "index.json"),
@@ -121,7 +121,7 @@ func TestUpsertActiveFromSpansNestsSubagents(t *testing.T) {
 	store := NewStore(paths)
 
 	now := time.Now().UnixNano()
-	store.UpsertActiveFromSpans([]tracestore.Span{
+	store.UpsertActiveFromSpans([]trace.Span{
 		{
 			Name:           "coding_agent.session",
 			StartTimeUnixN: now,
@@ -181,7 +181,7 @@ func TestUpsertActiveFromSpansNestsSubagents(t *testing.T) {
 
 func TestUpsertActiveFromSpansSameThreadOneSession(t *testing.T) {
 	root := t.TempDir()
-	paths := harness.Paths{
+	paths := paths.Paths{
 		Root:          filepath.Join(root, ".so"),
 		SessionsDir:   filepath.Join(root, ".so", "sessions"),
 		SessionsIndex: filepath.Join(root, ".so", "sessions", "index.json"),
@@ -193,7 +193,7 @@ func TestUpsertActiveFromSpansSameThreadOneSession(t *testing.T) {
 	now := time.Now().UnixNano()
 
 	// Two ephemeral session ids, same conversation - one chat row.
-	store.UpsertActiveFromSpans([]tracestore.Span{
+	store.UpsertActiveFromSpans([]trace.Span{
 		{
 			StartTimeUnixN: now,
 			Attributes: map[string]string{
@@ -228,7 +228,7 @@ func TestUpsertActiveFromSpansSameThreadOneSession(t *testing.T) {
 
 func TestUpsertActiveFromSpansUsesAgentLinks(t *testing.T) {
 	root := t.TempDir()
-	paths := harness.Paths{
+	paths := paths.Paths{
 		Root:          filepath.Join(root, ".so"),
 		SessionsDir:   filepath.Join(root, ".so", "sessions"),
 		SessionsIndex: filepath.Join(root, ".so", "sessions", "index.json"),
@@ -243,7 +243,7 @@ func TestUpsertActiveFromSpansUsesAgentLinks(t *testing.T) {
 	}
 	store := NewStore(paths)
 	now := time.Now().UnixNano()
-	store.UpsertActiveFromSpans([]tracestore.Span{
+	store.UpsertActiveFromSpans([]trace.Span{
 		{
 			Name:           "coding_agent.llm.turn",
 			StartTimeUnixN: now,

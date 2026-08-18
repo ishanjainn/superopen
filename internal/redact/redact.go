@@ -32,7 +32,7 @@ import (
 const Replacement = "[REDACTED]"
 
 // PrivateReplacement preserves event structure while excluding user-marked
-// content from traces, reviews, indexes, and durable memory.
+// content from captured traces and graph indexes.
 const PrivateReplacement = "[EXCLUDED_PRIVATE]"
 
 // JSON sanitizes every string value while preserving the event envelope. For
@@ -199,7 +199,7 @@ func StringFull(s string) string {
 	return s
 }
 
-// scrubExfilURLs redacts common paste/exfil hosts when redact_output guardrails are on.
+// scrubExfilURLs redacts common paste/exfil hosts from captured telemetry.
 func scrubExfilURLs(s string) string {
 	hosts := []string{
 		"pastebin.com",

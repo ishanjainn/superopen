@@ -32,7 +32,7 @@ describe("removeProject / pruneMissingProjects", () => {
     const repo = join(dir, "repo-a");
     const so = join(repo, ".so");
     mkdirSync(so, { recursive: true });
-    writeFileSync(join(so, "config.yaml"), "memory:\n  enabled: true\n");
+    writeFileSync(join(so, "config.yaml"), "project: test\n");
     writeFileSync(
       projectsPath,
       JSON.stringify(

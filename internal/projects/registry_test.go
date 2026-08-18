@@ -46,7 +46,7 @@ func TestRemovePurgeAndPruneMissing(t *testing.T) {
 	if err := os.MkdirAll(so, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(so, "config.yaml"), []byte("memory:\n  enabled: true\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(so, "config.yaml"), []byte("project: test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	p, err := projects.Register(repo, so, "")

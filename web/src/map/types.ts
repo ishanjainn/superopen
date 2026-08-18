@@ -30,8 +30,6 @@ export interface SessionMeta {
   eventCount: number;
   /** user-turn count; with eventCount, the badge's cheap staleness signal */
   userTurns?: number;
-  /** evaluation state for the rail badge; absent when never evaluated */
-  reportState?: "running" | "done" | "stale" | "failed";
 }
 
 export type AgentKind = "main" | "subagent";
@@ -198,112 +196,6 @@ export interface Observability {
 }
 
 export type MetricObservability = "exact" | "estimated" | "unavailable";
-
-/** LLM-assisted evaluation of one session; verdicts are server-derived
- * from finding severities, never decided by the judge itself */
-export interface Report {
-  version: number;
-  session: {
-    id: string;
-    harness: string;
-    model?: string;
-    /** event count the report was generated from - the staleness signal */
-    eventCount: number;
-  };
-  judge: {
-    cli: string;
-    /** the LLM that actually judged, as reported by the CLI itself */
-    model?: string;
-    promptVersion: number;
-    /** set only when the report carries a scored rubric */
-    rubricPromptVersion?: number;
-    generatedAt: string;
-  };
-  taskSummary: string;
-  dimensions: ReportDimension[];
-  /** task-accounting layer; absent on --no-rubric and pre-rubric reports */
-  rubric?: Rubric;
-  notableMoments?: ReportMoment[];
-  narrative: string;
-}
-
-export type RubricStatus = "scored" | "unavailable";
-export type RubricReason = "generation-failed" | "no-task-text" | "weak-task-text" | "no-events";
-/** what the log let the scorer judge; none forces insufficient-data */
-export type Coverage = "sufficient" | "partial" | "none";
-
-/** session-specific criteria generated before scoring, grouped by the
- * independent tasks the judge enumerated from the user messages */
-export interface Rubric {
-  status: RubricStatus;
-  reason?: RubricReason;
-  source?: "full" | "task";
-  taskDigest?: string;
-  tasks?: RubricTask[];
-  /** what the scorer felt the rubric did not let it express */
-  note?: string;
-}
-
-export interface RubricTask {
-  title: string;
-  type?: string;
-  anchorUserMessages: number[];
-  /** mark seqs the anchors resolve to - the task's start on the timeline */
-  anchorSeqs?: number[];
-  criteria: RubricCriterion[];
-}
-
-export interface RubricCriterion {
-  id: string;
-  title: string;
-  why?: string;
-  good?: string;
-  bad?: string;
-  coverage?: Coverage;
-  verdict: Verdict;
-  findings: ReportFinding[];
-}
-
-export type Verdict = "good" | "warning" | "problem" | "insufficient-data";
-export type Severity = "info" | "warning" | "problem";
-export type DimensionName = "exploration" | "scope" | "wandering" | "verification";
-
-export interface ReportDimension {
-  name: DimensionName;
-  verdict: Verdict;
-  findings: ReportFinding[];
-}
-
-export interface ReportFinding {
-  claim: string;
-  severity: Severity;
-  evidenceSeqs?: number[];
-}
-
-export interface ReportMoment {
-  seq: number;
-  note: string;
-}
-
-export interface ReportStatus {
-  state: "none" | "running" | "done" | "failed";
-  /** done, but generated from fewer events than the trace now has */
-  stale: boolean;
-  report?: Report;
-  error?: string;
-  judgeAvailable: boolean;
-  /** default judge (first available) */
-  judgeCli?: string;
-  /** every installed judge CLI, preference order first */
-  judgeClis?: string[];
-}
-
-/** the panel's judge selection, sent with the analyze request */
-export interface JudgeChoice {
-  cli: string;
-  /** empty string keeps the CLI's default model */
-  model: string;
-}
 
 export interface ActionCounts {
   search: number;

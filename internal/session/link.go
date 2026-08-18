@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ishanjainn/superopen/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/session/trace"
 )
 
 // ApplyVCSFromSpans folds commit/PR/branch attrs from spans into meta.
-func ApplyVCSFromSpans(meta *Meta, spans []tracestore.Span) {
+func ApplyVCSFromSpans(meta *Meta, spans []trace.Span) {
 	if meta == nil {
 		return
 	}

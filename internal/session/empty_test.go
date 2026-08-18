@@ -6,15 +6,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ishanjainn/superopen/internal/harness"
-	"github.com/ishanjainn/superopen/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/session/trace"
 )
 
 func TestSpansHaveActivity(t *testing.T) {
 	if SpansHaveActivity(nil) {
 		t.Fatal("empty spans")
 	}
-	if SpansHaveActivity([]tracestore.Span{{
+	if SpansHaveActivity([]trace.Span{{
 		Name: "coding_agent.session",
 		Attributes: map[string]string{
 			"coding_agent.client":  "cursor",
@@ -25,7 +25,7 @@ func TestSpansHaveActivity(t *testing.T) {
 	}}) {
 		t.Fatal("identity-only spans must not count as activity")
 	}
-	if !SpansHaveActivity([]tracestore.Span{{
+	if !SpansHaveActivity([]trace.Span{{
 		Name: "coding_agent.prompt",
 		Attributes: map[string]string{
 			"gen_ai.prompt": "hello",
@@ -33,7 +33,7 @@ func TestSpansHaveActivity(t *testing.T) {
 	}}) {
 		t.Fatal("prompt must count")
 	}
-	if !SpansHaveActivity([]tracestore.Span{{
+	if !SpansHaveActivity([]trace.Span{{
 		Name: "coding_agent.read",
 		Attributes: map[string]string{
 			"coding_agent.file_path": "main.go",
@@ -62,7 +62,7 @@ func TestIsEmptyListItem(t *testing.T) {
 
 func TestListDetailedKeepsToolOnlyLiveSession(t *testing.T) {
 	root := t.TempDir()
-	paths := harness.Resolve(root)
+	paths := paths.Resolve(root)
 	if err := paths.EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestListDetailedKeepsToolOnlyLiveSession(t *testing.T) {
 
 func TestUpsertSkipsIdentityOnly(t *testing.T) {
 	root := t.TempDir()
-	paths := harness.Paths{
+	paths := paths.Paths{
 		Root:          filepath.Join(root, ".so"),
 		SessionsDir:   filepath.Join(root, ".so", "sessions"),
 		SessionsIndex: filepath.Join(root, ".so", "sessions", "index.json"),
@@ -92,7 +92,7 @@ func TestUpsertSkipsIdentityOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := NewStore(paths)
-	store.UpsertActiveFromSpans([]tracestore.Span{{
+	store.UpsertActiveFromSpans([]trace.Span{{
 		Name:           "coding_agent.session",
 		StartTimeUnixN: time.Now().UnixNano(),
 		Attributes: map[string]string{
@@ -105,7 +105,7 @@ func TestUpsertSkipsIdentityOnly(t *testing.T) {
 	if _, err := store.Get("empty-chat"); err == nil {
 		t.Fatal("identity-only upsert must not create a session")
 	}
-	store.UpsertActiveFromSpans([]tracestore.Span{{
+	store.UpsertActiveFromSpans([]trace.Span{{
 		Name:           "coding_agent.prompt",
 		StartTimeUnixN: time.Now().UnixNano(),
 		Attributes: map[string]string{

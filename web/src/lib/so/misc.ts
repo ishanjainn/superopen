@@ -1,9 +1,9 @@
-import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { homedir } from "os";
 import { basename, dirname, join } from "path";
 import { gitRemoteURL, repoSlug } from "./git";
-import { fileExists, readJSONFile, readText } from "./nodeio";
-import { processRepoRoot, soPath, soRoot } from "./root";
+import { fileExists, readText } from "./nodeio";
+import { processRepoRoot } from "./root";
 
 export type Project = {
   id: string;
@@ -11,75 +11,65 @@ export type Project = {
   repo_root: string;
   so_root?: string;
   remote_url?: string;
-  /** `owner/repo` when resolvable from git remote */
   slug?: string;
-  /** True when repo_root is gone from disk but still in projects.json */
   missing?: boolean;
 };
 
-function enrich(p: Project): Project {
-  const remote = p.remote_url || gitRemoteURL(p.repo_root) || undefined;
-  const slug = remote
-    ? repoSlug(p.repo_root)
-    : p.slug || p.name || basename(p.repo_root) || p.id;
-  const missing = !fileExists(p.repo_root);
+function enrich(project: Project): Project {
+  const remote = project.remote_url || gitRemoteURL(project.repo_root) || undefined;
+  const slug = remote ? repoSlug(project.repo_root) : project.slug || project.name || basename(project.repo_root) || project.id;
   return {
-    ...p,
+    ...project,
     remote_url: remote,
     slug,
-    name: p.name || slug.split("/").pop() || basename(p.repo_root) || p.id,
-    missing,
+    name: project.name || slug.split("/").pop() || basename(project.repo_root) || project.id,
+    missing: !fileExists(project.repo_root),
   };
 }
 
 function projectsFile(): string {
-  const xdg = process.env.XDG_CONFIG_HOME;
-  if (xdg) return join(xdg, "superopen", "projects.json");
-  // Match Go internal/projects: Windows → %APPDATA%\superopen
+  if (process.env.XDG_CONFIG_HOME) return join(process.env.XDG_CONFIG_HOME, "superopen", "projects.json");
   if (process.platform === "win32") {
-    const appdata =
-      process.env.APPDATA || join(homedir(), "AppData", "Roaming");
-    return join(appdata, "superopen", "projects.json");
+    return join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "superopen", "projects.json");
   }
   return join(homedir(), ".config", "superopen", "projects.json");
 }
 
-export function listProjects(activeRoot = processRepoRoot()): {
+type ProjectsFile = {
   projects: Project[];
-  active: Project;
-} {
-  const active: Project = enrich({
-    id: "local",
-    name: basename(activeRoot) || "local",
-    repo_root: activeRoot,
-    so_root: join(activeRoot, ".so"),
-  });
-  const p = projectsFile();
-  if (!fileExists(p)) {
-    return { projects: [active], active };
-  }
+  active_project_id?: string;
+  active_id?: string;
+};
+
+function readProjectsFile(): ProjectsFile {
+  const path = projectsFile();
+  if (!fileExists(path)) return { projects: [] };
   try {
-    const raw = JSON.parse(readText(p)) as {
-      projects?: Project[];
-      active_id?: string;
-      active_project_id?: string;
+    const value = JSON.parse(readText(path)) as ProjectsFile;
+    return {
+      projects: Array.isArray(value.projects) ? value.projects : [],
+      active_project_id: value.active_project_id || value.active_id,
     };
-    const projects = (
-      Array.isArray(raw.projects) ? raw.projects : [active]
-    ).map(enrich);
-    const activeKey = raw.active_project_id || raw.active_id || "";
-    const found =
-      projects.find((x) => x.id === activeKey) ||
-      projects.find((x) => x.repo_root === activeRoot) ||
-      projects[0] ||
-      active;
-    if (!projects.some((x) => x.repo_root === activeRoot)) {
-      projects.unshift(active);
-    }
-    return { projects, active: enrich(found) };
   } catch {
-    return { projects: [active], active };
+    return { projects: [] };
   }
+}
+
+function writeProjectsFile(value: ProjectsFile) {
+  const path = projectsFile();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify({ projects: value.projects, active_project_id: value.active_project_id || "" }, null, 2)}\n`, "utf8");
+}
+
+export function listProjects(activeRoot = processRepoRoot()): { projects: Project[]; active: Project } {
+  const local = enrich({ id: "local", name: basename(activeRoot) || "local", repo_root: activeRoot, so_root: join(activeRoot, ".so") });
+  const value = readProjectsFile();
+  const projects = value.projects.map(enrich);
+  if (!projects.some((project) => project.repo_root === activeRoot)) projects.unshift(local);
+  const active = projects.find((project) => project.id === value.active_project_id) ||
+    projects.find((project) => project.repo_root === activeRoot) ||
+    local;
+  return { projects, active: enrich(active) };
 }
 
 export type RemoveProjectResult = {
@@ -90,431 +80,26 @@ export type RemoveProjectResult = {
   repo_missing: boolean;
 };
 
-type ProjectsFile = {
-  projects: Project[];
-  active_project_id?: string;
-  active_id?: string;
-};
+function matchesProject(project: Project, selector: string): boolean {
+  return project.id === selector || project.repo_root === selector || project.name === selector || project.slug === selector;
+}
 
-function readProjectsFile(): ProjectsFile {
-  const p = projectsFile();
-  if (!fileExists(p)) return { projects: [] };
-  try {
-    const raw = JSON.parse(readText(p)) as ProjectsFile;
-    return {
-      projects: Array.isArray(raw.projects) ? raw.projects : [],
-      active_project_id: raw.active_project_id || raw.active_id,
-    };
-  } catch {
-    return { projects: [] };
+export function removeProject(selector: string, purge = false): RemoveProjectResult {
+  const value = readProjectsFile();
+  const index = value.projects.findIndex((project) => matchesProject(project, selector));
+  if (index < 0) throw new Error(`project not found: ${selector}`);
+  const project = enrich(value.projects[index]);
+  const soPath = project.so_root || join(project.repo_root, ".so");
+  value.projects.splice(index, 1);
+  if (value.active_project_id === project.id || value.active_project_id === selector) value.active_project_id = value.projects[0]?.id || "";
+  writeProjectsFile(value);
+  if (purge) {
+    if (basename(soPath.replace(/\/+$/, "")) !== ".so") throw new Error(`refusing to delete non-.so path: ${soPath}`);
+    rmSync(soPath, { recursive: true, force: true });
   }
+  return { project, unregistered: true, purged_so: purge, so_path: soPath, repo_missing: Boolean(project.missing) };
 }
 
-function writeProjectsFile(data: ProjectsFile) {
-  const p = projectsFile();
-  mkdirSync(dirname(p), { recursive: true });
-  writeFileSync(
-    p,
-    JSON.stringify(
-      {
-        projects: data.projects,
-        active_project_id: data.active_project_id || "",
-      },
-      null,
-      2,
-    ) + "\n",
-    "utf8",
-  );
-}
-
-function matchesProject(p: Project, idOrRoot: string): boolean {
-  return (
-    p.id === idOrRoot ||
-    p.repo_root === idOrRoot ||
-    p.name === idOrRoot ||
-    p.slug === idOrRoot
-  );
-}
-
-function safePurgeSO(soDir: string): void {
-  const cleaned = soDir.replace(/\/+$/, "");
-  if (basename(cleaned) !== ".so") {
-    throw new Error(`refusing to delete non-.so path: ${soDir}`);
-  }
-  if (!fileExists(cleaned)) return;
-  rmSync(cleaned, { recursive: true, force: true });
-}
-
-/** Unregister a project; with purgeSO also delete its .so directory. */
-export function removeProject(
-  idOrRoot: string,
-  purgeSO = false,
-): RemoveProjectResult {
-  const data = readProjectsFile();
-  const idx = data.projects.findIndex((p) => matchesProject(p, idOrRoot));
-  if (idx < 0) {
-    throw new Error(`project not found: ${idOrRoot}`);
-  }
-  const found = enrich(data.projects[idx]);
-  const soDir = found.so_root || join(found.repo_root, ".so");
-  data.projects.splice(idx, 1);
-  if (
-    data.active_project_id === found.id ||
-    data.active_project_id === idOrRoot
-  ) {
-    data.active_project_id = data.projects[0]?.id || "";
-  }
-  writeProjectsFile(data);
-
-  const result: RemoveProjectResult = {
-    project: found,
-    unregistered: true,
-    purged_so: false,
-    so_path: soDir,
-    repo_missing: Boolean(found.missing),
-  };
-  if (purgeSO) {
-    safePurgeSO(soDir);
-    result.purged_so = true;
-  }
-  return result;
-}
-
-/** Drop registry entries whose repo_root no longer exists. */
-export function pruneMissingProjects(purgeSO = false): RemoveProjectResult[] {
-  const data = readProjectsFile();
-  const missing = data.projects.filter((p) => !fileExists(p.repo_root));
-  const out: RemoveProjectResult[] = [];
-  for (const p of missing) {
-    out.push(removeProject(p.id, purgeSO));
-  }
-  return out;
-}
-
-export function loadConfig(): Record<string, unknown> {
-  const p = soPath("config.yaml");
-  if (!fileExists(p)) {
-    return {
-      memory: { enabled: true, idle_harvest_hours: 6, backend: "auto" },
-      guardrails: { enabled: true },
-      retention: { days: 7 },
-    };
-  }
-  const raw = readText(p);
-  // Lightweight structured view for Settings UI (no yaml dependency).
-  const pick = (key: string, fallback = ""): string => {
-    const re = new RegExp(`^\\s*${key}:\\s*(.+)$`, "m");
-    const m = raw.match(re);
-    return m ? m[1].replace(/['"]/g, "").trim() : fallback;
-  };
-  const pickInt = (key: string, fallback: number): number => {
-    const n = parseInt(pick(key, ""), 10);
-    return Number.isFinite(n) ? n : fallback;
-  };
-  return {
-    memory: {
-      enabled: !/memory:[\s\S]*?enabled:\s*(false|0|off)/i.test(raw),
-      idle_harvest_hours: pickInt("idle_harvest_hours", 6),
-      backend: (() => {
-        const m = raw.match(/memory:[\s\S]*?backend:\s*(\S+)/);
-        return m?.[1]?.replace(/['"]/g, "") || "auto";
-      })(),
-    },
-    guardrails: {
-      enabled: !/guardrails:[\s\S]*?enabled:\s*(false|0|off)/i.test(raw),
-    },
-    graph: {
-      code: !/graph:[\s\S]*?code:\s*false/i.test(raw),
-      semantic: !/graph:[\s\S]*?semantic:\s*false/i.test(raw),
-    },
-    recommendations: {
-      auto: !/recommendations:[\s\S]*?auto:\s*false/i.test(raw),
-      require_approval: !/require_approval:\s*false/i.test(raw),
-      soft_auto:
-        /require_approval:\s*false/i.test(raw) ||
-        (!/auto_apply_tiers:\s*\[\s*\]/.test(raw) &&
-          (!/auto_apply_tiers:/.test(raw) ||
-            /auto_apply_tiers:[\s\S]*?\bsoft\b/.test(raw) ||
-            /auto_apply_tiers:[\s\S]*?\ball\b/.test(raw))),
-    },
-    retention: {
-      days: (() => {
-        const m = raw.match(/retention:[\s\S]*?days:\s*(\d+)/);
-        if (!m) return 7;
-        const n = parseInt(m[1], 10);
-        return Number.isFinite(n) && n > 0 ? n : 7;
-      })(),
-    },
-    evals: {
-      on_session_end: !/on_session_end:\s*false/i.test(raw),
-      auto: !/evals:[\s\S]*?auto:\s*false/i.test(raw),
-      backend: (() => {
-        const m = raw.match(/evals:[\s\S]*?backend:\s*(\S+)/);
-        return m?.[1]?.replace(/['"]/g, "") || pick("backend", "auto");
-      })(),
-      model_claude: (() => {
-        const m = raw.match(/evals:[\s\S]*?models:[\s\S]*?claude:\s*(\S+)/);
-        return m?.[1]?.replace(/['"]/g, "") || "claude-sonnet-5";
-      })(),
-      model_codex: (() => {
-        const m = raw.match(/evals:[\s\S]*?models:[\s\S]*?codex:\s*(\S+)/);
-        return m?.[1]?.replace(/['"]/g, "") || "gpt-5.6-luna";
-      })(),
-    },
-    advanced_llm: {
-      provider: (() => {
-        const m = raw.match(/llm:[\s\S]*?provider:\s*(\S+)/);
-        return m?.[1]?.replace(/['"]/g, "") || "";
-      })(),
-      model: (() => {
-        const m = raw.match(/llm:[\s\S]*?model:\s*(\S+)/);
-        return m?.[1]?.replace(/['"]/g, "") || "";
-      })(),
-      api_key_env: (() => {
-        const m = raw.match(/api_key_env:\s*(\S+)/);
-        return m?.[1]?.replace(/['"]/g, "") || "";
-      })(),
-      base_url: (() => {
-        const m = raw.match(/base_url:\s*(\S+)/);
-        return m?.[1]?.replace(/['"]/g, "") || "";
-      })(),
-    },
-  };
-}
-
-export type RecommendationStatus = "pending" | "applied" | "dismissed" | string;
-
-export type Recommendation = {
-  id: string;
-  fingerprint?: string;
-  title?: string;
-  type?: string;
-  rationale?: string;
-  why?: string;
-  status?: RecommendationStatus;
-  proposed_path?: string;
-  proposed_body?: string;
-  session_id?: string;
-  related_sessions?: string[];
-  evidence?: string[];
-  created_at?: string;
-  applied_at?: string;
-  decision_reason?: string;
-  decision_actor?: "human" | "agent" | "system" | string;
-  decision_at?: string;
-  vendor?: string;
-  target_type?: string;
-  change_kind?: string;
-  confidence?: number;
-  verified?: boolean;
-  explicit_workflow?: boolean;
-  occurrence_count?: number;
-  auto_apply_after?: number;
-  auto_apply_reason?: string;
-  [key: string]: unknown;
-};
-
-export type RecommendationsDashboard = {
-  summary: {
-    open: number;
-    resolved: number;
-    dismissed: number;
-  };
-  items: Recommendation[];
-};
-
-function readSessionRecommendations(): Recommendation[] {
-  const dir = soPath("sessions");
-  if (!fileExists(dir)) return [];
-  const out: Recommendation[] = [];
-  for (const name of readdirSync(dir)) {
-    try {
-      if (!statSync(join(dir, name)).isDirectory()) continue;
-      const doc = readJSONFile<{ recommendations?: Recommendation[] }>(
-        join(dir, name, "session.json"),
-      );
-      if (!Array.isArray(doc?.recommendations)) continue;
-      for (const rec of doc.recommendations) {
-        out.push({ ...rec, session_id: rec.session_id || name });
-      }
-    } catch {
-      // Concurrent materialization is retried on the next request.
-    }
-  }
-  return out;
-}
-
-/** Stable cross-session key - mirrors Go recommend.FingerprintKey. */
-export function fingerprintKey(
-  recType: string,
-  proposedPath: string,
-  kind = "",
-): string {
-  let p = String(proposedPath || "").replace(/\\/g, "/");
-  const soIdx = p.lastIndexOf("/.so/");
-  if (soIdx >= 0) p = p.slice(soIdx + 5);
-  else if (
-    p.includes("/.agents/skills/") ||
-    /\/\.(claude|cursor|gemini|opencode|codex|github|pi)\/skills\//.test(p)
-  ) {
-    const parts = p.split("/");
-    const i = parts.lastIndexOf("skills");
-    p = i >= 0 ? `skills/${parts[i + 1]}` : `skills/${parts.pop()}`;
-  } else if (p.includes("/skills/")) {
-    const parts = p.split("/");
-    const base = parts[parts.length - 1];
-    p =
-      base === "SKILL.md"
-        ? `skills/${parts[parts.length - 2]}`
-        : `skills/${base}`;
-  } else if (p.endsWith("/AGENTS.md") || p.endsWith("AGENTS.md"))
-    p = "AGENTS.md";
-  else if (
-    p.includes("/.agents/rules/") ||
-    /\/\.(cursor|claude|gemini|codex|opencode|pi)\/rules\//.test(p) ||
-    p.includes("/.github/instructions/")
-  ) {
-    p = `rules/${p.split("/").pop()}`;
-  } else if (p.endsWith("guardrails.yaml")) p = "guardrails.yaml";
-  const t = String(recType || "")
-    .toLowerCase()
-    .trim();
-  const k = String(kind || "")
-    .toLowerCase()
-    .trim();
-  return k ? `${t}|${p}|${k}` : `${t}|${p}`;
-}
-
-function mergeSessions(...lists: Array<string[] | undefined>): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const list of lists) {
-    for (const s of list || []) {
-      if (!s || seen.has(s)) continue;
-      seen.add(s);
-      out.push(s);
-    }
-  }
-  return out;
-}
-
-function ensureFingerprint(r: Recommendation): string {
-  if (r.fingerprint) return String(r.fingerprint);
-  const path = String(r.proposed_path || "");
-  const kind =
-    r.type === "skill" && path.includes("prefer-harness")
-      ? "prefer-harness"
-      : r.type === "docs" && path.includes("architecture")
-        ? "architecture"
-        : r.type === "guardrail"
-          ? "tool-thrash"
-          : "";
-  r.fingerprint = fingerprintKey(String(r.type || ""), path, kind);
-  return String(r.fingerprint);
-}
-
-/**
- * Collapse duplicate open cards that share a fingerprint (same skill/docs/
- * guardrail proposal from different sessions) into one row.
- */
-function compactPendingRecommendations(): Recommendation[] {
-  const pending = readSessionRecommendations()
-    .filter((r) => !r.status || r.status === "pending" || r.status === "stale")
-    .map((r) => ({
-      ...r,
-      status: r.status || "pending",
-    }));
-  const byFp = new Map<string, Recommendation>();
-
-  for (const r of pending) {
-    const fp = ensureFingerprint(r);
-    const status = String(r.status || "pending");
-    const prev = byFp.get(fp);
-    if (!prev) {
-      byFp.set(fp, {
-        ...r,
-        fingerprint: fp,
-        status: status === "stale" ? "pending" : status,
-        related_sessions: mergeSessions(
-          r.related_sessions,
-          r.session_id ? [r.session_id] : [],
-        ),
-      });
-      continue;
-    }
-    byFp.set(fp, {
-      ...prev,
-      ...r,
-      id: prev.id,
-      fingerprint: fp,
-      status: "pending",
-      created_at: prev.created_at || r.created_at,
-      related_sessions: mergeSessions(
-        prev.related_sessions,
-        r.related_sessions,
-        prev.session_id ? [prev.session_id] : [],
-        r.session_id ? [r.session_id] : [],
-      ),
-      evidence: Array.from(
-        new Set([...(prev.evidence || []), ...(r.evidence || [])]),
-      ).slice(0, 10),
-      title: r.title || prev.title,
-      rationale: r.rationale || prev.rationale,
-      why: r.why || prev.why,
-      proposed_body: r.proposed_body || prev.proposed_body,
-    });
-  }
-
-  return Array.from(byFp.values());
-}
-
-export function listRecommendations(): Recommendation[] {
-  return compactPendingRecommendations().map((r) => ({
-    ...r,
-    status: r.status || "pending",
-  }));
-}
-
-function listRecommendationHistory(): Recommendation[] {
-  return readSessionRecommendations().filter(
-    (r) => Boolean(r.status) && r.status !== "pending" && r.status !== "stale",
-  );
-}
-
-/** Pending + history (newest first). Pending wins if the same id appears twice. */
-function listAllRecommendations(): Recommendation[] {
-  const pending = listRecommendations();
-  const history = listRecommendationHistory();
-  const byId = new Map<string, Recommendation>();
-  for (const r of history) {
-    if (!r?.id) continue;
-    byId.set(r.id, {
-      ...r,
-      status: r.status || "applied",
-    });
-  }
-  for (const r of pending) {
-    if (!r?.id) continue;
-    byId.set(r.id, { ...r, status: r.status || "pending" });
-  }
-  return Array.from(byId.values()).sort((a, b) =>
-    String(b.created_at || "").localeCompare(String(a.created_at || "")),
-  );
-}
-
-export function getRecommendation(id: string): Recommendation | null {
-  return listAllRecommendations().find((r) => r.id === id) || null;
-}
-
-export function listRecommendationsDashboard(): RecommendationsDashboard {
-  const items = listAllRecommendations();
-  const summary = { open: 0, resolved: 0, dismissed: 0 };
-  for (const r of items) {
-    const s = String(r.status || "pending");
-    if (s === "applied") summary.resolved++;
-    else if (s === "dismissed") summary.dismissed++;
-    else if (s === "pending") summary.open++;
-    // stale / invalid / reverted are not "Open"
-  }
-  return { summary, items };
+export function pruneMissingProjects(purge = false): RemoveProjectResult[] {
+  return readProjectsFile().projects.filter((project) => !fileExists(project.repo_root)).map((project) => removeProject(project.id, purge));
 }

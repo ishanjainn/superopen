@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ishanjainn/superopen/internal/artifactmeta"
-	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/artifact"
+	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/session"
 )
 
@@ -28,16 +28,16 @@ type Meta struct {
 }
 
 type manifest struct {
-	About       artifactmeta.About `json:"_about"`
+	About       artifact.About `json:"_about"`
 	Checkpoints []Meta             `json:"checkpoints"`
 }
 
-// Store manages checkpoints for sessions in one harness.
+// Store manages checkpoints for sessions in one paths.
 type Store struct {
-	Paths harness.Paths
+	Paths paths.Paths
 }
 
-func NewStore(paths harness.Paths) *Store {
+func NewStore(paths paths.Paths) *Store {
 	return &Store{Paths: paths}
 }
 
@@ -241,7 +241,7 @@ func (s *Store) readManifest(sessionID string) (manifest, error) {
 }
 
 func (s *Store) writeManifest(sessionID string, mf manifest) error {
-	mf.About = artifactmeta.About{Purpose: "Lists exact restorable file snapshots captured during this session.", Authority: "checkpoint metadata", UpdatedBy: "checkpoint creation"}
+	mf.About = artifact.About{Purpose: "Lists exact restorable file snapshots captured during this session.", Authority: "checkpoint metadata", UpdatedBy: "checkpoint creation"}
 	b, err := json.MarshalIndent(mf, "", "  ")
 	if err != nil {
 		return err

@@ -1,24 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Crosshair, Sparkles, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Crosshair, Users } from "lucide-react";
 import {
   describeError,
   getAgentTrace,
   getSessionAgents,
-  getSessionReport,
   getSessionSnapshot,
   resolveSessionKey,
-  startSessionAnalyze,
 } from "./api";
 import { PlaybackEngine } from "./playback/reducer";
 import { TreeScene } from "./scene/TreeScene";
 import { TerrainScene } from "./scene/TerrainScene";
-import { type PanelBadge, type PanelDescriptor } from "./ui/Dock";
+import { type PanelDescriptor } from "./ui/Dock";
 import { AgentsPanel } from "./ui/AgentsPanel";
 import { Hud, type ChurnEntry, type HudSessionExtras, type HudTool } from "./ui/Hud";
 import { Inspector } from "./ui/Inspector";
-import { ReportPanel } from "./ui/ReportPanel";
 import { Timeline } from "./ui/Timeline";
 import { nearbyFiles } from "./nearby";
 import { computeTreeLayout } from "./scene/treeLayout";
@@ -26,8 +23,6 @@ import type {
   AgentGraph,
   SessionFile,
   SessionMap,
-  JudgeChoice,
-  ReportStatus,
   Trace,
 } from "./types";
 import "./map.css";
@@ -40,23 +35,8 @@ export interface MapViewProps {
   /** Embed in Sessions → Map tab (no full-page chrome). */
   embed?: boolean;
   className?: string;
-  /** Chat-origin linked/checkpoint meta for the shared session rail. */
+  /** Chat-origin linked metadata for the shared session rail. */
   sessionExtras?: HudSessionExtras;
-}
-
-function evaluateHint(badge: PanelBadge | null): string {
-  switch (badge) {
-    case "running":
-      return "The judge is reading the trace - about a minute";
-    case "done":
-      return "Evaluation ready";
-    case "stale":
-      return "Evaluation ready, but the session has grown since";
-    case "failed":
-      return "The last evaluation failed - open to retry";
-    default:
-      return "Evaluate this session with your local agent CLI";
-  }
 }
 
 /**
@@ -86,10 +66,6 @@ export default function MapView({
   const [loadingAgentID, setLoadingAgentID] = useState<string | undefined>();
   const [retryAgentID, setRetryAgentID] = useState<string | null>(null);
   const [currentAgentID, setCurrentAgentID] = useState<string | null>(null);
-
-  const [reportStatus, setReportStatus] = useState<ReportStatus | undefined>();
-  const [analyzing, setAnalyzing] = useState(false);
-  const reportPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,36 +120,6 @@ export default function MapView({
     if (!sessionKey) return;
     void loadAgents();
   }, [sessionKey, loadAgents]);
-
-  const refreshReport = useCallback(async () => {
-    if (!sessionKey) return;
-    try {
-      const status = await getSessionReport(sessionKey);
-      setReportStatus(status);
-      setAnalyzing(status.state === "running");
-    } catch {
-      /* report optional */
-    }
-  }, [sessionKey]);
-
-  useEffect(() => {
-    if (!sessionKey) return;
-    void refreshReport();
-  }, [sessionKey, refreshReport]);
-
-  useEffect(() => {
-    if (reportPollRef.current) {
-      clearInterval(reportPollRef.current);
-      reportPollRef.current = null;
-    }
-    if (!sessionKey || reportStatus?.state !== "running") return;
-    reportPollRef.current = setInterval(() => {
-      void refreshReport();
-    }, 4000);
-    return () => {
-      if (reportPollRef.current) clearInterval(reportPollRef.current);
-    };
-  }, [sessionKey, reportStatus?.state, refreshReport]);
 
   const engine = useMemo(() => new PlaybackEngine(trace, sessionMap), [trace, sessionMap]);
   const playback = useMemo(() => engine.snapshotAt(currentSeq), [engine, currentSeq]);
@@ -337,36 +283,6 @@ export default function MapView({
     [sessionKey, mainTrace]
   );
 
-  const onAnalyze = useCallback(
-    async (choice: JudgeChoice) => {
-      if (!sessionKey) return;
-      setAnalyzing(true);
-      try {
-        const status = await startSessionAnalyze(sessionKey, choice);
-        setReportStatus(status);
-      } catch (err) {
-        setReportStatus({
-          state: "failed",
-          stale: false,
-          error: describeError(err, "starting evaluation"),
-          judgeAvailable: true,
-          judgeClis: ["heuristic"],
-        });
-        setAnalyzing(false);
-      }
-    },
-    [sessionKey]
-  );
-
-  const evalBadge: PanelBadge | null = useMemo(() => {
-    if (!reportStatus) return null;
-    if (reportStatus.state === "running" || analyzing) return "running";
-    if (reportStatus.state === "failed") return "failed";
-    if (reportStatus.state === "done" && reportStatus.stale) return "stale";
-    if (reportStatus.state === "done") return "done";
-    return null;
-  }, [reportStatus, analyzing]);
-
   const agentLabel = useMemo(() => {
     if (!currentAgentID || !agentGraph) return undefined;
     return agentGraph.agents.find((a) => a.id === currentAgentID)?.label;
@@ -423,25 +339,6 @@ export default function MapView({
           />
         ),
       },
-      {
-        id: "evaluate",
-        icon: Sparkles,
-        label: "Evaluate",
-        hint: evaluateHint(evalBadge),
-        section: "session",
-        presentation: "sheet",
-        badge: evalBadge,
-        render: () => (
-          <ReportPanel
-            status={reportStatus}
-            analyzing={analyzing}
-            locked={false}
-            onAnalyze={(choice) => void onAnalyze(choice)}
-            onClose={closeSheet}
-            onJumpTo={onJumpTo}
-          />
-        ),
-      },
     ],
     [
       selectedFile,
@@ -459,10 +356,6 @@ export default function MapView({
       retryAgentID,
       selectAgent,
       loadAgents,
-      evalBadge,
-      reportStatus,
-      analyzing,
-      onAnalyze,
     ]
   );
 

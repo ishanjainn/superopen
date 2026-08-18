@@ -32,7 +32,6 @@ export type SessionMeta = {
 };
 
 export type ListItem = SessionMeta & {
-  checkpoints?: number;
   turns?: number;
   files?: string[];
   match?: string;
@@ -289,7 +288,6 @@ function parentIsEmptyStub(sessionsDir: string, parentId: string): boolean {
   const stats = enrichSessionStats(sessionPath, meta);
   return isEmptySession({
     ...meta,
-    checkpoints: stats.checkpoints,
     turns: stats.turns,
     files: [],
     prompt_preview:
@@ -306,10 +304,10 @@ function persistAgentLink(
   let doc: { links: Record<string, { parent_id: string; source?: string }> } = {
     _about: {
       purpose:
-        "Rebuildable catalog of sessions, parent-child links, pending reviews, and the latest session for each vendor.",
+        "Rebuildable catalog of sessions, parent-child links, and the latest session for each vendor.",
       authority:
         "derived from session.json files with temporary coordination state",
-      updated_by: "session ingestion and review workers",
+      updated_by: "session ingestion",
     },
     sessions: [],
     links: {},
@@ -405,45 +403,6 @@ function isNestedSubagent(
     repairSubagentMeta(sessionPath, meta, parent);
   }
   return true;
-}
-
-function countCheckpointDirs(sessionPath: string): number {
-  const dir = join(sessionPath, "checkpoints");
-  if (!fileExists(dir)) return 0;
-  try {
-    return readdirSync(dir).filter((name) => {
-      try {
-        return statSync(join(dir, name)).isDirectory();
-      } catch {
-        return false;
-      }
-    }).length;
-  } catch {
-    return 0;
-  }
-}
-
-export type RestoreCheckpoint = {
-  id: number;
-  session_id?: string;
-  created_at?: string;
-  label?: string;
-  files?: string[];
-};
-
-function listCheckpoints(
-  sessionPath: string,
-  sessionId: string,
-): RestoreCheckpoint[] {
-  const dir = join(sessionPath, "checkpoints");
-  if (!fileExists(dir)) return [];
-  const manifest = readJSON<{ checkpoints?: RestoreCheckpoint[] }>(
-    join(dir, "manifest.json"),
-  );
-  const out = [...(manifest?.checkpoints || [])];
-  for (const meta of out) if (!meta.session_id) meta.session_id = sessionId;
-  out.sort((a, b) => b.id - a.id);
-  return out;
 }
 
 export function countTurnsFromSpans(spans: TraceSpan[]): number {
@@ -583,7 +542,7 @@ function codexRolloutUpdatedAt(sessionId: string): number {
 function enrichSessionStats(
   sessionPath: string,
   meta: SessionMeta,
-): { turns: number; checkpoints: number; hasActivity: boolean; files: string[] } {
+): { turns: number; hasActivity: boolean; files: string[] } {
   const spans = mergeTraceSpans(loadTranscriptSpans(sessionPath));
   const files = new Set<string>();
   for (const span of spans) {
@@ -595,7 +554,6 @@ function enrichSessionStats(
   }
   return {
     turns: countTurnsFromSpans(spans),
-    checkpoints: countCheckpointDirs(sessionPath),
     hasActivity: spansHaveActivity(spans),
     files: Array.from(files),
   };
@@ -817,7 +775,6 @@ function listSessionsInSo(soDir: string, projectId: string): ListItem[] {
         humanizePromptPreview(meta.prompt_preview) || meta.prompt_preview,
       project_id: projectId,
       so_root: soDir,
-      checkpoints: stats.checkpoints,
       turns: stats.turns,
       files,
     };
@@ -829,11 +786,7 @@ function listSessionsInSo(soDir: string, projectId: string): ListItem[] {
 
 /** Opened chat with no turns/work - hide from UI (matches Go session.IsEmptyListItem). */
 function isEmptySession(item: ListItem): boolean {
-  if (
-    (item.turns || 0) > 0 ||
-    Number(item.tokens || 0) > 0 ||
-    (item.checkpoints || 0) > 0
-  ) {
+  if ((item.turns || 0) > 0 || Number(item.tokens || 0) > 0) {
     return false;
   }
   if ((item.files || []).length > 0) return false;
@@ -979,9 +932,7 @@ export function getSessionDetail(id: string, projectFilter = "") {
 
     const sessionDoc = readJSON<{
       footprint?: unknown;
-      evaluation?: unknown;
-      review?: { findings?: unknown[] };
-	  memory_retrievals?: unknown[];
+      replay?: unknown;
     }>(join(sessionPath, "session.json"));
     const footprint = sessionDoc?.footprint;
     // Hooks append directly to this file, including during active chats.
@@ -991,13 +942,13 @@ export function getSessionDetail(id: string, projectFilter = "") {
     if (meta.status === "ended" && rolloutUpdatedAt > recordedEnd + 15_000) {
       // Older Codex hooks treated every assistant Stop as chat closure. A
       // rollout that keeps advancing proves the chat is active; repair the
-      // stale materialized status so evaluations are labeled snapshots.
+      // stale materialized status.
       meta.status = "active";
       meta.ended_at = undefined;
       try {
         writeFileSync(
           join(sessionPath, "session.json"),
-          JSON.stringify(meta, null, 2),
+          JSON.stringify({ ...sessionDoc, ...meta }, null, 2),
         );
       } catch {
         // The response can still report the corrected in-memory status.
@@ -1039,20 +990,11 @@ export function getSessionDetail(id: string, projectFilter = "") {
       );
     }
 
-    const stats = enrichSessionStats(sessionPath, meta);
-    const evalResult = sessionDoc?.evaluation || null;
     return {
       meta,
       transcript,
       footprint,
-      checkpoints: listCheckpoints(sessionPath, id),
-      // Replay lives in Map / `so sessions` CLI - not duplicated in Chat.
       replay: undefined,
-      eval: evalResult,
-      findings: Array.isArray(sessionDoc?.review?.findings)
-        ? sessionDoc.review.findings
-        : [],
-	  memory_retrievals: Array.isArray(sessionDoc?.memory_retrievals) ? sessionDoc.memory_retrievals : [],
       subagents,
     };
   }

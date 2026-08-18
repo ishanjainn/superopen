@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ishanjainn/superopen/internal/harness"
-	"github.com/ishanjainn/superopen/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/session/trace"
 )
 
 func TestVendorFromAttrsPrefersClient(t *testing.T) {
@@ -23,7 +23,7 @@ func TestVendorFromAttrsPrefersClient(t *testing.T) {
 
 func TestStartDoesNotClearDetectedVendor(t *testing.T) {
 	root := t.TempDir()
-	paths := harness.Paths{
+	paths := paths.Paths{
 		Root:          filepath.Join(root, ".so"),
 		SessionsDir:   filepath.Join(root, ".so", "sessions"),
 		SessionsIndex: filepath.Join(root, ".so", "sessions", "index.json"),
@@ -63,7 +63,7 @@ func TestStartDoesNotClearDetectedVendor(t *testing.T) {
 
 func TestMaterializeFillsVendorFromClientWhenVendorKeyMissing(t *testing.T) {
 	root := t.TempDir()
-	paths := harness.Paths{
+	paths := paths.Paths{
 		Root:          filepath.Join(root, ".so"),
 		SessionsDir:   filepath.Join(root, ".so", "sessions"),
 		SessionsIndex: filepath.Join(root, ".so", "sessions", "index.json"),
@@ -76,7 +76,7 @@ func TestMaterializeFillsVendorFromClientWhenVendorKeyMissing(t *testing.T) {
 	if err := store.Start(Meta{ID: id, Vendor: "", StartedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	spans := []tracestore.Span{{
+	spans := []trace.Span{{
 		Name:           "coding_agent.llm.turn",
 		StartTimeUnixN: time.Now().UnixNano(),
 		Attributes: map[string]string{
@@ -103,7 +103,7 @@ func TestMaterializeFillsVendorFromClientWhenVendorKeyMissing(t *testing.T) {
 
 func TestMaterializeRepairsEpochSessionStart(t *testing.T) {
 	root := t.TempDir()
-	paths := harness.Resolve(root)
+	paths := paths.Resolve(root)
 	if err := paths.EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestMaterializeRepairsEpochSessionStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now().UTC().Add(-time.Minute)
-	meta, err := store.MaterializeFromSpans("epoch", []tracestore.Span{{
+	meta, err := store.MaterializeFromSpans("epoch", []trace.Span{{
 		Name: "coding_agent.tool.call", StartTimeUnixN: started.UnixNano(),
 		Attributes: map[string]string{"coding_agent.vendor": "codex", "gen_ai.tool.name": "Read"},
 	}}, 0, 0)

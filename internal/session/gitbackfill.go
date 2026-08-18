@@ -4,8 +4,11 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+)
 
-	"github.com/ishanjainn/superopen/internal/githooks"
+const (
+	trailerSession     = "SO-Session"
+	trailerAttribution = "SO-Attribution"
 )
 
 // BackfillFromGitLog scans recent commits for SO-Session trailers matching this session.
@@ -28,7 +31,7 @@ func BackfillFromGitLog(meta *Meta, repoRoot string, limit int) {
 		if sha == "" {
 			continue
 		}
-		sid, attr := githooks.ParseTrailers(msg)
+		sid, attr := parseCommitTrailers(msg)
 		if sid != meta.ID {
 			continue
 		}
@@ -38,6 +41,19 @@ func BackfillFromGitLog(meta *Meta, repoRoot string, limit int) {
 			meta.Attribution = &AttributionSummary{Display: attr}
 		}
 	}
+}
+
+func parseCommitTrailers(msg string) (sessionID, attribution string) {
+	for _, line := range strings.Split(msg, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, trailerSession+":") {
+			sessionID = strings.TrimSpace(strings.TrimPrefix(line, trailerSession+":"))
+		}
+		if strings.HasPrefix(line, trailerAttribution+":") {
+			attribution = strings.TrimSpace(strings.TrimPrefix(line, trailerAttribution+":"))
+		}
+	}
+	return sessionID, attribution
 }
 
 func itoa(n int) string {

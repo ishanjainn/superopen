@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,8 +15,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ishanjainn/superopen/internal/harness"
-	"github.com/ishanjainn/superopen/internal/userpaths"
+	"github.com/ishanjainn/superopen/internal/agent/install"
+	"github.com/ishanjainn/superopen/internal/graph/client"
+	"github.com/ishanjainn/superopen/internal/graph/watch"
+	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/projects"
 )
 
 func cmdDev() *cobra.Command {
@@ -61,36 +65,36 @@ uses next dev (Turbopack).`,
 	return c
 }
 
-func runDir(paths harness.Paths) string {
-	dir, err := userpaths.RuntimeDir(paths.RepoRoot)
+func runDir(layout paths.Paths) string {
+	dir, err := paths.RuntimeDir(layout.RepoRoot)
 	if err != nil {
 		return filepath.Join(os.TempDir(), "superopen-runtime")
 	}
 	return dir
 }
 
-func pidFile(paths harness.Paths) string {
-	return filepath.Join(runDir(paths), "dev.pid")
+func pidFile(layout paths.Paths) string {
+	return filepath.Join(runDir(layout), "dev.pid")
 }
 
-func logFile(paths harness.Paths) string {
-	return filepath.Join(runDir(paths), "dev.log")
+func logFile(layout paths.Paths) string {
+	return filepath.Join(runDir(layout), "dev.log")
 }
 
 func runDev(uiPort int, detach, noOpen bool) error {
 	root := repoRoot()
-	paths := harness.Resolve(root)
-	if !paths.Exists() {
+	layout := paths.Resolve(root)
+	if !layout.Exists() {
 		return fmt.Errorf("run `so init` first")
 	}
-	if err := os.MkdirAll(runDir(paths), 0o755); err != nil {
+	if err := os.MkdirAll(runDir(layout), 0o755); err != nil {
 		return err
 	}
 
 	if detach {
-		return startDevDetached(root, paths, uiPort, noOpen)
+		return startDevDetached(root, layout, uiPort, noOpen)
 	}
-	return runDevForeground(root, paths, uiPort, noOpen)
+	return runDevForeground(root, layout, uiPort, noOpen)
 }
 
 func maybeOpenUI(url string, noOpen bool) {
@@ -106,9 +110,9 @@ func maybeOpenUI(url string, noOpen bool) {
 	}
 }
 
-func startDevDetached(root string, paths harness.Paths, uiPort int, noOpen bool) error {
+func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen bool) error {
 	url := fmt.Sprintf("http://127.0.0.1:%d", uiPort)
-	if st, err := readDevStatus(paths, uiPort); err == nil && st.alive {
+	if st, err := readDevStatus(layout, uiPort); err == nil && st.alive {
 		fmt.Printf("Already running (pid %d) at %s\n", st.pid, st.url)
 		fmt.Printf("Stop with: so dev stop\n")
 		maybeOpenUI(url+"/sessions", noOpen)
@@ -119,7 +123,7 @@ func startDevDetached(root string, paths harness.Paths, uiPort int, noOpen bool)
 	if err != nil {
 		return err
 	}
-	logPath := logFile(paths)
+	logPath := logFile(layout)
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
@@ -139,7 +143,7 @@ func startDevDetached(root string, paths harness.Paths, uiPort int, noOpen bool)
 	}
 	_ = f.Close()
 
-	if err := os.WriteFile(pidFile(paths), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(pidFile(layout), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
 		_ = cmd.Process.Kill()
 		return err
 	}
@@ -165,7 +169,22 @@ func startDevDetached(root string, paths harness.Paths, uiPort int, noOpen bool)
 	return fmt.Errorf("timed out waiting for UI on %s; see %s", url, logPath)
 }
 
-func runDevForeground(root string, paths harness.Paths, uiPort int, noOpen bool) error {
+func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen bool) error {
+	_, _ = projects.Register(root, layout.Root, "")
+	var runner *watch.Runner
+	if graphClient, err := client.Resolve(); err == nil {
+		runner = &watch.Runner{Root: root, Client: graphClient}
+		runner.Start(context.Background())
+		defer runner.Stop()
+	}
+	fmt.Println("Ensuring user-global Superopen MCP entries (repo-neutral)…")
+	if written, err := install.InstallUserMCP(); err != nil {
+		fmt.Fprintf(os.Stderr, "so dev: mcp ensure: %v\n", err)
+	} else if len(written) > 0 {
+		fmt.Printf("MCP ready (%d agent config(s)); agents spawn: so graph mcp serve\n", len(written))
+	}
+	fmt.Println("Live graph refresh active (local git poll ~60s; no LLM).")
+
 	nextCmd, nextURL, err := startNextUI(root, uiPort)
 	if err != nil {
 		return fmt.Errorf("Next.js UI: %w", err)
@@ -175,14 +194,14 @@ func runDevForeground(root string, paths harness.Paths, uiPort int, noOpen bool)
 
 	// Track foreground runs too so `so dev stop` works from another shell.
 	if nextCmd.Process != nil {
-		_ = os.WriteFile(pidFile(paths), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
+		_ = os.WriteFile(pidFile(layout), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
 	}
 
 	defer func() {
 		if nextCmd.Process != nil {
 			_ = nextCmd.Process.Kill()
 		}
-		_ = os.Remove(pidFile(paths))
+		_ = os.Remove(pidFile(layout))
 	}()
 
 	sig := make(chan os.Signal, 1)
@@ -194,8 +213,8 @@ func runDevForeground(root string, paths harness.Paths, uiPort int, noOpen bool)
 
 func stopDev() error {
 	root := repoRoot()
-	paths := harness.Resolve(root)
-	pf := pidFile(paths)
+	layout := paths.Resolve(root)
+	pf := pidFile(layout)
 	raw, err := os.ReadFile(pf)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -228,10 +247,10 @@ type devStatus struct {
 	alive bool
 }
 
-func readDevStatus(paths harness.Paths, uiPort int) (devStatus, error) {
+func readDevStatus(layout paths.Paths, uiPort int) (devStatus, error) {
 	url := fmt.Sprintf("http://127.0.0.1:%d", uiPort)
 	st := devStatus{url: url}
-	raw, err := os.ReadFile(pidFile(paths))
+	raw, err := os.ReadFile(pidFile(layout))
 	if err != nil {
 		return st, err
 	}
@@ -249,10 +268,10 @@ func readDevStatus(paths harness.Paths, uiPort int) (devStatus, error) {
 
 func statusDev(uiPort int) error {
 	root := repoRoot()
-	paths := harness.Resolve(root)
+	layout := paths.Resolve(root)
 	url := fmt.Sprintf("http://127.0.0.1:%d", uiPort)
 
-	st, err := readDevStatus(paths, uiPort)
+	st, err := readDevStatus(layout, uiPort)
 	reachable := false
 	if resp, herr := http.Get(url + "/sessions"); herr == nil {
 		_ = resp.Body.Close()

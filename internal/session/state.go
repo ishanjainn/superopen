@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
-	"github.com/ishanjainn/superopen/internal/gitruntime"
-	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/paths"
 )
 
 // Phase is the lifecycle phase of an active coding session.
@@ -34,13 +35,28 @@ type State struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
-// StateStore reads/writes session state files for one harness.
+// StateStore reads/writes session state files for one paths.
 type StateStore struct {
 	Dir string
 }
 
-func NewStateStore(paths harness.Paths) *StateStore {
-	return &StateStore{Dir: gitruntime.StateDir(paths.RepoRoot)}
+func NewStateStore(paths paths.Paths) *StateStore {
+	return &StateStore{Dir: liveStateDir(paths.RepoRoot)}
+}
+
+// liveStateDir returns .git/so-sessions for live phase/branch state.
+func liveStateDir(repoRoot string) string {
+	gitDir := ""
+	if out, err := exec.Command("git", "-C", repoRoot, "rev-parse", "--git-dir").Output(); err == nil {
+		gitDir = strings.TrimSpace(string(out))
+		if gitDir != "" && !filepath.IsAbs(gitDir) {
+			gitDir = filepath.Join(repoRoot, gitDir)
+		}
+	}
+	if gitDir == "" {
+		return filepath.Join(repoRoot, ".git", "so-sessions")
+	}
+	return filepath.Join(gitDir, "so-sessions")
 }
 
 func (s *StateStore) path(id string) string {

@@ -4,13 +4,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ishanjainn/superopen/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/session/trace"
 )
 
 // SpansHaveActivity reports whether spans include a real user turn or tool work.
 // Identity-only telemetry (vendor/model/user/branch) does not count - those create
 // empty "opened chat then closed" sessions.
-func SpansHaveActivity(spans []tracestore.Span) bool {
+func SpansHaveActivity(spans []trace.Span) bool {
 	for _, sp := range spans {
 		attrs := sp.Attributes
 		if attrs == nil {
@@ -53,7 +53,7 @@ func IsEmptyListItem(item ListItem) bool {
 	if item.hasActivity {
 		return false
 	}
-	if item.Turns > 0 || item.Tokens > 0 || item.Checkpoints > 0 {
+	if item.Turns > 0 || item.Tokens > 0 {
 		return false
 	}
 	if len(item.Files) > 0 {

@@ -11,15 +11,7 @@ import { playgroundTopBarClassName } from "./sidebar-layout-context";
 
 const TITLES: Record<string, string> = {
   "/sessions": "Sessions",
-  "/memory": "Memory",
   "/graph": "Graph",
-  "/knowledge": "Knowledge",
-  "/rules": "Rules",
-  "/skills": "Skills",
-  "/guardrails": "Guardrails",
-  "/evaluations": "Evaluations",
-  "/recs": "Recommendations",
-  "/settings": "Settings",
 };
 
 export function pageTitle(pathname: string) {
@@ -33,14 +25,7 @@ export function pageTitle(pathname: string) {
 /** Section root path for breadcrumb up-navigation (never the detail pathname). */
 function sectionRoot(pathname: string): string {
   if (pathname.startsWith("/sessions")) return "/sessions";
-  if (pathname.startsWith("/recs")) return "/recs";
-  if (pathname.startsWith("/guardrails")) return "/guardrails";
-  if (pathname.startsWith("/evaluations")) {
-    return "/evaluations";
-  }
-  if (pathname.startsWith("/knowledge")) {
-    return "/knowledge";
-  }
+  if (pathname.startsWith("/graph")) return "/graph";
   for (const prefix of Object.keys(TITLES)) {
     if (pathname === prefix || pathname.startsWith(prefix + "/")) return prefix;
   }

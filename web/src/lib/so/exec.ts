@@ -14,7 +14,7 @@ export type SoJSON<T> = {
 
 /**
  * Run `so <args> --json` and parse the envelope.
- * Heavy algorithms (search, consolidate, guard check, sessions start) live in Go.
+ * Native graph and session materialization algorithms live in Go.
  * SUPEROPEN_ROOT follows the active workspace override (x-so-project) when set.
  */
 export async function soJSON<T = unknown>(

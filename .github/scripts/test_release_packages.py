@@ -300,7 +300,7 @@ class ReleaseTests(unittest.TestCase):
                     self.file_api_used = True
                     return [
                         {
-                            "filename": "internal/coding/hook/hook.go",
+                            "filename": "internal/agent/hook/hook.go",
                             "status": "modified",
                             "additions": 2,
                             "deletions": 1,
@@ -321,7 +321,7 @@ class ReleaseTests(unittest.TestCase):
             )
         self.assertTrue(github.file_api_used)
         self.assertNotIn("cached_summary", prs[0])
-        self.assertEqual(prs[0]["files"][0]["filename"], "internal/coding/hook/hook.go")
+        self.assertEqual(prs[0]["files"][0]["filename"], "internal/agent/hook/hook.go")
 
     def test_component_evidence_suppresses_cross_component_body_and_noisy_patches(self):
         pr = {

@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSoftPoll } from "@/hooks/use-soft-poll";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
 import { useProject } from "@/components/shell/project-context";
-import PortWizard from "@/components/port-wizard";
 import SessionSearchBar from "@/components/session-search-bar";
 import {
   displayUser,
@@ -22,7 +21,6 @@ type Session = {
   tokens?: number;
   cost_usd?: number;
   started_at?: string;
-  checkpoints?: number;
   turns?: number;
   files?: string[];
   match?: string;
@@ -105,7 +103,6 @@ export default function SessionsPage() {
   const [debounced, setDebounced] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [portOpen, setPortOpen] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), 200);
@@ -166,21 +163,7 @@ export default function SessionsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
-      <FeaturePageHeader
-        title="Sessions"
-        actions={
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setPortOpen(true)}
-              className="rounded-md border border-neutral-200 px-2.5 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
-            >
-              Port
-            </button>
-          </div>
-        }
-      />
-      <PortWizard open={portOpen} onClose={() => setPortOpen(false)} />
+      <FeaturePageHeader title="Sessions" />
 
       <div className="flex shrink-0 items-center gap-2 border-b border-neutral-200 px-4 py-2">
         <SessionSearchBar value={query} onChange={setQuery} facets={facets} />
@@ -276,12 +259,6 @@ export default function SessionsPage() {
                             : `${s.tokens} tok`}
                         </span>
                       )}
-                      <span
-                        className="tabular-nums text-neutral-400"
-                        title="Checkpoints created on git commit / finalize"
-                      >
-                        {s.checkpoints || 0} cp
-                      </span>
                     </div>
                   </Link>
                 </li>

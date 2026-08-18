@@ -31,7 +31,6 @@ export type SessionMeta = {
   duration_ms?: number;
   tokens?: number;
   cost_usd?: number;
-  eval_badge?: string;
   branch?: string;
   head_sha?: string;
   commits?: { sha?: string; message?: string }[];
@@ -40,20 +39,12 @@ export type SessionMeta = {
   summary?: string;
 };
 
-export type RestoreCheckpoint = {
-  id: number;
-  session_id?: string;
-  created_at?: string;
-  label?: string;
-  files?: string[];
-};
-
 export type Span = {
   name?: string;
   start_time_unix_nano?: number;
   end_time_unix_nano?: number;
   attributes?: Record<string, string>;
-  /** Ported PortableTurn rows (so sessions port) - not OTLP spans. */
+  /** Normalized conversation row when no OTLP span shape is available. */
   role?: string;
   text?: string;
   timestamp?: number;
@@ -232,10 +223,10 @@ function isoToNano(iso?: string): number {
   return Number.isFinite(ms) ? ms * 1e6 : 0;
 }
 
-/** True when transcript rows are PortableTurn JSONL from `so sessions port`. */
-function looksLikePortableTurns(spans: Span[]): boolean {
+/** True when transcript rows use the normalized conversation-row shape. */
+function looksLikeConversationTurns(spans: Span[]): boolean {
   if (!spans.length) return false;
-  let portable = 0;
+  let conversation = 0;
   for (const sp of spans) {
     const role = String(sp.role || "").toLowerCase();
     const hasText = typeof sp.text === "string" && sp.text.trim() !== "";
@@ -243,13 +234,13 @@ function looksLikePortableTurns(spans: Span[]): boolean {
       Boolean(sp.name) ||
       Boolean(sp.attributes && Object.keys(sp.attributes).length);
     if ((role === "user" || role === "assistant" || role === "system") && hasText && !hasOtlp) {
-      portable++;
+      conversation++;
     }
   }
-  return portable > 0 && portable >= spans.length / 2;
+  return conversation > 0 && conversation >= spans.length / 2;
 }
 
-function buildTimelineFromPortableTurns(spans: Span[]): TimelineItem[] {
+function buildTimelineFromConversationTurns(spans: Span[]): TimelineItem[] {
   const items: TimelineItem[] = [];
   let i = 0;
   for (const sp of spans) {
@@ -265,7 +256,7 @@ function buildTimelineFromPortableTurns(spans: Span[]): TimelineItem[] {
     if (role === "assistant") {
       items.push({
         kind: "response",
-        id: `port-resp-${i++}`,
+        id: `resp-${i++}`,
         at,
         text,
         model: typeof (sp as { model?: string }).model === "string"
@@ -275,7 +266,7 @@ function buildTimelineFromPortableTurns(spans: Span[]): TimelineItem[] {
     } else if (role === "user" || role === "system" || role === "user_prompt") {
       items.push({
         kind: "prompt",
-        id: `port-prompt-${i++}`,
+        id: `prompt-${i++}`,
         at,
         text,
       });
@@ -285,8 +276,8 @@ function buildTimelineFromPortableTurns(spans: Span[]): TimelineItem[] {
 }
 
 function buildTimeline(spans: Span[]): TimelineItem[] {
-  if (looksLikePortableTurns(spans)) {
-    return buildTimelineFromPortableTurns(spans);
+  if (looksLikeConversationTurns(spans)) {
+    return buildTimelineFromConversationTurns(spans);
   }
   const items: TimelineItem[] = [];
   let i = 0;
@@ -573,14 +564,12 @@ export default function SessionTimeline({
   meta,
   spans,
   footprint,
-  restoreCheckpoints = [],
   subagents = [],
   project = "",
 }: {
   meta: SessionMeta;
   spans: Span[];
   footprint?: { files?: { path: string; state: string; count: number }[] };
-  restoreCheckpoints?: RestoreCheckpoint[];
   subagents?: NestedSessionSummary[];
   project?: string;
 }) {
@@ -1031,25 +1020,6 @@ export default function SessionTimeline({
                 <span className="tb-value tb-mono tb-session-id">
                   {meta.id.length > 12 ? `${meta.id.slice(0, 8)}…` : meta.id}
                 </span>
-              </div>
-
-              <div className="tb-cell tb-shrink">
-                <span className="tb-label">Checkpoints</span>
-                {restoreCheckpoints.length === 0 ? (
-                  <span className="tb-value tb-mono tb-muted" title="Created on git commit / finalize">
-                    None yet
-                  </span>
-                ) : (
-                  <span className="tb-value tb-mono tb-activity">
-                    {restoreCheckpoints.slice(0, 5).map((cp) => (
-                      <span key={cp.id} title={(cp.files || []).join(", ")}>
-                        #{cp.id}
-                        {cp.label ? ` · ${cp.label}` : ""}
-                        {cp.files?.length ? ` · ${cp.files.length}f` : ""}
-                      </span>
-                    ))}
-                  </span>
-                )}
               </div>
 
               <div className="tb-cell tb-grow">

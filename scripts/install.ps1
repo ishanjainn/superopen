@@ -51,7 +51,7 @@ if ($ScriptDir) {
         $env:Path = "$InstallDir;$env:Path"
         Write-So "Installed: $Out"
         & $Out install
-        Write-So 'Done. Try /so in your coding agent, then /so init'
+        Write-So 'Done. Run: so install   then in a repo: /so init'
         return
     }
 }

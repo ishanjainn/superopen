@@ -29,7 +29,6 @@ export interface HudSessionExtras {
   commits?: { sha?: string; message?: string }[];
   pullRequests?: { url?: string; number?: number; title?: string }[];
   attribution?: string;
-  checkpoints?: { id: number; label?: string; files?: string[] }[];
 }
 
 interface HudProps {
@@ -135,7 +134,6 @@ export const Hud = memo(function Hud({
 
   const commits = sessionExtras?.commits || [];
   const prs = sessionExtras?.pullRequests || [];
-  const checkpoints = sessionExtras?.checkpoints || [];
   const showLinked =
     Boolean(sessionExtras?.branch) ||
     Boolean(sessionExtras?.attribution) ||
@@ -341,20 +339,6 @@ export const Hud = memo(function Hud({
                 </span>
               </div>
 
-              {checkpoints.length > 0 ? (
-                <div className="tb-cell tb-shrink">
-                  <span className="tb-label">Checkpoints</span>
-                  <span className="tb-value tb-mono tb-activity">
-                    {checkpoints.slice(0, 4).map((cp) => (
-                      <span key={cp.id}>
-                        #{cp.id}
-                        {cp.label ? ` · ${cp.label}` : ""}
-                        {cp.files?.length ? ` · ${cp.files.length} files` : ""}
-                      </span>
-                    ))}
-                  </span>
-                </div>
-              ) : null}
             </>
           ) : null}
         </div>

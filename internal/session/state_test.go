@@ -5,13 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/session"
 )
 
 func TestStateStoreLifecycle(t *testing.T) {
 	root := t.TempDir()
-	paths := harness.Resolve(root)
+	paths := paths.Resolve(root)
 	st := session.NewStateStore(paths)
 
 	err := st.Save(session.State{

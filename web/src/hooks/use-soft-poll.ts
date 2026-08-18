@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 
 /**
- * Soft-poll while the tab is visible so Sessions / Memory / Recs / Evals
+ * Soft-poll while the tab is visible so session views
  * pick up disk updates from hooks without a full remount.
  */
 export function useSoftPoll(

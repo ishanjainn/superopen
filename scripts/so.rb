@@ -8,7 +8,7 @@
 # To build the current checkout instead:
 #   brew install --HEAD ./scripts/so.rb
 class So < Formula
-  desc "Superopen - harness engineering for AI coding agents"
+  desc "Native code graph and coding-session observability"
   homepage "https://github.com/ishanjainn/superopen"
   license "Apache-2.0"
   head "https://github.com/ishanjainn/superopen.git", branch: "main"

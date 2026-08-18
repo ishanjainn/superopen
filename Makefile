@@ -20,7 +20,5 @@ install:
 	go install -ldflags "-X $(PKG_VERSION).Version=$(VERSION)" ./cmd/so
 
 smoke: build
-	./bin/so init --code-only
-	./bin/so sessions demo
-	./bin/so doctor
-	./bin/so recommend list
+	./bin/so --help
+	./bin/so graph status --json >/dev/null

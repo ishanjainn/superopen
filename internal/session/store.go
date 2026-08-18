@@ -10,13 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ishanjainn/superopen/internal/artifactmeta"
-	"github.com/ishanjainn/superopen/internal/harness"
-	"github.com/ishanjainn/superopen/internal/llm"
-	"github.com/ishanjainn/superopen/internal/otlp"
+	"github.com/ishanjainn/superopen/internal/artifact"
+	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/redact"
 	"github.com/ishanjainn/superopen/internal/session/agentlinks"
-	"github.com/ishanjainn/superopen/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/session/trace"
 )
 
 type Status string
@@ -40,7 +38,6 @@ type Meta struct {
 	DurationMs    int64      `json:"duration_ms,omitempty"`
 	Tokens        int64      `json:"tokens,omitempty"`
 	CostUSD       float64    `json:"cost_usd,omitempty"`
-	EvalBadge     string     `json:"eval_badge,omitempty"`
 	ParentID      string     `json:"parent_id,omitempty"`
 	IsSubagent    bool       `json:"is_subagent,omitempty"`
 
@@ -66,143 +63,40 @@ type Footprint struct {
 	Files []FootprintFile `json:"files"`
 }
 
-// ReviewEligible requires an actual repository source edit. Harness/bootstrap,
-// graph, telemetry, generated guidance, and dependency-vendor activity is not
-// useful evidence for a coding-session review.
-func ReviewEligible(d Document) bool {
-	generatedSkillRoots := []string{
-		".github/skills/so", ".openclaw/skills/so", ".factory/skills/so", ".trae/skills/so",
-		".trae-cn/skills/so", ".hermes/skills/so", ".kiro/skills/so", ".devin/skills/so",
-		".codebuddy/skills/so", ".kimi/skills/so", ".kilo/skills/so", ".aider/so",
-	}
-	for _, f := range d.Footprint.Files {
-		if f.State != "edited" {
-			continue
-		}
-		p := filepath.ToSlash(filepath.Clean(strings.ReplaceAll(f.Path, `\`, "/")))
-		p = strings.TrimPrefix(p, "./")
-		if p == ".so" || strings.HasPrefix(p, ".so/") || p == "AGENTS.md" || p == "CLAUDE.md" ||
-			strings.HasPrefix(p, ".claude/") || strings.HasPrefix(p, ".cursor/") || strings.HasPrefix(p, ".codex/") ||
-			strings.HasPrefix(p, ".agents/") || strings.HasPrefix(p, ".gemini/") || strings.HasPrefix(p, ".opencode/") ||
-			strings.HasPrefix(p, ".pi/") {
-			continue
-		}
-		managed := false
-		for _, root := range generatedSkillRoots {
-			if p == root || strings.HasPrefix(p, root+"/") {
-				managed = true
-				break
-			}
-		}
-		if managed {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
 type IndexEntry = Meta
 
-type ReviewState struct {
-	Status               string          `json:"status,omitempty"`
-	Trigger              string          `json:"trigger,omitempty"`
-	Backend              string          `json:"backend,omitempty"`
-	StartedAt            *time.Time      `json:"started_at,omitempty"`
-	CompletedAt          *time.Time      `json:"completed_at,omitempty"`
-	Error                string          `json:"error,omitempty"`
-	HarvestedAt          *time.Time      `json:"harvested_at,omitempty"`
-	HarvestedSourceMtime int64           `json:"harvested_source_mtime,omitempty"`
-	HarvestTrigger       string          `json:"harvest_trigger,omitempty"`
-	Findings             []ReviewFinding `json:"findings,omitempty"`
-	MidSessionInjected   bool            `json:"mid_session_injected,omitempty"`
-}
-
-// GraphRefreshState records the graph side of the post-session lifecycle next
-// to the evaluation it accompanies. The graph itself remains authoritative in
-// .so/graph; this is observability for retries and the Sessions UI.
-type GraphRefreshState struct {
-	Status      string     `json:"status,omitempty"` // running | ready | continuation_required | failed
-	Trigger     string     `json:"trigger,omitempty"`
-	RunID       string     `json:"run_id,omitempty"`
-	GraphSHA256 string     `json:"graph_sha256,omitempty"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
-	Error       string     `json:"error,omitempty"`
-}
-
-// ReviewFinding is compact, redacted evidence from one session review. It
-// intentionally excludes proposed file bodies; actionable content belongs to
-// the recommendation record and cross-session counters belong to memory.
-type ReviewFinding struct {
-	Fingerprint      string   `json:"fingerprint"`
-	Kind             string   `json:"kind"`
-	ChangeKind       string   `json:"change_kind,omitempty"`
-	Summary          string   `json:"summary"`
-	Vendor           string   `json:"vendor"`
-	TargetType       string   `json:"target_type,omitempty"`
-	TargetPath       string   `json:"target_path,omitempty"`
-	Confidence       float64  `json:"confidence,omitempty"`
-	Verified         bool     `json:"verified,omitempty"`
-	ExplicitWorkflow bool     `json:"explicit_workflow,omitempty"`
-	Evidence         []string `json:"evidence,omitempty"`
-	EventIDs         []string `json:"event_ids,omitempty"`
-	Keywords         []string `json:"keywords,omitempty"`
-	Paths            []string `json:"paths,omitempty"`
-	Symbols          []string `json:"symbols,omitempty"`
-	ErrorSignatures  []string `json:"error_signatures,omitempty"`
-	Applicability    string   `json:"applicability,omitempty"`
-}
-
-type MemoryRetrieval struct {
-	PatternIDs      []string  `json:"pattern_ids"`
-	Scores          []string  `json:"scores,omitempty"`
-	Reasons         []string  `json:"selection_reasons,omitempty"`
-	TargetPaths     []string  `json:"target_paths,omitempty"`
-	EstimatedTokens int64     `json:"estimated_tokens"`
-	TurnID          string    `json:"turn_id,omitempty"`
-	Delivery        string    `json:"delivery,omitempty"`
-	At              time.Time `json:"at"`
-}
-
 type Document struct {
-	About artifactmeta.About `json:"_about"`
+	About artifact.About `json:"_about"`
 	Meta
-	Footprint        Footprint         `json:"footprint,omitempty"`
-	Evaluation       json.RawMessage   `json:"evaluation,omitempty"`
-	Recommendations  json.RawMessage   `json:"recommendations,omitempty"`
-	Replay           json.RawMessage   `json:"replay,omitempty"`
-	Port             json.RawMessage   `json:"port,omitempty"`
-	Review           ReviewState       `json:"review,omitempty"`
-	GraphRefresh     GraphRefreshState `json:"graph_refresh,omitempty"`
-	MemoryRetrievals []MemoryRetrieval `json:"memory_retrievals,omitempty"`
+	Footprint Footprint       `json:"footprint,omitempty"`
+	Replay    json.RawMessage `json:"replay,omitempty"`
 }
 
 type indexFile struct {
-	About         artifactmeta.About `json:"_about"`
+	About         artifact.About `json:"_about"`
 	Sessions      []Meta             `json:"sessions"`
 	PendingSpawns json.RawMessage    `json:"pending_spawns,omitempty"`
 	Links         json.RawMessage    `json:"links,omitempty"`
 }
 
-var sessionAbout = artifactmeta.About{
-	Purpose:   "Materialized state, summary, footprint, review, recommendations, and replay metadata for one coding session.",
+var sessionAbout = artifact.About{
+	Purpose:   "Materialized state, footprint, and replay metadata for one coding session.",
 	Authority: "authoritative session state derived from events.jsonl",
-	UpdatedBy: "session materializer and review worker",
+	UpdatedBy: "session materializer",
 }
 
-var indexAbout = artifactmeta.About{
-	Purpose:   "Rebuildable catalog of sessions, parent-child links, pending reviews, and the latest session for each vendor.",
+var indexAbout = artifact.About{
+	Purpose:   "Rebuildable catalog of sessions, parent-child links, and the latest session for each vendor.",
 	Authority: "derived from session.json files with temporary coordination state",
-	UpdatedBy: "session ingestion and review workers",
+	UpdatedBy: "session ingestion",
 }
 
 // Store manages session materialization under .so/sessions/.
 type Store struct {
-	Paths harness.Paths
+	Paths paths.Paths
 }
 
-func NewStore(paths harness.Paths) *Store {
+func NewStore(paths paths.Paths) *Store {
 	return &Store{Paths: paths}
 }
 
@@ -305,11 +199,10 @@ func (s *Store) List() ([]IndexEntry, error) {
 	return entries, nil
 }
 
-// ListItem is a sessions-index row enriched for the UI (checkpoints, files, search hits).
+// ListItem is a sessions-index row enriched for the UI.
 type ListItem struct {
 	Meta
-	Checkpoints int      `json:"checkpoints"` // restorable .so snapshots (git commit / finalize)
-	Turns       int      `json:"turns"`       // user prompt markers in transcript
+	Turns       int      `json:"turns"` // user prompt markers in transcript
 	Files       []string `json:"files,omitempty"`
 	Match       string   `json:"match,omitempty"` // why this row matched a search query
 	hasActivity bool
@@ -485,22 +378,7 @@ func (s *Store) enrich(meta Meta) ListItem {
 	if item.Model != "" && meta.Model == "" {
 		item.Meta.Model = item.Model
 	}
-	item.Checkpoints = countCheckpointDirs(filepath.Join(dir, "checkpoints"))
 	return item
-}
-
-func countCheckpointDirs(dir string) int {
-	ents, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
-	n := 0
-	for _, e := range ents {
-		if e.IsDir() {
-			n++
-		}
-	}
-	return n
 }
 
 func (s *Store) scanTranscript(dir, existingModel string) (turns int, model string, hasActivity bool) {
@@ -510,11 +388,11 @@ func (s *Store) scanTranscript(dir, existingModel string) (turns int, model stri
 		return 0, model, false
 	}
 	defer f.Close()
-	spans := make([]tracestore.Span, 0)
+	spans := make([]trace.Span, 0)
 
 	dec := json.NewDecoder(f)
 	for {
-		var sp tracestore.Span
+		var sp trace.Span
 		if err := dec.Decode(&sp); err != nil {
 			break
 		}
@@ -631,41 +509,6 @@ func (s *Store) transcriptContains(id, needle string) string {
 	return ""
 }
 
-// FillMissingTitles assigns vendor AI names and (optionally) LLM short titles
-// for sessions that still only have a raw prompt_preview. Limited per call so
-// list endpoints stay responsive.
-func (s *Store) FillMissingTitles(client *llm.Client, limit int) int {
-	if limit <= 0 {
-		limit = 3
-	}
-	entries, err := s.List()
-	if err != nil {
-		return 0
-	}
-	filled := 0
-	for _, e := range entries {
-		if filled >= limit {
-			break
-		}
-		if !IsPlaceholderTitle(e.Title, e.ID) {
-			continue
-		}
-		meta, err := s.Get(e.ID)
-		if err != nil || !IsPlaceholderTitle(meta.Title, meta.ID) {
-			continue
-		}
-		EnsureTitle(&meta, client)
-		if IsPlaceholderTitle(meta.Title, meta.ID) {
-			continue
-		}
-		if err := s.UpdateMeta(meta); err != nil {
-			continue
-		}
-		filled++
-	}
-	return filled
-}
-
 func (s *Store) Get(id string) (Meta, error) {
 	path := filepath.Join(s.Paths.SessionDir(id), "session.json")
 	data, err := os.ReadFile(path)
@@ -711,7 +554,7 @@ func VendorFromAttrs(attrs map[string]string) string {
 }
 
 // VendorFromSpans returns the first non-empty vendor across spans.
-func VendorFromSpans(spans []tracestore.Span) string {
+func VendorFromSpans(spans []trace.Span) string {
 	for _, sp := range spans {
 		if v := VendorFromAttrs(sp.Attributes); v != "" {
 			return v
@@ -723,7 +566,7 @@ func VendorFromSpans(spans []tracestore.Span) string {
 // StartTimeFromSpans returns the earliest plausible telemetry timestamp. Some
 // vendor hooks omit timestamps or emit zero/Unix-epoch values; those must not
 // turn an active session into a decades-long session in the UI.
-func StartTimeFromSpans(spans []tracestore.Span) time.Time {
+func StartTimeFromSpans(spans []trace.Span) time.Time {
 	now := time.Now().UTC()
 	var earliest time.Time
 	for _, sp := range spans {
@@ -842,22 +685,22 @@ func (s *Store) Start(meta Meta) error {
 // Session identity prefers the stable chat-thread id (conversation.id). Subagent
 // traffic keeps its own id with parent_id set so the Sessions list shows one row
 // per chat and nested agents appear under the parent when viewing that chat.
-func (s *Store) UpsertActiveFromSpans(spans []tracestore.Span) {
+func (s *Store) UpsertActiveFromSpans(spans []trace.Span) {
 	if len(spans) == 0 {
 		return
 	}
 	type bucket struct {
-		spans  []tracestore.Span
+		spans  []trace.Span
 		parent string
 		nested bool
 	}
 	by := map[string]*bucket{}
 	for _, sp := range spans {
-		sid := otlp.ResolveSessionID(sp.Attributes, "")
+		sid := ResolveSessionID(sp.Attributes, "")
 		if sid == "" {
 			continue
 		}
-		parent := otlp.ResolveParentID(sp.Attributes)
+		parent := ResolveParentID(sp.Attributes)
 		if parent == sid {
 			parent = "" // self-parent echo must not nest the parent chat
 		}
@@ -947,7 +790,7 @@ func (s *Store) UpsertActiveFromSpans(spans []tracestore.Span) {
 				}
 			}
 			if meta.ParentID == "" {
-				if p := otlp.ResolveParentID(sp.Attributes); p != "" && p != id {
+				if p := ResolveParentID(sp.Attributes); p != "" && p != id {
 					if !agentlinks.IsTopLevelCursorChat(id) {
 						meta.ParentID = p
 						meta.IsSubagent = true
@@ -959,7 +802,7 @@ func (s *Store) UpsertActiveFromSpans(spans []tracestore.Span) {
 			meta.IsSubagent = false
 		}
 		if IsPlaceholderTitle(meta.Title, meta.ID) {
-			EnsureTitle(&meta, nil)
+			meta.Title = truncate(meta.PromptPreview, 80)
 		}
 		if !validSessionTime(meta.StartedAt, time.Now().UTC()) {
 			meta.StartedAt = StartTimeFromSpans(b.spans)
@@ -980,7 +823,7 @@ func truncateRunes(s string, n int) string {
 }
 
 // MaterializeFromSpans builds events, footprint, and updates session.json post-session.
-func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens int64, cost float64) (Meta, error) {
+func (s *Store) MaterializeFromSpans(id string, spans []trace.Span, tokens int64, cost float64) (Meta, error) {
 	dir := s.Paths.SessionDir(id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Meta{}, err
@@ -1021,7 +864,7 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 	if err := os.Remove(eventsPath); err != nil && !os.IsNotExist(err) {
 		return Meta{}, err
 	}
-	if err := artifactmeta.EnsureJSONL(eventsPath, artifactmeta.About{
+	if err := artifact.EnsureJSONL(eventsPath, artifact.About{
 		Purpose:   "Normalized prompts, responses, tool calls, file activity, usage, lifecycle, and audit events for this session.",
 		Authority: "authoritative session event stream", UpdatedBy: "vendor telemetry adapter",
 	}); err != nil {
@@ -1033,7 +876,6 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 	}
 	enc := json.NewEncoder(tf)
 	foot := map[string]*FootprintFile{}
-	retrievals := []MemoryRetrieval{}
 	for _, sp := range spans {
 		safe := sp
 		if len(sp.Attributes) > 0 {
@@ -1043,17 +885,6 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 			}
 		}
 		_ = enc.Encode(safe)
-		if sp.Name == "superopen.memory.retrieved" {
-			retrievals = append(retrievals, MemoryRetrieval{
-				PatternIDs:      parseStringList(safe.Attributes["superopen.memory.pattern_ids"]),
-				Scores:          parseStringList(safe.Attributes["superopen.memory.scores"]),
-				Reasons:         parseStringList(safe.Attributes["superopen.memory.reasons"]),
-				TargetPaths:     parseStringList(safe.Attributes["superopen.memory.target_paths"]),
-				EstimatedTokens: parseInt64(safe.Attributes["superopen.memory.estimated_tokens"]),
-				TurnID:          safe.Attributes["superopen.memory.turn_id"], Delivery: safe.Attributes["superopen.memory.delivery"],
-				At: time.Unix(0, sp.StartTimeUnixN).UTC(),
-			})
-		}
 		if meta.Vendor == "" || meta.Vendor == "unknown" {
 			if v := VendorFromAttrs(sp.Attributes); v != "" {
 				meta.Vendor = v
@@ -1119,7 +950,7 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 	if meta.ParentID == "" || !meta.IsSubagent {
 		for _, sp := range spans {
 			if meta.ParentID == "" {
-				if p := otlp.ResolveParentID(sp.Attributes); p != "" && p != id {
+				if p := ResolveParentID(sp.Attributes); p != "" && p != id {
 					meta.ParentID = p
 					meta.IsSubagent = true
 				}
@@ -1133,35 +964,17 @@ func (s *Store) MaterializeFromSpans(id string, spans []tracestore.Span, tokens 
 		meta.IsSubagent = false
 	}
 
-	// Prefer Claude aiTitle / Codex thread_name / OpenCode AI title when the id matches.
 	if IsPlaceholderTitle(meta.Title, meta.ID) {
-		EnsureTitle(&meta, nil) // vendor lookup only; LLM fill happens via FillMissingTitles
+		meta.Title = truncate(meta.PromptPreview, 80)
 	}
 
-	if err := s.writeDocument(id, func(d *Document) { d.Meta = meta; d.Footprint = fp; d.MemoryRetrievals = retrievals }); err != nil {
+	if err := s.writeDocument(id, func(d *Document) { d.Meta = meta; d.Footprint = fp }); err != nil {
 		return Meta{}, err
 	}
 	if err := s.upsertIndex(meta); err != nil {
 		return Meta{}, err
 	}
 	return meta, nil
-}
-
-func parseStringList(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	var values []string
-	if json.Unmarshal([]byte(raw), &values) == nil {
-		return values
-	}
-	return []string{raw}
-}
-
-func parseInt64(raw string) int64 {
-	var value int64
-	_, _ = fmt.Sscan(raw, &value)
-	return value
 }
 
 func (s *Store) upsertIndex(meta Meta) error {
@@ -1203,70 +1016,6 @@ func (s *Store) ReadDocument(id string) (Document, error) {
 
 func (s *Store) WriteDocument(id string, mutate func(*Document)) error {
 	return s.writeDocument(id, mutate)
-}
-
-// PreviousReviewContext returns context for only the latest preceding session
-// owned by vendor. It never leaks another vendor's review into a new session.
-func (s *Store) PreviousReviewContext(vendor, exceptID string) string {
-	entries, _ := s.List()
-	kind := harness.NormalizeVendorKind(vendor)
-	for _, m := range entries {
-		if m.ID == exceptID || harness.NormalizeVendorKind(m.Vendor) != kind {
-			continue
-		}
-		d, err := s.ReadDocument(m.ID)
-		if err != nil {
-			continue
-		}
-		if !ReviewEligible(d) {
-			continue
-		}
-		switch d.Review.Status {
-		case "pending", "failed":
-			return fmt.Sprintf("## Previous %s session review\n\nSession `%s` is eligible for review after the current user task. First produce the JSON from `so review-brief %s`, then invoke `so apply-review %s` with that JSON. Skip if status is complete or running.", kind, m.ID, m.ID, m.ID)
-		case "running":
-			return fmt.Sprintf("## Previous %s session review\n\nReview for `%s` is running; skip `so apply-review` and continue the user's task.", kind, m.ID)
-		case "complete":
-			var ev struct {
-				Score float64  `json:"score"`
-				Badge string   `json:"badge"`
-				Notes []string `json:"notes"`
-			}
-			_ = json.Unmarshal(d.Evaluation, &ev)
-			text := fmt.Sprintf("## Previous %s session review\n\nSession `%s`: %s (%.2f).", kind, m.ID, ev.Badge, ev.Score)
-			if len(ev.Notes) > 0 {
-				text += "\n\n- " + strings.Join(ev.Notes, "\n- ")
-			}
-			return text
-		}
-		return ""
-	}
-	return ""
-}
-
-// ClaimReview uses an OS-runtime lock so concurrent end/start hooks cannot
-// review or apply documentation for the same session twice.
-func (s *Store) ClaimReview(id, trigger string) (func(), bool) {
-	sum := sha256.Sum256([]byte(s.Paths.RepoRoot + "\x00" + id))
-	lock := filepath.Join(os.TempDir(), fmt.Sprintf("superopen-review-%x.lock", sum[:12]))
-	if err := os.Mkdir(lock, 0o700); err != nil {
-		if st, statErr := os.Stat(lock); statErr == nil && time.Since(st.ModTime()) > 10*time.Minute {
-			_ = os.RemoveAll(lock)
-			if err = os.Mkdir(lock, 0o700); err == nil {
-				goto claimed
-			}
-		}
-		return func() {}, false
-	}
-claimed:
-	now := time.Now().UTC()
-	_ = s.WriteDocument(id, func(d *Document) {
-		d.Review.Status = "running"
-		d.Review.Trigger = trigger
-		d.Review.StartedAt = &now
-		d.Review.Error = ""
-	})
-	return func() { _ = os.RemoveAll(lock) }, true
 }
 
 func (s *Store) writeDocument(id string, mutate func(*Document)) error {

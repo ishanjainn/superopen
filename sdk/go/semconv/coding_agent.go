@@ -191,7 +191,7 @@ const (
 
 // VCS bridging - repo / branch / commit live under OTel's standard
 // `vcs.*` attributes (see Reuse note at top of file), stamped on the
-// session root from local git context by `cli/internal/coding/git`.
+// session root from local git context by `cli/internal/agent/git`.
 // The constants below cover what OTel doesn't define.
 const (
 	// CodingAgentVCSDirty indicates the working tree has uncommitted changes

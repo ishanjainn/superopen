@@ -3,6 +3,5 @@ bin/
 dist/
 *.exe
 .DS_Store
-graphify-out/
 web/tsconfig.tsbuildinfo
 *.tsbuildinfo

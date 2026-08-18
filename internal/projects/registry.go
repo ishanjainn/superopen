@@ -9,23 +9,27 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ishanjainn/superopen/internal/paths"
 )
 
 const fileName = "projects.json"
 
 // Project is one registered repo/.so pair.
 type Project struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	RepoRoot   string    `json:"repo_root"`
-	SoRoot     string    `json:"so_root"`
-	RemoteURL  string    `json:"remote_url,omitempty"`
-	LastSeenAt time.Time `json:"last_seen_at"`
+	ID               string    `json:"id"`
+	Name             string    `json:"name"`
+	RepoRoot         string    `json:"repo_root"`
+	SoRoot           string    `json:"so_root"`
+	RemoteURL        string    `json:"remote_url,omitempty"`
+	LastSeenAt       time.Time `json:"last_seen_at"`
+	LastInitAt       time.Time `json:"last_init_at,omitempty"`
+	LastGraphRefresh time.Time `json:"last_graph_refresh,omitempty"`
+	LastSessionAt    time.Time `json:"last_session_at,omitempty"`
 }
 
 type fileShape struct {
@@ -46,19 +50,7 @@ func SetPathForTest(path string) {
 }
 
 func configDir() (string, error) {
-	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
-		return filepath.Join(x, "superopen"), nil
-	}
-	if runtime.GOOS == "windows" {
-		if cfg, err := os.UserConfigDir(); err == nil && cfg != "" {
-			return filepath.Join(cfg, "superopen"), nil
-		}
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config", "superopen"), nil
+	return paths.ConfigDir()
 }
 
 // Path returns the absolute path to projects.json.
@@ -149,6 +141,9 @@ func Register(repoRoot, soRoot, remoteURL string) (Project, error) {
 			if f.Projects[i].RemoteURL != "" && remoteURL == "" {
 				p.RemoteURL = f.Projects[i].RemoteURL
 			}
+			p.LastInitAt = f.Projects[i].LastInitAt
+			p.LastGraphRefresh = f.Projects[i].LastGraphRefresh
+			p.LastSessionAt = f.Projects[i].LastSessionAt
 			f.Projects[i] = p
 			found = true
 			break
@@ -365,4 +360,51 @@ func ResolveFilter(filter string) ([]Project, error) {
 		return nil, err
 	}
 	return []Project{p}, nil
+}
+
+// TouchInit records so init for a repo.
+func TouchInit(repoRoot string) error {
+	return touchField(repoRoot, func(p *Project, now time.Time) {
+		p.LastInitAt = now
+		p.LastSeenAt = now
+	})
+}
+
+// TouchGraphRefresh records a successful graph build/refresh.
+func TouchGraphRefresh(repoRoot string) error {
+	return touchField(repoRoot, func(p *Project, now time.Time) {
+		p.LastGraphRefresh = now
+		p.LastSeenAt = now
+	})
+}
+
+// TouchSession records session activity.
+func TouchSession(repoRoot string) error {
+	return touchField(repoRoot, func(p *Project, now time.Time) {
+		p.LastSessionAt = now
+		p.LastSeenAt = now
+	})
+}
+
+func touchField(repoRoot string, apply func(*Project, time.Time)) error {
+	if _, err := Register(repoRoot, "", ""); err != nil {
+		return err
+	}
+	f, err := load()
+	if err != nil {
+		return err
+	}
+	repoRoot, err = filepath.Abs(repoRoot)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	id := idFor(repoRoot)
+	for i := range f.Projects {
+		if f.Projects[i].RepoRoot == repoRoot || f.Projects[i].ID == id {
+			apply(&f.Projects[i], now)
+			return save(f)
+		}
+	}
+	return fmt.Errorf("project not found after register: %s", repoRoot)
 }
