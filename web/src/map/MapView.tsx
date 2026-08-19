@@ -1,24 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Crosshair, Sparkles, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import { Mountain, TreePine, Users } from "lucide-react";
 import {
   describeError,
   getAgentTrace,
   getSessionAgents,
-  getSessionReport,
   getSessionSnapshot,
   resolveSessionKey,
-  startSessionAnalyze,
 } from "./api";
 import { PlaybackEngine } from "./playback/reducer";
 import { TreeScene } from "./scene/TreeScene";
 import { TerrainScene } from "./scene/TerrainScene";
-import { type PanelBadge, type PanelDescriptor } from "./ui/Dock";
+import { type PanelDescriptor } from "./ui/Dock";
 import { AgentsPanel } from "./ui/AgentsPanel";
 import { Hud, type ChurnEntry, type HudSessionExtras, type HudTool } from "./ui/Hud";
 import { Inspector } from "./ui/Inspector";
-import { ReportPanel } from "./ui/ReportPanel";
 import { Timeline } from "./ui/Timeline";
 import { nearbyFiles } from "./nearby";
 import { computeTreeLayout } from "./scene/treeLayout";
@@ -26,8 +24,6 @@ import type {
   AgentGraph,
   SessionFile,
   SessionMap,
-  JudgeChoice,
-  ReportStatus,
   Trace,
 } from "./types";
 import "./map.css";
@@ -40,23 +36,15 @@ export interface MapViewProps {
   /** Embed in Sessions → Map tab (no full-page chrome). */
   embed?: boolean;
   className?: string;
-  /** Chat-origin linked/checkpoint meta for the shared session rail. */
+  /** Chat-origin linked metadata for the shared session rail. */
   sessionExtras?: HudSessionExtras;
-}
-
-function evaluateHint(badge: PanelBadge | null): string {
-  switch (badge) {
-    case "running":
-      return "The judge is reading the trace - about a minute";
-    case "done":
-      return "Evaluation ready";
-    case "stale":
-      return "Evaluation ready, but the session has grown since";
-    case "failed":
-      return "The last evaluation failed - open to retry";
-    default:
-      return "Evaluate this session with your local agent CLI";
-  }
+  /** Controlled playback index. Uncontrolled when omitted. */
+  seq?: number;
+  onSeqChange?: (seq: number, at?: number) => void;
+  /** Chat-scroll timestamp (unix nano). Map jumps to the nearest event. */
+  seekAtNano?: number;
+  /** Mount the HUD into a shared top bar instead of the right overlay. */
+  hudHost?: HTMLElement | null;
 }
 
 /**
@@ -67,12 +55,27 @@ export default function MapView({
   embed = true,
   className,
   sessionExtras,
+  seq,
+  onSeqChange,
+  seekAtNano,
+  hudHost,
 }: MapViewProps) {
   const [sessionKey, setSessionKey] = useState<string | undefined>();
   const [mainTrace, setMainTrace] = useState<Trace | undefined>();
   const [trace, setTrace] = useState<Trace | undefined>();
   const [sessionMap, setSessionMap] = useState<SessionMap | undefined>();
-  const [currentSeq, setCurrentSeq] = useState(0);
+  const [internalSeq, setInternalSeq] = useState(0);
+  const currentSeq = seq ?? internalSeq;
+  const pushSeq = useCallback(
+    (next: number) => {
+      setInternalSeq(next);
+      const ts = trace?.events[next]?.ts;
+      const ms = ts ? Date.parse(ts) : NaN;
+      const at = Number.isFinite(ms) ? ms * 1e6 : undefined;
+      onSeqChange?.(next, at);
+    },
+    [onSeqChange, trace],
+  );
   const [selectedPath, setSelectedPath] = useState<string | undefined>();
   const [view, setView] = useState<MapViewMode>("tree");
   const [loading, setLoading] = useState(true);
@@ -87,10 +90,6 @@ export default function MapView({
   const [retryAgentID, setRetryAgentID] = useState<string | null>(null);
   const [currentAgentID, setCurrentAgentID] = useState<string | null>(null);
 
-  const [reportStatus, setReportStatus] = useState<ReportStatus | undefined>();
-  const [analyzing, setAnalyzing] = useState(false);
-  const reportPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -99,7 +98,7 @@ export default function MapView({
       setMainTrace(undefined);
       setTrace(undefined);
       setSessionMap(undefined);
-      setCurrentSeq(0);
+      pushSeq(0);
       setSelectedPath(undefined);
       setCurrentAgentID(null);
       setAgentGraph(undefined);
@@ -112,7 +111,7 @@ export default function MapView({
         setMainTrace(snap.trace);
         setTrace(snap.trace);
         setSessionMap(snap.sessionMap);
-        setCurrentSeq(0);
+        pushSeq(0);
       } catch (err) {
         if (!cancelled) setError(describeError(err, "loading the map"));
       } finally {
@@ -145,38 +144,32 @@ export default function MapView({
     void loadAgents();
   }, [sessionKey, loadAgents]);
 
-  const refreshReport = useCallback(async () => {
-    if (!sessionKey) return;
-    try {
-      const status = await getSessionReport(sessionKey);
-      setReportStatus(status);
-      setAnalyzing(status.state === "running");
-    } catch {
-      /* report optional */
-    }
-  }, [sessionKey]);
-
-  useEffect(() => {
-    if (!sessionKey) return;
-    void refreshReport();
-  }, [sessionKey, refreshReport]);
-
-  useEffect(() => {
-    if (reportPollRef.current) {
-      clearInterval(reportPollRef.current);
-      reportPollRef.current = null;
-    }
-    if (!sessionKey || reportStatus?.state !== "running") return;
-    reportPollRef.current = setInterval(() => {
-      void refreshReport();
-    }, 4000);
-    return () => {
-      if (reportPollRef.current) clearInterval(reportPollRef.current);
-    };
-  }, [sessionKey, reportStatus?.state, refreshReport]);
-
   const engine = useMemo(() => new PlaybackEngine(trace, sessionMap), [trace, sessionMap]);
   const playback = useMemo(() => engine.snapshotAt(currentSeq), [engine, currentSeq]);
+
+  useEffect(() => {
+    if (seekAtNano == null || !trace?.events.length) return;
+    let best = 0;
+    let bestDelta = Infinity;
+    const events = trace.events;
+    const hasTs = events.some((event) => event.ts);
+    if (!hasTs) {
+      const ratio = Math.min(1, Math.max(0, seekAtNano));
+      best = Math.round(ratio * (events.length - 1));
+    } else {
+      for (let i = 0; i < events.length; i++) {
+        const stamp = events[i].ts ? Date.parse(events[i].ts as string) * 1e6 : i;
+        const delta = Math.abs(stamp - seekAtNano);
+        if (delta < bestDelta) {
+          best = i;
+          bestDelta = delta;
+        }
+      }
+    }
+    if (best !== currentSeq) pushSeq(best);
+    // currentSeq is read for inequality only; chat-origin seeks should not loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekAtNano, trace, pushSeq]);
 
   const touchCounts = useMemo(() => {
     let edited = 0;
@@ -245,12 +238,8 @@ export default function MapView({
   const onSelect = useCallback(
     (path?: string) => {
       setSelectedPath(path);
-      if (path) {
-        rebuildNeighborRing(path);
-        setOpenSheet("inspect");
-      } else {
-        setNeighborRing([]);
-      }
+      if (path) rebuildNeighborRing(path);
+      else setNeighborRing([]);
     },
     [rebuildNeighborRing]
   );
@@ -258,7 +247,13 @@ export default function MapView({
   const onSelectNeighbor = useCallback((path: string) => {
     // Step inside the frozen ring - do not rebuild from the new leaf.
     setSelectedPath(path);
-    setOpenSheet("inspect");
+  }, []);
+
+  // Closing the card is how you drop the selection - there is no other way
+  // back to an unselected stage.
+  const closeInspector = useCallback(() => {
+    setSelectedPath(undefined);
+    setNeighborRing([]);
   }, []);
 
   // Rebuild ring if layout or session map changes while a selection is active
@@ -277,9 +272,9 @@ export default function MapView({
     });
   }, [sessionMap, treeLayout]); // eslint-disable-line react-hooks/exhaustive-deps -- only refresh refs on layout/session map
 
-  // Keyboard Prev/Next while Inspect is open
+  // Keyboard Prev/Next while a file is selected
   useEffect(() => {
-    if (openSheet !== "inspect" || neighborRing.length < 2 || !selectedPath) return;
+    if (neighborRing.length < 2 || !selectedPath) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
         return;
@@ -296,16 +291,16 @@ export default function MapView({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openSheet, neighborRing, selectedPath, onSelectNeighbor]);
+  }, [neighborRing, selectedPath, onSelectNeighbor]);
 
   const onJumpTo = useCallback(
     (seq: number) => {
-      setCurrentSeq(seq);
+      pushSeq(seq);
       const event = trace?.events[seq];
       const path = event?.targets[0]?.path;
       if (path) setSelectedPath(path);
     },
-    [trace]
+    [trace, pushSeq]
   );
 
   const selectAgent = useCallback(
@@ -314,7 +309,7 @@ export default function MapView({
       if (agentID === null) {
         setCurrentAgentID(null);
         setTrace(mainTrace);
-        setCurrentSeq(0);
+        pushSeq(0);
         setSelectedPath(undefined);
         return;
       }
@@ -325,7 +320,7 @@ export default function MapView({
         const agentTrace = await getAgentTrace(sessionKey, agentID);
         setCurrentAgentID(agentID);
         setTrace(agentTrace);
-        setCurrentSeq(0);
+        pushSeq(0);
         setSelectedPath(undefined);
       } catch (err) {
         setAgentError(describeError(err, "loading agent trace"));
@@ -336,36 +331,6 @@ export default function MapView({
     },
     [sessionKey, mainTrace]
   );
-
-  const onAnalyze = useCallback(
-    async (choice: JudgeChoice) => {
-      if (!sessionKey) return;
-      setAnalyzing(true);
-      try {
-        const status = await startSessionAnalyze(sessionKey, choice);
-        setReportStatus(status);
-      } catch (err) {
-        setReportStatus({
-          state: "failed",
-          stale: false,
-          error: describeError(err, "starting evaluation"),
-          judgeAvailable: true,
-          judgeClis: ["heuristic"],
-        });
-        setAnalyzing(false);
-      }
-    },
-    [sessionKey]
-  );
-
-  const evalBadge: PanelBadge | null = useMemo(() => {
-    if (!reportStatus) return null;
-    if (reportStatus.state === "running" || analyzing) return "running";
-    if (reportStatus.state === "failed") return "failed";
-    if (reportStatus.state === "done" && reportStatus.stale) return "stale";
-    if (reportStatus.state === "done") return "done";
-    return null;
-  }, [reportStatus, analyzing]);
 
   const agentLabel = useMemo(() => {
     if (!currentAgentID || !agentGraph) return undefined;
@@ -378,27 +343,10 @@ export default function MapView({
     setOpenSheet((cur) => (cur === panel.id ? null : panel.id));
   }, []);
 
+  // Inspect is not a dock sheet: it rides the stage as a card over the scene,
+  // so the selected file stays in view beside its own facts.
   const panels: PanelDescriptor[] = useMemo(
     () => [
-      {
-        id: "inspect",
-        icon: Crosshair,
-        label: "Inspect",
-        hint: "Inspect selected file",
-        section: "session",
-        presentation: "sheet",
-        render: () => (
-          <Inspector
-            file={selectedFile}
-            touch={selectedTouch}
-            history={selectedHistory}
-            neighbors={neighborRing}
-            onSelectNeighbor={onSelectNeighbor}
-            onClose={closeSheet}
-            onJumpTo={onJumpTo}
-          />
-        ),
-      },
       {
         id: "agents",
         icon: Users,
@@ -423,34 +371,9 @@ export default function MapView({
           />
         ),
       },
-      {
-        id: "evaluate",
-        icon: Sparkles,
-        label: "Evaluate",
-        hint: evaluateHint(evalBadge),
-        section: "session",
-        presentation: "sheet",
-        badge: evalBadge,
-        render: () => (
-          <ReportPanel
-            status={reportStatus}
-            analyzing={analyzing}
-            locked={false}
-            onAnalyze={(choice) => void onAnalyze(choice)}
-            onClose={closeSheet}
-            onJumpTo={onJumpTo}
-          />
-        ),
-      },
     ],
     [
-      selectedFile,
-      selectedTouch,
-      selectedHistory,
-      neighborRing,
-      onSelectNeighbor,
       closeSheet,
-      onJumpTo,
       agentGraph,
       currentAgentID,
       agentLoading,
@@ -459,10 +382,6 @@ export default function MapView({
       retryAgentID,
       selectAgent,
       loadAgents,
-      evalBadge,
-      reportStatus,
-      analyzing,
-      onAnalyze,
     ]
   );
 
@@ -485,8 +404,34 @@ export default function MapView({
     return panels.find((panel) => panel.id === openSheet)?.render();
   }, [panels, openSheet]);
 
+  const hud = (
+    <Hud
+      trace={trace}
+      sessionMap={sessionMap}
+      agentLabel={agentLabel}
+      view={view}
+      onViewChange={setView}
+      tools={hudTools}
+      panel={openPanel}
+      onClosePanel={closeSheet}
+      sessionExtras={sessionExtras}
+      editedNow={touchCounts.edited}
+      readNow={touchCounts.read}
+      seenNow={touchCounts.seen}
+      churn={churn}
+      onSelectFile={(path) => onSelect(path)}
+      agentGraph={agentGraph}
+      currentAgentID={currentAgentID}
+      agentLoading={agentLoading}
+      agentError={agentError}
+      onSelectAgent={(id) => void selectAgent(id)}
+      placement={hudHost ? "top" : "right"}
+    />
+  );
+
   return (
     <div className={`map-root ${className || ""}`.trim()} data-embed={embed ? "1" : undefined}>
+      {hudHost ? createPortal(hud, hudHost) : null}
       <main className="app-frame rail-collapsed">
         <section className="stage">
           <div className="viewport">
@@ -506,25 +451,42 @@ export default function MapView({
               />
             )}
 
-            <Hud
-              trace={trace}
-              sessionMap={sessionMap}
-              agentLabel={agentLabel}
-              view={view}
-              onViewChange={setView}
-              tools={hudTools}
-              panel={openPanel}
-              onClosePanel={closeSheet}
-              sessionExtras={sessionExtras}
-              editedNow={touchCounts.edited}
-              readNow={touchCounts.read}
-              seenNow={touchCounts.seen}
-              churn={churn}
-              onSelectFile={(path) => onSelect(path)}
-              onOpenAgents={() => {
-                setOpenSheet("agents");
-              }}
-            />
+            {hudHost ? null : hud}
+
+            <div className="map-view-badge" role="group" aria-label="Scene view">
+              <button
+                type="button"
+                aria-pressed={view === "tree"}
+                className={view === "tree" ? "active" : undefined}
+                onClick={() => setView("tree")}
+                title="Tree"
+              >
+                <TreePine size={11} strokeWidth={2} />
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === "terrain"}
+                className={view === "terrain" ? "active" : undefined}
+                onClick={() => setView("terrain")}
+                title="Terrain"
+              >
+                <Mountain size={11} strokeWidth={2} />
+              </button>
+            </div>
+
+            {selectedFile ? (
+              <div className="map-inspector">
+                <Inspector
+                  file={selectedFile}
+                  touch={selectedTouch}
+                  history={selectedHistory}
+                  neighbors={neighborRing}
+                  onSelectNeighbor={onSelectNeighbor}
+                  onClose={closeInspector}
+                  onJumpTo={onJumpTo}
+                />
+              </div>
+            ) : null}
 
             {loading && <div className="map-status">Loading map…</div>}
             {error && !loading && (
@@ -535,7 +497,7 @@ export default function MapView({
           <Timeline
             trace={trace}
             currentSeq={currentSeq}
-            onChange={setCurrentSeq}
+            onChange={pushSeq}
             onSubagentMark={() => {
               setOpenSheet("agents");
             }}

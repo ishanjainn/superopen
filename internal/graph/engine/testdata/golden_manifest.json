@@ -1,0 +1,53 @@
+{
+  "asset_revision": "41d240accf91641b197620f7c33a4d2d60451d0b",
+  "source_revision": "",
+  "project": "superopen-current",
+  "generated_at": "2026-08-17T21:51:17.032154Z",
+  "counts": {
+    "nodes": 6550,
+    "edges": 33920,
+    "vectors": 3510,
+    "coverage": 0,
+    "files": 590,
+    "unresolved": 10794,
+    "missed_nodes": 0
+  },
+  "node_labels": {
+    "Branch": 1,
+    "Class": 35,
+    "Decorator": 1,
+    "EnvVar": 58,
+    "File": 590,
+    "Folder": 198,
+    "Function": 3022,
+    "Interface": 62,
+    "Method": 488,
+    "Module": 220,
+    "Package": 27,
+    "Project": 1,
+    "Route": 78,
+    "Section": 86,
+    "Struct": 427,
+    "Type": 145,
+    "Variable": 1111
+  },
+  "edge_types": {
+    "CALLS": 8592,
+    "CONFIGURES": 229,
+    "CONTAINS_FILE": 590,
+    "CONTAINS_FOLDER": 167,
+    "DECORATES": 1,
+    "DEFINES": 6028,
+    "DEFINES_METHOD": 529,
+    "DEPENDS_ON": 37,
+    "HAS_BRANCH": 1,
+    "HTTP_CALLS": 115,
+    "IMPORTS": 1219,
+    "RAISES": 79,
+    "SIMILAR_TO": 104,
+    "TESTS": 1709,
+    "TESTS_FILE": 122,
+    "USAGE": 12128,
+    "WRITES": 2270
+  }
+}

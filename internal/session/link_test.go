@@ -5,12 +5,12 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/session"
-	"github.com/ishanjainn/superopen/internal/tracestore"
+	"github.com/ishanjainn/superopen/internal/session/trace"
 )
 
 func TestApplyVCSFromSpans(t *testing.T) {
 	meta := &session.Meta{ID: "s1"}
-	session.ApplyVCSFromSpans(meta, []tracestore.Span{
+	session.ApplyVCSFromSpans(meta, []trace.Span{
 		{
 			Name:           "coding_agent.git.commit",
 			StartTimeUnixN: time.Now().UnixNano(),

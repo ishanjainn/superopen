@@ -61,7 +61,9 @@ jobs:
       - name: go test
         # -race for sessionstate / OTLP / projects registry concurrency.
         # -count=1 disables the test cache.
-        run: go test -race -count=1 ./...
+        # -timeout 30m: graph/engine race + wazero grammar compiles exceed the
+        # default 10m package timeout on slower runners.
+        run: go test -race -timeout 30m -count=1 ./...
 
   cross-compile:
     name: Build / ${{ matrix.os }}-${{ matrix.arch }}
@@ -101,11 +103,11 @@ jobs:
         run: |
           set -euo pipefail
           BEFORE=$(mktemp -d)
-          cp -R internal/coding/install/marketplace/. "$BEFORE/"
+          cp -R internal/agent/install/marketplace/. "$BEFORE/"
           bash scripts/sync-plugins.sh
-          if ! diff -ru "$BEFORE" internal/coding/install/marketplace; then
+          if ! diff -ru "$BEFORE" internal/agent/install/marketplace; then
             echo
-            echo "::error::plugins/ or .claude-plugin/ has drifted from internal/coding/install/marketplace/."
+            echo "::error::plugins/ or .claude-plugin/ has drifted from internal/agent/install/marketplace/."
             echo "Run \`bash scripts/sync-plugins.sh\` locally and commit the result."
             exit 1
           fi

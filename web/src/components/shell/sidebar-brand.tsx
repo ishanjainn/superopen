@@ -35,29 +35,32 @@ export default function SidebarBrand() {
           {isExpanded ? "Collapse sidebar" : "Expand sidebar"}
         </TooltipContent>
       </Tooltip>
-      {isExpanded ? (
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/brand-wordmark.png"
-            alt="SUPEROPEN"
-            className="h-9 w-auto max-w-[12rem] object-contain object-left"
-          />
-          <p
-            className="shrink-0 text-[10px] text-neutral-400"
-            title={`Superopen ${displayVersion()}`}
-          >
-            {displayVersion()}
-          </p>
-        </div>
-      ) : (
-        // eslint-disable-next-line @next/next/no-img-element
+      {/* The mark keeps its slot in both states; expanding only reveals the
+          wordmark and version beside it. */}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/brand-mark.png"
           alt="Superopen"
           className="size-8 shrink-0 object-contain"
         />
-      )}
+        {isExpanded ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/brand-wordmark.png"
+              alt="superopen"
+              className="h-5 w-auto min-w-0 max-w-[9rem] object-contain object-left"
+            />
+            <p
+              className="shrink-0 text-[10px] text-neutral-400"
+              title={`Superopen ${displayVersion()}`}
+            >
+              {displayVersion()}
+            </p>
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }

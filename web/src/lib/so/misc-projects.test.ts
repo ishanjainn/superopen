@@ -32,7 +32,7 @@ describe("removeProject / pruneMissingProjects", () => {
     const repo = join(dir, "repo-a");
     const so = join(repo, ".so");
     mkdirSync(so, { recursive: true });
-    writeFileSync(join(so, "config.yaml"), "memory:\n  enabled: true\n");
+    writeFileSync(join(so, "config.yaml"), "project: test\n");
     writeFileSync(
       projectsPath,
       JSON.stringify(
@@ -94,11 +94,44 @@ describe("removeProject / pruneMissingProjects", () => {
     expect(existsSync(orphanSo)).toBe(false);
   });
 
+  it("prunes non-git directories that still exist", async () => {
+    const junk = join(dir, "not-a-repo");
+    mkdirSync(junk, { recursive: true });
+    writeFileSync(
+      projectsPath,
+      JSON.stringify(
+        {
+          projects: [
+            {
+              id: "dddddddddddddddd",
+              name: "junk",
+              repo_root: junk,
+              so_root: join(junk, ".so"),
+            },
+          ],
+        },
+        null,
+        2
+      )
+    );
+
+    const { pruneInvalidProjects } = await import("./misc");
+    const out = pruneInvalidProjects(false);
+    expect(out).toHaveLength(1);
+    expect(out[0].project.repo_root).toBe(junk);
+    const raw = JSON.parse(readFileSync(projectsPath, "utf8")) as {
+      projects: unknown[];
+    };
+    expect(raw.projects).toHaveLength(0);
+  });
+
   it("scopes data to one selected managed repository", async () => {
     const active = join(dir, "active");
     const selected = join(dir, "selected");
     mkdirSync(join(active, ".so"), { recursive: true });
+    mkdirSync(join(active, ".git"), { recursive: true });
     mkdirSync(join(selected, ".so"), { recursive: true });
+    mkdirSync(join(selected, ".git"), { recursive: true });
     vi.stubEnv("SUPEROPEN_ROOT", active);
     writeFileSync(
       projectsPath,

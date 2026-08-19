@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/ishanjainn/superopen/internal/checkpoint"
-	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/paths"
 )
 
 // fakeSecret is assembled at runtime so the source file never contains
@@ -19,7 +19,7 @@ func TestCreateRestore(t *testing.T) {
 	repo := t.TempDir()
 	soRoot := filepath.Join(repo, ".so")
 	_ = os.MkdirAll(soRoot, 0o755)
-	paths := harness.Resolve(repo)
+	paths := paths.Resolve(repo)
 	_ = os.MkdirAll(paths.SessionDir("s1"), 0o755)
 
 	src := filepath.Join(repo, "a.txt")

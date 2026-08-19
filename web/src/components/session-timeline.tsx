@@ -14,10 +14,13 @@ import {
   ChevronDown,
   ChevronUp,
   FileCode2,
+  SlidersHorizontal,
   Terminal,
+  User,
 } from "lucide-react";
 import { SessionRail } from "@/components/session-rail";
 import { cn } from "@/lib/utils";
+import { useAuthorAvatar } from "@/lib/use-author-avatar";
 
 export type SessionMeta = {
   id: string;
@@ -31,7 +34,6 @@ export type SessionMeta = {
   duration_ms?: number;
   tokens?: number;
   cost_usd?: number;
-  eval_badge?: string;
   branch?: string;
   head_sha?: string;
   commits?: { sha?: string; message?: string }[];
@@ -40,20 +42,12 @@ export type SessionMeta = {
   summary?: string;
 };
 
-export type RestoreCheckpoint = {
-  id: number;
-  session_id?: string;
-  created_at?: string;
-  label?: string;
-  files?: string[];
-};
-
 export type Span = {
   name?: string;
   start_time_unix_nano?: number;
   end_time_unix_nano?: number;
   attributes?: Record<string, string>;
-  /** Ported PortableTurn rows (so sessions port) - not OTLP spans. */
+  /** Normalized conversation row when no OTLP span shape is available. */
   role?: string;
   text?: string;
   timestamp?: number;
@@ -232,10 +226,10 @@ function isoToNano(iso?: string): number {
   return Number.isFinite(ms) ? ms * 1e6 : 0;
 }
 
-/** True when transcript rows are PortableTurn JSONL from `so sessions port`. */
-function looksLikePortableTurns(spans: Span[]): boolean {
+/** True when transcript rows use the normalized conversation-row shape. */
+function looksLikeConversationTurns(spans: Span[]): boolean {
   if (!spans.length) return false;
-  let portable = 0;
+  let conversation = 0;
   for (const sp of spans) {
     const role = String(sp.role || "").toLowerCase();
     const hasText = typeof sp.text === "string" && sp.text.trim() !== "";
@@ -243,13 +237,13 @@ function looksLikePortableTurns(spans: Span[]): boolean {
       Boolean(sp.name) ||
       Boolean(sp.attributes && Object.keys(sp.attributes).length);
     if ((role === "user" || role === "assistant" || role === "system") && hasText && !hasOtlp) {
-      portable++;
+      conversation++;
     }
   }
-  return portable > 0 && portable >= spans.length / 2;
+  return conversation > 0 && conversation >= spans.length / 2;
 }
 
-function buildTimelineFromPortableTurns(spans: Span[]): TimelineItem[] {
+function buildTimelineFromConversationTurns(spans: Span[]): TimelineItem[] {
   const items: TimelineItem[] = [];
   let i = 0;
   for (const sp of spans) {
@@ -265,7 +259,7 @@ function buildTimelineFromPortableTurns(spans: Span[]): TimelineItem[] {
     if (role === "assistant") {
       items.push({
         kind: "response",
-        id: `port-resp-${i++}`,
+        id: `resp-${i++}`,
         at,
         text,
         model: typeof (sp as { model?: string }).model === "string"
@@ -275,7 +269,7 @@ function buildTimelineFromPortableTurns(spans: Span[]): TimelineItem[] {
     } else if (role === "user" || role === "system" || role === "user_prompt") {
       items.push({
         kind: "prompt",
-        id: `port-prompt-${i++}`,
+        id: `prompt-${i++}`,
         at,
         text,
       });
@@ -285,8 +279,8 @@ function buildTimelineFromPortableTurns(spans: Span[]): TimelineItem[] {
 }
 
 function buildTimeline(spans: Span[]): TimelineItem[] {
-  if (looksLikePortableTurns(spans)) {
-    return buildTimelineFromPortableTurns(spans);
+  if (looksLikeConversationTurns(spans)) {
+    return buildTimelineFromConversationTurns(spans);
   }
   const items: TimelineItem[] = [];
   let i = 0;
@@ -305,7 +299,7 @@ function buildTimeline(spans: Span[]): TimelineItem[] {
 
   for (const sp of spans) {
     const attrs = sp.attributes || {};
-    const at = sp.start_time_unix_nano || 0;
+    const at = Number(sp.start_time_unix_nano) || 0;
     const name = sp.name || "";
 
     if (name.includes("llm.turn") || name.includes("prompt") || name.includes("completion")) {
@@ -555,34 +549,27 @@ function vendorFromMeta(
   return "other";
 }
 
-function userLabel(spans: Span[]): string {
-  const email =
-    spans.map((s) => s.attributes?.["gen_ai.user.name"]).find(Boolean) || "";
-  if (email.includes("@")) return email.split("@")[0];
-  return email || "You";
-}
-
-function userInitials(spans: Span[]): string {
-  const label = userLabel(spans);
-  const parts = label.replace(/[._-]+/g, " ").split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return label.slice(0, 2).toUpperCase() || "U";
-}
-
 export default function SessionTimeline({
   meta,
   spans,
   footprint,
-  restoreCheckpoints = [],
   subagents = [],
   project = "",
+  showRail = true,
+  onVisibleAt,
+  seekAt,
+  seekNonce,
 }: {
   meta: SessionMeta;
   spans: Span[];
   footprint?: { files?: { path: string; state: string; count: number }[] };
-  restoreCheckpoints?: RestoreCheckpoint[];
   subagents?: NestedSessionSummary[];
   project?: string;
+  showRail?: boolean;
+  onVisibleAt?: (at: number) => void;
+  seekAt?: number;
+  /** Bumps when the map playhead seeks so chat always jumps, even to a nearby timestamp. */
+  seekNonce?: number;
 }) {
   const rawItems = useMemo(() => buildTimeline(spans), [spans]);
   const items = useMemo(
@@ -590,8 +577,8 @@ export default function SessionTimeline({
     [rawItems, subagents]
   );
   const vendor = useMemo(() => vendorFromMeta(meta, spans), [meta, spans]);
-  const initials = useMemo(() => userInitials(spans), [spans]);
   const feedRef = useRef<HTMLDivElement>(null);
+  const skipScrollReport = useRef(false);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -615,6 +602,61 @@ export default function SessionTimeline({
     },
     [filters, pathname, router, searchParams]
   );
+
+  useEffect(() => {
+    const root = feedRef.current;
+    if (!root || !onVisibleAt) return;
+    const report = () => {
+      if (skipScrollReport.current) {
+        skipScrollReport.current = false;
+        return;
+      }
+      const marker = root.scrollTop + root.clientHeight * 0.35;
+      let at = 0;
+      for (const node of root.querySelectorAll<HTMLElement>("[data-at]")) {
+        if (node.offsetTop <= marker) {
+          const value = Number(node.dataset.at);
+          if (Number.isFinite(value)) at = value;
+        }
+      }
+      onVisibleAt(at);
+    };
+    root.addEventListener("scroll", report, { passive: true });
+    return () => root.removeEventListener("scroll", report);
+  }, [onVisibleAt]);
+
+  useEffect(() => {
+    if (seekAt == null) return;
+    const root = feedRef.current;
+    if (!root) return;
+    const nodes = [...root.querySelectorAll<HTMLElement>("[data-at]")];
+    if (!nodes.length) return;
+    let best = nodes[0];
+    let bestDelta = Infinity;
+    for (const node of nodes) {
+      const value = Number(node.dataset.at);
+      const delta = Math.abs(value - seekAt);
+      if (delta < bestDelta) {
+        best = node;
+        bestDelta = delta;
+      }
+    }
+    skipScrollReport.current = true;
+    const top = best.offsetTop;
+    const viewTop = root.scrollTop;
+    const viewBot = viewTop + root.clientHeight;
+    const alreadyVisible =
+      seekNonce == null && top >= viewTop + 24 && top <= viewBot - 80;
+    if (!alreadyVisible) {
+      root.scrollTo({
+        top: Math.max(0, top - root.clientHeight * 0.28),
+        behavior: "auto",
+      });
+    }
+    window.setTimeout(() => {
+      skipScrollReport.current = false;
+    }, 80);
+  }, [seekAt, seekNonce]);
   const counts = useMemo(() => {
     const c = {
       prompts: 0,
@@ -719,7 +761,7 @@ export default function SessionTimeline({
     Boolean(meta.attribution?.display);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white">
+    <div className={cn("flex h-full min-h-0 flex-col", showRail ? "bg-white" : "bg-transparent")}>
       <div className="flex min-h-0 flex-1">
         <div className="relative min-h-0 min-w-0 flex-1">
           <div
@@ -742,7 +784,8 @@ export default function SessionTimeline({
                     <TimelineStep
                       key={it.id}
                       id={it.id}
-                      icon={<UserAvatar initials={initials} />}
+                      at={it.at}
+                      icon={<UserAvatar />}
                       isFirst={isFirst}
                       isLast={isLast}
                     >
@@ -764,6 +807,7 @@ export default function SessionTimeline({
                     <TimelineStep
                       key={it.id}
                       id={it.id}
+                      at={it.at}
                       icon={<VendorAvatar vendor={vendor} />}
                       isFirst={isFirst}
                       isLast={isLast}
@@ -772,12 +816,12 @@ export default function SessionTimeline({
                         className={cn(
                           "px-4 py-3",
                           it.asThought
-                            ? "rounded-2xl border border-amber-200/60 bg-amber-50/80 dark:border-amber-500/25 dark:bg-amber-950/45"
+                            ? "rounded-2xl border border-indigo-200/70 bg-indigo-50/70 dark:border-indigo-500/25 dark:bg-indigo-950/40"
                             : "rounded-2xl bg-neutral-50"
                         )}
                       >
                         {it.asThought && (
-                          <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-amber-800/80 dark:text-amber-300/90">
+                          <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-indigo-600/85 dark:text-indigo-300/90">
                             {it.thoughtUnavailable ? "Reasoning" : "Thought"}
                           </p>
                         )}
@@ -800,6 +844,7 @@ export default function SessionTimeline({
                     <TimelineStep
                       key={it.id}
                       id={it.id}
+                      at={it.at}
                       icon={<SubagentAvatar />}
                       isFirst={isFirst}
                       isLast={isLast}
@@ -827,6 +872,7 @@ export default function SessionTimeline({
                     <TimelineStep
                       key={it.id}
                       id={it.id}
+                      at={it.at}
                       icon={<ToolAvatar />}
                       isFirst={isFirst}
                       isLast={isLast}
@@ -915,8 +961,18 @@ export default function SessionTimeline({
             marks={minimapMarks}
             revision={toolsOpen}
           />
+          {showRail ? null : (
+            <ChatViewMenu
+              turns={turns}
+              counts={counts}
+              filters={filters}
+              onFilters={updateFilters}
+              onJump={jumpTo}
+            />
+          )}
         </div>
 
+        {showRail ? (
         <div className="hidden lg:flex">
           <SessionRail aria-label="Session chat rail">
             <div className="tb-band">
@@ -1033,25 +1089,6 @@ export default function SessionTimeline({
                 </span>
               </div>
 
-              <div className="tb-cell tb-shrink">
-                <span className="tb-label">Checkpoints</span>
-                {restoreCheckpoints.length === 0 ? (
-                  <span className="tb-value tb-mono tb-muted" title="Created on git commit / finalize">
-                    None yet
-                  </span>
-                ) : (
-                  <span className="tb-value tb-mono tb-activity">
-                    {restoreCheckpoints.slice(0, 5).map((cp) => (
-                      <span key={cp.id} title={(cp.files || []).join(", ")}>
-                        #{cp.id}
-                        {cp.label ? ` · ${cp.label}` : ""}
-                        {cp.files?.length ? ` · ${cp.files.length}f` : ""}
-                      </span>
-                    ))}
-                  </span>
-                )}
-              </div>
-
               <div className="tb-cell tb-grow">
                 <span className="tb-label">Filters</span>
                 <div className="tb-filter-list" style={{ padding: 0 }}>
@@ -1104,6 +1141,7 @@ export default function SessionTimeline({
             </div>
           </SessionRail>
         </div>
+        ) : null}
       </div>
     </div>
   );
@@ -1116,12 +1154,14 @@ type MinimapMark = {
   tone: MinimapTone;
 };
 
+// Matches the block colors above, and subagent matches --mark-subagent on the
+// session map so the same concept reads the same in chat and on the stage.
 const MINIMAP_TONE: Record<MinimapTone, string> = {
   prompt: "bg-neutral-400",
   response: "bg-neutral-200",
-  thought: "bg-amber-300",
+  thought: "bg-indigo-300",
   tools: "bg-sky-300",
-  subagent: "bg-teal-400",
+  subagent: "bg-pink-400",
 };
 
 function ChatMinimap({
@@ -1285,18 +1325,24 @@ function ChatMinimap({
 
 function TimelineStep({
   id,
+  at,
   icon,
   isLast,
   children,
 }: {
   id: string;
+  at?: number;
   icon: ReactNode;
   isFirst?: boolean;
   isLast: boolean;
   children: ReactNode;
 }) {
   return (
-    <div id={`tl-${id}`} className="relative flex items-stretch gap-3">
+    <div
+      id={`tl-${id}`}
+      data-at={at != null ? String(at) : undefined}
+      className="relative flex items-stretch gap-3"
+    >
       <div className="flex w-8 shrink-0 flex-col items-center self-stretch">
         <div className="relative z-10 shrink-0">{icon}</div>
         {!isLast ? (
@@ -1324,9 +1370,11 @@ function toolGroupLabel(tools: ToolEntry[]): string {
   return `${tools.length} tool calls`;
 }
 
-function UserAvatar({ initials }: { initials: string }) {
+function UserAvatar() {
+  const author = useAuthorAvatar();
   const [imgOk, setImgOk] = useState(true);
-  if (imgOk) {
+  // Hotlinked from GitHub/Gravatar; never downloaded or stored by Superopen.
+  if (author.avatar_url && imgOk) {
     return (
       <div
         className="size-8 shrink-0 overflow-hidden rounded-full bg-neutral-200"
@@ -1334,8 +1382,9 @@ function UserAvatar({ initials }: { initials: string }) {
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/vendors/user.png"
+          src={author.avatar_url}
           alt=""
+          referrerPolicy="no-referrer"
           className="size-full object-cover"
           onError={() => setImgOk(false)}
         />
@@ -1344,10 +1393,10 @@ function UserAvatar({ initials }: { initials: string }) {
   }
   return (
     <div
-      className="flex size-8 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-[11px] font-semibold text-white"
+      className="flex size-8 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-neutral-500"
       title="You"
     >
-      {initials}
+      <User className="size-4" />
     </div>
   );
 }
@@ -1431,7 +1480,7 @@ function ToolAvatar() {
 
 function SubagentAvatar() {
   return (
-    <div className="flex size-8 shrink-0 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-600">
+    <div className="flex size-8 shrink-0 items-center justify-center rounded-full border border-pink-200 bg-pink-50 text-pink-600">
       <UsersIcon />
     </div>
   );
@@ -1507,17 +1556,17 @@ function SubagentCard({
   const status = item.child?.status || "subagent";
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-violet-200/80 bg-white">
+    <div className="overflow-hidden rounded-2xl border border-pink-200/80 bg-white">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-violet-50/50",
-          open && "border-b border-violet-100"
+          "flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-pink-50/50",
+          open && "border-b border-pink-100"
         )}
       >
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-violet-600/80">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-pink-600/85">
             Subagent
           </div>
           <div className="truncate text-sm font-medium text-neutral-900">
@@ -1603,7 +1652,7 @@ function NestedSubagentFeed({
               className={cn(
                 "rounded-xl px-3 py-2.5 text-[13px] leading-relaxed text-neutral-800 shadow-sm ring-1",
                 it.asThought
-                  ? "bg-amber-50/80 ring-amber-100 dark:bg-amber-950/45 dark:ring-amber-500/25"
+                  ? "bg-indigo-50/70 ring-indigo-100 dark:bg-indigo-950/40 dark:ring-indigo-500/25"
                   : "bg-white ring-neutral-200/80"
               )}
             >
@@ -1611,7 +1660,7 @@ function NestedSubagentFeed({
                 className={cn(
                   "mb-1 text-[10px] font-medium uppercase tracking-wide",
                   it.asThought
-                    ? "text-amber-800/80 dark:text-amber-300/90"
+                    ? "text-indigo-600/85 dark:text-indigo-300/90"
                     : "text-neutral-400"
                 )}
               >
@@ -1652,6 +1701,145 @@ function NestedSubagentFeed({
         }
         return null;
       })}
+    </div>
+  );
+}
+
+function ChatViewMenu({
+  turns,
+  counts,
+  filters,
+  onFilters,
+  onJump,
+}: {
+  turns: Extract<TimelineItem, { kind: "turn" }>[];
+  counts: {
+    prompts: number;
+    responses: number;
+    intermediate: number;
+    turns: number;
+    tools: number;
+    toolCalls: number;
+    edits: number;
+    bash: number;
+    subagents: number;
+  };
+  filters: Record<FilterKey, boolean>;
+  onFilters: (patch: Partial<Record<FilterKey, boolean>>) => void;
+  onJump: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="chat-view-menu">
+      <button
+        type="button"
+        className="chat-view-menu-btn"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        title="Turns and filters"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <SlidersHorizontal size={13} strokeWidth={2} />
+        <span>
+          {counts.turns} turn{counts.turns === 1 ? "" : "s"}
+        </span>
+        <ChevronDown size={12} strokeWidth={2} />
+      </button>
+      {open ? (
+        <div className="chat-view-menu-pop" role="dialog" aria-label="Turns and filters">
+          <div className="chat-view-menu-section">
+            <p className="chat-view-menu-label">Turns</p>
+            {turns.length === 0 ? (
+              <p className="chat-view-menu-empty">No turns yet</p>
+            ) : (
+              <ul className="tb-jump-list">
+                {turns.map((cp, index) => (
+                  <li key={cp.id}>
+                    <button
+                      type="button"
+                      className="tb-jump-row"
+                      onClick={() => {
+                        onJump(cp.id.replace(/^turn-/, ""));
+                        setOpen(false);
+                      }}
+                    >
+                      <span className="tb-jump-row-index">{index + 1}</span>
+                      <span className="tb-jump-row-text">{cp.label}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="chat-view-menu-section">
+            <p className="chat-view-menu-label">Filters</p>
+            <div className="tb-filter-list" style={{ padding: 0 }}>
+              <FilterRow
+                label="Prompts"
+                count={counts.prompts}
+                checked={filters.prompts}
+                onChange={(v) => onFilters({ prompts: v })}
+              />
+              <FilterRow
+                label="Responses"
+                count={counts.responses}
+                checked={filters.responses}
+                onChange={(v) => onFilters({ responses: v })}
+              />
+              <FilterRow
+                label="Thoughts"
+                count={counts.intermediate}
+                checked={filters.intermediate}
+                onChange={(v) => onFilters({ intermediate: v })}
+              />
+              <FilterRow
+                label="Tool calls"
+                count={counts.toolCalls}
+                checked={filters.tools}
+                onChange={(v) => onFilters({ tools: v })}
+              />
+              <div className="tb-filter-nest">
+                <FilterRow
+                  label="Edits"
+                  count={counts.edits}
+                  checked={filters.edits}
+                  onChange={(v) => onFilters({ edits: v })}
+                />
+                <FilterRow
+                  label="Bash"
+                  count={counts.bash}
+                  checked={filters.bash}
+                  onChange={(v) => onFilters({ bash: v })}
+                />
+              </div>
+              <FilterRow
+                label="Subagents"
+                count={counts.subagents}
+                checked={filters.subagents}
+                onChange={(v) => onFilters({ subagents: v })}
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

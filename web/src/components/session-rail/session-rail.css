@@ -347,6 +347,129 @@
   opacity: 0.55;
 }
 
+.tb-agents {
+  position: relative;
+  z-index: 6;
+  overflow: visible;
+}
+
+/* Repos: the map's own checkout, plus a count of the others it reached into.
+   The full list lives in the cell's hint. */
+.tb-roots-value {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  /* The band cell aligns its children to the start (no stretch), so the value
+     sizes to content and would spill the "+N" past the cell border. Cap it to
+     the cell width and let the repo name ellipsize instead. */
+  max-width: 100%;
+}
+
+.tb-root {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tb-root-more {
+  flex: none;
+  color: var(--faint);
+}
+
+/* A plain directory has no history behind it, so it must not read as a repo. */
+.tb-root-dir {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.tb-agents-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  /* The button lives in a fixed-basis band cell, so it has to give way rather
+     than spill past the cell's right border. */
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 7px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tb-agents-btn > svg {
+  flex: none;
+}
+
+.tb-agents-btn > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tb-agents-btn:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.tb-agents-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.tb-agents-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 8px;
+  z-index: 20;
+  width: min(280px, 70vw);
+  max-height: min(70vh, 420px);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 18%);
+}
+
+.tb-agents-label {
+  margin: 0 0 6px;
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tb-agents-empty {
+  margin: 0;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.tb-jump-row.active {
+  background: rgb(231 229 228 / 70%);
+  color: var(--ink);
+}
+
+html.dark .tb-jump-row.active {
+  background: rgb(38 38 38 / 70%);
+}
+
+.tb-faint {
+  color: var(--faint);
+  font-weight: 500;
+}
+
 .tb-label {
   display: inline-flex;
   align-items: center;
@@ -375,11 +498,6 @@
 
 .tb-session-id {
   color: var(--muted);
-}
-
-.tb-dirty {
-  color: var(--ember);
-  font-weight: 600;
 }
 
 .tb-partial {
@@ -417,6 +535,14 @@
 }
 
 .tb-activity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  color: var(--muted);
+}
+
+.tb-inline {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -777,5 +903,139 @@ html.dark .session-rail-host .inspector-panel {
   background: var(--panel);
   border-color: var(--hairline);
   color: var(--ink);
+}
+
+/* Horizontal chrome: wrapping stats cards, heading over value. */
+.title-block-horizontal {
+  width: 100%;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  border-left: none;
+  border-bottom: 1px solid var(--hairline);
+  overflow: visible;
+}
+
+.title-block-horizontal.title-block-open {
+  display: flex;
+  flex-direction: column;
+  max-height: min(48vh, 380px);
+  overflow: hidden;
+}
+
+.title-block-horizontal .tb-chrome {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+
+.title-block-horizontal .tb-chrome > .tb-cell:last-child {
+  border-bottom: none;
+}
+
+.title-block-horizontal .tb-tools {
+  flex-direction: row;
+}
+
+.title-block-horizontal .tb-tools-cell {
+  padding: 8px 10px;
+}
+
+.title-block-horizontal .tb-tools button {
+  width: auto;
+  padding: 6px 8px;
+}
+
+.title-block-horizontal .tb-band {
+  flex: none;
+  flex-direction: row;
+  flex-wrap: wrap;
+  overflow: visible;
+  max-height: none;
+  align-items: stretch;
+}
+
+.title-block-horizontal .tb-band > .tb-cell {
+  border-bottom: none;
+  border-right: 1px solid var(--hairline);
+  min-width: 88px;
+  max-width: none;
+  flex: 1 1 88px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 10px;
+}
+
+.title-block-horizontal .tb-band > .tb-cell:last-child {
+  border-right: 1px solid var(--hairline);
+}
+
+.title-block-horizontal .tb-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.title-block-horizontal .tb-value {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.title-block-horizontal .tb-mono {
+  font-size: 12px;
+}
+
+.title-block-horizontal .tb-inline,
+.title-block-horizontal .tb-activity,
+.title-block-horizontal .tb-review-bits {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+  max-height: 2.5em;
+  overflow: hidden;
+}
+
+.title-block-horizontal .tb-inline > span + span::before,
+.title-block-horizontal .tb-activity > * + *::before,
+.title-block-horizontal .tb-review-bits > * + *::before {
+  content: "·";
+  margin-right: 8px;
+  color: var(--faint);
+}
+
+.title-block-horizontal .tb-spectrum-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  max-height: 2.5em;
+  overflow: hidden;
+}
+
+.title-block-horizontal .tb-stat {
+  gap: 4px;
+}
+
+.title-block-horizontal .tb-stat-label {
+  font-size: 10px;
+}
+
+.title-block-horizontal .tb-cell.tb-spectrum,
+.title-block-horizontal .tb-cell.tb-grow {
+  flex: 2 1 200px;
+}
+
+/* Root names and the agents button both need more than the 88px default. */
+.title-block-horizontal .tb-band > .tb-cell.tb-roots {
+  flex: 2 1 150px;
+}
+
+.title-block-horizontal .tb-band > .tb-cell.tb-agents {
+  min-width: 120px;
+  flex: 1 1 120px;
 }
 

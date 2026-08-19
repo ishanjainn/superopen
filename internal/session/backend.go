@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/projects"
 )
 
@@ -49,18 +49,18 @@ type Filter struct {
 type Backend interface {
 	List(ctx context.Context, filter Filter) ([]ListItem, error)
 	Get(ctx context.Context, projectID, sessionID string) (Meta, error)
-	StoreFor(projectID string) (*Store, harness.Paths, error)
+	StoreFor(projectID string) (*Store, paths.Paths, error)
 }
 
 // LocalMulti lists sessions from registered .so roots (and optional current paths).
 type LocalMulti struct {
 	// Current is the cwd project's paths (always included).
-	Current     harness.Paths
+	Current     paths.Paths
 	CurrentRoot string
 	CurrentID   string
 }
 
-func NewLocalMulti(repoRoot string, paths harness.Paths) *LocalMulti {
+func NewLocalMulti(repoRoot string, paths paths.Paths) *LocalMulti {
 	id := ""
 	if p, err := projects.Register(repoRoot, paths.Root, ""); err == nil {
 		id = p.ID
@@ -72,13 +72,13 @@ type projectBinding struct {
 	ID       string
 	Name     string
 	RepoRoot string
-	Paths    harness.Paths
+	Paths    paths.Paths
 }
 
 func (l *LocalMulti) bindings(filter Filter) ([]projectBinding, error) {
 	seen := map[string]bool{}
 	var out []projectBinding
-	add := func(id, name, root string, paths harness.Paths) {
+	add := func(id, name, root string, paths paths.Paths) {
 		key := paths.SessionsDir
 		if key == "" || seen[key] {
 			return
@@ -92,7 +92,7 @@ func (l *LocalMulti) bindings(filter Filter) ([]projectBinding, error) {
 	projs, err := projects.ResolveFilter(filter.ProjectID)
 	if err == nil {
 		for _, p := range projs {
-			add(p.ID, p.Name, p.RepoRoot, harness.Resolve(p.RepoRoot))
+			add(p.ID, p.Name, p.RepoRoot, paths.Resolve(p.RepoRoot))
 		}
 	} else if filter.ProjectID != "" && filter.ProjectID != "all" {
 		return nil, err
@@ -174,7 +174,7 @@ func (l *LocalMulti) Get(ctx context.Context, projectID, sessionID string) (Meta
 	return Meta{}, fmt.Errorf("session not found: %s", sessionID)
 }
 
-func (l *LocalMulti) StoreFor(projectID string) (*Store, harness.Paths, error) {
+func (l *LocalMulti) StoreFor(projectID string) (*Store, paths.Paths, error) {
 	if projectID == "" || projectID == "all" {
 		return NewStore(l.Current), l.Current, nil
 	}
@@ -182,7 +182,7 @@ func (l *LocalMulti) StoreFor(projectID string) (*Store, harness.Paths, error) {
 	if err != nil {
 		return NewStore(l.Current), l.Current, nil
 	}
-	paths := harness.Resolve(p.RepoRoot)
+	paths := paths.Resolve(p.RepoRoot)
 	return NewStore(paths), paths, nil
 }
 

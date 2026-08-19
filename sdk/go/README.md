@@ -12,5 +12,5 @@ general OpenAI/Anthropic/vLLM instrumentation SDK.
 | `semconv/` | Coding-agent + gen_ai attribute names |
 | `helpers/` | Small shared helpers (e.g. capture flags) |
 
-Consumed by `internal/codingotlp` and the vendor hook adapters. Do not add
+Consumed by `internal/agent/export` and the vendor hook adapters. Do not add
 provider-specific LLM client wrappers here.

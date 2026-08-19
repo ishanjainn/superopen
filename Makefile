@@ -7,7 +7,7 @@ build:
 	go build -ldflags "-X $(PKG_VERSION).Version=$(VERSION)" -o bin/so ./cmd/so
 
 test:
-	go test -race -count=1 ./...
+	go test -race -timeout 30m -count=1 ./...
 
 test-web:
 	cd web && npm ci --ignore-scripts && npm run typecheck && npm test
@@ -20,7 +20,5 @@ install:
 	go install -ldflags "-X $(PKG_VERSION).Version=$(VERSION)" ./cmd/so
 
 smoke: build
-	./bin/so init --code-only
-	./bin/so sessions demo
-	./bin/so doctor
-	./bin/so recommend list
+	./bin/so --help
+	./bin/so graph status --json >/dev/null

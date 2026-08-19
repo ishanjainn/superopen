@@ -28,16 +28,21 @@ export class TrailRenderer {
     geometry.setAttribute("position", this.positions);
     geometry.setAttribute("color", this.colors);
     geometry.setDrawRange(0, 0);
-    // Normal blending so yellow/orange/pink read on white (additive washes out).
+    // Additive over the opaque night stage: overlapping arcs pile up into
+    // brighter light instead of flat strokes. This requires the scene to
+    // clear opaque - on a transparent canvas additive writes ~0 alpha and
+    // the arcs disappear at composite time.
     const material = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.92,
+      blending: THREE.AdditiveBlending,
       depthWrite: false,
       fog: false,
+      toneMapped: false,
     });
     this.object = new THREE.LineSegments(geometry, material);
     this.object.frustumCulled = false;
+    this.object.renderOrder = 12;
   }
 
   // points are the recent fixations, oldest first, y already at arc height
@@ -62,9 +67,9 @@ export class TrailRenderer {
       }
       const recency = i / arcs;
       trailColorForRecency(recency, this.color);
-      // Fade older arcs slightly without washing out on white.
-      const fade = 0.35 + 0.65 * recency * recency;
-      this.color.multiplyScalar(fade);
+      // Squared falloff: the newest hop burns, older ones drop away fast, so
+      // the head of the walk is obvious in a dense arc soup.
+      this.color.multiplyScalar(0.05 + 0.95 * recency * recency);
       for (let s = 0; s < SAMPLES; s++) {
         const pa = this.arcPoints[s];
         const pb = this.arcPoints[s + 1];

@@ -1,0 +1,17 @@
+{
+  "_about": {
+    "purpose": "Materialized state, footprint, and replay metadata for one coding session.",
+    "authority": "authoritative session state derived from events.jsonl",
+    "updated_by": "session materializer"
+  },
+  "id": "f5262b2d-94b2-4996-9a1f-82da11f60860",
+  "vendor": "cursor",
+  "model": "auto-smart",
+  "user": "ishan.jain@grafana.com",
+  "status": "active",
+  "started_at": "2026-08-18T15:01:35.932194Z",
+  "branch": "main",
+  "footprint": {
+    "files": null
+  }
+}

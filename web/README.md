@@ -1,6 +1,6 @@
 # Superopen Web (Next.js)
 
-Local UI for sessions, Graphify HTML, and Map. **No Go API process.**
+Local UI for observability sessions, session maps, and native graph queries.
 
 ```bash
 # from a repo with `.so/` (after `so init`)

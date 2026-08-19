@@ -1,8 +1,6 @@
 import type {
   AgentGraph,
   SessionMap,
-  JudgeChoice,
-  ReportStatus,
   SessionMeta,
   Trace,
 } from "./types";
@@ -17,19 +15,6 @@ function apiURL(path: string): string {
 async function getJSON<T>(url: string): Promise<T> {
   const res = await fetch(apiURL(url));
   if (!res.ok) {
-    const detail = (await res.text()).trim();
-    throw new Error(detail || `${res.status} ${res.statusText}`);
-  }
-  return res.json() as Promise<T>;
-}
-
-async function postJSON<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(apiURL(url), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {}),
-  });
-  if (!res.ok && res.status !== 202) {
     const detail = (await res.text()).trim();
     throw new Error(detail || `${res.status} ${res.statusText}`);
   }
@@ -62,14 +47,6 @@ export function getAgentTrace(key: string, agentId: string): Promise<Trace> {
   return getJSON<Trace>(
     `/api/sessions/${encodeURIComponent(key)}/agents/${encodeURIComponent(agentId)}/trace`
   );
-}
-
-export function getSessionReport(key: string): Promise<ReportStatus> {
-  return getJSON<ReportStatus>(`/api/sessions/${encodeURIComponent(key)}/report`);
-}
-
-export function startSessionAnalyze(key: string, choice: JudgeChoice): Promise<ReportStatus> {
-  return postJSON<ReportStatus>(`/api/sessions/${encodeURIComponent(key)}/analyze`, choice);
 }
 
 /** Resolve a Superopen session id (or map key) to the map session key. */

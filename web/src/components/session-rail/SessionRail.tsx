@@ -27,6 +27,8 @@ export interface SessionRailProps {
   locked?: boolean;
   /** Skip the outer host; parent provides positioning (Map `.hud`). */
   bare?: boolean;
+  /** Horizontal chrome (shared session top bar). */
+  layout?: "vertical" | "horizontal";
   hostClassName?: string;
   "aria-label"?: string;
 }
@@ -43,6 +45,7 @@ export function SessionRail({
   children,
   locked = false,
   bare = false,
+  layout = "vertical",
   hostClassName,
   "aria-label": ariaLabel = "Session rail",
 }: SessionRailProps) {
@@ -70,7 +73,14 @@ export function SessionRail({
   const rail = (
     <aside
       ref={blockRef}
-      className={panelOpen ? "title-block title-block-open" : "title-block"}
+      className={
+        [
+          panelOpen ? "title-block title-block-open" : "title-block",
+          layout === "horizontal" ? "title-block-horizontal" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      }
       aria-label={ariaLabel}
     >
       {(viewToggle || tools.length > 0) && (

@@ -1,0 +1,6 @@
+{
+  "asset_revision": "41d240accf91641b197620f7c33a4d2d60451d0b",
+  "model": "nomic-embed-code token vectors",
+  "tokens": 40856,
+  "dimensions": 768
+}

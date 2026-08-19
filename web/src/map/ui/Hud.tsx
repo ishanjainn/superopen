@@ -1,10 +1,10 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { Mountain, TreePine, type LucideIcon } from "lucide-react";
+import { ChevronDown, Mountain, TreePine, Users, type LucideIcon } from "lucide-react";
 import {
   SessionRail,
   type SessionRailTool,
 } from "@/components/session-rail";
-import type { ActionCounts, SessionMap, MetricObservability, Trace } from "../types";
+import type { ActionCounts, AgentGraph, MetricObservability, SessionMap, Trace } from "../types";
 
 export interface ChurnEntry {
   path: string;
@@ -29,7 +29,8 @@ export interface HudSessionExtras {
   commits?: { sha?: string; message?: string }[];
   pullRequests?: { url?: string; number?: number; title?: string }[];
   attribution?: string;
-  checkpoints?: { id: number; label?: string; files?: string[] }[];
+  tokens?: number;
+  costUsd?: number;
 }
 
 interface HudProps {
@@ -47,8 +48,13 @@ interface HudProps {
   seenNow: number;
   churn: ChurnEntry[];
   onSelectFile: (path: string) => void;
-  onOpenAgents?: () => void;
+  agentGraph?: AgentGraph;
+  currentAgentID?: string | null;
+  agentLoading?: boolean;
+  agentError?: string;
+  onSelectAgent?: (agentID: string | null) => void;
   locked?: boolean;
+  placement?: "right" | "top";
 }
 
 const CHURN_PANEL_ROWS = 8;
@@ -68,8 +74,13 @@ export const Hud = memo(function Hud({
   seenNow,
   churn,
   onSelectFile,
-  onOpenAgents,
+  agentGraph,
+  currentAgentID = null,
+  agentLoading = false,
+  agentError,
+  onSelectAgent,
   locked = false,
+  placement = "right",
 }: HudProps) {
   const stats = trace?.stats;
   const readFinal = stats ? stats.fovea - stats.edited : 0;
@@ -89,12 +100,17 @@ export const Hud = memo(function Hud({
   const panelOpen = Boolean(panel);
 
   const [churnOpen, setChurnOpen] = useState(false);
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const churnPanelRef = useRef<HTMLDivElement | null>(null);
   const churnToggleRef = useRef<HTMLButtonElement | null>(null);
+  const agentsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => setChurnOpen(false), [trace]);
   useEffect(() => {
-    if (panelOpen) setChurnOpen(false);
+    if (panelOpen) {
+      setChurnOpen(false);
+      setAgentsOpen(false);
+    }
   }, [panelOpen]);
 
   useEffect(() => {
@@ -119,6 +135,23 @@ export const Hud = memo(function Hud({
     };
   }, [churnOpen]);
 
+  useEffect(() => {
+    if (!agentsOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (agentsRef.current?.contains(event.target as Node)) return;
+      setAgentsOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAgentsOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [agentsOpen]);
+
   if (!sessionMap) {
     return <div className="hud" aria-hidden />;
   }
@@ -133,9 +166,28 @@ export const Hud = memo(function Hud({
     onClick: tool.onClick,
   }));
 
+  // A session that spans repos gets a district per root; naming them is more
+  // use than a revision line that only ever reads "worktree".
+  const roots = sessionMap.roots?.length
+    ? sessionMap.roots
+    : [
+        {
+          prefix: "",
+          name: sessionMap.repo.root.split("/").pop() || "repo",
+          path: sessionMap.repo.root,
+          git: true,
+          files: sessionMap.files.length,
+        },
+      ];
+  const rootsHint = roots
+    .map(
+      (root) =>
+        `${root.name}${root.git ? "" : " (plain directory, not a checkout)"} - ${root.files} files - ${root.path}`,
+    )
+    .join("\n");
+
   const commits = sessionExtras?.commits || [];
   const prs = sessionExtras?.pullRequests || [];
-  const checkpoints = sessionExtras?.checkpoints || [];
   const showLinked =
     Boolean(sessionExtras?.branch) ||
     Boolean(sessionExtras?.attribution) ||
@@ -143,49 +195,55 @@ export const Hud = memo(function Hud({
     prs.length > 0;
 
   return (
-    <div className="hud" aria-hidden={false}>
+    <div className={placement === "top" ? "hud hud-top" : "hud"} aria-hidden={false}>
       <SessionRail
         bare
+        layout={placement === "top" ? "horizontal" : "vertical"}
         aria-label="Session map title block"
         locked={locked}
-        tools={railTools}
+        tools={placement === "top" ? [] : railTools}
         panel={panel}
         onClosePanel={onClosePanel}
         viewToggle={
-          <div className="tb-seg" role="group" aria-label="Scene view">
-            <button
-              type="button"
-              aria-pressed={view === "tree"}
-              className={view === "tree" ? "active" : undefined}
-              onClick={() => onViewChange("tree")}
-              disabled={locked}
-            >
-              <TreePine size={15} strokeWidth={1.75} />
-              Tree
-            </button>
-            <button
-              type="button"
-              aria-pressed={view === "terrain"}
-              className={view === "terrain" ? "active" : undefined}
-              onClick={() => onViewChange("terrain")}
-              disabled={locked}
-            >
-              <Mountain size={15} strokeWidth={1.75} />
-              Terrain
-            </button>
-          </div>
+          placement === "top" ? undefined : (
+            <div className="tb-seg" role="group" aria-label="Scene view">
+              <button
+                type="button"
+                aria-pressed={view === "tree"}
+                className={view === "tree" ? "active" : undefined}
+                onClick={() => onViewChange("tree")}
+                disabled={locked}
+              >
+                <TreePine size={15} strokeWidth={1.75} />
+                Tree
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === "terrain"}
+                className={view === "terrain" ? "active" : undefined}
+                onClick={() => onViewChange("terrain")}
+                disabled={locked}
+              >
+                <Mountain size={15} strokeWidth={1.75} />
+                Terrain
+              </button>
+            </div>
+          )
         }
       >
         <div className="tb-band">
-          <div className="tb-cell tb-shrink">
-            <span className="tb-label">Revision</span>
-            <span className="tb-value tb-mono">
-              {sessionMap.repo.commit || "worktree"}
-              {sessionMap.repo.dirty ? (
-                <span className="tb-dirty" title="Uncommitted changes">
-                  {" "}
-                  ● dirty
-                </span>
+          <div className="tb-cell tb-shrink tb-roots" data-hint={rootsHint}>
+            <span className="tb-label">
+              {roots.length > 1 ? "Repos" : "Repo"}
+            </span>
+            <span className="tb-value tb-mono tb-roots-value">
+              <span
+                className={roots[0].git ? "tb-root" : "tb-root tb-root-dir"}
+              >
+                {roots[0].name}
+              </span>
+              {roots.length > 1 ? (
+                <span className="tb-root-more">+{roots.length - 1}</span>
               ) : null}
             </span>
           </div>
@@ -193,7 +251,7 @@ export const Hud = memo(function Hud({
           {showLinked ? (
             <div className="tb-cell tb-shrink">
               <span className="tb-label">Linked</span>
-              <span className="tb-value tb-mono tb-activity">
+              <span className="tb-value tb-mono tb-inline">
                 {sessionExtras?.branch ? (
                   <span>branch {sessionExtras.branch}</span>
                 ) : null}
@@ -215,20 +273,94 @@ export const Hud = memo(function Hud({
             </div>
           ) : null}
 
-          <div className="tb-cell tb-grow">
+          <div className="tb-cell tb-shrink">
             <span className="tb-label">Model</span>
-            <span className="tb-value tb-mono tb-model-row">
-              <span>{trace?.session.model || "-"}</span>
-              {trace && agentLabel ? (
-                <button
-                  className="tb-lens-chip"
-                  onClick={onOpenAgents}
-                  disabled={!onOpenAgents || locked}
-                  aria-label={`Open Agent lenses, current ${agentLabel}`}
-                >
-                  {agentLabel}
-                </button>
+            <span className="tb-value tb-mono">
+              {trace?.session.model || "-"}
+            </span>
+          </div>
+
+          <div className="tb-cell tb-shrink tb-agents" ref={agentsRef}>
+            <span className="tb-label">Agents</span>
+            <button
+              type="button"
+              className="tb-agents-btn"
+              aria-expanded={agentsOpen}
+              aria-haspopup="listbox"
+              disabled={!onSelectAgent || locked}
+              title="Agent lenses"
+              onClick={() => setAgentsOpen((value) => !value)}
+            >
+              <Users size={13} strokeWidth={2} />
+              <span>{agentLabel || "Main"}</span>
+              {stats && stats.subagents > 0 ? (
+                <span className="tb-faint">{stats.subagents}</span>
               ) : null}
+              <ChevronDown size={12} strokeWidth={2} />
+            </button>
+            {agentsOpen ? (
+              <div className="tb-agents-pop" role="listbox" aria-label="Agent lenses">
+                  <p className="tb-agents-label">Lenses</p>
+                  {agentError ? (
+                    <p className="tb-agents-empty">{agentError}</p>
+                  ) : null}
+                  {agentLoading && !agentGraph ? (
+                    <p className="tb-agents-empty">Loading agents…</p>
+                  ) : (
+                    <ul className="tb-jump-list">
+                      <li>
+                        <button
+                          type="button"
+                          className={currentAgentID == null ? "tb-jump-row active" : "tb-jump-row"}
+                          aria-pressed={currentAgentID == null}
+                          onClick={() => {
+                            onSelectAgent?.(null);
+                            setAgentsOpen(false);
+                          }}
+                        >
+                          <span className="tb-jump-row-text">Main</span>
+                          <span className="tb-filter-count">
+                            {agentGraph?.agents.find((agent) => agent.kind === "main")?.traceEventCount ??
+                              0}
+                          </span>
+                        </button>
+                      </li>
+                      {(agentGraph?.agents.filter((agent) => agent.kind !== "main") ?? []).map((agent) => (
+                        <li key={agent.id}>
+                          <button
+                            type="button"
+                            className={
+                              currentAgentID === agent.id ? "tb-jump-row active" : "tb-jump-row"
+                            }
+                            aria-pressed={currentAgentID === agent.id}
+                            disabled={agent.traceAvailability !== "available" || locked}
+                            onClick={() => {
+                              onSelectAgent?.(agent.id);
+                              setAgentsOpen(false);
+                            }}
+                          >
+                            <span className="tb-jump-row-text">{agent.label}</span>
+                            <span className="tb-filter-count">{agent.traceEventCount}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="tb-cell tb-shrink">
+            <span className="tb-label">Tokens</span>
+            <span className="tb-value tb-mono">
+              {fmtTokens(sessionExtras?.tokens)}
+            </span>
+          </div>
+
+          <div className="tb-cell tb-shrink">
+            <span className="tb-label">Cost</span>
+            <span className="tb-value tb-mono">
+              {fmtCost(sessionExtras?.costUsd)}
             </span>
           </div>
 
@@ -279,7 +411,7 @@ export const Hud = memo(function Hud({
 
               <div className="tb-cell tb-grow">
                 <span className="tb-label">Activity</span>
-                <span className="tb-value tb-mono tb-activity">
+                <span className="tb-value tb-mono tb-inline">
                   <span data-hint={`Tool calls - ${mixHint(stats.actions)}`}>
                     {countActions(stats.actions)} calls
                   </span>
@@ -290,8 +422,8 @@ export const Hud = memo(function Hud({
                     <button
                       className="tb-link"
                       data-hint="Subagent launches (Task/Agent) - open Agent lenses"
-                      onClick={onOpenAgents}
-                      disabled={!onOpenAgents || locked}
+                      onClick={() => setAgentsOpen(true)}
+                      disabled={!onSelectAgent || locked}
                       aria-label={`Open ${stats.subagents} subagent${stats.subagents === 1 ? "" : "s"} in Agent lenses`}
                     >
                       {stats.subagents} subagent
@@ -334,36 +466,19 @@ export const Hud = memo(function Hud({
                 </span>
               </div>
 
-              <div className="tb-cell tb-shrink">
-                <span className="tb-label">Session</span>
-                <span className="tb-value tb-mono tb-session-id">
-                  {shortId(trace?.session.id)}
-                </span>
-              </div>
-
-              {checkpoints.length > 0 ? (
+              {placement !== "top" ? (
                 <div className="tb-cell tb-shrink">
-                  <span className="tb-label">Checkpoints</span>
-                  <span className="tb-value tb-mono tb-activity">
-                    {checkpoints.slice(0, 4).map((cp) => (
-                      <span key={cp.id}>
-                        #{cp.id}
-                        {cp.label ? ` · ${cp.label}` : ""}
-                        {cp.files?.length ? ` · ${cp.files.length} files` : ""}
-                      </span>
-                    ))}
+                  <span className="tb-label">Session</span>
+                  <span className="tb-value tb-mono tb-session-id">
+                    {shortId(trace?.session.id)}
                   </span>
                 </div>
               ) : null}
-            </>
-          ) : null}
-        </div>
 
-        {stats && showReview ? (
-          <div className="tb-band tb-review">
-            <div className="tb-cell tb-grow">
-              <span className="tb-label">Review</span>
-              <span className="tb-value tb-review-bits">
+              {showReview ? (
+                <div className="tb-cell tb-shrink">
+                  <span className="tb-label">Review</span>
+                  <span className="tb-value tb-review-bits">
                 {errorCount > 0 ? (
                   <span
                     className="warn"
@@ -413,10 +528,12 @@ export const Hud = memo(function Hud({
                     </span>
                   )
                 ) : null}
-              </span>
-            </div>
-          </div>
-        ) : null}
+                  </span>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </div>
 
         {churnOpen ? (
           <div className="churn-panel" ref={churnPanelRef}>
@@ -525,6 +642,19 @@ function fmtBytes(bytes: number): string {
   if (kb < 1) return `${bytes} B`;
   if (kb < 1000) return `${Math.round(kb)} KB`;
   return `${(kb / 1024).toFixed(1)} MB`;
+}
+
+function fmtTokens(n?: number): string {
+  if (!n || n <= 0) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+  return n.toLocaleString();
+}
+
+function fmtCost(n?: number): string {
+  if (n == null || n <= 0) return "—";
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  return `$${n.toFixed(2)}`;
 }
 
 function shortId(id?: string): string {

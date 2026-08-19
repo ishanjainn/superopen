@@ -1,0 +1,43 @@
+package format_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/ishanjainn/superopen/internal/graph/api"
+	"github.com/ishanjainn/superopen/internal/graph/format"
+)
+
+func TestSearchCompactOmitsProperties(t *testing.T) {
+	text := format.SearchCompact(api.SearchResult{
+		Matches: []api.RankedNode{{
+			Node: api.Node{
+				Label: "Method", Name: "bar", QualifiedName: "pkg.Foo.bar",
+				Location:   api.Location{File: "foo.go", StartLine: 1, EndLine: 10},
+				Properties: api.Properties{"bt": "secret", "fp": "abc"},
+			},
+			Score: 12.5,
+		}},
+		Page: api.Page{Total: 1},
+	})
+	if strings.Contains(text, "secret") || strings.Contains(text, "fp") {
+		t.Fatalf("leaked properties: %q", text)
+	}
+	if !strings.Contains(text, "pkg.Foo.bar") {
+		t.Fatalf("missing qn: %q", text)
+	}
+}
+
+func TestTraceCompactAmbiguous(t *testing.T) {
+	text := format.TraceCompact(api.TraceResult{
+		Status:  "ambiguous",
+		Message: "retry with qualified_name",
+		Suggestions: []api.Node{
+			{QualifiedName: "pkg.A.init", Label: "Method", Location: api.Location{File: "a.go", StartLine: 1}},
+			{QualifiedName: "pkg.B.init", Label: "Method", Location: api.Location{File: "b.go", StartLine: 2}},
+		},
+	})
+	if !strings.Contains(text, "status: ambiguous") || !strings.Contains(text, "pkg.A.init") {
+		t.Fatalf("%q", text)
+	}
+}

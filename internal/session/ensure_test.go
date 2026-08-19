@@ -5,11 +5,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ishanjainn/superopen/internal/harness"
+	"github.com/ishanjainn/superopen/internal/paths"
 )
 
 func TestEnsureRepairsEventStreamWithoutSessionDocument(t *testing.T) {
-	paths := harness.Resolve(t.TempDir())
+	paths := paths.Resolve(t.TempDir())
 	if err := paths.EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestEnsureRepairsEventStreamWithoutSessionDocument(t *testing.T) {
 }
 
 func TestEnsureRepairsIndexFromExistingSessionDocument(t *testing.T) {
-	paths := harness.Resolve(t.TempDir())
+	paths := paths.Resolve(t.TempDir())
 	if err := paths.EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestEnsureRepairsIndexFromExistingSessionDocument(t *testing.T) {
 }
 
 func TestListUsesSessionDocumentsWhenIndexIsStale(t *testing.T) {
-	paths := harness.Resolve(t.TempDir())
+	paths := paths.Resolve(t.TempDir())
 	if err := paths.EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}

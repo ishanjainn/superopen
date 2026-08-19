@@ -73,7 +73,7 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../cmd/so/main.go" ] && command -v 
 	if command -v so >/dev/null 2>&1; then
 		so install || true
 	fi
-	info "Done. Try /so in your coding agent, then /so init"
+	info "Done. Run: so install   then in a repo: /so init"
 	exit 0
 fi
 

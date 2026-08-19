@@ -1,8 +1,9 @@
 import { readdirSync, statSync } from "fs";
 import { fileExists, readText } from "./nodeio";
-import { join, relative } from "path";
+import { homedir } from "os";
+import { basename, dirname, isAbsolute, join, relative } from "path";
 import type { SessionMap } from "./session_map";
-import { sessionKey } from "./session_map";
+import { SKIPPED_DIRS, seatTracePaths, sessionKey } from "./session_map";
 import { repoRoot, soPath } from "./root";
 import {
   humanizePromptPreview,
@@ -74,17 +75,204 @@ type Span = {
   attributes?: Record<string, string>;
 };
 
-function relToRepo(cwd: string, path: string): string {
-  if (!path) return path;
-  const norm = path.replace(/\\/g, "/");
-  if (!cwd) return norm;
-  try {
-    const rel = relative(cwd, path).replace(/\\/g, "/");
-    if (!rel.startsWith("..")) return rel;
-  } catch {
-    /* keep absolute */
+/**
+ * Files outside the mapped repo are grouped into a district named after the
+ * repo that owns them, so a multi-repo session reads as "grafana plus
+ * superopen" instead of a home-directory spine twelve levels deep.
+ *
+ * Keyed by district name; the value is that repo's absolute root, which
+ * seating needs to stat the file back off disk.
+ */
+export type Districts = Map<string, string>;
+
+// A checkout is where .git is. Manifests only stand in for it when nothing is
+// version controlled: a monorepo is full of nested package.json/go.mod files,
+// and treating those as roots would split one repo across several districts.
+const MANIFESTS = [
+  ".so",
+  "go.mod",
+  "package.json",
+  "Cargo.toml",
+  "pyproject.toml",
+];
+
+const projectRootCache = new Map<string, string | null>();
+
+function projectRootFor(absFile: string): string | null {
+  const home = homedir();
+  const pending: string[] = [];
+  let manifest: string | null = null;
+  let found: string | null = null;
+  let dir = dirname(absFile);
+  for (;;) {
+    const cached = projectRootCache.get(dir);
+    if (cached !== undefined) {
+      found = cached;
+      break;
+    }
+    pending.push(dir);
+    // Stop at $HOME: dotfiles setups keep a git repo there, and accepting it
+    // would drag every touched file into one district named after the user.
+    if (dir === home || dir === "/") break;
+    if (fileExists(join(dir, ".git"))) {
+      found = dir;
+      break;
+    }
+    if (!manifest && MANIFESTS.some((m) => fileExists(join(dir, m)))) {
+      manifest = dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
   }
-  return norm;
+  const root = found ?? manifest;
+  for (const d of pending) projectRootCache.set(d, root);
+  return root;
+}
+
+// A session often runs from one workspace while the agent edits another repo,
+// so try the session cwd and the mapped repo root and keep whichever lands
+// inside. Anything else is attributed to its own repo district; a path that
+// belongs to no project at all (tool installs, scratch dirs) is not code this
+// map can place, so it is dropped.
+function relToRepo(cwd: string, path: string, districts: Districts): string {
+  if (!path) return path;
+  // Paths lifted out of shell commands drag the punctuation that followed them.
+  const norm = path.replace(/\\/g, "/").replace(/[;,:'"`]+$/, "");
+  if (!norm) return "";
+  for (const base of [cwd, repoRoot()]) {
+    if (!base) continue;
+    try {
+      const rel = relative(base, norm).replace(/\\/g, "/");
+      if (rel && !rel.startsWith("..") && !isAbsolute(rel)) return rel;
+    } catch {
+      /* try the next base */
+    }
+  }
+  if (!isAbsolute(norm)) return norm;
+
+  const owner = projectRootFor(norm);
+  if (!owner) return "";
+  const inside = relative(owner, norm).replace(/\\/g, "/");
+  if (!inside || inside.startsWith("..")) return "";
+  const name = districtNameFor(owner, districts);
+  return `${name}/${inside}`;
+}
+
+function districtNameFor(owner: string, districts: Districts): string {
+  for (const [name, root] of districts) {
+    if (root === owner) return name;
+  }
+  const base = basename(owner) || "repo";
+  let name = base;
+  // A district must not silently merge into a directory of the mapped repo
+  // that happens to share its name.
+  for (let n = 2; districts.has(name); n++) name = `${base}-${n}`;
+  districts.set(name, owner);
+  return name;
+}
+
+/**
+ * Agent scratch (terminal dumps, tool-result spills), globs and bare
+ * directories are tool arguments, not files anyone can land on. Letting them
+ * through fills the map with junk tiles and buries the real landings.
+ */
+export function isMappablePath(path: string): boolean {
+  if (!path) return false;
+  if (path.endsWith("/")) return false;
+  if (path.includes("[REDACTED]")) return false;
+  if (/[*?]/.test(path) || path.includes("...")) return false;
+  if (/(^|\/)\.(cursor|claude|codex|agents)\//.test(path)) return false;
+  if (/(^|\/)(terminals|agent-tools|agent-transcripts)\//.test(path)) return false;
+  // Vendored and generated trees are not authored code; the repo walk skips
+  // them, so seating them from a trace would put tiles on the map that the
+  // rest of the map denies exist.
+  if (path.split("/").some((seg) => SKIPPED_DIRS.has(seg))) return false;
+  // Tools are often handed a directory ("go test ./internal/graph/engine").
+  // Without an extension the only signal is the basename, so keep the small
+  // set of real files that legitimately have none.
+  const base = path.slice(path.lastIndexOf("/") + 1);
+  if (!base.includes(".") && !EXTENSIONLESS_FILES.has(base)) return false;
+  return true;
+}
+
+const EXTENSIONLESS_FILES = new Set([
+  "AGENTS",
+  "CHANGELOG",
+  "CLAUDE",
+  "CODEOWNERS",
+  "Dockerfile",
+  "Gemfile",
+  "Justfile",
+  "LICENSE",
+  "Makefile",
+  "Procfile",
+  "Rakefile",
+  "README",
+]);
+
+/**
+ * One file, one spelling. Extractors disagree - a tool attribute yields an
+ * absolute path while a shell command yields a repo-relative fragment of the
+ * same file - and two spellings mean two tiles, a split trail and a
+ * double-counted touch. The shortest spelling wins; any longer path ending in
+ * it is the same file.
+ */
+/**
+ * Shell commands name files relative to a cwd we no longer know
+ * ("go test ./internal/graph/..."), so the same file arrives both attributed
+ * to its repo and as a bare fragment. Fold the fragment into the attributed
+ * spelling - the complete one is the only one that can be placed - so one file
+ * is one tile instead of a phantom top-level district.
+ */
+function canonicalizeTargetPaths(
+  events: TraceEvent[],
+  mapPaths: string[],
+  districts: Districts,
+): void {
+  const touched = touchedPaths(events);
+  const onMap = new Set(mapPaths);
+  const isComplete = (p: string) => {
+    if (onMap.has(p)) return true;
+    const cut = p.indexOf("/");
+    return cut > 0 && districts.has(p.slice(0, cut));
+  };
+  const complete = touched
+    .filter(isComplete)
+    .sort((a, b) => a.length - b.length || a.localeCompare(b));
+
+  const alias = new Map<string, string>();
+  const orphans: string[] = [];
+  for (const fragment of touched
+    .filter((p) => !isComplete(p))
+    .sort((a, b) => a.length - b.length || a.localeCompare(b))) {
+    // Shortest match keeps the choice deterministic when two repos both
+    // contain, say, "internal/graph/engine.go".
+    const owner = complete.find((p) => p.endsWith(`/${fragment}`));
+    if (owner) {
+      alias.set(fragment, owner);
+      continue;
+    }
+    // Nothing else named this file, but one of the repos already in play may
+    // still have it on disk - that is enough to place it in the right district.
+    const onDisk = [...districts].find(([, root]) =>
+      fileExists(join(root, fragment)),
+    );
+    if (onDisk) {
+      alias.set(fragment, `${onDisk[0]}/${fragment}`);
+      continue;
+    }
+    const sibling = orphans.find((p) => fragment.endsWith(`/${p}`));
+    if (sibling) alias.set(fragment, sibling);
+    else orphans.push(fragment);
+  }
+  if (alias.size === 0) return;
+  for (const event of events) {
+    for (const target of event.targets) {
+      const canonical = alias.get(target.path);
+      if (canonical) target.path = canonical;
+    }
+  }
 }
 
 function emptyStats(
@@ -151,6 +339,7 @@ function emptyStats(
 function footprintEvents(
   sessionDir: string,
   cwd: string,
+  districts: Districts,
   startedAt?: string,
 ): TraceEvent[] {
   const fpPath = join(sessionDir, "session.json");
@@ -176,12 +365,13 @@ function footprintEvents(
         tool = "Write";
         action = "edit";
       }
+      const path = relToRepo(cwd, f.path, districts);
       return {
         seq: i,
         ts: startedAt,
         tool,
         action,
-        targets: [{ path: relToRepo(cwd, f.path), touch }],
+        targets: isMappablePath(path) ? [{ path, touch }] : [],
         resultBytes: 0,
         isError: false,
         summary: f.path,
@@ -204,14 +394,18 @@ function decodedStringLiteral(code: string, prefix: RegExp): string {
   }
 }
 
-function patchTargets(patch: string, cwd: string): TraceTarget[] {
+function patchTargets(
+  patch: string,
+  cwd: string,
+  districts: Districts,
+): TraceTarget[] {
   const seen = new Set<string>();
   const targets: TraceTarget[] = [];
   for (const line of patch.split("\n")) {
     const match = line.match(/^\*\*\* (?:Add|Update|Delete) File:\s+(.+)$/);
     if (!match?.[1]) continue;
-    const path = relToRepo(cwd, match[1].trim());
-    if (!path || seen.has(path)) continue;
+    const path = relToRepo(cwd, match[1].trim(), districts);
+    if (!path || seen.has(path) || !isMappablePath(path)) continue;
     seen.add(path);
     targets.push({ path, touch: "edit" });
   }
@@ -233,6 +427,7 @@ function nestedCodexPatch(code: string): string {
 export function parseCodexRolloutLines(
   lines: string[],
   cwd: string,
+  districts: Districts = new Map(),
 ): ParsedSpans {
   const events: TraceEvent[] = [];
   const marks: TraceMark[] = [];
@@ -279,14 +474,14 @@ export function parseCodexRolloutLines(
     if (/^apply_patch$/i.test(rawTool)) {
       tool = "apply_patch";
       action = "edit";
-      targets = patchTargets(input, cwd);
+      targets = patchTargets(input, cwd, districts);
     } else if (
       /^(exec|code|bash)$/i.test(rawTool) &&
       /tools\.apply_patch/.test(input)
     ) {
       tool = "apply_patch";
       action = "edit";
-      targets = patchTargets(nestedCodexPatch(input), cwd);
+      targets = patchTargets(nestedCodexPatch(input), cwd, districts);
     } else if (
       /^(exec|code)$/i.test(rawTool) &&
       /tools\.(?:exec_command|write_stdin)/.test(input)
@@ -324,10 +519,14 @@ export function parseCodexRolloutLines(
   return { events, marks };
 }
 
-function parseTranscriptEvents(sessionDir: string, cwd: string): ParsedSpans {
+function parseTranscriptEvents(
+  sessionDir: string,
+  cwd: string,
+  districts: Districts,
+): ParsedSpans {
   const tPath = join(sessionDir, "events.jsonl");
   if (!fileExists(tPath)) return { events: [], marks: [] };
-  return parseSpanLines(readText(tPath).split("\n"), cwd);
+  return parseSpanLines(readText(tPath).split("\n"), cwd, districts);
 }
 
 function markSeq(events: TraceEvent[]): number {
@@ -386,14 +585,19 @@ function toolCommand(attrs: Record<string, string>): string {
 /** Best-effort path extraction from shell commands for map highlighting. */
 function pathFromCommand(command: string, cwd: string): string {
   if (!command) return "";
-  const repo = cwd.replace(/\\/g, "/").replace(/\/$/, "");
-  const abs = command.match(
-    new RegExp(
-      `(${repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/[^\\s'\"\`]+)`,
-      "i",
-    ),
-  );
-  if (abs?.[1]) return abs[1];
+  // Match either root: commands run from the chat workspace routinely name
+  // absolute paths in the repo the agent is actually editing.
+  for (const base of [cwd, repoRoot()]) {
+    if (!base) continue;
+    const repo = base.replace(/\\/g, "/").replace(/\/$/, "");
+    const abs = command.match(
+      new RegExp(
+        `(${repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/[^\\s'\"\`]+)`,
+        "i",
+      ),
+    );
+    if (abs?.[1]) return abs[1];
+  }
   const rel = command.match(
     /(?:^|[\s"'`])((?:\.\/)?(?:src|pkg|internal|web|cmd|integrations|ops|docs)\/[^\s'"`]+)/,
   );
@@ -401,7 +605,11 @@ function pathFromCommand(command: string, cwd: string): string {
   return "";
 }
 
-function parseSpanLines(lines: string[], cwd: string): ParsedSpans {
+function parseSpanLines(
+  lines: string[],
+  cwd: string,
+  districts: Districts = new Map(),
+): ParsedSpans {
   const events: TraceEvent[] = [];
   const marks: TraceMark[] = [];
   for (const line of lines) {
@@ -516,7 +724,7 @@ function parseSpanLines(lines: string[], cwd: string): ParsedSpans {
     }
 
     const summary =
-      (filePath && relToRepo(cwd, filePath)) ||
+      (filePath && relToRepo(cwd, filePath, districts)) ||
       (command ? command.replace(/\s+/g, " ").slice(0, 140) : "") ||
       tool ||
       name;
@@ -529,10 +737,11 @@ function parseSpanLines(lines: string[], cwd: string): ParsedSpans {
 
     const targets: TraceTarget[] = [];
     if (filePath) {
-      targets.push({
-        path: relToRepo(cwd, filePath),
-        touch: touch || "hit",
-      });
+      const target = relToRepo(cwd, filePath, districts);
+      // The event still plays (it happened); it just has nowhere to land.
+      if (isMappablePath(target)) {
+        targets.push({ path: target, touch: touch || "hit" });
+      }
     }
 
     events.push({
@@ -659,6 +868,17 @@ function resolveNestedMapSession(selector: string): MapSessionMeta | null {
   return null;
 }
 
+/** Distinct target paths in first-touch order, so seating stays deterministic. */
+function touchedPaths(events: TraceEvent[]): string[] {
+  const seen = new Set<string>();
+  for (const ev of events) {
+    for (const t of ev.targets) {
+      if (t.path) seen.add(t.path);
+    }
+  }
+  return [...seen];
+}
+
 function assignFileIds(trace: Trace, sessionMap: SessionMap) {
   const byPath = new Map(sessionMap.files.map((f) => [f.path, f.id]));
   for (const ev of trace.events) {
@@ -704,10 +924,11 @@ function subagentMarksFromChildren(
 /** Build map Trace from a Superopen session directory. */
 export function buildTrace(session: MapSessionMeta, sessionMap: SessionMap): Trace {
   const cwd = session.cwd || repoRoot();
-  let parsed = parseTranscriptEvents(session.path, cwd);
+  const districts: Districts = new Map();
+  let parsed = parseTranscriptEvents(session.path, cwd, districts);
   if (parsed.events.length === 0) {
     parsed = {
-      events: footprintEvents(session.path, cwd, session.startedAt),
+      events: footprintEvents(session.path, cwd, districts, session.startedAt),
       marks: [],
     };
   }
@@ -725,6 +946,15 @@ export function buildTrace(session: MapSessionMeta, sessionMap: SessionMap): Tra
     if (parsed.events.length === 0) m.seq = 0;
     else m.seq = Math.min(Math.max(0, m.seq), parsed.events.length - 1);
   }
+
+  // Seat before stats and ids: a touch with no file on the map gets no id,
+  // and without an id it grows no terrain column and anchors no trail arc.
+  canonicalizeTargetPaths(
+    parsed.events,
+    sessionMap.files.map((f) => f.path),
+    districts,
+  );
+  seatTracePaths(sessionMap, touchedPaths(parsed.events), districts);
 
   const trace: Trace = {
     version: 1,

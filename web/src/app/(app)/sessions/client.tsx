@@ -2,15 +2,16 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { User } from "lucide-react";
 import { useSoftPoll } from "@/hooks/use-soft-poll";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
 import { useProject } from "@/components/shell/project-context";
-import PortWizard from "@/components/port-wizard";
 import SessionSearchBar from "@/components/session-search-bar";
 import {
   displayUser,
   type SessionQueryFacets,
 } from "@/lib/so/session-query";
+import { useAuthorAvatar } from "@/lib/use-author-avatar";
 
 type Session = {
   id: string;
@@ -22,7 +23,6 @@ type Session = {
   tokens?: number;
   cost_usd?: number;
   started_at?: string;
-  checkpoints?: number;
   turns?: number;
   files?: string[];
   match?: string;
@@ -69,6 +69,28 @@ function dateGroupLabel(iso?: string): string {
   });
 }
 
+function UserAvatar() {
+  const author = useAuthorAvatar();
+  const [imgOk, setImgOk] = useState(true);
+  if (author.avatar_url && imgOk) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={author.avatar_url}
+        alt=""
+        referrerPolicy="no-referrer"
+        className="size-7 shrink-0 rounded-full object-cover bg-neutral-200"
+        onError={() => setImgOk(false)}
+      />
+    );
+  }
+  return (
+    <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-neutral-500">
+      <User className="size-4" />
+    </div>
+  );
+}
+
 function VendorMark({ vendor }: { vendor?: string }) {
   const v = (vendor || "").toLowerCase();
   if (v.includes("opencode")) {
@@ -105,7 +127,6 @@ export default function SessionsPage() {
   const [debounced, setDebounced] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [portOpen, setPortOpen] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), 200);
@@ -166,21 +187,7 @@ export default function SessionsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-white">
-      <FeaturePageHeader
-        title="Sessions"
-        actions={
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setPortOpen(true)}
-              className="rounded-md border border-neutral-200 px-2.5 py-1 text-xs text-neutral-700 hover:bg-neutral-50"
-            >
-              Port
-            </button>
-          </div>
-        }
-      />
-      <PortWizard open={portOpen} onClose={() => setPortOpen(false)} />
+      <FeaturePageHeader title="Sessions" />
 
       <div className="flex shrink-0 items-center gap-2 border-b border-neutral-200 px-4 py-2">
         <SessionSearchBar value={query} onChange={setQuery} facets={facets} />
@@ -218,15 +225,7 @@ export default function SessionsPage() {
                     }`}
                     className="flex items-center gap-3 px-4 py-2.5 hover:bg-neutral-50"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src="/vendors/user.png"
-                      alt=""
-                      className="size-7 shrink-0 rounded-full object-cover bg-neutral-200"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                      }}
-                    />
+                    <UserAvatar />
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="truncate text-sm text-neutral-900">
@@ -276,12 +275,6 @@ export default function SessionsPage() {
                             : `${s.tokens} tok`}
                         </span>
                       )}
-                      <span
-                        className="tabular-nums text-neutral-400"
-                        title="Checkpoints created on git commit / finalize"
-                      >
-                        {s.checkpoints || 0} cp
-                      </span>
                     </div>
                   </Link>
                 </li>
