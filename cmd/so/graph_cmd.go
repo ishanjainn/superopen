@@ -14,6 +14,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph/client"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/graph/mcp"
+	"github.com/ishanjainn/superopen/internal/graph/watch"
 	"github.com/ishanjainn/superopen/internal/projects"
 )
 
@@ -38,6 +39,7 @@ func runGraphRefresh(cmd *cobra.Command, root string, force bool) error {
 	if err := c.Call(cmd.Context(), api.OpBuild, req, &result); err != nil {
 		return err
 	}
+	watch.RecordSignature(root)
 	_ = projects.TouchGraphRefresh(root)
 	return out().HumanOrJSON("graph_refresh", func() {
 		fmt.Fprintf(cmd.OutOrStdout(), "graph refresh: status=%s nodes=%d edges=%d\n", result.Status, result.NodeCount, result.EdgeCount)

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { useThemeOptional } from "@/components/shell/theme-provider";
 import { touchWord, type SessionFile, type SessionMap, type Touch } from "../types";
 import type { FilePlayback } from "../playback/reducer";
 import { DirLabelSet } from "./dirLabels";
@@ -13,8 +12,10 @@ import {
   ensureVisible,
   fitDistance,
   focusOnPoint,
+  GROUND,
   prefersReducedMotion,
   SceneTip,
+  SKY,
   touchColors
 } from "./sceneUtils";
 import { fireflyTexture } from "./textures";
@@ -35,8 +36,8 @@ interface TerrainSceneProps {
 // earned by attention - touch depth × revisits - so mountains grow where the
 // walker lingered. Light is data: only touched terrain gets bright color.
 const colors: Record<Touch | "unvisited" | "ghost" | "selected", THREE.Color> = {
-  unvisited: new THREE.Color("#d4d4d4"),
-  ghost: new THREE.Color("#e5e5e5"),
+  unvisited: new THREE.Color("#5b6372"),
+  ghost: new THREE.Color("#404551"),
   ...touchColors
 };
 
@@ -68,17 +69,11 @@ function locHeight(t: number): number {
 
 // LOC tier ramp: yellow → orange → pink
 const LOC_RAMP: { at: number; color: THREE.Color }[] = [
-  { at: 0.0, color: new THREE.Color("#d4d4d4") },
+  { at: 0.0, color: new THREE.Color("#5b6372") },
   { at: 0.35, color: new THREE.Color("#eab308") },
   { at: 0.7, color: new THREE.Color("#f97316") },
   { at: 1.0, color: new THREE.Color("#ec4899") }
 ];
-
-function applyTerrainSceneTheme(dark: boolean) {
-  colors.unvisited.set(dark ? "#404040" : "#d4d4d4");
-  colors.ghost.set(dark ? "#262626" : "#e5e5e5");
-  LOC_RAMP[0].color.set(dark ? "#404040" : "#d4d4d4");
-}
 
 function locColor(t: number): THREE.Color {
   for (let i = 1; i < LOC_RAMP.length; i++) {
@@ -100,8 +95,6 @@ interface TerrainSlot {
 }
 
 export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onCanvasReady, locHeights }: TerrainSceneProps) {
-  const theme = useThemeOptional();
-  const dark = theme?.resolved === "dark";
   const hostRef = useRef<HTMLDivElement | null>(null);
   const tileMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const terrainMeshRef = useRef<THREE.InstancedMesh | null>(null);
@@ -148,26 +141,20 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
   }, [sessionMap]);
 
   useEffect(() => {
-    applyTerrainSceneTheme(dark);
-  }, [dark]);
-
-  useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const reduced = prefersReducedMotion();
     reducedRef.current = reduced;
 
     const scene = new THREE.Scene();
-    // Transparent clear so the Graph-style CSS grid on .map-root shows through.
-    scene.background = null;
+    scene.background = SKY;
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(38, host.clientWidth / host.clientHeight || 1, 0.1, 2400);
     camera.position.set(70, 130, 100);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setClearColor(0x000000, 0);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(host.clientWidth || 1, host.clientHeight || 1);
     renderer.domElement.style.display = "block";
@@ -199,9 +186,9 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     host.addEventListener("wheel", onWheel, { passive: false });
     controlsRef.current = controls;
 
-    const sky = new THREE.HemisphereLight("#ffffff", "#ffffff", 1.0);
+    const sky = new THREE.HemisphereLight("#66779b", "#161922", 1.7);
     scene.add(sky);
-    const moon = new THREE.DirectionalLight("#ffffff", 0.55);
+    const moon = new THREE.DirectionalLight("#b6c5de", 1.1);
     moon.position.set(-60, 120, -40);
     scene.add(moon);
 
@@ -294,7 +281,6 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
       const slots = slotsRef.current;
       const heights = heightsRef.current;
       if (terrain && slots.length > 0) {
-        let moving = false;
         for (let i = 0; i < slots.length; i++) {
           const slot = slots[i];
           const file = filesRef.current[slot.fileId];
@@ -304,11 +290,9 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
           if (Math.abs(diff) > 0.015) {
             cur = reducedRef.current ? slot.target : cur + diff * 0.13;
             heights.set(slot.fileId, cur);
-            moving = true;
           } else if (cur !== slot.target) {
             heights.set(slot.fileId, slot.target);
             cur = slot.target;
-            moving = true;
           }
           const sx = Math.max(file.rect.w, 0.45) + 0.04;
           const sz = Math.max(file.rect.d, 0.45) + 0.04;
@@ -323,7 +307,9 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
           );
           terrain.setMatrixAt(i, matrix);
         }
-        if (moving) terrain.instanceMatrix.needsUpdate = true;
+        // Always flush: slot order changes whenever playback adds a column,
+        // so a frame that happens to be settled still has stale matrices.
+        terrain.instanceMatrix.needsUpdate = true;
       }
 
       const firefly = fireflyRef.current;
@@ -369,10 +355,21 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     const group = new THREE.Group();
     const size = bounds.size;
 
-    scene.fog = null;
+    scene.fog = new THREE.Fog(SKY, size * 2.1, size * 4.2);
 
-    // Paper grid is CSS on .map-root (matches Graph). No opaque floor /
-    // GridHelper so the screen-space grid reads through empty sky and ground.
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(size * 6, size * 6),
+      new THREE.MeshStandardMaterial({ color: GROUND, roughness: 1 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.32;
+    group.add(ground);
+
+    const grid = new THREE.GridHelper(size * 2.8, 46, "#3a3a3a", "#262626");
+    (grid.material as THREE.Material).transparent = true;
+    (grid.material as THREE.Material).opacity = 0.9;
+    grid.position.y = -0.3;
+    group.add(grid);
 
     const plateDirs = sessionMap.dirs.filter((dir) => dir.depth <= 3 && dir.rect.w > 0 && dir.rect.d > 0);
     if (plateDirs.length > 0) {
@@ -394,7 +391,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
           new THREE.Vector3(dir.rect.w, height, dir.rect.d)
         );
         plates.setMatrixAt(i, matrix);
-        shade.set("#ffffff").lerp(new THREE.Color("#f5f5f5"), Math.min(dir.depth, 3) / 3);
+        shade.set("#1a1f29").lerp(new THREE.Color("#252b37"), Math.min(dir.depth, 3) / 3);
         plates.setColorAt(i, shade);
       });
       plates.instanceMatrix.needsUpdate = true;
@@ -455,10 +452,9 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
       new THREE.SpriteMaterial({
         map: fireflyTexture(),
         color: EMBER,
-        blending: THREE.NormalBlending,
+        blending: THREE.AdditiveBlending,
         depthWrite: false,
         transparent: true,
-        opacity: 0.95,
       })
     );
     firefly.userData.baseScale = Math.max(size * 0.028, 2.2);
@@ -511,11 +507,10 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
       fireflyRef.current = null;
       labelSetRef.current = null;
     };
-  }, [sessionMap, bounds, dark]);
+  }, [sessionMap, bounds]);
 
   // playback → terrain targets and colors
   useEffect(() => {
-    applyTerrainSceneTheme(dark);
     const terrain = terrainMeshRef.current;
     const tiles = tileMeshRef.current;
     if (!terrain || !tiles || !sessionMap) return;
@@ -562,7 +557,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     if (terrain.instanceColor) terrain.instanceColor.needsUpdate = true;
     if (tiles.instanceColor) tiles.instanceColor.needsUpdate = true;
     slotsRef.current = slots;
-  }, [sessionMap, playback, selectedPath, locHeights, dark]);
+  }, [sessionMap, playback, selectedPath, locHeights]);
 
   // the inspector opens over the right edge; pan the selected tile clear of it
   useEffect(() => {
@@ -589,7 +584,11 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     // playback resolves fileId with the same path key the session map uses, so a
     // target still missing one has no tile to land on
     const targetFiles = playback.recentTargets
-      .map((target) => (target.fileId !== undefined ? sessionMap.files[target.fileId] : undefined))
+      .map((target) =>
+        target.fileId !== undefined
+          ? sessionMap.files.find((file) => file.id === target.fileId)
+          : sessionMap.files.find((file) => file.path === target.path),
+      )
       .filter((file): file is SessionFile => Boolean(file));
 
     const peakFor = (file: SessionFile): number => {
@@ -619,7 +618,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     );
   }, [sessionMap, playback, bounds]);
 
-  return <div className="session-map" ref={hostRef} aria-label="Attention terrain" />;
+  return <div className="session-map session-map-night" ref={hostRef} aria-label="Attention terrain" />;
 }
 
 // Columns must read as phosphorescence, not paint: glow pools at the crest and

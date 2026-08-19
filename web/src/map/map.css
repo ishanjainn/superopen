@@ -40,6 +40,11 @@
 
   --grid-line: #ececec;
 
+  /* 3D stage only - theme-independent, see .session-map-night. Black is the
+     dark theme's --sky, so the stage matches the graph surface. */
+  --stage: #000000;
+  --stage-ink: #a3a3a3;
+
   color: var(--ink);
   /* Square paper grid shared with the graph surface. */
   background-color: var(--sky);
@@ -143,8 +148,21 @@ html.dark .map-root {
   touch-action: none;
   cursor: grab;
   outline: none;
-  /* Grid lives on .map-root; keep host clear so it shows through alpha canvas. */
+  /* Graph keeps a transparent canvas so the paper grid reads through. */
   background: transparent;
+}
+
+/* The session stage is an opaque night map in both app themes: additive
+   light (jump arcs, walker) only accumulates on a dark buffer, and touched
+   files only read as lit against unlit surroundings. Painting the host too
+   keeps resizes and the first frame from flashing the page through. */
+.session-map-night {
+  background: var(--stage);
+}
+
+.viewport:has(.session-map-night) .map-status {
+  background: color-mix(in oklab, var(--stage) 78%, transparent);
+  color: var(--stage-ink);
 }
 
 .session-map:active {
@@ -558,6 +576,52 @@ html.dark .map-root {
   justify-content: flex-end;
 }
 
+.hud-top {
+  position: relative;
+  inset: auto;
+  z-index: 4;
+  height: auto;
+  align-items: stretch;
+  justify-content: stretch;
+  pointer-events: auto;
+  overflow: visible;
+}
+
+.map-view-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 8;
+  display: flex;
+  gap: 0;
+  padding: 1px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--panel) 88%, transparent);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+
+.map-view-badge button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--faint);
+}
+
+.map-view-badge button:hover {
+  color: var(--ink);
+}
+
+.map-view-badge button.active {
+  color: var(--ink);
+  background: var(--panel-raised);
+}
+
 /* Map sets `button { font: inherit }` from .map-root (14px base). Keep the
    shared SessionRail type scale so Chat and Map read the same size. */
 .map-root .title-block {
@@ -732,6 +796,135 @@ html.dark .map-root {
 }
 
 /* ---------- dock panel shell (inspector + evaluation content) ---------- */
+
+/* Inspect rides the stage as a card in the top-right, clear of the view
+   toggle. It carries the night palette itself so it reads the same over the
+   black stage in either app theme, and runs at a smaller type scale than the
+   dock so it covers as little of the scene as possible. */
+.map-inspector {
+  --panel: #0f0f0f;
+  --panel-raised: #191919;
+  --hairline: #282828;
+  --hairline-strong: #3d3d3d;
+  --ink: #fafafa;
+  --muted: #a3a3a3;
+  --faint: #737373;
+
+  position: absolute;
+  top: 36px;
+  right: 8px;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  width: 224px;
+  max-height: calc(100% - 96px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 6px;
+  background: color-mix(in oklab, #000 84%, transparent);
+  backdrop-filter: blur(10px);
+  color: var(--ink);
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline) transparent;
+  pointer-events: auto;
+}
+
+.map-inspector .inspector-head {
+  padding: 7px 9px;
+  gap: 6px;
+}
+
+.map-inspector .inspector-path {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.map-inspector .ghost-badge {
+  margin-top: 4px;
+  padding: 1px 6px;
+  font-size: 9px;
+}
+
+.map-inspector .icon-btn {
+  width: 20px;
+  height: 20px;
+}
+
+.map-inspector .inspector-nav {
+  padding: 5px 8px;
+  gap: 6px;
+}
+
+.map-inspector .inspector-nav-btn {
+  padding: 2px 6px;
+  font-size: 10px;
+}
+
+.map-inspector .inspector-nav-btn:hover:not(:disabled) {
+  background: var(--panel-raised);
+}
+
+.map-inspector .inspector-nav-count {
+  font-size: 10px;
+}
+
+.map-inspector .inspector-facts {
+  padding: 4px 9px 7px;
+}
+
+.map-inspector .inspector-facts > div {
+  padding: 4px 0;
+  gap: 6px;
+}
+
+.map-inspector .inspector-facts > div:nth-child(odd) {
+  padding-right: 8px;
+}
+
+.map-inspector .inspector-facts > div:nth-child(even) {
+  padding-left: 8px;
+}
+
+.map-inspector .inspector-facts dt {
+  font-size: 9px;
+  letter-spacing: 0.07em;
+}
+
+.map-inspector .inspector-facts dd {
+  font-size: 11px;
+}
+
+.map-inspector .inspector-history {
+  padding: 8px 9px;
+}
+
+.map-inspector .eyebrow {
+  margin-bottom: 6px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+
+.map-inspector .history-row {
+  gap: 6px;
+  padding: 4px 3px;
+  font-size: 10px;
+}
+
+.map-inspector .history-time {
+  font-size: 9px;
+}
+
+.map-inspector .muted {
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .map-inspector {
+    animation: inspector-in 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
 
 .dock-panel {
   /* the .dock container owns placement (below the view toggle, above the
@@ -998,6 +1191,8 @@ html.dark .map-root {
   padding: 12px 22px 10px;
   background: var(--panel);
   border-top: 1px solid var(--hairline);
+  container-type: inline-size;
+  container-name: deck;
 }
 
 /* band one is the instrument row: full-width strip, then position dial and
@@ -1019,6 +1214,8 @@ html.dark .map-root {
   display: flex;
   align-items: center;
   gap: 26px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .transport {
@@ -1391,6 +1588,7 @@ html.dark .map-root {
   gap: 8px;
   font-size: var(--text-sm);
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .readout-tool {
@@ -1409,6 +1607,8 @@ html.dark .map-root {
 .readout-summary {
   color: var(--muted);
   line-height: 1.4;
+  min-width: 0;
+  flex: 1 1 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -1424,6 +1624,7 @@ html.dark .map-root {
   font-size: 0.68rem;
   letter-spacing: 0.07em;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .legend-group {
@@ -1585,6 +1786,12 @@ html.dark .map-root {
 }
 
 /* the key is reference material; below this the caption line belongs to the summary */
+@container deck (max-width: 720px) {
+  .deck-legend {
+    display: none;
+  }
+}
+
 @media (max-width: 1180px) {
   .deck-legend {
     display: none;

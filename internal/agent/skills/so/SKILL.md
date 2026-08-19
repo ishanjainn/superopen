@@ -31,13 +31,60 @@ Do **not** Read/Grep/Glob source until graph/snippet context is insufficient.
 
 | Intent | CLI | MCP (when connected) |
 |--------|-----|----------------------|
-| Architecture overview | `__SO_BIN__ graph architecture` | `graph_architecture` |
+| Natural-language / how does X work | `__SO_BIN__ graph query "..."` | `graph_query` |
 | Find a symbol | `__SO_BIN__ graph search <name>` | `graph_search` |
-| Call / config chain | `__SO_BIN__ graph trace <qn> --direction outgoing` | `graph_trace` |
 | Function body | `__SO_BIN__ graph snippet <qn>` | `graph_snippet` |
-| Natural-language question | `__SO_BIN__ graph query "..."` | `graph_query` |
+| Callers / callees (slim) | `__SO_BIN__ graph trace <qn> --direction outgoing` | `graph_trace` |
+| Architecture overview | `__SO_BIN__ graph architecture` | `graph_architecture` |
 
-Suggested loop: **search → trace → snippet** (or one `graph query`, which already includes top-seed snippets).
+**Stop-early loop (prefer fewer turns):**
+1. Run **one** `graph query` with the full question.
+2. If the answer is already clear from NODE/EDGE lines and any included snippets, **stop**.
+3. Otherwise `graph search` for the exact symbol, then `graph snippet <qualified_name>`.
+4. Use `graph trace` only when you need callers/callees; prefer a fully qualified name (short names may return an ambiguous suggestion list).
+5. Read source files only if graph/snippet context is still insufficient.
+
+Do **not** run long multi-step graph checklists after a good query/snippet already answers the question.
+
+## Graph vocabulary
+
+Node labels: `Function`, `Method`, `Class`, `Struct`, `Interface`, `Type`, `Variable`, `EnvVar`,
+`Decorator`, `Route`, `Module`, `Package`, `File`, `Folder`, `Section`, `Branch`, `Project`.
+
+Edge types: `CALLS`, `CALL_REFERENCE`, `DEFINES`, `DEFINES_METHOD`, `IMPORTS`, `DEPENDS_ON`,
+`IMPLEMENTS`, `OVERRIDE`, `USAGE`, `WRITES`, `RAISES`, `CONFIGURES`, `DECORATES`, `HTTP_CALLS`,
+`TESTS`, `TESTS_FILE`, `CONTAINS_FILE`, `CONTAINS_FOLDER`, `FILE_CHANGES_WITH`, `HAS_BRANCH`,
+`SIMILAR_TO`, `SEMANTICALLY_RELATED`.
+
+Run `__SO_BIN__ graph schema` for this repository's live counts and edge properties.
+For query recipes (dead code, fan-in/fan-out, routes, config keys, impact), load
+`references/query.md` — do not paste it in unless the task needs it.
+
+## Delegate to a subagent for multi-step graph work
+
+`so install` ships three subagents. Delegating keeps the exploration turns and their tokens
+out of the parent conversation:
+
+| Agent | Use when |
+|-------|----------|
+| `so-scout` | Fast provisional lookup — where is X, what calls Y. No absence claims. |
+| `so-verify` | Default. Task-directed evidence with snippets for anything you will act on. |
+| `so-auditor` | Bounded-scope exhaustive claims (dead code, complete impact). Needs a scope. |
+
+## Gotchas
+
+1. `graph trace` needs an exact qualified name — a short name returns an ambiguous
+   suggestion list and costs a turn. `graph search` first, then trace the qualified name.
+2. `graph query` output is truncated to a budget. A `TRUNCATED` banner means narrow the
+   question or move to `graph search` + `graph snippet`, not that the graph is incomplete.
+3. Common short terms (`init`, `run`, `New`) match broadly. Add the package or type
+   (`Openlit.init`, `engine.Query`) to get a usable ranking.
+4. `--direction outgoing` shows callees only; callers need `incoming`, and cross-package
+   answers usually need `both`.
+5. Search covers indexed symbols. Literal strings, comments, and unindexed config need
+   `code_search`/Grep — reach for those only after graph search comes back empty.
+6. Compact text is the default view; `--json` (CLI) returns full fidelity including
+   coverage and edge properties when you actually need them.
 
 ## Other commands
 

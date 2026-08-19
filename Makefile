@@ -7,7 +7,7 @@ build:
 	go build -ldflags "-X $(PKG_VERSION).Version=$(VERSION)" -o bin/so ./cmd/so
 
 test:
-	go test -race -count=1 ./...
+	go test -race -timeout 30m -count=1 ./...
 
 test-web:
 	cd web && npm ci --ignore-scripts && npm run typecheck && npm test

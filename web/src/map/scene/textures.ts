@@ -38,29 +38,46 @@ export function haloTexture(): THREE.Texture {
   return haloMap;
 }
 
+// Glyphs fill most of the box: the sprite is scaled so the box height matches
+// a screen-pixel target, so padding here is height the name does not get.
+const LABEL_FONT_PX = 34;
+const LABEL_BOX_PX = 44;
+const LABEL_PAD_X = 14;
+
+/**
+ * Directory names for the night stage: light type over a dark halo, so a name
+ * holds up against the black sky and against a lit column underneath it.
+ */
 export function labelTexture(text: string): { texture: THREE.Texture; aspect: number } {
-  const font = '600 30px ui-sans-serif, system-ui, sans-serif';
+  const font = `650 ${LABEL_FONT_PX}px "Inter var", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif`;
   const measure = document.createElement("canvas").getContext("2d")!;
   measure.font = font;
-  const width = Math.ceil(measure.measureText(text).width) + 28;
-  const height = 46;
+  const width = Math.ceil(measure.measureText(text).width) + LABEL_PAD_X * 2;
+  const height = LABEL_BOX_PX;
+  // Draw against device pixels, not CSS pixels, or the texture is already soft
+  // before the sprite is scaled down.
+  const scale = Math.min(2, Math.max(1, Math.round(window.devicePixelRatio || 1)));
   const canvas = document.createElement("canvas");
-  canvas.width = width * 2;
-  canvas.height = height * 2;
+  canvas.width = width * scale;
+  canvas.height = height * scale;
   const ctx = canvas.getContext("2d")!;
-  ctx.scale(2, 2);
+  ctx.scale(scale, scale);
   ctx.font = font;
   ctx.textBaseline = "middle";
   ctx.textAlign = "center";
-  // Soft white halo so names stay legible on the paper grid when zoomed in.
   ctx.lineJoin = "round";
   ctx.miterLimit = 2;
-  ctx.lineWidth = 4;
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
-  ctx.strokeText(text, width / 2, height / 2 + 1);
-  ctx.fillStyle = "rgba(28, 25, 23, 0.94)";
-  ctx.fillText(text, width / 2, height / 2 + 1);
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+  ctx.strokeText(text, width / 2, height / 2);
+  ctx.fillStyle = "rgba(250, 250, 250, 0.97)";
+  ctx.fillText(text, width / 2, height / 2);
   const texture = new THREE.CanvasTexture(canvas);
-  texture.anisotropy = 4;
+  // Labels are always minified toward their screen-size target, so trilinear
+  // mipmapping plus anisotropy is what keeps the strokes from crawling.
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = true;
+  texture.anisotropy = 8;
   return { texture, aspect: width / height };
 }

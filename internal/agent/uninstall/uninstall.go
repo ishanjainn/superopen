@@ -8,8 +8,8 @@
 //
 // We separate `--vendor` cleanup from `--purge` so the common
 // "I want to stop Cursor from being tracked but keep my Claude Code
-// telemetry" case is a single command and doesn't blow away the
-// shared API key + endpoint config.
+// telemetry" case is a single command and doesn't blow away shared
+// local config under ~/.config/superopen.
 package uninstall
 
 import (
@@ -20,6 +20,7 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/agent/install"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
+	"github.com/ishanjainn/superopen/internal/agent/subagents"
 	"github.com/spf13/cobra"
 )
 
@@ -44,7 +45,7 @@ Vendors:
 
 Use --purge to also remove the shared config (~/.config/superopen)
 and the session-state cache. Leave it off if you plan to re-install
-later and want to keep your API key + endpoint.
+later and want to keep local preferences.
 
 The 'so' binary itself is NOT removed by this command. Uninstall
 it via the same channel you installed it through (Homebrew, the curl|sh
@@ -94,6 +95,10 @@ func RemoveAll(purge, dryRun bool, stdout, stderr io.Writer) (removed []string, 
 		for _, path := range steer.RemoveAll() {
 			removed = append(removed, path)
 			fmt.Fprintf(stdout, "guidance: removed %s\n", path)
+		}
+		for _, path := range subagents.RemoveAll() {
+			removed = append(removed, path)
+			fmt.Fprintf(stdout, "subagents: removed %s\n", path)
 		}
 		for _, path := range install.RemoveUserMCP() {
 			removed = append(removed, path)

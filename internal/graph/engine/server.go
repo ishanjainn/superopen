@@ -190,6 +190,21 @@ func (s Server) dispatch(ctx context.Context, req api.Request) (any, *api.Error)
 			return nil, storeError("architecture", err)
 		}
 		return result, nil
+	case api.OpLayout:
+		var params api.LayoutRequest
+		if err := decodeParams(req.Params, &params); err != nil {
+			return nil, invalidParams(err)
+		}
+		store, callErr := openRequestStore(params.RepoRoot)
+		if callErr != nil {
+			return nil, callErr
+		}
+		defer store.Close()
+		result, err := store.Layout(ctx, params)
+		if err != nil {
+			return nil, storeError("layout", err)
+		}
+		return result, nil
 	case api.OpImpact:
 		var params api.ImpactRequest
 		if err := decodeParams(req.Params, &params); err != nil {

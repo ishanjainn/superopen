@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   Network,
+  Settings,
 } from "lucide-react";
 import type { SidebarItemProps } from "@/types/sidebar";
 
@@ -17,6 +18,12 @@ export const SIDEBAR_ITEMS: SidebarItemProps[] = [
     icon: <Network className={ICON_CLASSES} />,
     text: "Graph",
     link: "/graph",
+    type: "action",
+  },
+  {
+    icon: <Settings className={ICON_CLASSES} />,
+    text: "Settings",
+    link: "/settings",
     type: "action",
   },
 ];

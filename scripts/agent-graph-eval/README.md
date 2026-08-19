@@ -1,5 +1,8 @@
 # Agent graph eval
 
+All arms receive the **same prompt**; they differ only by prepared tooling
+(vanilla / `so init` / peer CLI graph / peer MCP).
+
 Run:
 
 ```bash

@@ -1,0 +1,47 @@
+{
+  "_about": {
+    "purpose": "Rebuildable catalog of sessions, parent-child links, and the latest session for each vendor.",
+    "authority": "derived from session.json files with temporary coordination state",
+    "updated_by": "session ingestion"
+  },
+  "sessions": [
+    {
+      "id": "f5262b2d-94b2-4996-9a1f-82da11f60860",
+      "vendor": "cursor",
+      "model": "auto-smart",
+      "user": "ishan.jain@grafana.com",
+      "status": "active",
+      "started_at": "2026-08-18T15:01:35.932194Z",
+      "branch": "main"
+    },
+    {
+      "id": "a490c0c4-8706-47c0-a96a-677757182fe5",
+      "vendor": "claude-code",
+      "model": "claude-haiku-4-5-20251001",
+      "user": "ishan.jain@grafana.com",
+      "title": "Reply with exactly: ok",
+      "prompt_preview": "Reply with exactly: ok",
+      "status": "ended",
+      "started_at": "2026-08-18T13:54:55.234433Z",
+      "ended_at": "2026-08-18T13:54:58.814578Z",
+      "duration_ms": 3580,
+      "tokens": 27910,
+      "cost_usd": 0.0350275,
+      "repo_root": "/Users/ishanjain/work/superopen",
+      "branch": "wo"
+    },
+    {
+      "id": "bad42a84-6e26-4530-b99e-bfb91d7f1284",
+      "vendor": "claude-code",
+      "user": "ishan.jain@grafana.com",
+      "title": "Say hi in 3 words",
+      "prompt_preview": "Say hi in 3 words",
+      "status": "ended",
+      "started_at": "2026-08-18T13:13:04.270522Z",
+      "ended_at": "2026-08-18T13:13:07.2793Z",
+      "duration_ms": 3008,
+      "repo_root": "/Users/ishanjain/work/superopen",
+      "branch": "wo"
+    }
+  ]
+}

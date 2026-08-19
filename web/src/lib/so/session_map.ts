@@ -1,10 +1,11 @@
 /** Session map: in-memory repo file layout used by session replay (tree/terrain). */
 import { createHash } from "crypto";
 import { readdirSync, statSync } from "fs";
-import { dirname, extname, join, relative, sep } from "path";
+import { basename, dirname, extname, isAbsolute, join, relative, sep } from "path";
 import { repoRoot } from "./root";
 
-const JUNK = new Set([
+/** Directories the walk never descends into; trace seating skips them too. */
+export const SKIPPED_DIRS = new Set([
   "node_modules",
   "dist",
   "build",
@@ -40,6 +41,20 @@ export type SessionDir = {
   lines: number;
 };
 
+/**
+ * A checkout or plain directory the session touched. The map is rooted at one
+ * of them; the rest occupy a district named by `prefix`.
+ */
+export type MapRoot = {
+  /** Top-level path segment on the map; "" for the repo the map is rooted at. */
+  prefix: string;
+  name: string;
+  path: string;
+  /** False for a plain directory, which is not a checkout and has no history. */
+  git: boolean;
+  files: number;
+};
+
 export type SessionMap = {
   version: number;
   repo: {
@@ -49,6 +64,7 @@ export type SessionMap = {
     generatedAt: string;
     truncated?: boolean;
   };
+  roots: MapRoot[];
   files: SessionFile[];
   dirs: SessionDir[];
   layout: { algorithm: string; weight: string };
@@ -94,7 +110,7 @@ function walkFiles(root: string): { path: string; bytes: number }[] {
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const e of entries) {
       if (e.name.startsWith(".") && e.name !== ".github" && e.name !== ".agents") continue;
-      if (JUNK.has(e.name)) continue;
+      if (SKIPPED_DIRS.has(e.name)) continue;
       const abs = join(dir, e.name);
       if (e.isDirectory()) {
         stack.push(abs);
@@ -363,6 +379,89 @@ function applyTreemap(files: SessionFile[]): SessionDir[] {
   return dirs;
 }
 
+/** Upper bound on trace-seated files so a noisy session cannot swamp the map. */
+const MAX_SEATED = 400;
+
+/**
+ * A district path ("superopen/web/src/x.ts") is repo-relative to another
+ * checkout, so it has to be resolved through that repo's root before the
+ * filesystem can be asked whether the file is really there.
+ */
+function absoluteFor(
+  path: string,
+  root: string,
+  districts: ReadonlyMap<string, string>,
+): string {
+  if (isAbsolute(path)) return path;
+  const cut = path.indexOf("/");
+  if (cut > 0) {
+    const owner = districts.get(path.slice(0, cut));
+    if (owner) return join(owner, path.slice(cut + 1));
+  }
+  return join(root, path);
+}
+
+/**
+ * Put trace-touched files on the map before playback runs.
+ *
+ * A session frequently edits a repo other than the one being mapped (chat
+ * opened in one workspace, tool calls in another), and the walk also skips
+ * dotted or deleted paths. Those touches still earned a landing: without a
+ * file on the map they carry no id, so terrain grows no column and the trail
+ * has no point to arc between. Paths that resolve under the mapped root are
+ * seated as real tiles; everything else becomes a ghost.
+ */
+export function seatTracePaths(
+  sessionMap: SessionMap,
+  paths: Iterable<string>,
+  districts: ReadonlyMap<string, string> = new Map(),
+): void {
+  const root = sessionMap.repo.root;
+  const known = new Set(sessionMap.files.map((f) => f.path));
+  let seated = 0;
+  for (const path of paths) {
+    if (!path || known.has(path)) continue;
+    if (seated >= MAX_SEATED || sessionMap.files.length >= MAX_FILES) {
+      sessionMap.repo.truncated = true;
+      break;
+    }
+    known.add(path);
+    seated++;
+
+    let bytes = 0;
+    let ghost = true;
+    try {
+      const st = statSync(absoluteFor(path, root, districts));
+      if (st.isFile()) {
+        bytes = st.size;
+        ghost = false;
+      }
+    } catch {
+      /* nothing on disk to measure: ghost */
+    }
+    const dir = dirname(path);
+    sessionMap.files.push({
+      id: 0,
+      path,
+      dir: dir === "." ? "" : dir,
+      lines: ghost ? 0 : estimateLines(bytes),
+      bytes,
+      lang: extname(path).replace(/^\./, "") || undefined,
+      rect: { x: 0, z: 0, w: 1, d: 1 },
+      ghost,
+    });
+  }
+  if (seated > 0) {
+    // Scene meshes index files by array position, so ids must stay dense.
+    sessionMap.files.sort((a, b) => a.path.localeCompare(b.path));
+    sessionMap.files.forEach((f, i) => {
+      f.id = i;
+    });
+    sessionMap.dirs = applyTreemap(sessionMap.files);
+  }
+  sessionMap.roots = computeRoots(sessionMap, districts);
+}
+
 /** Build the session map in memory; v2 never writes UI caches under .so. */
 export function getSessionMap(): SessionMap {
   const root = repoRoot();
@@ -396,6 +495,7 @@ export function getSessionMap(): SessionMap {
       generatedAt: new Date().toISOString(),
       truncated,
     },
+    roots: [],
     files,
     dirs,
     layout: {
@@ -403,8 +503,44 @@ export function getSessionMap(): SessionMap {
       weight: "sqrt(max(lines, bytes/4096, 16))",
     },
   };
+  sessionMap.roots = computeRoots(sessionMap, new Map());
 
   return sessionMap;
+}
+
+function computeRoots(
+  sessionMap: SessionMap,
+  districts: ReadonlyMap<string, string>,
+): MapRoot[] {
+  const counts = new Map<string, number>();
+  for (const f of sessionMap.files) {
+    const cut = f.path.indexOf("/");
+    const head = cut > 0 ? f.path.slice(0, cut) : "";
+    const prefix = districts.has(head) ? head : "";
+    counts.set(prefix, (counts.get(prefix) ?? 0) + 1);
+  }
+  const isGit = (path: string) => {
+    try {
+      return statSync(join(path, ".git")) != null;
+    } catch {
+      return false;
+    }
+  };
+  const roots: MapRoot[] = [
+    {
+      prefix: "",
+      name: basename(sessionMap.repo.root) || "repo",
+      path: sessionMap.repo.root,
+      git: isGit(sessionMap.repo.root),
+      files: counts.get("") ?? 0,
+    },
+  ];
+  for (const [prefix, path] of districts) {
+    const files = counts.get(prefix) ?? 0;
+    if (files === 0) continue;
+    roots.push({ prefix, name: prefix, path, git: isGit(path), files });
+  }
+  return roots;
 }
 
 export function sessionKey(harness: string, sessionDir: string): string {

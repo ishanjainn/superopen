@@ -48,11 +48,17 @@ export async function soJSON<T = unknown>(
     });
   });
   const raw = Buffer.concat(chunks).toString("utf8").trim();
+  const stderr = Buffer.concat(errChunks).toString("utf8").trim();
   if (!raw) {
+    // A failing `so` command writes its envelope to stderr and leaves stdout
+    // empty. Parse it so callers see the engine's error code rather than an
+    // opaque wrapper string with JSON embedded in it.
+    const envelope = parseEnvelope<T>(stderr);
+    if (envelope) return envelope;
     return {
       schema: 1,
       ok: false,
-      error: `so ${args.join(" ")} failed (exit ${code}): ${Buffer.concat(errChunks).toString("utf8")}`,
+      error: `so ${args.join(" ")} failed (exit ${code}): ${stderr}`,
     };
   }
   try {
@@ -63,6 +69,16 @@ export async function soJSON<T = unknown>(
       ok: false,
       error: `invalid JSON from so: ${raw.slice(0, 200)}`,
     };
+  }
+}
+
+function parseEnvelope<T>(raw: string): SoJSON<T> | null {
+  if (!raw.startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(raw) as SoJSON<T>;
+    return typeof parsed?.ok === "boolean" ? parsed : null;
+  } catch {
+    return null;
   }
 }
 

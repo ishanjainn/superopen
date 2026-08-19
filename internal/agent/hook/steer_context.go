@@ -1,12 +1,33 @@
 package hook
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
+	"time"
 
+	"github.com/ishanjainn/superopen/internal/agent/sessionstate"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
+	"github.com/ishanjainn/superopen/internal/graph/api"
+	"github.com/ishanjainn/superopen/internal/graph/client"
+	"github.com/ishanjainn/superopen/internal/paths"
+)
+
+const (
+	// augmentHitLimit caps how many indexed symbols one augment carries.
+	augmentHitLimit = 5
+	// augmentSessionCap caps how many explore-tool augments a session
+	// receives. Past this the agent has either adopted the graph or
+	// decided not to, and repeating only spends the user's tokens.
+	augmentSessionCap = 3
+	// augmentTimeout bounds the embedded graph lookup so a cold or
+	// locked database can never stall the host's tool call.
+	augmentTimeout = 1500 * time.Millisecond
+	// augmentMinTermLen skips terms too short to rank meaningfully.
+	augmentMinTermLen = 3
 )
 
 // emitSteerContext writes vendor-specific additionalContext when the event
@@ -49,59 +70,175 @@ func emitSteerContext(vendor, event string, payload []byte) {
 
 func steerTextFor(vendor, event string, payload []byte) (text, hookEvent string, ok bool) {
 	ev := strings.TrimSpace(event)
+	var sessionEvent, toolEvent bool
 	switch vendor {
-	case "claude-code":
-		switch ev {
-		case "SessionStart", "UserPromptSubmit", "SubagentStart":
-			return steer.HookReminder(), ev, true
-		case "PreToolUse":
-			tool := toolNameFromPayload(payload)
-			if isExploreTool(tool) {
-				return steer.ExploreNudge(tool), ev, true
-			}
-		}
+	case "claude-code", "codex":
+		sessionEvent = ev == "SessionStart" || ev == "UserPromptSubmit" || ev == "SubagentStart"
+		toolEvent = ev == "PreToolUse"
 	case "cursor":
-		switch ev {
-		case "sessionStart", "beforeSubmitPrompt", "subagentStart":
-			return steer.HookReminder(), ev, true
-		case "preToolUse", "beforeReadFile":
-			tool := toolNameFromPayload(payload)
-			if tool == "" || isExploreTool(tool) {
-				return steer.ExploreNudge(firstNonEmpty(tool, "Read")), ev, true
-			}
-		}
-	case "codex":
-		switch ev {
-		case "SessionStart", "UserPromptSubmit":
-			return steer.HookReminder(), ev, true
-		case "PreToolUse":
-			tool := toolNameFromPayload(payload)
-			if isExploreTool(tool) {
-				return steer.ExploreNudge(tool), ev, true
-			}
-		}
+		sessionEvent = ev == "sessionStart" || ev == "beforeSubmitPrompt" || ev == "subagentStart"
+		toolEvent = ev == "preToolUse" || ev == "beforeReadFile"
 	case "gemini":
-		switch strings.ToLower(ev) {
-		case "sessionstart", "beforeagent":
-			return steer.HookReminder(), ev, true
-		case "beforetool":
-			tool := toolNameFromPayload(payload)
-			if isExploreTool(tool) {
-				return steer.ExploreNudge(tool), ev, true
-			}
-		}
+		lower := strings.ToLower(ev)
+		sessionEvent = lower == "sessionstart" || lower == "beforeagent"
+		toolEvent = lower == "beforetool"
 	case "copilot-cli":
-		switch ev {
-		case "sessionStart", "userPromptSubmitted":
-			return steer.HookReminder(), ev, true
-		case "preToolUse":
-			tool := toolNameFromPayload(payload)
-			if isExploreTool(tool) {
-				return steer.ExploreNudge(tool), ev, true
-			}
+		sessionEvent = ev == "sessionStart" || ev == "userPromptSubmitted"
+		toolEvent = ev == "preToolUse"
+	default:
+		return "", "", false
+	}
+
+	switch {
+	case sessionEvent:
+		if !claimSessionReminder(payload, vendor) {
+			return "", "", false
+		}
+		return steer.HookReminder(), ev, true
+	case toolEvent:
+		if augment := exploreAugment(payload, vendor); augment != "" {
+			return augment, ev, true
 		}
 	}
 	return "", "", false
+}
+
+// claimSessionReminder reports whether this session still owes the durable
+// graph-first reminder. Hosts fire session-level events once per prompt, so
+// repeating the same sentence every turn is pure context tax.
+func claimSessionReminder(payload []byte, vendor string) bool {
+	sessionID := steerSessionID(payload)
+	if sessionID == "" {
+		return true
+	}
+	state := sessionstate.Load(sessionID, vendor)
+	if state.GraphSteerReminded {
+		return false
+	}
+	state.GraphSteerReminded = true
+	sessionstate.Save(sessionID, vendor, state)
+	return true
+}
+
+// exploreAugment turns an imminent Grep/Glob/Read into graph context: it looks
+// the term up in the embedded graph and returns compact matches, or "" when
+// the tool carries no usable term, the repository has no graph, the term is
+// unindexed, or this session already spent its augment budget.
+func exploreAugment(payload []byte, vendor string) string {
+	tool := toolNameFromPayload(payload)
+	if !isExploreTool(tool) {
+		return ""
+	}
+	term := searchTermFromPayload(payload)
+	if term == "" {
+		return ""
+	}
+	root := graphRoot(payload)
+	if root == "" {
+		return ""
+	}
+
+	sessionID := steerSessionID(payload)
+	var state *sessionstate.State
+	if sessionID != "" {
+		state = sessionstate.Load(sessionID, vendor)
+		if state.GraphSteerCount >= augmentSessionCap {
+			return ""
+		}
+		for _, seen := range state.GraphSteerTerms {
+			if strings.EqualFold(seen, term) {
+				return ""
+			}
+		}
+	}
+
+	total, hits := searchGraphForTerm(root, term)
+	if len(hits) == 0 {
+		return ""
+	}
+	text := steer.ExploreAugment(term, total, hits)
+	if text == "" {
+		return ""
+	}
+	if state != nil {
+		state.GraphSteerCount++
+		state.GraphSteerTerms = append(state.GraphSteerTerms, term)
+		sessionstate.Save(sessionID, vendor, state)
+	}
+	return text
+}
+
+// searchGraphForTerm runs a bounded search against the embedded engine.
+// Every failure path returns no hits so the hook stays silent.
+func searchGraphForTerm(root, term string) (int, []steer.GraphHit) {
+	graphClient, err := client.Resolve()
+	if err != nil {
+		return 0, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), augmentTimeout)
+	defer cancel()
+
+	var raw json.RawMessage
+	request := api.SearchRequest{RepoRoot: root, Query: term, Limit: augmentHitLimit}
+	if err := graphClient.Call(ctx, api.OpSearch, request, &raw); err != nil {
+		return 0, nil
+	}
+	var result api.SearchResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return 0, nil
+	}
+	matches := result.Matches
+	if len(matches) == 0 {
+		matches = result.Semantic
+	}
+	if len(matches) > augmentHitLimit {
+		matches = matches[:augmentHitLimit]
+	}
+	hits := make([]steer.GraphHit, 0, len(matches))
+	for _, match := range matches {
+		hits = append(hits, steer.GraphHit{
+			QualifiedName: match.QualifiedName,
+			Label:         match.Label,
+			File:          match.Location.File,
+			Lines:         lineSpan(match.Location.StartLine, match.Location.EndLine),
+		})
+	}
+	total := result.Page.Total
+	if total == 0 {
+		total = len(hits)
+	}
+	return total, hits
+}
+
+// graphRoot resolves the repository root for the tool call, and reports ""
+// when that repository has no Superopen graph to draw on.
+func graphRoot(payload []byte) string {
+	start := strings.TrimSpace(peekContext(payload).CWD)
+	if start == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+		start = wd
+	}
+	root, err := paths.FindRoot(start)
+	if err != nil || root == "" {
+		return ""
+	}
+	if _, err := os.Stat(paths.Resolve(root).Database); err != nil {
+		return ""
+	}
+	return root
+}
+
+// steerSessionID mirrors run()'s rollup key so the steer budget is tracked
+// against the same cache entry the rest of the hook writes.
+func steerSessionID(payload []byte) string {
+	probe := peekContext(payload)
+	if probe.ConversationID != "" {
+		return probe.ConversationID
+	}
+	return probe.SessionID
 }
 
 func toolNameFromPayload(payload []byte) string {
@@ -117,13 +254,98 @@ func toolNameFromPayload(payload []byte) string {
 	return ""
 }
 
+// isExploreTool matches the discovery tools whose input names a symbol or file
+// the graph can answer for. Shell and directory listings are deliberately
+// excluded: their arguments rarely yield a term worth a graph lookup, and
+// augmenting every one of them was the bulk of the old nudge's token cost.
 func isExploreTool(name string) bool {
-	n := strings.ToLower(strings.TrimSpace(name))
-	switch n {
-	case "grep", "glob", "read", "readfile", "search", "semanticsearch",
-		"ripgrep", "find", "list_dir", "listdir", "ls", "bash", "shell":
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "grep", "glob", "read", "readfile", "read_file", "search",
+		"searchfiles", "semanticsearch", "codebase_search", "ripgrep":
 		return true
 	default:
-		return strings.Contains(n, "grep") || strings.Contains(n, "glob") || strings.Contains(n, "search")
+		return false
 	}
+}
+
+// termPattern captures identifier-shaped runs, so a regex like `.*Handler.*`
+// yields `Handler` rather than a query the index cannot rank.
+var termPattern = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_.]*`)
+
+// searchTermFromPayload derives a searchable symbol from a discovery tool's
+// input: the pattern for Grep/Glob, or the file stem for Read.
+func searchTermFromPayload(payload []byte) string {
+	var probe map[string]any
+	if json.Unmarshal(payload, &probe) != nil {
+		return ""
+	}
+	input, _ := probe["tool_input"].(map[string]any)
+	if input == nil {
+		input, _ = probe["toolInput"].(map[string]any)
+	}
+	if input == nil {
+		input, _ = probe["args"].(map[string]any)
+	}
+	if input == nil {
+		input = probe
+	}
+
+	for _, key := range []string{"pattern", "query", "regex", "search"} {
+		if raw, ok := input[key].(string); ok {
+			if term := longestTerm(raw); term != "" {
+				return term
+			}
+		}
+	}
+	for _, key := range []string{"file_path", "filePath", "path", "notebook_path"} {
+		if raw, ok := input[key].(string); ok {
+			if term := fileStem(raw); term != "" {
+				return term
+			}
+		}
+	}
+	return ""
+}
+
+// longestTerm picks the most selective identifier in a raw pattern.
+func longestTerm(raw string) string {
+	best := ""
+	for _, candidate := range termPattern.FindAllString(raw, -1) {
+		candidate = strings.Trim(candidate, ".")
+		if len(candidate) < augmentMinTermLen {
+			continue
+		}
+		if len(candidate) > len(best) {
+			best = candidate
+		}
+	}
+	return best
+}
+
+// fileStem reduces a path to its base name without extension.
+func fileStem(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if i := strings.LastIndexAny(raw, `/\`); i >= 0 {
+		raw = raw[i+1:]
+	}
+	if i := strings.Index(raw, "."); i > 0 {
+		raw = raw[:i]
+	}
+	if len(raw) < augmentMinTermLen {
+		return ""
+	}
+	return raw
+}
+
+func lineSpan(start, end int) string {
+	if start <= 0 {
+		return "-"
+	}
+	if end <= 0 || end == start {
+		return fmt.Sprintf("%d", start)
+	}
+	return fmt.Sprintf("%d-%d", start, end)
 }

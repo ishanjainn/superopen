@@ -97,6 +97,16 @@ type State struct {
 	// the parent chat's trace detail instead.
 	IsBackgroundAgent bool `json:"is_background_agent,omitempty"`
 
+	// Graph-steer budget. The hook injects context into the agent's
+	// prompt, so every injection costs the user tokens on every
+	// subsequent turn. GraphSteerReminded keeps the durable reminder to
+	// one per session, while the count and terms bound how often an
+	// explore tool is answered with graph matches and suppress repeats
+	// for a term the agent already saw.
+	GraphSteerReminded bool     `json:"graph_steer_reminded,omitempty"`
+	GraphSteerCount    int      `json:"graph_steer_count,omitempty"`
+	GraphSteerTerms    []string `json:"graph_steer_terms,omitempty"`
+
 	// SessionRolledUp counters that Phase C's minimal mode emits on
 	// sessionEnd in lieu of per-event spans. Always safe to populate;
 	// only consumed when the active capture mode is "minimal".

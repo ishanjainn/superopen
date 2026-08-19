@@ -1,8 +1,14 @@
 import * as THREE from "three";
 import type { Touch } from "../types";
 
-// Shared scene vocabulary - white stage; yellow / orange / pink data marks
-// stay readable on both light and dark backdrops.
+// Shared scene vocabulary. The stage is a night map in both app themes:
+// additive light (arcs, firefly) only survives compositing on an opaque dark
+// buffer, and touched files only read as "lit" against unlit surroundings.
+// Black matches --sky in the dark theme, so the stage reads the same as the
+// graph surface whichever view you are on.
+export const SKY = new THREE.Color("#000000");
+export const GROUND = new THREE.Color("#0a0a0a");
+
 /** Jump arcs + walker glow - warm orange (middle of yellow→pink ramp). */
 export const EMBER = new THREE.Color("#f97316");
 export const TRAIL_YELLOW = new THREE.Color("#eab308");

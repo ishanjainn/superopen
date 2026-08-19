@@ -18,6 +18,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/graph/api"
 	"github.com/ishanjainn/superopen/internal/graph/client"
+	"github.com/ishanjainn/superopen/internal/graph/watch"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/projects"
 	"github.com/ishanjainn/superopen/internal/session"
@@ -84,6 +85,26 @@ func cmdProjects() *cobra.Command {
 			}, map[string]any{"projects": list})
 		},
 	}
+	command.AddCommand(&cobra.Command{
+		Use:   "prune",
+		Short: "Remove missing, non-git, home, and scratch entries from the project index",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			removed, err := projects.PruneInvalid(false)
+			if err != nil {
+				return err
+			}
+			return out().HumanOrJSON("projects_prune", func() {
+				if len(removed) == 0 {
+					fmt.Fprintln(cmd.OutOrStdout(), "Nothing to prune.")
+					return
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Removed %d project(s):\n", len(removed))
+				for _, res := range removed {
+					fmt.Fprintf(cmd.OutOrStdout(), "  %s  %s\n", res.Project.ID, res.Project.RepoRoot)
+				}
+			}, map[string]any{"pruned": len(removed), "results": removed})
+		},
+	})
 	return command
 }
 
@@ -259,6 +280,7 @@ Does not start so dev by default. Pass --dev to start the UI after init.`,
 			if err := client.Call(cmd.Context(), api.OpBuild, api.BuildRequest{RepoRoot: root, Mode: "full", Force: force}, &result); err != nil {
 				return err
 			}
+			watch.RecordSignature(root)
 			_ = projects.TouchInit(root)
 			_ = projects.TouchGraphRefresh(root)
 			fmt.Printf("Initialized native graph: %d nodes, %d edges (%s)\n", result.NodeCount, result.EdgeCount, result.Status)
@@ -273,7 +295,7 @@ Does not start so dev by default. Pass --dev to start the UI after init.`,
 				prev := cliFlags.Root
 				cliFlags.Root = root
 				defer func() { cliFlags.Root = prev }()
-				return runDev(4444, true, true)
+				return runDev(4444, true, true, false)
 			}
 			fmt.Println("Optional: so dev -d  (UI + live watcher)")
 			return nil

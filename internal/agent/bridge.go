@@ -11,6 +11,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/install"
 	"github.com/ishanjainn/superopen/internal/agent/skills"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
+	"github.com/ishanjainn/superopen/internal/agent/subagents"
 	"github.com/ishanjainn/superopen/internal/paths"
 )
 
@@ -28,6 +29,9 @@ func Install(repoRoot string, vendors []string) error {
 	}
 	if _, err := skills.InstallAll(soBin); err != nil {
 		return fmt.Errorf("install skill: %w", err)
+	}
+	if _, err := subagents.InstallAll(); err != nil {
+		return fmt.Errorf("install subagents: %w", err)
 	}
 	if _, err := steer.InstallAll(); err != nil {
 		return fmt.Errorf("install durable guidance: %w", err)
@@ -163,6 +167,7 @@ func removeNetworkTelemetryConfig() error {
 		if strings.HasPrefix(trimmed, "SUPEROPEN_OTLP_ENDPOINT=") ||
 			strings.HasPrefix(trimmed, "OTEL_EXPORTER_OTLP_ENDPOINT=") ||
 			strings.HasPrefix(trimmed, "OTEL_EXPORTER_OTLP_HEADERS=") ||
+			strings.HasPrefix(trimmed, "OTEL_RESOURCE_ATTRIBUTES=") ||
 			strings.HasPrefix(trimmed, "SUPEROPEN_API_KEY=") ||
 			trimmed == "# written by so init / so coding install" {
 			continue

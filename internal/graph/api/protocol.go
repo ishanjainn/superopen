@@ -26,6 +26,7 @@ const (
 	OpTrace          Operation = "trace"
 	OpSnippet        Operation = "snippet"
 	OpArchitecture   Operation = "architecture"
+	OpLayout         Operation = "layout"
 	OpImpact         Operation = "impact"
 	OpCoverage       Operation = "coverage"
 	OpProjects       Operation = "projects"
@@ -339,11 +340,14 @@ type TraceStep struct {
 }
 
 type TraceResult struct {
-	Paths      [][]TraceStep            `json:"paths"`
-	Unresolved []UnresolvedRelationship `json:"unresolved,omitempty"`
-	Visited    int                      `json:"visited"`
-	Truncated  bool                     `json:"truncated"`
-	Coverage   Coverage                 `json:"coverage"`
+	Paths       [][]TraceStep            `json:"paths"`
+	Unresolved  []UnresolvedRelationship `json:"unresolved,omitempty"`
+	Visited     int                      `json:"visited"`
+	Truncated   bool                     `json:"truncated"`
+	Coverage    Coverage                 `json:"coverage,omitempty"`
+	Status      string                   `json:"status,omitempty"`
+	Message     string                   `json:"message,omitempty"`
+	Suggestions []Node                   `json:"suggestions,omitempty"`
 }
 
 // UnresolvedRelationship preserves a source-grounded relationship attempt
@@ -368,10 +372,15 @@ type SnippetRequest struct {
 }
 
 type SnippetResult struct {
-	Location Location `json:"location"`
-	Language string   `json:"language,omitempty"`
-	Code     string   `json:"code"`
-	Coverage Coverage `json:"coverage"`
+	Location      Location `json:"location"`
+	Language      string   `json:"language,omitempty"`
+	Code          string   `json:"code"`
+	QualifiedName string   `json:"qualified_name,omitempty"`
+	Name          string   `json:"name,omitempty"`
+	Label         string   `json:"label,omitempty"`
+	Callers       int      `json:"callers,omitempty"`
+	Callees       int      `json:"callees,omitempty"`
+	Coverage      Coverage `json:"coverage,omitempty"`
 }
 
 type ArchitectureRequest struct {
@@ -401,6 +410,45 @@ type ArchitectureResult struct {
 	Cycles         [][]Node         `json:"cycles,omitempty"`
 	Communities    []Community      `json:"communities,omitempty"`
 	Coverage       Coverage         `json:"coverage"`
+}
+
+// LayoutRequest asks for a render-ready subgraph with server-computed 3D
+// coordinates. MaxNodes is a rendering budget, not a graph correctness limit.
+type LayoutRequest struct {
+	RepoRoot string `json:"repo_root,omitempty"`
+	Project  string `json:"project,omitempty"`
+	MaxNodes int    `json:"max_nodes,omitempty"`
+}
+
+type LayoutNode struct {
+	ID            int64   `json:"id"`
+	X             float64 `json:"x"`
+	Y             float64 `json:"y"`
+	Z             float64 `json:"z"`
+	Label         string  `json:"label"`
+	Name          string  `json:"name"`
+	QualifiedName string  `json:"qualified_name"`
+	FilePath      string  `json:"file_path,omitempty"`
+	StartLine     int     `json:"start_line,omitempty"`
+	EndLine       int     `json:"end_line,omitempty"`
+	Degree        int     `json:"degree"`
+	Size          float64 `json:"size"`
+	Color         string  `json:"color"`
+	Community     string  `json:"community,omitempty"`
+}
+
+type LayoutEdge struct {
+	Source int64  `json:"source"`
+	Target int64  `json:"target"`
+	Type   string `json:"type"`
+}
+
+type LayoutResult struct {
+	Nodes      []LayoutNode `json:"nodes"`
+	Edges      []LayoutEdge `json:"edges"`
+	TotalNodes int          `json:"total_nodes"`
+	TotalEdges int          `json:"total_edges"`
+	Project    string       `json:"project"`
 }
 
 type PackageSummary struct {
@@ -624,10 +672,10 @@ type ReadinessSummary struct {
 }
 
 type CapabilitySet struct {
-	AssetRevision string        `json:"asset_revision"`
-	Complete       bool          `json:"complete"`
-	Capabilities   []Capability  `json:"capabilities"`
-	Languages      []string      `json:"languages"`
-	Readiness         ReadinessSummary `json:"readiness"`
-	Gates          []ReadinessGate  `json:"gates,omitempty"`
+	AssetRevision string           `json:"asset_revision"`
+	Complete      bool             `json:"complete"`
+	Capabilities  []Capability     `json:"capabilities"`
+	Languages     []string         `json:"languages"`
+	Readiness     ReadinessSummary `json:"readiness"`
+	Gates         []ReadinessGate  `json:"gates,omitempty"`
 }

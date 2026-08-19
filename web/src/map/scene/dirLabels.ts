@@ -23,7 +23,13 @@ interface DirLabel {
   target: number;
 }
 
-const LABEL_MIN_SUBTREE_PX = 60;
+const LABEL_MIN_SUBTREE_PX = 48;
+/**
+ * A district stops being named once you are well inside it and its own name no
+ * longer describes what fills the screen. Keep it generous: culling early is
+ * how zooming in used to strip every label off the stage.
+ */
+const LABEL_MAX_SUBTREE_SCREENS = 4;
 const LABEL_BUDGET = 120;
 
 export class DirLabelSet {
@@ -106,12 +112,16 @@ export class DirLabelSet {
       const onScreen = this.point.z < 1 && sx > -60 && sx < viewW + 60 && sy > -40 && sy < viewH + 40;
       // too small to matter, or so large we're inside it - either way the
       // name would float over unrelated geometry
-      if (!onScreen || subtreePx < LABEL_MIN_SUBTREE_PX || subtreePx > maxDim * 1.6) {
+      if (
+        !onScreen ||
+        subtreePx < LABEL_MIN_SUBTREE_PX ||
+        subtreePx > maxDim * LABEL_MAX_SUBTREE_SCREENS
+      ) {
         label.target = 0;
         continue;
       }
       // constant screen-size type, like map labels
-      const ph = label.entry.depth <= 1 ? 15 : 13;
+      const ph = label.entry.depth <= 1 ? 19 : 16;
       const worldH = ph / pxPerWorld;
       label.sprite.scale.set(worldH * label.aspect, worldH, 1);
       candidates.push({ label, sx, sy, pw: ph * label.aspect, ph });

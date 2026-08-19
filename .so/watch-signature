@@ -1,0 +1,26 @@
+4208f9a09d34eefc3eb893b4c130f38a305d2c41
+M cmd/so/graph_cmd.go
+ M cmd/so/graph_native_cli.go
+ M cmd/so/main.go
+ M internal/agent/bridge.go
+ M internal/agent/hook/steer_context.go
+ M internal/agent/install/marketplace/plugins/claude-code/hooks/hooks.json
+ M internal/agent/install/marketplace/plugins/codex/plugins/superopen/hooks/hooks.json
+ M internal/agent/install/marketplace/plugins/cursor/hooks/hooks.json
+ M internal/agent/sessionstate/sessionstate.go
+ M internal/agent/skills/skills.go
+ M internal/agent/skills/so/SKILL.md
+ M internal/agent/steer/block.go
+ M internal/agent/uninstall/uninstall.go
+ M internal/graph/api/protocol.go
+ M internal/graph/engine/analysis.go
+ M internal/graph/mcp/server.go
+ M internal/graph/watch/watch.go
+ M scripts/agent-graph-eval/README.md
+ M scripts/agent-graph-eval/run_eval.py
+?? .so/
+?? internal/agent/skills/so/references/
+?? internal/agent/subagents/
+?? internal/graph/engine/agent_ux_test.go
+?? internal/graph/engine/query_seed.go
+?? internal/graph/format/

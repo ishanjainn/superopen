@@ -1,0 +1,445 @@
+/* Native graph: session-map stage (paper grid + right rail) with the few
+   graph-only controls the map has no equivalent for. */
+
+.graph-root {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The rail owns the right edge; the scene fills the whole viewport behind it. */
+.graph-root .session-map {
+  cursor: grab;
+}
+
+/* The grid rides above the (transparent) WebGL canvas so it can never be
+   swallowed by the compositor: screen-blended in the dark theme, multiplied
+   on paper. Blend keeps it invisible over bright stars and white cards. */
+.graph-grid {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: -1px -1px;
+}
+
+html.dark .graph-root .graph-grid {
+  mix-blend-mode: screen;
+}
+
+/* ---------- rail: shared row primitives ---------- */
+
+.graph-root .tb-filter-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.graph-swatch {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.graph-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px 4px;
+}
+
+.graph-mini-btn {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+}
+
+.graph-mini-btn:hover {
+  color: var(--ink);
+}
+
+/* ---------- rail: inspect (peer-style node card) ---------- */
+
+.graph-inspect-head {
+  display: grid;
+  gap: 6px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.graph-inspect-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.graph-inspect-title strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.graph-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.graph-dot-sm {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.graph-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.graph-chip {
+  justify-self: start;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 560;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.graph-inspect-path {
+  margin: 0;
+  color: var(--faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.graph-stats {
+  display: flex;
+  gap: 20px;
+  padding: 2px 0 0;
+}
+
+.graph-stats span {
+  display: grid;
+  gap: 1px;
+}
+
+.graph-stats i {
+  color: var(--faint);
+  font-size: 9px;
+  font-style: normal;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.graph-stats b {
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-clear {
+  justify-self: start;
+  padding: 3px 9px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.graph-clear:hover {
+  color: var(--ink);
+  background: var(--panel-raised);
+}
+
+.graph-group-title {
+  margin: 0;
+  padding: 10px 10px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.graph-group-title span {
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.graph-group-kind {
+  margin: 0;
+  padding: 6px 10px 1px;
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 560;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.graph-neighbor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: 5px;
+  text-align: left;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.graph-neighbor:hover {
+  background: color-mix(in oklab, var(--panel-raised) 70%, transparent);
+}
+
+.graph-neighbor .graph-neighbor-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.graph-neighbor .graph-neighbor-kind {
+  flex: none;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.graph-more {
+  margin: 0;
+  padding: 2px 10px 6px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.graph-list {
+  display: grid;
+  gap: 1px;
+  padding: 6px;
+}
+
+.graph-note {
+  padding: 8px 10px;
+  color: var(--faint);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.graph-note-warn {
+  color: var(--ember);
+}
+
+/* ---------- rail: display + budget controls ---------- */
+
+.graph-field {
+  display: grid;
+  gap: 5px;
+  padding: 8px 10px;
+}
+
+.graph-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--faint);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.graph-field-head strong {
+  color: var(--ink);
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+}
+
+.graph-field input[type="range"] {
+  width: 100%;
+  accent-color: var(--ink);
+}
+
+.graph-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.graph-toggle input {
+  width: 12px;
+  height: 12px;
+  accent-color: var(--ink);
+}
+
+/* ---------- rail: ask ---------- */
+
+.graph-ask {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.graph-ask-row {
+  display: flex;
+  gap: 6px;
+}
+
+.graph-answer {
+  margin: 0 10px 10px;
+  padding: 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--panel-raised);
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.graph-error {
+  padding: 0 10px 8px;
+  color: var(--alarm);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+/* ---------- stage status ---------- */
+
+.graph-progress {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+}
+
+.graph-progress-track {
+  width: 220px;
+  height: 2px;
+  overflow: hidden;
+  background: var(--hairline);
+}
+
+.graph-progress-fill {
+  height: 100%;
+  background: var(--ink);
+  transition: width 0.2s ease-out;
+}
+
+.graph-retry {
+  margin-top: 12px;
+  padding: 6px 11px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: var(--text-xs);
+  pointer-events: auto;
+}
+
+.graph-retry:hover {
+  background: var(--panel-raised);
+}
+
+/* ---------- unindexed repository ---------- */
+
+/* The stage status layer is click-through so the canvas keeps its drag
+   handling; the setup card has to opt back in for copy and retry. */
+.graph-empty {
+  max-width: 420px;
+  padding: 20px 22px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  text-align: left;
+  pointer-events: auto;
+}
+
+.graph-empty-title {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.graph-empty-body {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.graph-empty-command {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  background: var(--panel-raised);
+}
+
+.graph-empty-command code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-empty-copy {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.graph-empty-copy:hover {
+  color: var(--ink);
+}
+
+.graph-empty-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.graph-empty-note code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--panel-raised);
+  font-family: var(--font-mono);
+}

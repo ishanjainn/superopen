@@ -55,6 +55,33 @@ def ensure_fixture(src: Path, work: Path) -> Path:
     return repo
 
 
+# Markers for "this arm answered from a graph". Kept arm-neutral: it lists the
+# tool and subagent names every arm can emit, so delegating the graph work to a
+# child agent still counts as graph usage rather than reading as a fallback.
+GRAPH_MARKERS = (
+    "graph query",
+    "graph_query",
+    "graph_search",
+    "graph_snippet",
+    "graph_trace",
+    "graph_architecture",
+    "search_graph",
+    "query_graph",
+    "trace_path",
+    "get_code_snippet",
+    "get_architecture",
+    "so graph",
+    "so-scout",
+    "so-verify",
+    "so-auditor",
+    "codebase-memory",
+    "graphify",
+    "knowledge graph",
+    "code graph",
+    "mcp",
+)
+
+
 def parse_usage(path: Path) -> dict:
     data = json.loads(path.read_text())
     usage = data.get("usage") or {}
@@ -66,7 +93,7 @@ def parse_usage(path: Path) -> dict:
     out = model.get("outputTokens", usage.get("output_tokens", 0)) or 0
     result = data.get("result") or ""
     purity = {
-        "mentions_graph": any(s in result.lower() for s in ("graph query", "graph_search", "so graph", "mcp")),
+        "mentions_graph": any(s in result.lower() for s in GRAPH_MARKERS),
         "mentions_read": "source read" in result.lower() or "files read" in result.lower() or "`src/" in result,
     }
     return {
@@ -165,42 +192,30 @@ def prepare_peer_mcp(repo: Path, peer_mcp: Path) -> dict:
     return {"nodes": nodes, "edges": edges, "project": project, "mcp_config": str(mcp_path), "ok": proc.returncode == 0}
 
 
+SHARED_PROMPT = f"""Answer this question now (do not ask clarifying questions):
+{QUESTION}
+
+Use the tools available in this environment. Prefer graph tools when present; otherwise use Read/Grep/Glob. Prefer fewer tool calls: stop once you can answer accurately.
+Give a concise architecture answer, then briefly list which tools/files you used."""
+
+
 def arm_vanilla(repo: Path, model: str, out: Path) -> dict:
-    prompt = f"""Answer using only Read/Grep/Glob (no graph tools, no Superopen CLI/MCP).
-Question: {QUESTION}
-Give a concise architecture answer, then report which files you read."""
-    return claude_json(prompt, repo, out, None, model)
+    return claude_json(SHARED_PROMPT, repo, out, None, model)
 
 
 def arm_superopen(repo: Path, so_bin: Path, model: str, out: Path) -> dict:
-    prompt = f"""Answer this question now (do not ask clarifying questions):
-{QUESTION}
-
-Use Superopen graph tools. Prefer this playbook and do not Read source until graph/snippet is insufficient:
-1. Run: {so_bin} graph query "{QUESTION}"
-2. Optionally: {so_bin} graph search Openlit.init
-3. Optionally: {so_bin} graph snippet <qualified_name>
-4. Optionally: {so_bin} graph architecture
-
-Give a concise architecture answer, then report which tools/files you used."""
-    return claude_json(prompt, repo, out, None, model)
+    _ = so_bin  # environment prepared by so init; prompt is identical across arms
+    return claude_json(SHARED_PROMPT, repo, out, None, model)
 
 
 def arm_peer_cli(repo: Path, peer_cli: Path, model: str, out: Path) -> dict:
-    prompt = f"""Answer using the peer CLI graph tool only when possible.
-First run exactly: {peer_cli} query "{QUESTION}"
-Prefer graph over reading source. Only Read if graph context is insufficient.
-Give a concise architecture answer, then report which tools/files you used."""
-    return claude_json(prompt, repo, out, None, model)
+    _ = peer_cli  # environment prepared by peer CLI build; prompt is identical across arms
+    return claude_json(SHARED_PROMPT, repo, out, None, model)
 
 
 def arm_peer_mcp(repo: Path, mcp_config: Path, project: str, model: str, out: Path) -> dict:
-    prompt = f"""Answer using the peer graph MCP tools only when possible.
-Project name: {project}
-Prefer graph MCP search/trace/snippet/architecture tools over reading source files.
-Question: {QUESTION}
-Give a concise architecture answer, then report which MCP tools/files you used."""
-    return claude_json(prompt, repo, out, mcp_config, model)
+    _ = project  # MCP project is prepared; prompt is identical across arms
+    return claude_json(SHARED_PROMPT, repo, out, mcp_config, model)
 
 
 def write_summary(out_dir: Path, results: dict, graphs: dict) -> None:
@@ -247,6 +262,12 @@ def write_summary(out_dir: Path, results: dict, graphs: dict) -> None:
             )
         )
     lines += [
+        "",
+        f"## Shared prompt (identical for all arms)",
+        "",
+        "```",
+        SHARED_PROMPT.strip(),
+        "```",
         "",
         "## Baseline (prior fair openlit run)",
         "",

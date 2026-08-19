@@ -162,8 +162,7 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 }
 
 // purgeShared removes shared residual config/cache state. Triggered by
-// `--purge`; left out by default so re-onboarding doesn't require
-// re-entering the API key / endpoint.
+// `--purge`; left out by default so re-onboarding keeps local preferences.
 func purgeShared(dryRun bool) (removed []string, errs []string) {
 	home, err := os.UserHomeDir()
 	if err != nil {

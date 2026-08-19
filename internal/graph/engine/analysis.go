@@ -130,12 +130,30 @@ func (s *Store) Trace(ctx context.Context, req api.TraceRequest) (api.TraceResul
 	if req.Project == "" {
 		req.Project, _ = s.defaultProject(ctx)
 	}
-	starts, err := s.findNodes(ctx, req.Project, req.Start, 20)
+	starts, err := s.findNodes(ctx, req.Project, req.Start, 40)
 	if err != nil {
 		return api.TraceResult{}, err
 	}
 	if len(starts) == 0 {
 		return api.TraceResult{}, fmt.Errorf("start node not found: %s", req.Start)
+	}
+	if ambiguousTraceStart(req.Start, starts) {
+		suggestions := make([]api.Node, 0, len(starts))
+		for _, node := range starts {
+			slim := node
+			slim.Properties = nil
+			suggestions = append(suggestions, slim)
+		}
+		return api.TraceResult{
+			Status:      "ambiguous",
+			Message:     fmt.Sprintf("%q matches %d nodes; retry with a qualified_name", req.Start, len(starts)),
+			Suggestions: suggestions,
+		}, nil
+	}
+	if exact := exactQualifiedMatch(req.Start, starts); exact != nil {
+		starts = []api.Node{*exact}
+	} else {
+		starts = starts[:1]
 	}
 	depth := req.Depth
 	if depth <= 0 {
@@ -231,6 +249,33 @@ func (s *Store) Trace(ctx context.Context, req api.TraceRequest) (api.TraceResul
 	return result, nil
 }
 
+func ambiguousTraceStart(identity string, nodes []api.Node) bool {
+	if len(nodes) <= 1 {
+		return false
+	}
+	if exactQualifiedMatch(identity, nodes) != nil {
+		return false
+	}
+	// Short / non-qualified names with multiple hits need disambiguation.
+	if !strings.Contains(identity, ".") {
+		return true
+	}
+	distinct := map[string]struct{}{}
+	for _, node := range nodes {
+		distinct[node.QualifiedName] = struct{}{}
+	}
+	return len(distinct) > 1
+}
+
+func exactQualifiedMatch(identity string, nodes []api.Node) *api.Node {
+	for i := range nodes {
+		if nodes[i].QualifiedName == identity {
+			return &nodes[i]
+		}
+	}
+	return nil
+}
+
 func containsString(values []string, value string) bool {
 	for _, candidate := range values {
 		if candidate == value {
@@ -254,12 +299,9 @@ func visitedQualifiedNames(paths [][]api.TraceStep, starts []api.Node) map[strin
 }
 
 func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResult, error) {
-	query := strings.TrimSpace(req.Question + " " + strings.Join(req.Terms, " "))
-	search, err := s.Search(ctx, api.SearchRequest{Project: req.Project, Query: query, Limit: 8, Budget: req.Budget})
-	if err != nil {
-		return api.QueryResult{}, err
+	if req.Project == "" {
+		req.Project, _ = s.defaultProject(ctx)
 	}
-	result := api.QueryResult{Seeds: search.Matches, Page: search.Page}
 	depth := req.Depth
 	if depth <= 0 {
 		depth = 2
@@ -269,110 +311,263 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 		budget = 1200
 	}
 	maxChars := budget * 4
-	edgeBudget := (maxChars * 3) / 5
-	if edgeBudget < 400 {
-		edgeBudget = maxChars / 2
+
+	terms := queryTerms(req.Question, req.Terms)
+	candidates, err := s.querySeedCandidates(ctx, req.Project)
+	if err != nil {
+		return api.QueryResult{}, err
+	}
+	seeded := scoreQuerySeeds(candidates, terms)
+	if len(seeded.seeds) == 0 {
+		return api.QueryResult{
+			Text:   "No matching nodes found.",
+			Budget: api.Budget{RequestedTokens: budget, ReturnedTokens: 1, Truncated: false},
+		}, nil
 	}
 
+	communityByID, _ := s.communityLabelByNodeID(ctx, req.Project)
+
+	result := api.QueryResult{Seeds: seeded.seeds}
 	seenNodes := map[int64]bool{}
 	seenEdges := map[int64]bool{}
-	var edges strings.Builder
-	for _, seed := range search.Matches {
-		if !seenNodes[seed.ID] {
-			seenNodes[seed.ID] = true
-			result.Nodes = append(result.Nodes, seed.Node)
+	type nodeHit struct {
+		node api.Node
+		hop  int
+		seed bool
+	}
+	nodesByID := map[int64]nodeHit{}
+	var edgeLines []string
+	seedOrder := make([]int64, 0, len(seeded.seeds))
+	seedLabels := make([]string, 0, len(seeded.seeds))
+	expandLimit := len(seeded.primary)
+	if expandLimit == 0 {
+		expandLimit = seedMaxK
+		if expandLimit > len(seeded.seeds) {
+			expandLimit = len(seeded.seeds)
 		}
-		fmt.Fprintf(&edges, "%s %s — %s:%d\n", seed.Label, seed.QualifiedName, seed.Location.File, seed.Location.StartLine)
+	}
+	expandIDs := map[int64]bool{}
+	for i, seed := range seeded.primary {
+		if i >= seedMaxK {
+			break
+		}
+		expandIDs[seed.ID] = true
+	}
+	if len(expandIDs) == 0 {
+		for i, seed := range seeded.seeds {
+			if i >= expandLimit {
+				break
+			}
+			expandIDs[seed.ID] = true
+		}
+	}
+
+	for _, seed := range seeded.seeds {
+		seedOrder = append(seedOrder, seed.ID)
+		seedLabels = append(seedLabels, seed.Name)
+		nodesByID[seed.ID] = nodeHit{node: seed.Node, hop: 0, seed: true}
+		seenNodes[seed.ID] = true
+		result.Nodes = append(result.Nodes, seed.Node)
+
+		// Expand only gap-selected primary seeds; per-term guarantee seeds stay
+		// as NODE anchors without flooding BFS neighborhoods.
+		if !expandIDs[seed.ID] {
+			continue
+		}
+
 		trace, err := s.Trace(ctx, api.TraceRequest{
 			Project: seed.Project, Start: seed.QualifiedName, Direction: "both", Depth: depth, Limit: 80,
 		})
-		if err != nil {
+		if err != nil || trace.Status == "ambiguous" {
 			continue
 		}
-		var preferred, other []string
 		for _, path := range trace.Paths {
-			if len(path) < 2 {
-				continue
+			for _, step := range path {
+				if !seenNodes[step.Node.ID] {
+					seenNodes[step.Node.ID] = true
+					result.Nodes = append(result.Nodes, step.Node)
+					nodesByID[step.Node.ID] = nodeHit{node: step.Node, hop: step.Hop}
+				} else if existing := nodesByID[step.Node.ID]; !existing.seed && step.Hop < existing.hop {
+					existing.hop = step.Hop
+					nodesByID[step.Node.ID] = existing
+				}
+				if step.Via == nil || seenEdges[step.Via.ID] {
+					continue
+				}
+				seenEdges[step.Via.ID] = true
+				result.Edges = append(result.Edges, *step.Via)
+				previous := path[0].Node
+				if step.Hop > 0 && len(path) >= 2 {
+					previous = path[len(path)-2].Node
+				}
+				from, to := previous.Name, step.Node.Name
+				if step.Via.SourceID == step.Node.ID {
+					from, to = to, from
+				}
+				at := ""
+				if step.Via.Evidence != nil && step.Via.Evidence.Location != nil && step.Via.Evidence.Location.StartLine > 0 {
+					at = fmt.Sprintf(" at=%s:L%d", step.Via.Evidence.Location.File, step.Via.Evidence.Location.StartLine)
+				}
+				line := fmt.Sprintf("EDGE %s --%s --> %s%s", from, step.Via.Type, to, at)
+				if queryEdgePreferred(step.Via.Type) {
+					edgeLines = append([]string{line}, edgeLines...)
+				} else {
+					edgeLines = append(edgeLines, line)
+				}
 			}
-			step := path[len(path)-1]
-			if !seenNodes[step.Node.ID] {
-				seenNodes[step.Node.ID] = true
-				result.Nodes = append(result.Nodes, step.Node)
-			}
-			if step.Via == nil || seenEdges[step.Via.ID] {
-				continue
-			}
-			seenEdges[step.Via.ID] = true
-			result.Edges = append(result.Edges, *step.Via)
-			previous := path[len(path)-2].Node
-			from, to := previous.QualifiedName, step.Node.QualifiedName
-			if step.Via.SourceID == step.Node.ID {
-				from, to = to, from
-			}
-			line := fmt.Sprintf("  %s → %s (%s)\n", from, to, step.Via.Type)
-			if queryEdgePreferred(step.Via.Type) {
-				preferred = append(preferred, line)
-			} else {
-				other = append(other, line)
-			}
-		}
-		for _, line := range preferred {
-			edges.WriteString(line)
-		}
-		for _, line := range other {
-			edges.WriteString(line)
 		}
 	}
 
-	edgeText := edges.String()
-	truncated := false
-	if len(edgeText) > edgeBudget {
-		edgeText = edgeText[:edgeBudget]
-		truncated = true
+	orderedNodes := make([]nodeHit, 0, len(nodesByID))
+	for _, id := range seedOrder {
+		if hit, ok := nodesByID[id]; ok {
+			orderedNodes = append(orderedNodes, hit)
+		}
+	}
+	rest := make([]nodeHit, 0, len(nodesByID))
+	for id, hit := range nodesByID {
+		if hit.seed {
+			continue
+		}
+		_ = id
+		rest = append(rest, hit)
+	}
+	sort.SliceStable(rest, func(i, j int) bool {
+		if rest[i].hop != rest[j].hop {
+			return rest[i].hop < rest[j].hop
+		}
+		return rest[i].node.QualifiedName < rest[j].node.QualifiedName
+	})
+	orderedNodes = append(orderedNodes, rest...)
+
+	var body strings.Builder
+	for _, hit := range orderedNodes {
+		community := communityByID[hit.node.ID]
+		if community == "" {
+			community = packagePrefix(hit.node.QualifiedName)
+		}
+		fmt.Fprintf(&body, "NODE %s [src=%s loc=L%d community=%s]\n",
+			hit.node.Name, hit.node.Location.File, hit.node.Location.StartLine, community)
+	}
+	for _, line := range edgeLines {
+		body.WriteString(line)
+		body.WriteByte('\n')
 	}
 
-	var text strings.Builder
-	text.WriteString(edgeText)
-
-	snippetSeeds := querySnippetSeeds(search.Matches, 3)
-	remaining := maxChars - text.Len()
+	snippetSeeds := querySnippetSeeds(seeded.seeds, 3)
 	for _, seed := range snippetSeeds {
-		if remaining < 120 {
-			truncated = true
-			break
-		}
 		snippet, err := s.Snippet(ctx, api.SnippetRequest{
 			Project: seed.Project, QualifiedName: seed.QualifiedName, ContextLines: 0,
 		})
 		if err != nil || strings.TrimSpace(snippet.Code) == "" {
 			continue
 		}
-		body := snippet.Code
-		header := fmt.Sprintf("\n### snippet %s (%s:%d-%d)\n", seed.QualifiedName, snippet.Location.File, snippet.Location.StartLine, snippet.Location.EndLine)
-		block := header + body + "\n"
-		if len(block) > remaining {
-			block = block[:remaining]
-			truncated = true
-		}
-		text.WriteString(block)
-		remaining = maxChars - text.Len()
-		if truncated {
-			break
-		}
+		fmt.Fprintf(&body, "\n### snippet %s (%s:%d-%d)\n%s\n",
+			seed.QualifiedName, snippet.Location.File, snippet.Location.StartLine, snippet.Location.EndLine, snippet.Code)
 	}
 
-	output := text.String()
+	header := fmt.Sprintf("Traversal: BFS depth=%d | Start: %v | %d nodes found\n\n", depth, seedLabels, len(orderedNodes))
+	output := header + body.String()
+	truncated := false
 	if len(output) > maxChars {
-		output = output[:maxChars]
 		truncated = true
+		cutAt := strings.LastIndex(output[:maxChars], "\n")
+		if cutAt < len(header) {
+			cutAt = maxChars
+		}
+		// Never cut seed NODE block.
+		seedBlockEnd := len(header)
+		for i := 0; i < len(seedOrder) && i < len(orderedNodes); i++ {
+			line := fmt.Sprintf("NODE %s [src=%s loc=L%d community=%s]\n",
+				orderedNodes[i].node.Name, orderedNodes[i].node.Location.File, orderedNodes[i].node.Location.StartLine, communityByID[orderedNodes[i].node.ID])
+			seedBlockEnd += len(line)
+		}
+		if cutAt < seedBlockEnd {
+			cutAt = seedBlockEnd
+			if cutAt > len(output) {
+				cutAt = len(output)
+			}
+		}
+		shownNodes := strings.Count(output[:cutAt], "\nNODE ")
+		if strings.Contains(output[:cutAt], "\n\nNODE ") || strings.HasPrefix(strings.TrimPrefix(output[len(header):cutAt], "\n"), "NODE ") {
+			// recounted via prefix
+		}
+		totalNodes := len(orderedNodes)
+		if shownNodes == 0 && totalNodes > 0 {
+			shownNodes = strings.Count(output[:cutAt], "NODE ")
+		}
+		cutCount := totalNodes - shownNodes
+		if cutCount < 0 {
+			cutCount = 0
+		}
+		output = fmt.Sprintf(
+			"[!] TRUNCATED: showing %d of %d nodes (~%d-token budget). The answer may be among the %d cut nodes — raise the token budget (CLI: --budget) or narrow the query (e.g. edge filter CALLS, or graph snippet for a specific symbol).\n\n%s\n... (truncated — %d more nodes cut by ~%d-token budget. Narrow with graph_trace or graph_snippet for a specific symbol)",
+			shownNodes, totalNodes, budget, cutCount, output[:cutAt], cutCount, budget,
+		)
 	}
+
 	result.Text = output
 	result.Budget.RequestedTokens = budget
 	result.Budget.ReturnedTokens = (len(output) + 3) / 4
 	result.Budget.Truncated = truncated
 	result.Page.Total = len(result.Nodes)
-	result.Page.Truncated = result.Page.Truncated || truncated
+	result.Page.Truncated = truncated
 	return result, nil
+}
+
+func (s *Store) communityLabelByNodeID(ctx context.Context, project string) (map[int64]string, error) {
+	communities, err := s.architectureCommunities(ctx, project, "")
+	if err != nil || len(communities) == 0 {
+		return map[int64]string{}, err
+	}
+	// Rebuild membership cheaply from the same CALLS Leiden path used by architecture.
+	where := []string{"project=?", "label IN ('Function','Method','Class','Struct','Interface','Enum','Type','Trait')"}
+	args := []any{project}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,qualified_name FROM nodes WHERE `+strings.Join(where, " AND ")+` ORDER BY id LIMIT 8000`, args...)
+	if err != nil {
+		return map[int64]string{}, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		var qn string
+		if err := rows.Scan(&id, &qn); err != nil {
+			rows.Close()
+			return map[int64]string{}, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return map[int64]string{}, err
+	}
+	edgeRows, err := s.db.QueryContext(ctx, `SELECT source_id,target_id FROM edges WHERE project=? AND type='CALLS' ORDER BY id`, project)
+	if err != nil {
+		return map[int64]string{}, err
+	}
+	var edges []LeidenEdge
+	for edgeRows.Next() {
+		var sourceID, targetID int64
+		if err := edgeRows.Scan(&sourceID, &targetID); err != nil {
+			edgeRows.Close()
+			return map[int64]string{}, err
+		}
+		edges = append(edges, LeidenEdge{Source: sourceID, Target: targetID})
+	}
+	if err := edgeRows.Close(); err != nil {
+		return map[int64]string{}, err
+	}
+	membership := Leiden(ids, edges, 1)
+	nameByCommunity := map[int]string{}
+	for _, community := range communities {
+		nameByCommunity[int(community.ID)] = community.Name
+	}
+	out := map[int64]string{}
+	for _, item := range membership {
+		if name := nameByCommunity[item.Community]; name != "" {
+			out[item.NodeID] = name
+		}
+	}
+	return out, nil
 }
 
 func queryEdgePreferred(edgeType string) bool {
@@ -525,6 +720,7 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 	}
 	file := filepath.ToSlash(req.File)
 	start, end := req.StartLine, req.EndLine
+	var matched *api.Node
 	if req.QualifiedName != "" {
 		nodes, err := s.findNodes(ctx, req.Project, req.QualifiedName, 2)
 		if err != nil {
@@ -533,6 +729,7 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 		if len(nodes) == 0 {
 			return api.SnippetResult{}, fmt.Errorf("symbol not found: %s", req.QualifiedName)
 		}
+		matched = &nodes[0]
 		file = nodes[0].Location.File
 		start, end = nodes[0].Location.StartLine, nodes[0].Location.EndLine
 	}
@@ -589,10 +786,18 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 		return api.SnippetResult{}, err
 	}
 	coverage, _ := s.Coverage(ctx, api.CoverageRequest{Project: req.Project, Paths: []string{file}})
-	return api.SnippetResult{
+	result := api.SnippetResult{
 		Location: api.Location{File: file, StartLine: start, EndLine: start + len(lines) - 1},
 		Language: "go", Code: strings.Join(lines, "\n"), Coverage: coverage,
-	}, nil
+	}
+	if matched != nil {
+		result.QualifiedName = matched.QualifiedName
+		result.Name = matched.Name
+		result.Label = matched.Label
+		_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM edges WHERE project=? AND target_id=? AND type='CALLS'`, req.Project, matched.ID).Scan(&result.Callers)
+		_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM edges WHERE project=? AND source_id=? AND type='CALLS'`, req.Project, matched.ID).Scan(&result.Callees)
+	}
+	return result, nil
 }
 
 func (s *Store) Architecture(ctx context.Context, req api.ArchitectureRequest) (api.ArchitectureResult, error) {

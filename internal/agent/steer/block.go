@@ -23,9 +23,13 @@ For structural codebase questions (architecture, callers/callees, where X is def
 dependencies, impact, "how does Y work"), use the Superopen graph **before** broad
 Read/Grep/Glob of source:
 
-1. Prefer MCP tools `+"`graph_search` / `graph_trace` / `graph_snippet` / `graph_query` / `graph_architecture`"+` when connected.
-2. Otherwise run `+"`so graph search|trace|snippet|query|architecture`"+` (binary from the /so skill).
-3. Only fall back to reading files when graph/snippet context is insufficient.
+1. Prefer MCP tools `+"`graph_query` / `graph_search` / `graph_snippet` / `graph_trace` / `graph_architecture`"+` when connected.
+2. Otherwise run `+"`so graph query|search|snippet|trace|architecture`"+` (binary from the /so skill).
+3. Prefer one `+"`graph query`"+` first; stop when NODE/EDGE/snippet context answers the question. Use `+"`graph trace`"+` only with a qualified name when callers/callees are still needed.
+4. Only fall back to reading files when graph/snippet context is insufficient.
+
+For multi-step graph work, delegate to the `+"`so-verify`"+` subagent (or `+"`so-scout`"+` for a quick
+lookup) so the exploration turns stay out of this conversation.
 
 If this repository has no `+"`.so/`"+`, run `+"`so init`"+` once at the repository root.
 Graph builds are local (no LLM). Live refresh runs on session boundaries and while `+"`so dev`"+` / MCP is up (~60s poll).
@@ -37,13 +41,32 @@ func HookReminder() string {
 	return "Superopen: for structural code questions prefer graph_search/graph_trace/graph_snippet (or `so graph …`) before broad Read/Grep. Run `so init` if `.so/` is missing."
 }
 
-// ExploreNudge is emitted before Grep/Glob/Read-style tools when useful.
-func ExploreNudge(toolName string) string {
-	tool := strings.TrimSpace(toolName)
-	if tool == "" {
-		tool = "filesystem search"
+// GraphHit is one indexed symbol rendered into an explore-tool augment.
+type GraphHit struct {
+	QualifiedName string
+	Label         string
+	File          string
+	Lines         string
+}
+
+// ExploreAugment renders indexed matches for the term an agent was about to
+// grep for, so the hook spends its tokens on graph facts rather than a nudge.
+// Returns "" when there is nothing worth injecting.
+func ExploreAugment(term string, total int, hits []GraphHit) string {
+	term = strings.TrimSpace(term)
+	if term == "" || len(hits) == 0 {
+		return ""
 	}
-	return fmt.Sprintf("Superopen nudge: before %s, try graph_search / graph_trace / so graph search|trace for structural lookups.", tool)
+	if total < len(hits) {
+		total = len(hits)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Superopen graph: %d indexed match(es) for %q — prefer graph_search/graph_snippet/graph_trace over filesystem search here.\n", total, term)
+	for _, hit := range hits {
+		fmt.Fprintf(&b, "  %s %s %s %s\n", hit.QualifiedName, hit.Label, hit.File, hit.Lines)
+	}
+	b.WriteString("Call graph_snippet with a qualified name above to read a body without grepping.")
+	return b.String()
 }
 
 // MergeBlock replaces or appends the Superopen sentinel block in content.

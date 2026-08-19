@@ -10,6 +10,7 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
 	"github.com/ishanjainn/superopen/internal/graph/client"
+	"github.com/ishanjainn/superopen/internal/graph/format"
 )
 
 // graphNativeReadCommands exposes the native graph's read/query operations.
@@ -61,6 +62,11 @@ func graphNativeReadCommands() []*cobra.Command {
 	})
 	architecture.Flags().String("path", "", "Directory scope")
 	architecture.Flags().StringSlice("aspect", nil, "Architecture aspect")
+	layout := nativeGraphLeaf("layout", "Emit a render-ready subgraph with server-computed coordinates", api.OpLayout, func(cmd *cobra.Command, _ []string) any {
+		maxNodes, _ := cmd.Flags().GetInt("max-nodes")
+		return api.LayoutRequest{RepoRoot: repoRoot(), MaxNodes: maxNodes}
+	})
+	layout.Flags().Int("max-nodes", 5000, "Node budget (highest degree first)")
 	impact := nativeGraphLeaf("impact [symbol...]", "Analyze change or symbol impact", api.OpImpact, func(cmd *cobra.Command, args []string) any {
 		base, _ := cmd.Flags().GetString("base")
 		depth, _ := cmd.Flags().GetInt("depth")
@@ -79,7 +85,7 @@ func graphNativeReadCommands() []*cobra.Command {
 	artifact := &cobra.Command{Use: "artifact", Short: "Export, import, or verify a content-addressed graph artifact"}
 	artifact.AddCommand(nativeArtifactLeaf("export <path>", api.OpArtifactExport), nativeArtifactLeaf("import <path>", api.OpArtifactImport), nativeArtifactLeaf("verify <path>", api.OpArtifactVerify))
 	diagnostics := nativeGraphLeaf("diagnostics", "Verify graph database integrity", api.OpDiagnostics, func(*cobra.Command, []string) any { return api.DiagnosticsRequest{RepoRoot: repoRoot()} })
-	return []*cobra.Command{status, schema, search, cypher, trace, snippet, architecture, impact, coverage, projects, artifact, diagnostics}
+	return []*cobra.Command{status, schema, search, cypher, trace, snippet, architecture, layout, impact, coverage, projects, artifact, diagnostics}
 }
 
 func nativeArtifactLeaf(use string, operation api.Operation) *cobra.Command {
@@ -118,8 +124,40 @@ func nativeGraphLeaf(use, short string, operation api.Operation, params func(*co
 			return err
 		}
 		return out().HumanOrJSON("graph_"+strings.ReplaceAll(string(operation), "_", "-"), func() {
-			body, _ := json.MarshalIndent(display, "", "  ")
-			fmt.Fprintln(cmd.OutOrStdout(), string(body))
+			text := compactGraphText(operation, result)
+			fmt.Fprint(cmd.OutOrStdout(), text)
+			if !strings.HasSuffix(text, "\n") {
+				fmt.Fprintln(cmd.OutOrStdout())
+			}
 		}, display)
 	}}
+}
+
+func compactGraphText(operation api.Operation, result json.RawMessage) string {
+	switch operation {
+	case api.OpSearch:
+		var search api.SearchResult
+		if json.Unmarshal(result, &search) == nil {
+			return format.SearchCompact(search)
+		}
+	case api.OpTrace:
+		var trace api.TraceResult
+		if json.Unmarshal(result, &trace) == nil {
+			return format.TraceCompact(trace)
+		}
+	case api.OpSnippet:
+		var snippet api.SnippetResult
+		if json.Unmarshal(result, &snippet) == nil {
+			return format.SnippetCompact(snippet)
+		}
+	case api.OpArchitecture:
+		var architecture api.ArchitectureResult
+		if json.Unmarshal(result, &architecture) == nil {
+			return format.ArchitectureCompact(architecture)
+		}
+	}
+	var pretty any
+	_ = json.Unmarshal(result, &pretty)
+	body, _ := json.MarshalIndent(pretty, "", "  ")
+	return string(body) + "\n"
 }

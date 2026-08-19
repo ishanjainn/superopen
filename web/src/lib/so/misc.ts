@@ -64,12 +64,22 @@ function writeProjectsFile(value: ProjectsFile) {
 export function listProjects(activeRoot = processRepoRoot()): { projects: Project[]; active: Project } {
   const local = enrich({ id: "local", name: basename(activeRoot) || "local", repo_root: activeRoot, so_root: join(activeRoot, ".so") });
   const value = readProjectsFile();
-  const projects = value.projects.map(enrich);
-  if (!projects.some((project) => project.repo_root === activeRoot)) projects.unshift(local);
-  const active = projects.find((project) => project.id === value.active_project_id) ||
-    projects.find((project) => project.repo_root === activeRoot) ||
+  // Keep missing entries visible so Settings can clean them; drop other junk
+  // (non-git / scratch) from the picker immediately.
+  const visible = value.projects
+    .filter((project) => {
+      if (!fileExists(project.repo_root)) return true;
+      return isEligibleProject(project.repo_root);
+    })
+    .map(enrich);
+  if (!visible.some((project) => project.repo_root === activeRoot)) {
+    visible.unshift(local);
+  }
+  const active =
+    visible.find((project) => project.id === value.active_project_id) ||
+    visible.find((project) => project.repo_root === activeRoot) ||
     local;
-  return { projects, active: enrich(active) };
+  return { projects: visible, active: enrich(active) };
 }
 
 export type RemoveProjectResult = {
@@ -101,5 +111,27 @@ export function removeProject(selector: string, purge = false): RemoveProjectRes
 }
 
 export function pruneMissingProjects(purge = false): RemoveProjectResult[] {
-  return readProjectsFile().projects.filter((project) => !fileExists(project.repo_root)).map((project) => removeProject(project.id, purge));
+  return pruneInvalidProjects(purge);
+}
+
+/** Drop missing paths, non-git dirs, home, and known scratch trees. */
+export function pruneInvalidProjects(purge = false): RemoveProjectResult[] {
+  return readProjectsFile()
+    .projects.filter((project) => !isEligibleProject(project.repo_root))
+    .map((project) => removeProject(project.id, purge));
+}
+
+function isEligibleProject(repoRoot: string): boolean {
+  if (!fileExists(repoRoot)) return false;
+  const home = homedir();
+  if (repoRoot === home) return false;
+  const normalized = repoRoot.replaceAll("\\", "/");
+  for (const marker of [
+    "/agent-graph-eval/work/",
+    "/.claude/plugins/cache/",
+    "/.cursor/projects/",
+  ]) {
+    if (normalized.includes(marker)) return false;
+  }
+  return fileExists(join(repoRoot, ".git"));
 }

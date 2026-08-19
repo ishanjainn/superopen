@@ -14,6 +14,8 @@ type FeaturePageHeaderProps = {
   icon?: ReactNode;
   tone?: string;
   leading?: ReactNode;
+  /** Quiet meta beside the title (session id, etc.). */
+  meta?: ReactNode;
   actions?: ReactNode;
   className?: string;
 };
@@ -67,6 +69,7 @@ export default function FeaturePageHeader({
   icon,
   tone = "border-neutral-200 bg-stone-100 text-stone-700",
   leading,
+  meta,
   actions,
   className,
 }: FeaturePageHeaderProps) {
@@ -97,6 +100,11 @@ export default function FeaturePageHeader({
         <h1 className="truncate text-[15px] font-semibold leading-none tracking-tight text-neutral-900">
           {title}
         </h1>
+        {meta ? (
+          <span className="min-w-0 truncate font-mono text-[11px] text-neutral-500">
+            {meta}
+          </span>
+        ) : null}
       </div>
       {actions ? (
         <div className="flex shrink-0 items-center gap-2">{actions}</div>

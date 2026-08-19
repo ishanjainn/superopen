@@ -26,27 +26,28 @@ func cmdDev() *cobra.Command {
 	var uiPort int
 	var detach bool
 	var noOpen bool
+	var hot bool
 
 	c := &cobra.Command{
 		Use:   "dev",
 		Short: "Start the Superopen file-backed Sessions UI",
-		Long: `Start the local Superopen UI with Next.js in development mode
-(Turbopack by default on Next 16) so pages compile on demand with fast HMR.
+		Long: `Start the local Superopen UI. Pages are served from a production
+build, so they are compiled and prerendered before the first request.
+The build runs once and is reused until the UI sources change.
 
   so dev              # foreground (Ctrl+C to stop); opens the UI
   so dev -d           # detached (background); opens the UI when ready
+  so dev --hot        # next dev instead: on-demand compile + HMR
   so dev stop         # stop a detached (or any tracked) UI
-  so dev status       # show if the UI is running
-
-End-user / release installs can later ship a prebuilt UI; local work
-uses next dev (Turbopack).`,
+  so dev status       # show if the UI is running`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDev(uiPort, detach, noOpen)
+			return runDev(uiPort, detach, noOpen, hot)
 		},
 	}
 	c.Flags().IntVar(&uiPort, "ui-port", 4444, "Superopen UI port")
 	c.Flags().BoolVarP(&detach, "detach", "d", false, "Run in the background (like docker -d)")
 	c.Flags().BoolVar(&noOpen, "no-open", false, "Do not open the UI in a browser when ready")
+	c.Flags().BoolVar(&hot, "hot", false, "Serve with next dev (on-demand compile, HMR) for UI work")
 
 	c.AddCommand(&cobra.Command{
 		Use:   "stop",
@@ -81,7 +82,7 @@ func logFile(layout paths.Paths) string {
 	return filepath.Join(runDir(layout), "dev.log")
 }
 
-func runDev(uiPort int, detach, noOpen bool) error {
+func runDev(uiPort int, detach, noOpen, hot bool) error {
 	root := repoRoot()
 	layout := paths.Resolve(root)
 	if !layout.Exists() {
@@ -92,9 +93,9 @@ func runDev(uiPort int, detach, noOpen bool) error {
 	}
 
 	if detach {
-		return startDevDetached(root, layout, uiPort, noOpen)
+		return startDevDetached(root, layout, uiPort, noOpen, hot)
 	}
-	return runDevForeground(root, layout, uiPort, noOpen)
+	return runDevForeground(root, layout, uiPort, noOpen, hot)
 }
 
 func maybeOpenUI(url string, noOpen bool) {
@@ -110,7 +111,7 @@ func maybeOpenUI(url string, noOpen bool) {
 	}
 }
 
-func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen bool) error {
+func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen, hot bool) error {
 	url := fmt.Sprintf("http://127.0.0.1:%d", uiPort)
 	if st, err := readDevStatus(layout, uiPort); err == nil && st.alive {
 		fmt.Printf("Already running (pid %d) at %s\n", st.pid, st.url)
@@ -130,6 +131,9 @@ func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen bool) 
 	}
 
 	args := []string{"dev", "--ui-port", strconv.Itoa(uiPort), "--no-open"}
+	if hot {
+		args = append(args, "--hot")
+	}
 	cmd := exec.Command(exe, args...)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "SO_DEV_DAEMON=1")
@@ -169,7 +173,7 @@ func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen bool) 
 	return fmt.Errorf("timed out waiting for UI on %s; see %s", url, logPath)
 }
 
-func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen bool) error {
+func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot bool) error {
 	_, _ = projects.Register(root, layout.Root, "")
 	var runner *watch.Runner
 	if graphClient, err := client.Resolve(); err == nil {
@@ -185,11 +189,15 @@ func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen bool) 
 	}
 	fmt.Println("Live graph refresh active (local git poll ~60s; no LLM).")
 
-	nextCmd, nextURL, err := startNextUI(root, uiPort)
+	nextCmd, nextURL, err := startNextUI(root, uiPort, hot)
 	if err != nil {
 		return fmt.Errorf("Next.js UI: %w", err)
 	}
-	fmt.Printf("Superopen UI %s (dev / Turbopack)\n", nextURL)
+	mode := "prebuilt"
+	if hot {
+		mode = "hot / Turbopack"
+	}
+	fmt.Printf("Superopen UI %s (%s)\n", nextURL, mode)
 	maybeOpenUI(nextURL+"/sessions", noOpen)
 
 	// Track foreground runs too so `so dev stop` works from another shell.

@@ -32,14 +32,23 @@ func FindRoot(start string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Prefer the git top-level so nested package .so dirs do not become the
+	// registered project root. Explicit --root / SUPEROPEN_ROOT still win.
+	var soRoot string
 	for dir := absolute; ; dir = filepath.Dir(dir) {
-		for _, marker := range []string{DirName, ".git"} {
-			if info, statErr := os.Stat(filepath.Join(dir, marker)); statErr == nil && (info.IsDir() || info.Mode().IsRegular()) {
-				return dir, nil
+		if info, statErr := os.Stat(filepath.Join(dir, ".git")); statErr == nil && (info.IsDir() || info.Mode().IsRegular()) {
+			return dir, nil
+		}
+		if soRoot == "" {
+			if info, statErr := os.Stat(filepath.Join(dir, DirName)); statErr == nil && info.IsDir() {
+				soRoot = dir
 			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
+			if soRoot != "" {
+				return soRoot, nil
+			}
 			return absolute, nil
 		}
 	}

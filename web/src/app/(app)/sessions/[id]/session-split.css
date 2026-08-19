@@ -1,0 +1,202 @@
+/* Session chat + map, shared top chrome, draggable split. */
+
+.session-workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: rgb(var(--color-white));
+  color: rgb(var(--color-neutral-900));
+}
+
+.session-chrome {
+  flex: none;
+  min-height: 0;
+  z-index: 4;
+  overflow: visible;
+}
+
+.session-chrome:empty {
+  display: none;
+}
+
+.session-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.session-split-chat,
+.session-split-map {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: rgb(var(--color-white));
+}
+
+.session-split-map .map-root,
+.session-split-map .app-frame,
+.session-split-chat > div {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.session-split-gutter {
+  flex: none;
+  width: 9px;
+  margin: 0 -4px;
+  cursor: col-resize;
+  position: relative;
+  z-index: 3;
+  touch-action: none;
+}
+
+.session-split-gutter::before {
+  content: "";
+  position: absolute;
+  inset: 0 3px;
+  background: rgb(var(--color-neutral-200));
+}
+
+.session-split-gutter:hover::before,
+.session-split-gutter:active::before {
+  background: rgb(var(--color-neutral-400));
+}
+
+.session-split-gutter-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgb(var(--color-neutral-300));
+  border-radius: 999px;
+  background: rgb(var(--color-white));
+  color: rgb(var(--color-neutral-600));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%);
+  pointer-events: none;
+}
+
+.session-split-gutter:hover .session-split-gutter-handle,
+.session-split-gutter:active .session-split-gutter-handle {
+  color: rgb(var(--color-neutral-900));
+  border-color: rgb(var(--color-neutral-400));
+}
+
+.chat-view-menu {
+  --panel: #ffffff;
+  --panel-raised: #fafafa;
+  --hairline: #e5e5e5;
+  --ink: #171717;
+  --muted: #525252;
+  --faint: #737373;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 8;
+}
+
+html.dark .chat-view-menu {
+  --panel: #0a0a0a;
+  --panel-raised: #111111;
+  --hairline: #262626;
+  --ink: #fafafa;
+  --muted: #a3a3a3;
+  --faint: #737373;
+}
+
+.chat-view-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 7px;
+  background: rgb(var(--color-white) / 0.88);
+  color: rgb(var(--color-neutral-700));
+  font-size: 11px;
+  font-weight: 500;
+  backdrop-filter: blur(8px);
+}
+
+.chat-view-menu-btn:hover {
+  color: rgb(var(--color-neutral-900));
+}
+
+.chat-view-menu-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(260px, calc(100vw - 24px));
+  max-height: min(70vh, 480px);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 10px;
+  background: rgb(var(--color-white));
+  box-shadow: 0 10px 28px rgb(0 0 0 / 18%);
+}
+
+.chat-view-menu-section + .chat-view-menu-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgb(var(--color-neutral-200));
+}
+
+.chat-view-menu-label {
+  margin: 0 0 6px;
+  color: rgb(var(--color-neutral-500));
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.chat-view-menu-empty {
+  margin: 0;
+  color: rgb(var(--color-neutral-500));
+  font-size: 12px;
+}
+
+html.dark .chat-view-menu .tb-filter-row input {
+  accent-color: #fafafa;
+}
+
+html.dark .chat-view-menu .tb-jump-row:hover,
+html.dark .chat-view-menu .tb-filter-row:hover {
+  background: rgb(38 38 38 / 70%);
+}
+
+@media (max-width: 900px) {
+  .session-split {
+    flex-direction: column;
+  }
+
+  .session-split-chat,
+  .session-split-map {
+    flex-basis: 50% !important;
+    min-height: 160px;
+  }
+
+  .session-split-gutter {
+    width: auto;
+    height: 9px;
+    margin: -4px 0;
+    cursor: row-resize;
+  }
+
+  .session-split-gutter::before {
+    inset: 3px 0;
+  }
+
+  .session-split-gutter-handle {
+    transform: translate(-50%, -50%) rotate(90deg);
+  }
+}

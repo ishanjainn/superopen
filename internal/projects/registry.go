@@ -106,7 +106,98 @@ func idFor(repoRoot string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// ephemeral reports whether repoRoot is a scratch path that must never enter
+// the durable registry (temp dirs, eval harness work trees, agent caches).
+func ephemeral(repoRoot string) bool {
+	mu.Lock()
+	redirected := override != ""
+	mu.Unlock()
+	if redirected {
+		return false // explicit test registry: caller owns the path
+	}
+	// A brand new repo path cannot be symlink-resolved, and on macOS the temp
+	// dir itself is a symlink (/var -> /private/var), so compare both forms.
+	roots := []string{os.TempDir()}
+	if resolved, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
+		roots = append(roots, resolved)
+	}
+	candidates := []string{repoRoot}
+	if resolved, err := filepath.EvalSymlinks(repoRoot); err == nil {
+		candidates = append(candidates, resolved)
+	}
+	for _, root := range roots {
+		for _, candidate := range candidates {
+			if under(root, candidate) {
+				return true
+			}
+		}
+	}
+	normalized := filepath.ToSlash(filepath.Clean(repoRoot))
+	for _, marker := range []string{
+		"/agent-graph-eval/work/",
+		"/.claude/plugins/cache/",
+		"/.cursor/projects/",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func under(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func isGitTopLevel(repoRoot string) bool {
+	info, err := os.Stat(filepath.Join(repoRoot, ".git"))
+	if err != nil {
+		return false
+	}
+	return info.IsDir() || info.Mode().IsRegular()
+}
+
+func isHomeDirectory(repoRoot string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	return filepath.Clean(repoRoot) == filepath.Clean(home)
+}
+
+// Eligible reports whether a path may appear in the project picker: a real
+// git repository top-level that is not a scratch/home directory.
+// Nested package graphs (--root) still work for commands; they just do not
+// pollute the cross-repo index.
+func Eligible(repoRoot string) bool {
+	repoRoot = filepath.Clean(repoRoot)
+	if repoRoot == "" || repoRoot == "." {
+		return false
+	}
+	if ephemeral(repoRoot) || isHomeDirectory(repoRoot) {
+		return false
+	}
+	return isGitTopLevel(repoRoot)
+}
+
+func projectStub(repoRoot, soRoot, remoteURL string) Project {
+	return Project{
+		ID:         idFor(repoRoot),
+		Name:       filepath.Base(repoRoot),
+		RepoRoot:   repoRoot,
+		SoRoot:     soRoot,
+		RemoteURL:  remoteURL,
+		LastSeenAt: time.Now().UTC(),
+	}
+}
+
 // Register upserts a project by repo root. soRoot defaults to repoRoot/.so.
+// Ineligible paths (temp, home, non-git, eval scratch) are returned to the
+// caller but not written to the durable registry.
 func Register(repoRoot, soRoot, remoteURL string) (Project, error) {
 	repoRoot, err := filepath.Abs(repoRoot)
 	if err != nil {
@@ -119,6 +210,13 @@ func Register(repoRoot, soRoot, remoteURL string) (Project, error) {
 		if err != nil {
 			return Project{}, err
 		}
+	}
+	mu.Lock()
+	redirected := override != ""
+	mu.Unlock()
+	// Test registries own their path policy; production only keeps git top-levels.
+	if !redirected && !Eligible(repoRoot) {
+		return projectStub(repoRoot, soRoot, remoteURL), nil
 	}
 	f, err := load()
 	if err != nil {
@@ -245,6 +343,28 @@ func PruneMissing(purgeSO bool) ([]RemoveResult, error) {
 	var out []RemoveResult
 	for _, p := range list {
 		if pathExists(p.RepoRoot) {
+			continue
+		}
+		res, err := Remove(p.ID, RemoveOptions{PurgeSO: purgeSO})
+		if err != nil {
+			return out, err
+		}
+		out = append(out, res)
+	}
+	return out, nil
+}
+
+// PruneInvalid unregisters projects that should never have been indexed:
+// missing paths, non-git directories, home, and scratch/eval work trees.
+// Does not delete .so data unless purgeSO is set.
+func PruneInvalid(purgeSO bool) ([]RemoveResult, error) {
+	list, err := List()
+	if err != nil {
+		return nil, err
+	}
+	var out []RemoveResult
+	for _, p := range list {
+		if pathExists(p.RepoRoot) && Eligible(p.RepoRoot) {
 			continue
 		}
 		res, err := Remove(p.ID, RemoveOptions{PurgeSO: purgeSO})

@@ -76,6 +76,20 @@ export interface Rect {
   d: number;
 }
 
+/**
+ * A checkout or plain directory the session touched. The map is rooted at one
+ * of them; the rest occupy a district named by `prefix`.
+ */
+export interface MapRoot {
+  /** Top-level path segment on the map; "" for the repo the map is rooted at. */
+  prefix: string;
+  name: string;
+  path: string;
+  /** False for a plain directory, which is not a checkout and has no history. */
+  git: boolean;
+  files: number;
+}
+
 export interface SessionMap {
   version: number;
   repo: {
@@ -86,6 +100,7 @@ export interface SessionMap {
     /** the tree holds more files than the map shows - a scan budget cut in */
     truncated?: boolean;
   };
+  roots: MapRoot[];
   files: SessionFile[];
   dirs: SessionDir[];
   layout: {

@@ -54,7 +54,6 @@ var allowedFileKeys = map[string]struct{}{
 	"SUPEROPEN_ENVIRONMENT":           {},
 	"SUPEROPEN_APPLICATION_NAME":      {},
 	"SUPEROPEN_CODING_REPO_ALLOWLIST": {},
-	"OTEL_RESOURCE_ATTRIBUTES":        {},
 }
 
 // PromoteFileToEnv re-exports the config-file values that downstream

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { User } from "lucide-react";
 import { useSoftPoll } from "@/hooks/use-soft-poll";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
 import { useProject } from "@/components/shell/project-context";
@@ -10,6 +11,7 @@ import {
   displayUser,
   type SessionQueryFacets,
 } from "@/lib/so/session-query";
+import { useAuthorAvatar } from "@/lib/use-author-avatar";
 
 type Session = {
   id: string;
@@ -65,6 +67,28 @@ function dateGroupLabel(iso?: string): string {
     day: "numeric",
     month: "short",
   });
+}
+
+function UserAvatar() {
+  const author = useAuthorAvatar();
+  const [imgOk, setImgOk] = useState(true);
+  if (author.avatar_url && imgOk) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={author.avatar_url}
+        alt=""
+        referrerPolicy="no-referrer"
+        className="size-7 shrink-0 rounded-full object-cover bg-neutral-200"
+        onError={() => setImgOk(false)}
+      />
+    );
+  }
+  return (
+    <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-neutral-200 text-neutral-500">
+      <User className="size-4" />
+    </div>
+  );
 }
 
 function VendorMark({ vendor }: { vendor?: string }) {
@@ -201,15 +225,7 @@ export default function SessionsPage() {
                     }`}
                     className="flex items-center gap-3 px-4 py-2.5 hover:bg-neutral-50"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src="/vendors/user.png"
-                      alt=""
-                      className="size-7 shrink-0 rounded-full object-cover bg-neutral-200"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                      }}
-                    />
+                    <UserAvatar />
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="truncate text-sm text-neutral-900">

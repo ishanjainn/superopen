@@ -10,6 +10,7 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
 	"github.com/ishanjainn/superopen/internal/graph/client"
+	"github.com/ishanjainn/superopen/internal/graph/format"
 	"github.com/ishanjainn/superopen/internal/graph/watch"
 )
 
@@ -171,10 +172,35 @@ func (s Server) callTool(ctx context.Context, call toolCall) (string, error) {
 	if err := s.Client.Call(ctx, operation, params, &result); err != nil {
 		return "", err
 	}
-	if operation == api.OpQuery {
+	return formatMCPResult(operation, result)
+}
+
+func formatMCPResult(operation api.Operation, result json.RawMessage) (string, error) {
+	switch operation {
+	case api.OpQuery:
 		var query api.QueryResult
 		if json.Unmarshal(result, &query) == nil && query.Text != "" {
 			return query.Text, nil
+		}
+	case api.OpSearch:
+		var search api.SearchResult
+		if json.Unmarshal(result, &search) == nil {
+			return format.SearchCompact(search), nil
+		}
+	case api.OpTrace:
+		var trace api.TraceResult
+		if json.Unmarshal(result, &trace) == nil {
+			return format.TraceCompact(trace), nil
+		}
+	case api.OpSnippet:
+		var snippet api.SnippetResult
+		if json.Unmarshal(result, &snippet) == nil {
+			return format.SnippetCompact(snippet), nil
+		}
+	case api.OpArchitecture:
+		var architecture api.ArchitectureResult
+		if json.Unmarshal(result, &architecture) == nil {
+			return format.ArchitectureCompact(architecture), nil
 		}
 	}
 	var pretty any
@@ -252,4 +278,4 @@ func nativeTools() []tool {
 	}
 }
 
-const mcpInstructions = `Superopen native code graph. For architecture, callers/callees, symbol lookup, and "how does X work" questions: call graph_search, graph_trace, graph_snippet, graph_query, or graph_architecture BEFORE broad Read/Grep/Glob. Graph builds are local (no LLM). Root is resolved from the agent working directory.`
+const mcpInstructions = `Superopen native code graph. For architecture, callers/callees, symbol lookup, and "how does X work" questions: call graph_query first (stop if answered), else graph_search → graph_snippet → graph_trace (qualified names), or graph_architecture — BEFORE broad Read/Grep/Glob. Graph builds are local (no LLM). Root is resolved from the agent working directory.`
