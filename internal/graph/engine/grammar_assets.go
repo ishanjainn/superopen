@@ -26,11 +26,11 @@ type GrammarAsset struct {
 }
 
 type GrammarManifest struct {
-	Format         int            `json:"format"`
+	Format        int            `json:"format"`
 	AssetRevision string         `json:"asset_revision"`
-	TreeSitter     string         `json:"tree_sitter"`
-	Target         string         `json:"target"`
-	Assets         []GrammarAsset `json:"assets"`
+	TreeSitter    string         `json:"tree_sitter"`
+	Target        string         `json:"target"`
+	Assets        []GrammarAsset `json:"assets"`
 }
 
 // LoadGrammarAssets verifies every byte before passing modules to wazero. A
@@ -41,6 +41,10 @@ func LoadGrammarAssets(ctx context.Context, files fs.FS, manifestPath string) (*
 }
 
 func loadGrammarAssets(ctx context.Context, files fs.FS, manifestPath string, requireComplete bool) (*GrammarRuntime, GrammarManifest, error) {
+	return loadSelectedGrammarAssets(ctx, files, manifestPath, requireComplete, nil)
+}
+
+func loadSelectedGrammarAssets(ctx context.Context, files fs.FS, manifestPath string, requireComplete bool, only []string) (*GrammarRuntime, GrammarManifest, error) {
 	manifestBytes, err := fs.ReadFile(files, manifestPath)
 	if err != nil {
 		return nil, GrammarManifest{}, err
@@ -54,9 +58,19 @@ func loadGrammarAssets(ctx context.Context, files fs.FS, manifestPath string, re
 	if err := validateGrammarManifest(manifest, requireComplete); err != nil {
 		return nil, GrammarManifest{}, err
 	}
+	allow := map[string]bool{}
+	for _, language := range only {
+		if !knownLanguage(language) {
+			return nil, GrammarManifest{}, fmt.Errorf("unknown pinned grammar %q", language)
+		}
+		allow[language] = true
+	}
 	runtime := NewGrammarRuntime(ctx)
 	directory := path.Dir(manifestPath)
 	for _, item := range manifest.Assets {
+		if len(allow) > 0 && !allow[item.Language] {
+			continue
+		}
 		body, err := fs.ReadFile(files, path.Join(directory, item.File))
 		if err != nil {
 			runtime.Close(ctx)
@@ -91,6 +105,10 @@ func loadGrammarAssets(ctx context.Context, files fs.FS, manifestPath string, re
 	if requireComplete && !runtime.Complete() {
 		runtime.Close(ctx)
 		return nil, GrammarManifest{}, fmt.Errorf("grammar runtime loaded %d modules, require %d", runtime.Count(), len(Languages))
+	}
+	if len(allow) > 0 && runtime.Count() != len(allow) {
+		runtime.Close(ctx)
+		return nil, GrammarManifest{}, fmt.Errorf("grammar runtime loaded %d modules, require %d", runtime.Count(), len(allow))
 	}
 	return runtime, manifest, nil
 }

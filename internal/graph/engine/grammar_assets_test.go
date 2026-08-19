@@ -86,3 +86,18 @@ func TestLoadGrammarAssetsVerifiesCompressedAndRawContent(t *testing.T) {
 		t.Fatal("tampered compressed module accepted")
 	}
 }
+
+func TestLoadGrammarAssetsCompilesPinnedInventory(t *testing.T) {
+	if raceEnabled {
+		t.Skip("compiling 159 wazero AOT modules under -race exceeds CI time limits")
+	}
+	ctx := context.Background()
+	runtime, _, err := LoadGrammarAssets(ctx, EngineAssets, "assets/grammars/manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close(ctx)
+	if !runtime.Complete() {
+		t.Fatalf("loaded %d modules, want %d", runtime.Count(), len(Languages))
+	}
+}

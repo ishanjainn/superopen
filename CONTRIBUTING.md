@@ -45,7 +45,7 @@ make smoke
 
    | Area | Checks |
    |---|---|
-   | Go / CLI | `go test -race -count=1 ./...` · `go vet ./...` |
+   | Go / CLI | `go test -race -timeout 30m -count=1 ./...` · `go vet ./...` |
    | Web UI | `cd web && npm test && npm run typecheck && npm run lint` |
    | Plugins | `bash scripts/sync-plugins.sh` then commit marketplace drift |
 

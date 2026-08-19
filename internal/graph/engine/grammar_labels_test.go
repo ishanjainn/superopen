@@ -8,12 +8,9 @@ import (
 )
 
 func TestPythonLabelGoldenHistogram(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	runtime, _, err := LoadGrammarAssets(ctx, EngineAssets, "assets/grammars/manifest.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer runtime.Close(ctx)
+	runtime := testSyntaxGrammarRuntime(t)
 	root := t.TempDir()
 	path := "sample.py"
 	body := "class Client:\n    def run(self):\n        return 1\n\ndef helper():\n    return helper()\n"

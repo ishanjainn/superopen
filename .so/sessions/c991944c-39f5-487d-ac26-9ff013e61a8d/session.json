@@ -1,0 +1,17 @@
+{
+  "_about": {
+    "purpose": "Materialized state, footprint, and replay metadata for one coding session.",
+    "authority": "authoritative session state derived from events.jsonl",
+    "updated_by": "session materializer"
+  },
+  "id": "c991944c-39f5-487d-ac26-9ff013e61a8d",
+  "vendor": "cursor",
+  "model": "grok-4.6",
+  "user": "ishan.jain@grafana.com",
+  "status": "active",
+  "started_at": "2026-08-19T00:40:16.766964Z",
+  "branch": "main",
+  "footprint": {
+    "files": null
+  }
+}

@@ -22,7 +22,16 @@ type GrammarRuntime struct {
 }
 
 func NewGrammarRuntime(ctx context.Context) *GrammarRuntime {
-	config := wazero.NewRuntimeConfigCompiler().WithMemoryLimitPages(8192).WithCloseOnContextDone(true)
+	var config wazero.RuntimeConfig
+	if raceEnabled {
+		// wazero's AOT compiler (wazevo) allocates heavily. Under the race
+		// detector that makes compiling Tree-sitter grammars exceed CI's
+		// package timeout; the interpreter is semantically equivalent.
+		config = wazero.NewRuntimeConfigInterpreter()
+	} else {
+		config = wazero.NewRuntimeConfigCompiler()
+	}
+	config = config.WithMemoryLimitPages(8192).WithCloseOnContextDone(true)
 	runtime := wazero.NewRuntimeWithConfig(ctx, config)
 	_, _ = wasi_snapshot_preview1.Instantiate(ctx, runtime)
 	return &GrammarRuntime{

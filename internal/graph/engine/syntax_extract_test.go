@@ -509,12 +509,9 @@ func TestGitBranchSlugCollapsesPathSeparators(t *testing.T) {
 }
 
 func TestExtractSyntaxFactsCommonJSRequireAndObjectMethods(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	runtime, _, err := LoadGrammarAssets(ctx, EngineAssets, "assets/grammars/manifest.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer runtime.Close(ctx)
+	runtime := testSyntaxGrammarRuntime(t)
 	root := t.TempDir()
 	files := map[string]string{
 		"req.ts": "const metrics = require('../otel/metrics');\nOpenAI = require('openai').default;\n",
@@ -569,12 +566,9 @@ func TestExtractSyntaxFactsCommonJSRequireAndObjectMethods(t *testing.T) {
 }
 
 func TestYamlJestAndEnumExtraction(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	runtime, _, err := LoadGrammarAssets(ctx, EngineAssets, "assets/grammars/manifest.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer runtime.Close(ctx)
+	runtime := testSyntaxGrammarRuntime(t)
 	root := t.TempDir()
 	files := map[string]string{
 		"default.yaml": "apiVersion: 1\n\ndatasources:\n  - name: x\n    url: http://prometheus:9090\n",

@@ -10,12 +10,9 @@ import (
 )
 
 func TestCrossLanguageRelationshipsUseUnifiedGoPackageIdentity(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	runtime, _, err := LoadGrammarAssets(ctx, EngineAssets, "assets/grammars/manifest.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer runtime.Close(ctx)
+	runtime := testSyntaxGrammarRuntime(t)
 	root := t.TempDir()
 	files := map[string]string{
 		"internal/session/store.go": "package session\nfunc path() string { return \"\" }\n",

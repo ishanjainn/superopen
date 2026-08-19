@@ -7,6 +7,7 @@ import (
 )
 
 func TestExtractSyntaxFactsCapturesTSHeritageNames(t *testing.T) {
+	t.Parallel()
 	source := []byte(`
 export interface GuardOptions { timeout?: number }
 export class Guard {
@@ -19,11 +20,7 @@ export class PII extends Guard {
 }
 `)
 	ctx := context.Background()
-	runtime, _, err := LoadGrammarAssets(ctx, EngineAssets, "assets/grammars/manifest.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer runtime.Close(ctx)
+	runtime := testSyntaxGrammarRuntime(t)
 	root := t.TempDir()
 	path := "sample.ts"
 	if err := os.WriteFile(root+"/"+path, source, 0o600); err != nil {
