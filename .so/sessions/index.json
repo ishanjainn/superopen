@@ -6,6 +6,15 @@
   },
   "sessions": [
     {
+      "id": "30c48c69-9054-4fda-ae3d-bc69f3a33db4",
+      "vendor": "cursor",
+      "model": "grok-4.6",
+      "user": "ishan.jain@grafana.com",
+      "status": "active",
+      "started_at": "2026-08-19T00:20:35.981742Z",
+      "branch": "main"
+    },
+    {
       "id": "f5262b2d-94b2-4996-9a1f-82da11f60860",
       "vendor": "cursor",
       "model": "auto-smart",

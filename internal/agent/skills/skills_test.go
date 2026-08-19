@@ -14,6 +14,8 @@ func TestInstallAllWritesSkill(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	t.Setenv("COPILOT_HOME", "")
 
 	written, err := skills.InstallAll("/usr/local/bin/so")
 	if err != nil {
@@ -43,6 +45,8 @@ func TestInstallAllShipsReferences(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	t.Setenv("COPILOT_HOME", "")
 
 	written, err := skills.InstallAll("/usr/local/bin/so")
 	if err != nil {
