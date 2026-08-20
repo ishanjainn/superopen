@@ -152,6 +152,34 @@ func TestStripCursorHooks_NoOpWhenNothingOurs(t *testing.T) {
 	}
 }
 
+func TestStripCursorHooks_RemovesGraphRefresh(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hooks.json")
+	body := `{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {"command": "/tmp/so graph refresh --detach"},
+      {"command": "other-tool"}
+    ]
+  }
+}
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stripCursorHooks(path, false); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	if strings.Contains(string(raw), "graph refresh") {
+		t.Fatalf("graph refresh hook left: %s", raw)
+	}
+	if !strings.Contains(string(raw), "other-tool") {
+		t.Fatalf("other hook removed: %s", raw)
+	}
+}
+
 func TestStripCursorHooks_RemovesSessionsFinalize(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "hooks.json")

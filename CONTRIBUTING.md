@@ -5,7 +5,8 @@ reports, and integration feedback are all welcome.
 
 ## Before you start
 
-- Read the [README](README.md) for install and product overview.
+- Read the [README](README.md) for the Homebrew install and product overview.
+- Working from a git checkout? See [docs/local-build.md](docs/local-build.md) to build `so`, wire hooks, and wipe install state for a clean retest.
 - Follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 - For a substantial change, open or discuss an issue first so maintainers can
   confirm the scope. Small documentation fixes can go straight to a pull
@@ -17,9 +18,9 @@ reports, and integration feedback are all welcome.
 git clone https://github.com/YOUR_USERNAME/so.git
 cd so
 
-# CLI
+# CLI — production-shaped install (see docs/local-build.md)
 go test ./...
-go build -o bin/so ./cmd/so
+sh scripts/install.sh          # Windows: powershell -File scripts/install.ps1
 
 # Web UI
 cd web

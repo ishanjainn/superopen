@@ -118,7 +118,7 @@ func IndexSyntaxDevelopment(ctx context.Context, request api.BuildRequest, engin
 	if err != nil {
 		return api.BuildResult{}, err
 	}
-	return api.BuildResult{Status: "development_incomplete", Project: project, Database: database,
+	return api.BuildResult{Status: "ok", Project: project, Database: database,
 		SourceRevision: revision, Generation: repository.Generation, NodeCount: nodeCount, EdgeCount: edgeCount,
 		FileCount: len(graph.files), Duration: time.Since(started), Coverage: summarizedCoverage(coverage, 100), Changes: changes}, nil
 }

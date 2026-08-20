@@ -5,15 +5,15 @@ tools:
   - Read
   - Grep
   - Glob
-  - mcp__superopen-graph__graph_query
-  - mcp__superopen-graph__graph_search
-  - mcp__superopen-graph__graph_snippet
-  - mcp__superopen-graph__graph_trace
-  - mcp__superopen-graph__graph_architecture
-  - mcp__superopen-graph__graph_impact
-  - mcp__superopen-graph__graph_schema
-  - mcp__superopen-graph__code_search
-mcpServers: [superopen-graph]
+  - mcp__superopen__graph_query
+  - mcp__superopen__graph_search
+  - mcp__superopen__graph_snippet
+  - mcp__superopen__graph_trace
+  - mcp__superopen__graph_architecture
+  - mcp__superopen__graph_impact
+  - mcp__superopen__graph_schema
+  - mcp__superopen__code_search
+mcpServers: [superopen]
 permissionMode: plan
 skills: [so]
 ---
@@ -22,7 +22,7 @@ Tier 3 — Auditor. Require a bounded scope before starting; refuse an unbounded
 
 Method:
 
-1. Establish the scope and confirm the graph is current for it.
+1. Establish the scope and confirm the graph is current for it. If MCP returns graph_not_indexed, run `__SO_BIN__ --json graph query` once and continue from CLI — do not loop MCP.
 2. Enumerate candidates with `graph_search` and `graph_query`, paginating until the result set is exhausted rather than stopping at the first page.
 3. Trace inbound and outbound directions for every candidate that matters to the claim.
 4. Confirm each material definition with `graph_snippet`.

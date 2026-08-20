@@ -56,22 +56,31 @@ func openBrowser(url string) error {
 	return command.Start()
 }
 
-func findWebDir(repoRoot string) string {
+func findWebDir(_ string) string {
 	candidates := []string{}
 	if configured := strings.TrimSpace(os.Getenv("SUPEROPEN_WEB_DIR")); configured != "" {
 		candidates = append(candidates, configured)
 	}
 	if executable, err := os.Executable(); err == nil {
 		dir := filepath.Dir(executable)
-		candidates = append(candidates, filepath.Join(dir, "web"), filepath.Join(dir, "..", "share", "superopen", "web"))
+		candidates = append(candidates,
+			filepath.Join(dir, "..", "share", "superopen", "web"),
+			filepath.Join(dir, "web"),
+		)
 	}
-	candidates = append(candidates, filepath.Join(repoRoot, "web"))
 	for _, candidate := range candidates {
 		if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
 			return candidate
 		}
 	}
 	return ""
+}
+
+func expectedWebDir() string {
+	if executable, err := os.Executable(); err == nil {
+		return filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "share", "superopen", "web"))
+	}
+	return "~/.superopen/share/superopen/web"
 }
 
 func npmCommand(args ...string) *exec.Cmd {
@@ -130,7 +139,7 @@ func buildNextUI(webDir, repoRoot string) error {
 func startNextUI(repoRoot string, port int, hot bool) (*exec.Cmd, string, error) {
 	webDir := findWebDir(repoRoot)
 	if webDir == "" {
-		return nil, "", fmt.Errorf("superopen web UI not found")
+		return nil, "", fmt.Errorf("web UI missing from the Superopen prefix (%s); re-run the installer", expectedWebDir())
 	}
 	if _, err := os.Stat(filepath.Join(webDir, "node_modules")); err != nil {
 		return nil, "", fmt.Errorf("web dependencies missing; run npm install --ignore-scripts in %s", webDir)

@@ -11,25 +11,8 @@
   cursor: grab;
 }
 
-/* The grid rides above the (transparent) WebGL canvas so it can never be
-   swallowed by the compositor: screen-blended in the dark theme, multiplied
-   on paper. Blend keeps it invisible over bright stars and white cards. */
-.graph-grid {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  mix-blend-mode: multiply;
-  background-image:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 28px 28px;
-  background-position: -1px -1px;
-}
-
-html.dark .graph-root .graph-grid {
-  mix-blend-mode: screen;
-}
+/* Overlay grid lives in map.css (.graph-grid) so Graph, session map, and
+   Memory share one screen-space square. */
 
 /* ---------- rail: shared row primitives ---------- */
 

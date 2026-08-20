@@ -451,6 +451,8 @@ export default function MapView({
               />
             )}
 
+            <div className="graph-grid" aria-hidden />
+
             {hudHost ? null : hud}
 
             <div className="map-view-badge" role="group" aria-label="Scene view">

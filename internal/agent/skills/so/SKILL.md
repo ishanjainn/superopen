@@ -22,20 +22,20 @@ If that path is missing, fall back to `$SUPEROPEN_SO_BIN` or `so` on `PATH`.
 ## Prerequisites
 
 1. Run **`so install` once per machine** (from any directory) to install this skill, observability hooks, durable graph-first guidance, and user-global MCP.
-2. In a repository, run **`/so init`** (or `__SO_BIN__ init`) to create `.so/` and build the graph.
+2. In a repository, run **`/so init`** only when `.so/` is missing. Check with `test -d .so` — `ls` hides dot directories. If `.so/` exists, the graph is already there; do not run `so init` (it prints immediately and no-ops unless `--force`).
 3. `so init` defaults to the **repository root** (nearest existing `.so` or git top-level). Use `--root` / `SUPEROPEN_ROOT` only for an explicit nested package graph.
 
 ## Graph playbook (prefer graph over Read)
 
 Do **not** Read/Grep/Glob source until graph/snippet context is insufficient.
 
-| Intent | CLI | MCP (when connected) |
-|--------|-----|----------------------|
-| Natural-language / how does X work | `__SO_BIN__ graph query "..."` | `graph_query` |
-| Find a symbol | `__SO_BIN__ graph search <name>` | `graph_search` |
-| Function body | `__SO_BIN__ graph snippet <qn>` | `graph_snippet` |
-| Callers / callees (slim) | `__SO_BIN__ graph trace <qn> --direction outgoing` | `graph_trace` |
-| Architecture overview | `__SO_BIN__ graph architecture` | `graph_architecture` |
+| Intent | CLI (default) | MCP (only if listed) |
+|--------|---------------|----------------------|
+| Natural-language / how does X work | `__SO_BIN__ --json graph query "..."` | `graph_query` |
+| Find a symbol | `__SO_BIN__ --json graph search <name>` | `graph_search` |
+| Function body | `__SO_BIN__ --json graph snippet <qn>` | `graph_snippet` |
+| Callers / callees (slim) | `__SO_BIN__ --json graph trace <qn> --direction outgoing` | `graph_trace` |
+| Architecture overview | `__SO_BIN__ --json graph architecture` | `graph_architecture` |
 
 **Stop-early loop (prefer fewer turns):**
 1. Run **one** `graph query` with the full question.
@@ -45,6 +45,20 @@ Do **not** Read/Grep/Glob source until graph/snippet context is insufficient.
 5. Read source files only if graph/snippet context is still insufficient.
 
 Do **not** run long multi-step graph checklists after a good query/snippet already answers the question.
+
+## Memory playbook (prior work)
+
+Use memory for what this repo already decided or tried. Do not dump `.so/sessions/*/events.jsonl`.
+
+| Intent | CLI (default) | MCP (only if listed) |
+|--------|---------------|----------------------|
+| Find a prior decision / moment | `__SO_BIN__ --json memory search "..."` | `memory_recall` / `memory_search` |
+| Read one hit | `__SO_BIN__ --json memory get <id>` | `memory_get` |
+| Save a rollup (at most once) | `__SO_BIN__ memory capture --request … --learned … --next …` | `memory_capture` |
+| Correct a stale fact | `__SO_BIN__ memory contradict <id> --text "…"` | `memory_contradict` |
+| Teach a convention | `__SO_BIN__ memory teach --text "…"` | `memory_teach` |
+
+Memory is hints, not authority. Distill at most once when SessionStart asks; skip if unrelated. Graph answers “where is X”; memory answers “what did we decide.”
 
 ## Graph vocabulary
 
@@ -90,23 +104,24 @@ out of the parent conversation:
 
 | Intent | Command |
 |--------|---------|
-| Initialize this repo | `__SO_BIN__ init` |
+| Initialize this repo (skip if `test -d .so`) | `__SO_BIN__ init` |
 | Rebuild / refresh graph | `__SO_BIN__ graph build` or `__SO_BIN__ graph refresh` |
 | Force full rebuild | `__SO_BIN__ graph build --force` |
 | Session list | `__SO_BIN__ sessions list` |
+| Memory search | `__SO_BIN__ memory search` |
 | Local UI + live watcher | `__SO_BIN__ dev` or `__SO_BIN__ dev -d` |
 | Print MCP config (diagnostic) | `__SO_BIN__ graph mcp config` |
 
 ## MCP
 
-`so install` / `so init` / `so dev` ensure **user-global** MCP entries (repo-neutral; no project files). Agents spawn `__SO_BIN__ graph mcp serve`, which resolves the active repo from cwd. Prefer MCP tools over shelling out when connected. Skills-first CLI works without MCP.
+`so install` wires user-global MCP (`__SO_BIN__ graph mcp serve`). **CLI is primary** — agents must use `__SO_BIN__ --json graph …` / `__SO_BIN__ --json memory …` from the workspace. JSON is the agent contract; compact text is for humans. Use MCP tools only when they are listed and return graph hits. If MCP says `graph_not_indexed`, switch to CLI once. Do not loop GetMcpTools or mcp_auth.
 
 ## Layout
 
 ```text
 .so/
   sessions/   # observability sessions (gitignored)
-  db/so.db    # shared Superopen SQLite store (gitignored)
+  db/so.db    # shared Superopen SQLite store (graph + memory, gitignored)
 ```
 
 Optional path excludes: `.soignore` at the repository root (gitignore-style patterns).
@@ -118,5 +133,5 @@ A user-wide project index lives under the Superopen config dir (OS-agnostic: XDG
 - Durable graph-first guidance is installed into each agent’s **user-level** instruction surface (sentinel-managed; uninstall removes only Superopen’s block).
 - Graph refresh also runs detached on SessionStart / SessionEnd via observability hooks.
 - Live poll while `so dev` / MCP is up defaults to **60 seconds**. Builds are local Tree-sitter + SQLite — they do **not** call an LLM or the live coding agent.
-- Optional LLM API keys are not required for the AST graph.
+- Optional LLM API keys are not required for the AST graph or for memory ingest (local embeddings). Session rollup uses an authenticated headless CLI when present, otherwise one live `memory_capture` at next SessionStart.
 - `so init` does **not** start `so dev` unless `--dev` is passed.

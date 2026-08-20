@@ -18,6 +18,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/install"
 	"github.com/ishanjainn/superopen/internal/graph/client"
 	"github.com/ishanjainn/superopen/internal/graph/watch"
+	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/projects"
 )
@@ -188,6 +189,13 @@ func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot b
 		fmt.Printf("MCP ready (%d agent config(s)); agents spawn: so graph mcp serve\n", len(written))
 	}
 	fmt.Println("Live graph refresh active (local git poll ~60s; no LLM).")
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			_ = memory.SleepRoot(root)
+		}
+	}()
 
 	nextCmd, nextURL, err := startNextUI(root, uiPort, hot)
 	if err != nil {

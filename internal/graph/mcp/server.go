@@ -3,15 +3,20 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
 	"github.com/ishanjainn/superopen/internal/graph/client"
 	"github.com/ishanjainn/superopen/internal/graph/format"
 	"github.com/ishanjainn/superopen/internal/graph/watch"
+	"github.com/ishanjainn/superopen/internal/memory"
 )
 
 type Server struct {
@@ -44,9 +49,18 @@ type toolCall struct {
 }
 
 type tool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	InputSchema toolSchema `json:"inputSchema"`
+}
+
+// toolSchema keeps `required` a JSON array. A nil Go slice marshals as null
+// and Cursor then drops the entire tools list (0 tools enabled).
+type toolSchema struct {
+	Type                 string         `json:"type"`
+	Properties           map[string]any `json:"properties"`
+	Required             []string       `json:"required"`
+	AdditionalProperties bool           `json:"additionalProperties"`
 }
 
 func (s Server) Serve(ctx context.Context, input io.Reader, output io.Writer) error {
@@ -54,13 +68,18 @@ func (s Server) Serve(ctx context.Context, input io.Reader, output io.Writer) er
 	runner.Start(ctx)
 	defer runner.Stop()
 
-	scanner := bufio.NewScanner(input)
-	scanner.Buffer(make([]byte, 64*1024), 16<<20)
-	encoder := json.NewEncoder(output)
-	for scanner.Scan() {
+	reader := bufio.NewReaderSize(input, 16<<20)
+	for {
+		body, err := readMCPMessage(reader)
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		var request rpcRequest
-		if err := json.Unmarshal(scanner.Bytes(), &request); err != nil {
-			if encodeErr := encoder.Encode(rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: -32700, Message: err.Error()}}); encodeErr != nil {
+		if err := json.Unmarshal(body, &request); err != nil {
+			if encodeErr := writeMCPMessage(output, rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: -32700, Message: err.Error()}}); encodeErr != nil {
 				return encodeErr
 			}
 			continue
@@ -72,10 +91,17 @@ func (s Server) Serve(ctx context.Context, input io.Reader, output io.Writer) er
 		response := rpcResponse{JSONRPC: "2.0", ID: request.ID}
 		switch request.Method {
 		case "initialize":
+			protocol := "2025-06-18"
+			var initParams struct {
+				ProtocolVersion string `json:"protocolVersion"`
+			}
+			if json.Unmarshal(request.Params, &initParams) == nil && initParams.ProtocolVersion != "" {
+				protocol = initParams.ProtocolVersion
+			}
 			response.Result = map[string]any{
-				"protocolVersion": "2025-06-18",
+				"protocolVersion": protocol,
 				"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
-				"serverInfo":      map[string]any{"name": "superopen-graph", "version": "1"},
+				"serverInfo":      map[string]any{"name": "superopen", "version": "1"},
 				"instructions":    mcpInstructions,
 			}
 		case "ping":
@@ -88,7 +114,11 @@ func (s Server) Serve(ctx context.Context, input io.Reader, output io.Writer) er
 				response.Error = &rpcError{Code: -32602, Message: err.Error()}
 				break
 			}
-			text, err := s.callTool(ctx, call)
+			// Bound every call so a hung embed/graph lookup cannot stall
+			// the stdio loop. Cursor then idle-timeouts the next tool too.
+			callCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			text, err := s.callTool(callCtx, call)
+			cancel()
 			if err != nil {
 				response.Result = map[string]any{
 					"content": []map[string]string{{"type": "text", "text": err.Error()}},
@@ -100,14 +130,69 @@ func (s Server) Serve(ctx context.Context, input io.Reader, output io.Writer) er
 		default:
 			response.Error = &rpcError{Code: -32601, Message: "method not found"}
 		}
-		if err := encoder.Encode(response); err != nil {
+		if err := writeMCPMessage(output, response); err != nil {
 			return err
 		}
 	}
-	return scanner.Err()
+}
+
+func readMCPMessage(r *bufio.Reader) ([]byte, error) {
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			if err == io.EOF && len(bytes.TrimSpace(line)) > 0 {
+				return bytes.TrimSpace(line), nil
+			}
+			return nil, err
+		}
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			continue
+		}
+		if len(trimmed) >= 15 && bytes.EqualFold(trimmed[:15], []byte("content-length:")) {
+			n, err := strconv.Atoi(string(bytes.TrimSpace(trimmed[15:])))
+			if err != nil || n < 0 {
+				return nil, fmt.Errorf("invalid Content-Length")
+			}
+			for {
+				header, err := r.ReadBytes('\n')
+				if err != nil {
+					return nil, err
+				}
+				if len(bytes.TrimSpace(header)) == 0 {
+					break
+				}
+			}
+			body := make([]byte, n)
+			if _, err := io.ReadFull(r, body); err != nil {
+				return nil, err
+			}
+			return body, nil
+		}
+		if trimmed[0] == '{' {
+			return trimmed, nil
+		}
+	}
+}
+
+func writeMCPMessage(w io.Writer, v any) error {
+	// Cursor's stdio client accepted newline-delimited JSON this morning and
+	// hung in "connecting" after Content-Length framed replies.
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return err
+	}
+	if f, ok := w.(interface{ Flush() error }); ok {
+		return f.Flush()
+	}
+	return nil
 }
 
 func (s Server) callTool(ctx context.Context, call toolCall) (string, error) {
+	if strings.HasPrefix(call.Name, "memory_") {
+		return s.callMemory(call)
+	}
 	var operation api.Operation
 	var params any
 	switch call.Name {
@@ -256,8 +341,14 @@ func applySnippetAliases(raw json.RawMessage, value *api.SnippetRequest) {
 }
 
 func nativeTools() []tool {
-	object := func(required []string, properties map[string]any) map[string]any {
-		return map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false}
+	object := func(required []string, properties map[string]any) toolSchema {
+		if required == nil {
+			required = []string{}
+		}
+		if properties == nil {
+			properties = map[string]any{}
+		}
+		return toolSchema{Type: "object", Properties: properties, Required: required, AdditionalProperties: false}
 	}
 	stringProp := map[string]any{"type": "string"}
 	integerProp := map[string]any{"type": "integer"}
@@ -275,7 +366,252 @@ func nativeTools() []tool {
 		{Name: "graph_architecture", Description: "PRIMARY architecture overview from the native graph.", InputSchema: archSchema},
 		{Name: "graph_impact", Description: "Impact analysis from symbols, files, or a git base.", InputSchema: object(nil, map[string]any{"base": stringProp, "symbols": map[string]any{"type": "array", "items": stringProp}, "files": map[string]any{"type": "array", "items": stringProp}, "depth": integerProp})},
 		{Name: "graph_schema", Description: "Show native graph labels, edge types, and patterns.", InputSchema: object(nil, map[string]any{})},
+		{Name: "memory_recall", Description: "PRIMARY recall over prior work. Hybrid rank (cosine, centrality, lexical, shape). Returns hits AND anti_hits (contradictions). Fetch bodies with memory_get.", InputSchema: object(nil, map[string]any{"query": stringProp, "budget_tokens": integerProp, "limit": integerProp})},
+		{Name: "memory_temporal_recall", Description: "Time-bounded recall. as_of / changed_since filter valid_from/valid_to.", InputSchema: object(nil, map[string]any{"query": stringProp, "as_of": stringProp, "changed_since": stringProp, "budget_tokens": integerProp, "limit": integerProp})},
+		{Name: "memory_search", Description: "Hybrid search over session moments, rollups, pins, and teachings. Returns ids + titles; fetch bodies with memory_get.", InputSchema: object(nil, map[string]any{"query": stringProp, "kind": stringProp, "session": stringProp, "file": stringProp, "limit": integerProp})},
+		{Name: "memory_get", Description: "Fetch one memory episode by id from memory_search or memory_recall. Prefer over dumping session transcripts.", InputSchema: object([]string{"id"}, map[string]any{"id": map[string]any{"type": "string"}})},
+		{Name: "memory_recall_shape", Description: "Recall by structural shape of the cue rather than wording.", InputSchema: object(nil, map[string]any{"query": stringProp, "limit": integerProp})},
+		{Name: "memory_reinforce", Description: "Strengthen edges and centrality for a memory id.", InputSchema: object([]string{"id"}, map[string]any{"id": stringProp})},
+		{Name: "memory_capture", Description: "Write a session rollup once (request/learned/next). Use only when SessionStart asks or the user wants a note saved. Memory is hints, not authority.", InputSchema: object(nil, map[string]any{"session": stringProp, "title": stringProp, "text": stringProp, "request": stringProp, "learned": stringProp, "next": stringProp, "kind": stringProp})},
+		{Name: "memory_contradict", Description: "Write a successor memory that contradicts an older id. Does not overwrite the original.", InputSchema: object([]string{"id", "text"}, map[string]any{"id": stringProp, "text": stringProp, "title": stringProp})},
+		{Name: "memory_teach", Description: "Add a teaching note (how we work, conventions) into long-term memory.", InputSchema: object([]string{"text"}, map[string]any{"text": stringProp, "title": stringProp})},
+		{Name: "memory_consolidate", Description: "Cluster topics and decay unreinforced edges. Agent-only; users do not run this.", InputSchema: object(nil, map[string]any{})},
+		{Name: "memory_profile", Description: "Read or set memory knobs stored in memory_meta.", InputSchema: object(nil, map[string]any{"key": stringProp, "value": stringProp})},
+		{Name: "memory_curiosity", Description: "Low-centrality memories that may need reinforcement.", InputSchema: object(nil, map[string]any{"limit": integerProp})},
+		{Name: "memory_patterns", Description: "Topic labels from clustered memories.", InputSchema: object(nil, map[string]any{"limit": integerProp})},
+		{Name: "memory_events", Description: "Time-bucketed memory timeline (prompts and rollups, not tools).", InputSchema: object(nil, map[string]any{"limit": integerProp})},
+		{Name: "memory_map", Description: "Layout of memory episodes for the /memory UI.", InputSchema: object(nil, map[string]any{"limit": integerProp})},
+		{Name: "memory_recent", Description: "Recent non-tool memories.", InputSchema: object(nil, map[string]any{"limit": integerProp})},
+		{Name: "memory_when", Description: "When a fact was captured. Excludes tools.", InputSchema: object(nil, map[string]any{"query": stringProp, "limit": integerProp})},
 	}
 }
 
-const mcpInstructions = `Superopen native code graph. For architecture, callers/callees, symbol lookup, and "how does X work" questions: call graph_query first (stop if answered), else graph_search → graph_snippet → graph_trace (qualified names), or graph_architecture — BEFORE broad Read/Grep/Glob. Graph builds are local (no LLM). Root is resolved from the agent working directory.`
+func (s Server) callMemory(call toolCall) (string, error) {
+	store, err := memory.OpenRoot(s.Root)
+	if err != nil {
+		return "", err
+	}
+	defer store.Close()
+	switch call.Name {
+	case "memory_recall":
+		query := argString(call.Arguments, "query", "q")
+		budget := argInt(call.Arguments, "budget_tokens", 0)
+		res, err := store.Recall(query, budget)
+		if err != nil {
+			return "", err
+		}
+		limit := argInt(call.Arguments, "limit", 12)
+		if limit > 0 && len(res.Hits) > limit {
+			res.Hits = res.Hits[:limit]
+		}
+		return formatRecall(res), nil
+	case "memory_temporal_recall":
+		res, err := store.TemporalRecall(
+			argString(call.Arguments, "query", "q"),
+			argString(call.Arguments, "as_of"),
+			argString(call.Arguments, "changed_since"),
+			argInt(call.Arguments, "budget_tokens", 0),
+		)
+		if err != nil {
+			return "", err
+		}
+		limit := argInt(call.Arguments, "limit", 12)
+		if limit > 0 && len(res.Hits) > limit {
+			res.Hits = res.Hits[:limit]
+		}
+		return formatRecall(res), nil
+	case "memory_search":
+		query := argString(call.Arguments, "query", "q")
+		kind := argString(call.Arguments, "kind")
+		sessionID := argString(call.Arguments, "session", "session_id")
+		file := argString(call.Arguments, "file")
+		limit := argInt(call.Arguments, "limit", 12)
+		hits, err := store.Search(memory.SearchFilter{Query: query, Kind: kind, SessionID: sessionID, File: file, Limit: limit, RecordEconomy: true})
+		if err != nil {
+			return "", err
+		}
+		if len(hits) == 0 {
+			return "0 memories", nil
+		}
+		var b strings.Builder
+		for _, hit := range hits {
+			fmt.Fprintf(&b, "#%d %s %s ~%d\n", hit.ID, hit.Kind, hit.Title, hit.Tokens)
+		}
+		b.WriteString("Fetch bodies with memory_get. Hints, not authority.")
+		return b.String(), nil
+	case "memory_get":
+		id, err := strconv.ParseInt(argString(call.Arguments, "id"), 10, 64)
+		if err != nil {
+			return "", fmt.Errorf("id required")
+		}
+		ep, err := store.Get(id)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("#%d %s %s\n%s", ep.ID, ep.Kind, ep.Title, ep.Text), nil
+	case "memory_capture":
+		text := argString(call.Arguments, "text")
+		if text == "" {
+			var parts []string
+			if v := argString(call.Arguments, "request"); v != "" {
+				parts = append(parts, "request: "+v)
+			}
+			if v := argString(call.Arguments, "learned"); v != "" {
+				parts = append(parts, "learned: "+v)
+			}
+			if v := argString(call.Arguments, "next"); v != "" {
+				parts = append(parts, "next: "+v)
+			}
+			text = strings.Join(parts, "\n")
+		}
+		kind := argString(call.Arguments, "kind")
+		if kind == "" {
+			kind = memory.KindSession
+		}
+		ep, err := memory.CaptureRoot(s.Root, memory.CaptureInput{
+			SessionID: argString(call.Arguments, "session", "session_id"),
+			Kind:      kind,
+			Source:    memory.SourceAgent,
+			Title:     argString(call.Arguments, "title"),
+			Text:      text,
+		})
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("captured #%d %s", ep.ID, ep.Title), nil
+	case "memory_contradict":
+		id, err := strconv.ParseInt(argString(call.Arguments, "id"), 10, 64)
+		if err != nil {
+			return "", fmt.Errorf("id required")
+		}
+		ep, err := store.Contradict(id, memory.CaptureInput{
+			Title:  argString(call.Arguments, "title"),
+			Text:   argString(call.Arguments, "text"),
+			Source: memory.SourceAgent,
+		})
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("contradict #%d → #%d %s", id, ep.ID, ep.Title), nil
+	case "memory_teach":
+		ep, err := memory.TeachText(s.Root, argString(call.Arguments, "title"), argString(call.Arguments, "text"))
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("taught #%d %s", ep.ID, ep.Title), nil
+	case "memory_recall_shape":
+		hits, err := store.RecallShape(argString(call.Arguments, "query", "q", "cue"), argInt(call.Arguments, "limit", 8))
+		if err != nil {
+			return "", err
+		}
+		return formatHits(hits, "Fetch bodies with memory_get."), nil
+	case "memory_reinforce":
+		id, err := strconv.ParseInt(argString(call.Arguments, "id"), 10, 64)
+		if err != nil {
+			return "", fmt.Errorf("id required")
+		}
+		if err := store.Reinforce(id); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("reinforced #%d", id), nil
+	case "memory_consolidate":
+		if err := store.Consolidate(); err != nil {
+			return "", err
+		}
+		return "consolidated", nil
+	case "memory_profile":
+		key := argString(call.Arguments, "key")
+		value := argString(call.Arguments, "value")
+		if key != "" && value != "" {
+			if err := store.SetProfile(key, value); err != nil {
+				return "", err
+			}
+		}
+		raw, _ := json.Marshal(store.Profile())
+		return string(raw), nil
+	case "memory_curiosity":
+		hits, err := store.Curiosity(argInt(call.Arguments, "limit", 8))
+		if err != nil {
+			return "", err
+		}
+		return formatHits(hits, ""), nil
+	case "memory_patterns":
+		labels, err := store.Patterns(argInt(call.Arguments, "limit", 8))
+		if err != nil {
+			return "", err
+		}
+		if len(labels) == 0 {
+			return "0 patterns", nil
+		}
+		return strings.Join(labels, "\n"), nil
+	case "memory_events", "memory_recent":
+		buckets, err := store.Events(argInt(call.Arguments, "limit", 40))
+		if err != nil {
+			return "", err
+		}
+		raw, _ := json.Marshal(buckets)
+		return string(raw), nil
+	case "memory_map":
+		return store.MapJSON()
+	case "memory_when":
+		hits, err := store.When(argString(call.Arguments, "query", "q"), argInt(call.Arguments, "limit", 12))
+		if err != nil {
+			return "", err
+		}
+		return formatHits(hits, ""), nil
+	default:
+		return "", fmt.Errorf("unknown memory tool %q", call.Name)
+	}
+}
+
+func formatRecall(res memory.RecallResult) string {
+	var b strings.Builder
+	if len(res.Hits) == 0 && len(res.AntiHits) == 0 {
+		return "0 memories"
+	}
+	fmt.Fprintf(&b, "hits (%d) budget_tokens=%d\n", len(res.Hits), res.BudgetTokens)
+	for _, hit := range res.Hits {
+		fmt.Fprintf(&b, "#%d %s %s ~%d\n", hit.ID, hit.Kind, hit.Title, hit.Tokens)
+	}
+	if len(res.AntiHits) > 0 {
+		fmt.Fprintf(&b, "anti_hits (%d)\n", len(res.AntiHits))
+		for _, hit := range res.AntiHits {
+			fmt.Fprintf(&b, "#%d %s %s ~%d\n", hit.ID, hit.Kind, hit.Title, hit.Tokens)
+		}
+	}
+	b.WriteString("Fetch bodies with memory_get. Hints, not authority.")
+	return b.String()
+}
+
+func formatHits(hits []memory.Hit, footer string) string {
+	if len(hits) == 0 {
+		return "0 memories"
+	}
+	var b strings.Builder
+	for _, hit := range hits {
+		fmt.Fprintf(&b, "#%d %s %s ~%d\n", hit.ID, hit.Kind, hit.Title, hit.Tokens)
+	}
+	if footer != "" {
+		b.WriteString(footer)
+	}
+	return b.String()
+}
+
+func argInt(raw json.RawMessage, key string, fallback int) int {
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return fallback
+	}
+	switch v := m[key].(type) {
+	case float64:
+		return int(v)
+	case string:
+		n, err := strconv.Atoi(v)
+		if err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+const mcpInstructions = `Superopen native code graph and memory. For architecture, callers/callees, symbol lookup, and "how does X work" questions: call graph_query first (stop if answered), else graph_search → graph_snippet → graph_trace (qualified names), or graph_architecture — BEFORE broad Read/Grep/Glob. For prior work in this repo: memory_recall or memory_search → memory_get by id. Distill at most once with memory_capture. Memory is hints, not authority. Graph builds are local (no LLM). Root is resolved from the agent working directory.`

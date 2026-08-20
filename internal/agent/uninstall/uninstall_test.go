@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/ishanjainn/superopen/internal/paths"
 )
 
 // TestRemovePath covers the three states the helper has to handle:
@@ -98,6 +100,58 @@ func TestVendorsFromArg(t *testing.T) {
 
 	if _, err := vendorsFromArg("nope"); err == nil {
 		t.Fatalf("unknown vendor should error")
+	}
+}
+
+func TestPurgeSharedRemovesProductStateNotHomebrew(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("SUPEROPEN_INSTALL_DIR", "")
+
+	mustDir := func(p string) {
+		t.Helper()
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := paths.ConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := paths.DataDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	curlRoot, err := paths.CurlInstallRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustDir(cfg)
+	mustDir(filepath.Join(data, "codex-marketplace"))
+	mustDir(filepath.Join(curlRoot, "bin"))
+	if err := os.WriteFile(filepath.Join(cfg, "projects.json"), []byte(`{"projects":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cache, err := os.UserCacheDir(); err == nil {
+		mustDir(filepath.Join(cache, "so"))
+		mustDir(filepath.Join(cache, "superopen"))
+	}
+
+	removed, errs := purgeShared(false, true)
+	if len(errs) > 0 {
+		t.Fatalf("purge errors: %v", errs)
+	}
+	if len(removed) == 0 {
+		t.Fatal("expected paths removed")
+	}
+	for _, p := range []string{cfg, data, curlRoot} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("%s should be gone, stat=%v", p, err)
+		}
 	}
 }
 

@@ -1,4 +1,4 @@
-.PHONY: build test test-web install smoke lint
+.PHONY: build test test-web install uninstall smoke lint
 
 VERSION ?= $(shell tr -d '[:space:]' < VERSION 2>/dev/null || echo 0.1.0)
 PKG_VERSION := github.com/ishanjainn/superopen/internal/version
@@ -16,8 +16,12 @@ lint:
 	go vet ./...
 	cd web && npm ci --ignore-scripts && npm run lint
 
+# Same layout as production curl / install.ps1 (~/.superopen/bin + so install).
 install:
-	go install -ldflags "-X $(PKG_VERSION).Version=$(VERSION)" ./cmd/so
+	sh scripts/install.sh
+
+uninstall:
+	sh scripts/uninstall.sh
 
 smoke: build
 	./bin/so --help

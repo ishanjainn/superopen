@@ -390,3 +390,34 @@ func TestCursorStopAccumulatesIntoSessionEnd(t *testing.T) {
 		t.Errorf("CostUSD = %v, want %v", got.CostUSD, wantCost)
 	}
 }
+
+func TestCursorDurationAcceptsFractionalMillis(t *testing.T) {
+	raw := []byte(`{"hook_event_name":"postToolUse","duration":863.843,"duration_ms":54.943}`)
+	var p cursorPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.Duration != 864 {
+		t.Fatalf("Duration=%d, want 864", p.Duration)
+	}
+	if p.DurationMs != 55 {
+		t.Fatalf("DurationMs=%d, want 55", p.DurationMs)
+	}
+
+	withIsolatedCache(t)
+	em := &recordingEmitter{}
+	in := inputBuilder(t, em)
+	payload := map[string]any{
+		"hook_event_name": "afterShellExecution",
+		"conversation_id": "cur-chat-float-duration",
+		"command":         "echo ok",
+		"output":          "ok",
+		"duration":        863.843,
+	}
+	if err := handle(context.Background(), in("afterShellExecution", payload)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(em.toolCalls) != 1 {
+		t.Fatalf("expected one tool call after float duration; got %d (parse used to drop the event)", len(em.toolCalls))
+	}
+}

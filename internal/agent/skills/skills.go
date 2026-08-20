@@ -90,8 +90,7 @@ func renderedSkillFiles(soBin string) ([]skillFile, error) {
 
 func resolveSoBin() (string, error) {
 	if exe, err := os.Executable(); err == nil {
-		base := strings.TrimSuffix(filepath.Base(exe), ".exe")
-		if base == "so" {
+		if paths.IsSoBinary(exe) {
 			return exe, nil
 		}
 	}

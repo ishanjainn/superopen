@@ -14,9 +14,27 @@ class So < Formula
   head "https://github.com/ishanjainn/superopen.git", branch: "main"
 
   depends_on "go" => :build
+  depends_on "node"
 
   def install
     system "go", "build", "-o", bin/"so", "./cmd/so"
+    dst = share/"superopen/web"
+    dst.mkpath
+    Dir.children("web").each do |name|
+      next if name == "node_modules" || name == ".next"
+      cp_r buildpath/"web"/name, dst/name
+    end
+    cd dst do
+      system "npm", "install", "--ignore-scripts"
+      system "npm", "run", "build"
+    end
+  end
+
+  def caveats
+    <<~EOS
+      Run `so install` once to wire coding-agent hooks and MCP.
+      Then in any repo: `so init` and `so dev`.
+    EOS
   end
 
   test do

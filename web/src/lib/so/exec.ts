@@ -9,6 +9,7 @@ export type SoJSON<T> = {
   ok: boolean;
   error?: string;
   data?: T;
+  items?: unknown[];
   hint?: string;
 };
 

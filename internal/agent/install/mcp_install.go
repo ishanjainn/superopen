@@ -11,7 +11,8 @@ import (
 	"github.com/ishanjainn/superopen/internal/paths"
 )
 
-const mcpServerName = "superopen-graph"
+const mcpServerName = "superopen"
+const mcpLegacyServerName = "superopen-graph"
 
 // InstallUserMCP merges repo-neutral Superopen MCP entries into each agent's
 // user-global config. Entries launch `so graph mcp serve` without a baked
@@ -159,6 +160,7 @@ func writeOpenCodeMCP(home, soBin string) (string, error) {
 	if mcp == nil {
 		mcp = map[string]any{}
 	}
+	delete(mcp, mcpLegacyServerName)
 	mcp[mcpServerName] = map[string]any{
 		"type":    "local",
 		"command": []any{soBin, "graph", "mcp", "serve"},
@@ -190,10 +192,13 @@ func stripOpenCodeMCP(home string) (string, error) {
 	if mcp == nil {
 		return "", nil
 	}
-	if _, ok := mcp[mcpServerName]; !ok {
+	_, current := mcp[mcpServerName]
+	_, legacy := mcp[mcpLegacyServerName]
+	if !current && !legacy {
 		return "", nil
 	}
 	delete(mcp, mcpServerName)
+	delete(mcp, mcpLegacyServerName)
 	if len(mcp) == 0 {
 		delete(data, "mcp")
 	} else {
@@ -267,7 +272,18 @@ func upsertCodexMCPSection(src, soBin string) string {
 }
 
 func stripCodexMCPSection(src string) (string, bool) {
-	header := "[mcp_servers." + mcpServerName + "]"
+	changed := false
+	next := src
+	for _, name := range []string{mcpServerName, mcpLegacyServerName} {
+		stripped, did := stripCodexMCPHeader(next, name)
+		next = stripped
+		changed = changed || did
+	}
+	return next, changed
+}
+
+func stripCodexMCPHeader(src, name string) (string, bool) {
+	header := "[mcp_servers." + name + "]"
 	sep := "\n"
 	if strings.Contains(src, "\r\n") {
 		sep = "\r\n"
@@ -312,6 +328,7 @@ func mergeJSONMCP(path, soBin, serversKey string) (string, error) {
 	if servers == nil {
 		servers = map[string]any{}
 	}
+	delete(servers, mcpLegacyServerName)
 	servers[mcpServerName] = mcpEntry(soBin)
 	data[serversKey] = servers
 	return writeJSONFile(path, data)
@@ -333,10 +350,13 @@ func stripJSONMCP(path, serversKey string) (string, error) {
 	if servers == nil {
 		return "", nil
 	}
-	if _, ok := servers[mcpServerName]; !ok {
+	_, current := servers[mcpServerName]
+	_, legacy := servers[mcpLegacyServerName]
+	if !current && !legacy {
 		return "", nil
 	}
 	delete(servers, mcpServerName)
+	delete(servers, mcpLegacyServerName)
 	if len(servers) == 0 {
 		delete(data, serversKey)
 	} else {

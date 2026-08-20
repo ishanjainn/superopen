@@ -15,7 +15,7 @@ const (
 )
 
 // Paths contains repository-local Superopen storage under .so/.
-// The shared SQLite store lives in DBDir (graph today; more features later).
+// The shared SQLite store lives in DBDir (graph + memory).
 type Paths struct {
 	RepoRoot      string
 	Root          string

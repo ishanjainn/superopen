@@ -11,14 +11,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ishanjainn/superopen/internal/agent"
-	agentinstall "github.com/ishanjainn/superopen/internal/agent/install"
-	"github.com/ishanjainn/superopen/internal/agent/skills"
-	"github.com/ishanjainn/superopen/internal/agent/steer"
 	codinguninstall "github.com/ishanjainn/superopen/internal/agent/uninstall"
 	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/graph/api"
 	"github.com/ishanjainn/superopen/internal/graph/client"
 	"github.com/ishanjainn/superopen/internal/graph/watch"
+	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/projects"
 	"github.com/ishanjainn/superopen/internal/session"
@@ -56,6 +54,7 @@ func newRootCommand() *cobra.Command {
 		cmdQuery(),
 		cmdProjects(),
 		cmdSessions(),
+		cmdMemory(),
 		cmdDev(),
 		cmdOpen(),
 		cmdStatus(),
@@ -148,6 +147,27 @@ func repoRoot() string {
 	return root
 }
 
+// hookRepoAndSession prefers the editor workspace from hook stdin.
+// Cursor runs ~/.cursor/hooks.json with cwd ~/.cursor, which is not the repo
+// (and may even have a stray .so/ from a previous detached refresh).
+func hookRepoAndSession() (root, sessionID string) {
+	root = repoRoot()
+	if strings.TrimSpace(cliFlags.Root) != "" || strings.TrimSpace(os.Getenv("SUPEROPEN_ROOT")) != "" {
+		return root, ""
+	}
+	hook := cli.ReadHookStdin(os.Stdin)
+	if hook.Workspace == "" {
+		return root, hook.SessionID
+	}
+	found, err := paths.FindRoot(hook.Workspace)
+	if err == nil && found != "" {
+		root = found
+	} else {
+		root = absPath(hook.Workspace)
+	}
+	return root, hook.SessionID
+}
+
 // initRoot is the repository root used by `so init`.
 // Default preference: existing .so / git top-level via FindRoot (one graph per
 // repo). Explicit package graphs use --root or SUPEROPEN_ROOT.
@@ -200,7 +220,11 @@ and user-global MCP entries (repo-neutral; no project files written).`,
 			if err := agent.Install(repoRoot(), vendors); err != nil {
 				return err
 			}
+			_ = memory.FetchModels()
 			fmt.Println("Installed user-global /so skill, hooks, graph-first guidance, and MCP.")
+			if findWebDir("") == "" {
+				fmt.Printf("note: web UI is not in %s; re-run sh scripts/install.sh (or brew) so so dev works from any repo.\n", expectedWebDir())
+			}
 			fmt.Println("Next: open your coding agent and run /so init in a repository.")
 			return nil
 		},
@@ -213,35 +237,42 @@ func cmdUninstall() *cobra.Command {
 	var keepData bool
 	command := &cobra.Command{
 		Use:   "uninstall",
-		Short: "Remove coding-agent observability hooks, /so skills, and optional local session data",
+		Short: "Remove Superopen agent wiring and machine-local data",
+		Long: `Remove Superopen from this machine. Works from any directory on
+macOS, Linux, and Windows. No source checkout is required.
+
+Removes:
+  - hooks, /so skill, MCP, durable guidance, and subagents for every
+    supported coding agent (Claude Code, Cursor, Codex, Gemini CLI,
+    OpenCode, Copilot CLI, Pi)
+  - project index (config dir)
+  - marketplace copy (data dir)
+  - session-state caches
+  - registered repositories' .so data (unless --keep-data)
+  - release-installer prefix (~/.superopen), including that channel's binary
+
+Does not remove a package-managed so binary (Homebrew, Scoop, WinGet,
+Chocolatey). Use that manager's uninstall after this command.
+`,
 		RunE: func(*cobra.Command, []string) error {
-			_, warnings := codinguninstall.RemoveAll(true, false, os.Stdout, os.Stderr)
-			if len(warnings) > 0 {
-				return fmt.Errorf("uninstall hooks: %s", strings.Join(warnings, "; "))
+			_, warnings := codinguninstall.RemoveAll(true, keepData, false, os.Stdout, os.Stderr)
+			for _, w := range warnings {
+				fmt.Fprintf(os.Stderr, "so uninstall: %s\n", w)
 			}
-			for _, path := range skills.RemoveAll() {
-				fmt.Printf("removed skill %s\n", path)
-			}
-			for _, path := range steer.RemoveAll() {
-				fmt.Printf("removed guidance %s\n", path)
-			}
-			for _, path := range agentinstall.RemoveUserMCP() {
-				fmt.Printf("removed mcp %s\n", path)
-			}
-			if !keepData {
-				if err := os.RemoveAll(filepath.Join(repoRoot(), paths.DirName)); err != nil {
-					return err
+			if exe, err := os.Executable(); err == nil {
+				if hint := paths.PackageManagerUninstallHint(exe); hint != "" {
+					fmt.Printf("The so binary is still provided by a package manager. Remove it with: %s\n", hint)
 				}
 			}
+			fmt.Println("Restart your coding agent so it drops in-memory hooks and MCP.")
 			return nil
 		},
 	}
-	command.Flags().BoolVar(&keepData, "keep-data", false, "Keep .so session data")
+	command.Flags().BoolVar(&keepData, "keep-data", false, "Keep per-repo .so session/graph data")
 	return command
 }
 
 func cmdInit() *cobra.Command {
-	var vendors []string
 	var force bool
 	var withDev bool
 	command := &cobra.Command{
@@ -255,9 +286,17 @@ and registers the project in the user-wide Superopen index.
 Init defaults to the repository root (nearest existing .so or git top-level).
 Pass --root / SUPEROPEN_ROOT for an explicit nested package graph.
 
+Does not re-run user-global so install (hooks/MCP). Does not rebuild an
+existing graph unless --force is passed.
+
 Does not start so dev by default. Pass --dev to start the UI after init.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			out := cmd.OutOrStdout()
 			root := initRoot()
+			fmt.Fprintf(out, "so init: %s\n", root)
+			if f, ok := out.(*os.File); ok {
+				_ = f.Sync()
+			}
 			layout := paths.Resolve(root)
 			if err := layout.EnsureDirs(); err != nil {
 				return err
@@ -268,13 +307,22 @@ Does not start so dev by default. Pass --dev to start the UI after init.`,
 					return err
 				}
 			}
-			// Hooks/skills/MCP should already exist from `so install`; re-run is idempotent.
-			if err := agent.Install(root, vendors); err != nil {
-				return err
+			_, dbErr := os.Stat(layout.Database)
+			already := dbErr == nil
+			if already && !force {
+				fmt.Fprintf(out, "Already initialized. Graph DB: %s\n", layout.Database)
+				fmt.Fprintf(out, "Session data: %s\n", layout.SessionsDir)
+				fmt.Fprintf(out, "Rebuild with: so init --force\n")
+				_ = projects.TouchInit(root)
+				return nil
 			}
 			client, err := client.Resolve()
 			if err != nil {
 				return err
+			}
+			fmt.Fprintf(out, "Building native graph...\n")
+			if f, ok := out.(*os.File); ok {
+				_ = f.Sync()
 			}
 			var result api.BuildResult
 			if err := client.Call(cmd.Context(), api.OpBuild, api.BuildRequest{RepoRoot: root, Mode: "full", Force: force}, &result); err != nil {
@@ -283,25 +331,28 @@ Does not start so dev by default. Pass --dev to start the UI after init.`,
 			watch.RecordSignature(root)
 			_ = projects.TouchInit(root)
 			_ = projects.TouchGraphRefresh(root)
-			fmt.Printf("Initialized native graph: %d nodes, %d edges (%s)\n", result.NodeCount, result.EdgeCount, result.Status)
-			fmt.Printf("Repo root:    %s\n", root)
-			if top := gitTopLevel(root); top != "" && filepath.Clean(top) != filepath.Clean(root) {
-				fmt.Printf("Package-scoped graph (git top-level is %s)\n", top)
+			if result.Status != "" && result.Status != "ok" {
+				fmt.Fprintf(out, "Initialized native graph: %d nodes, %d edges (%s)\n", result.NodeCount, result.EdgeCount, result.Status)
+			} else {
+				fmt.Fprintf(out, "Initialized native graph: %d nodes, %d edges\n", result.NodeCount, result.EdgeCount)
 			}
-			fmt.Printf("Session data: %s\n", layout.SessionsDir)
-			fmt.Printf("Shared DB:    %s\n", layout.Database)
+			fmt.Fprintf(out, "Repo root:    %s\n", root)
+			if top := gitTopLevel(root); top != "" && filepath.Clean(top) != filepath.Clean(root) {
+				fmt.Fprintf(out, "Package-scoped graph (git top-level is %s)\n", top)
+			}
+			fmt.Fprintf(out, "Session data: %s\n", layout.SessionsDir)
+			fmt.Fprintf(out, "Shared DB:    %s\n", layout.Database)
 			if withDev {
-				fmt.Println("Starting so dev -d (UI + live watcher; MCP is user-global)...")
+				fmt.Fprintln(out, "Starting so dev -d (UI + live watcher; MCP is user-global)...")
 				prev := cliFlags.Root
 				cliFlags.Root = root
 				defer func() { cliFlags.Root = prev }()
 				return runDev(4444, true, true, false)
 			}
-			fmt.Println("Optional: so dev -d  (UI + live watcher)")
+			fmt.Fprintln(out, "Optional: so dev -d  (UI + live watcher)")
 			return nil
 		},
 	}
-	command.Flags().StringSliceVar(&vendors, "vendor", nil, "Install selected vendor observability hooks")
 	command.Flags().BoolVar(&force, "force", false, "Force native graph rebuild")
 	command.Flags().BoolVar(&withDev, "dev", false, "After init, start so dev -d (idempotent if already running)")
 	return command

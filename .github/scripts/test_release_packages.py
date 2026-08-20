@@ -440,6 +440,8 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(checksums, expected)
             formula = release.render_homebrew_formula("0.3.0", checksums)
             self.assertIn('version "0.3.0"', formula)
+            self.assertIn("depends_on \"node\"", formula)
+            self.assertIn('share/"superopen/web"', formula)
             for (operating_system, architecture), checksum in expected.items():
                 self.assertIn(f"so-{operating_system}-{architecture}.tar.gz", formula)
                 self.assertIn(f'sha256 "{checksum}"', formula)

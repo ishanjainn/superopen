@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -44,8 +45,8 @@ type cursorPayload struct {
 	Attachments []cursorAttachment `json:"attachments"`
 
 	// afterAgentResponse / afterAgentThought
-	Text       string `json:"text"`
-	DurationMs int64  `json:"duration_ms"`
+	Text       string     `json:"text"`
+	DurationMs flexMillis `json:"duration_ms"`
 
 	// Token usage - Cursor ships these on afterAgentResponse and stop.
 	// Absent on older builds and on beforeSubmitPrompt. We only trust
@@ -68,7 +69,7 @@ type cursorPayload struct {
 	ErrorMessage string          `json:"error_message"`
 	FailureType  string          `json:"failure_type"`
 	IsInterrupt  bool            `json:"is_interrupt"`
-	Duration     int64           `json:"duration"` // postToolUse uses `duration`, not `duration_ms`
+	Duration     flexMillis      `json:"duration"` // postToolUse uses `duration`, not `duration_ms`; Cursor sends floats
 
 	// beforeShellExecution / afterShellExecution
 	Command string `json:"command"`
@@ -127,6 +128,34 @@ type cursorEdit struct {
 	NewString string `json:"new_string"`
 	OldLine   string `json:"old_line"`
 	NewLine   string `json:"new_line"`
+}
+
+// flexMillis accepts JSON integers or floats. Cursor sends durations like
+// 863.843; unmarshaling into int64 used to fail the whole hook, so no
+// events.jsonl was written and Sessions stayed empty.
+type flexMillis int64
+
+func (f *flexMillis) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(string(b))
+	if s == "" || s == "null" {
+		*f = 0
+		return nil
+	}
+	var n int64
+	if err := json.Unmarshal(b, &n); err == nil {
+		*f = flexMillis(n)
+		return nil
+	}
+	var x float64
+	if err := json.Unmarshal(b, &x); err != nil {
+		return err
+	}
+	if x < 0 {
+		*f = 0
+		return nil
+	}
+	*f = flexMillis(int64(math.Round(x)))
+	return nil
 }
 
 func handle(ctx context.Context, in normalize.Input) error {
@@ -275,7 +304,7 @@ func handle(ctx context.Context, in normalize.Input) error {
 			StartedAt:      time.Now().Add(-time.Duration(p.DurationMs) * time.Millisecond),
 			EndedAt:        time.Now(),
 			ThoughtText:    p.Text,
-			ThoughtMs:      p.DurationMs,
+			ThoughtMs:      int64(p.DurationMs),
 		})
 
 	case "preToolUse":
@@ -342,7 +371,7 @@ func handle(ctx context.Context, in normalize.Input) error {
 			GitBranch:            p.GitBranch,
 			IsParallelWorker:     p.IsParallelWorker,
 			ToolCallID:           p.ToolCallID,
-			DurationMs:           p.DurationMs,
+			DurationMs:           int64(p.DurationMs),
 			MessageCount:         p.MessageCount,
 			ToolCallCount:        p.ToolCallCount,
 			LoopCount:            p.LoopCount,

@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/agent/install"
+	"github.com/ishanjainn/superopen/internal/agent/skills"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
 	"github.com/ishanjainn/superopen/internal/agent/subagents"
 	"github.com/spf13/cobra"
@@ -43,13 +44,12 @@ Vendors:
   codex         ~/.local/share/so/codex-marketplace/ + 'codex plugin remove'
   all           shorthand for all three
 
-Use --purge to also remove the shared config (~/.config/superopen)
-and the session-state cache. Leave it off if you plan to re-install
-later and want to keep local preferences.
+Use --purge to also remove the project index, marketplace copy,
+session-state cache, and release-installer prefix (~/.superopen).
+Leave it off if you only want vendor hooks gone.
 
-The 'so' binary itself is NOT removed by this command. Uninstall
-it via the same channel you installed it through (Homebrew, the curl|sh
-installer, or 'go install').`,
+This command does not remove a package-managed so binary (Homebrew,
+Scoop, WinGet, Chocolatey).`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -58,7 +58,7 @@ installer, or 'go install').`,
 	}
 
 	cmd.Flags().StringVar(&vendor, "vendor", "", "Vendor (claude-code | cursor | codex | all)")
-	cmd.Flags().BoolVar(&purge, "purge", false, "Also remove ~/.config/superopen and the session-state cache")
+	cmd.Flags().BoolVar(&purge, "purge", false, "Also remove project index, marketplace, caches, and the release-installer prefix")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would be removed without modifying any files")
 	_ = cmd.MarkFlagRequired("vendor")
 
@@ -66,8 +66,9 @@ installer, or 'go install').`,
 }
 
 // RemoveAll uninstalls every coding-agent vendor hook and optionally purges shared state.
-// Used by `so uninstall` so hook teardown stays in one place.
-func RemoveAll(purge, dryRun bool, stdout, stderr io.Writer) (removed []string, errs []string) {
+// Used by `so uninstall` so hook teardown stays in one place. keepData skips
+// deleting per-repo .so directories (project index and other shared state still go).
+func RemoveAll(purge, keepData, dryRun bool, stdout, stderr io.Writer) (removed []string, errs []string) {
 	if stdout == nil {
 		stdout = io.Discard
 	}
@@ -92,6 +93,10 @@ func RemoveAll(purge, dryRun bool, stdout, stderr io.Writer) (removed []string, 
 		}
 	}
 	if !dryRun {
+		for _, path := range skills.RemoveAll() {
+			removed = append(removed, path)
+			fmt.Fprintf(stdout, "skill: removed %s\n", path)
+		}
 		for _, path := range steer.RemoveAll() {
 			removed = append(removed, path)
 			fmt.Fprintf(stdout, "guidance: removed %s\n", path)
@@ -106,7 +111,7 @@ func RemoveAll(purge, dryRun bool, stdout, stderr io.Writer) (removed []string, 
 		}
 	}
 	if purge {
-		r, e := purgeShared(dryRun)
+		r, e := purgeShared(dryRun, keepData)
 		removed = append(removed, r...)
 		errs = append(errs, e...)
 		if dryRun {
@@ -152,7 +157,7 @@ func run(cmd *cobra.Command, vendor string, purge, dryRun bool) error {
 	}
 
 	if purge {
-		removed, purgeErrs := purgeShared(dryRun)
+		removed, purgeErrs := purgeShared(dryRun, false)
 		if dryRun {
 			fmt.Fprintf(out, "[dry-run] --purge would remove %d shared path(s)\n", len(removed))
 		} else {
@@ -170,7 +175,7 @@ func run(cmd *cobra.Command, vendor string, purge, dryRun bool) error {
 		fmt.Fprintln(out, "")
 		fmt.Fprintln(out, "Hooks will stop firing on the agent's next session.")
 		if !purge {
-			fmt.Fprintln(out, "Tip: pass --purge to also drop ~/.config/superopen and the session-state cache.")
+			fmt.Fprintln(out, "Tip: pass --purge to also drop the project index, marketplace, caches, and release-installer prefix.")
 		}
 	}
 	return nil

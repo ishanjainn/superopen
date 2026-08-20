@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
+	"github.com/ishanjainn/superopen/internal/memory"
+	"github.com/ishanjainn/superopen/internal/paths"
 )
 
 func TestStoreRoundTripAndSearch(t *testing.T) {
@@ -187,6 +189,59 @@ func TestPublishDoesNotReplaceValidGraphOnFailure(t *testing.T) {
 	}
 	if status.Generation != "generation-one" {
 		t.Fatalf("failed build replaced live graph: %+v", status)
+	}
+}
+
+func TestPublishPreservesMemory(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	repo := t.TempDir()
+	ctx := context.Background()
+	if _, err := Publish(ctx, repo, func(ctx context.Context, path string) error {
+		buildFixture(t, ctx, path, "generation-one")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store, err := memory.OpenRoot(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep, err := store.Capture(memory.CaptureInput{Kind: memory.KindSession, Title: "keep me", Text: "graph refresh must not wipe memory"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Publish(ctx, repo, func(ctx context.Context, path string) error {
+		buildFixture(t, ctx, path, "generation-two")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store, err = memory.OpenRoot(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	got, err := store.Get(ep.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "keep me" {
+		t.Fatalf("memory wiped on graph publish: %+v", got)
+	}
+	graph, err := OpenReadOnly(paths.Resolve(repo).Database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer graph.Close()
+	status, err := graph.Status(ctx, "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Generation != "generation-two" {
+		t.Fatalf("graph did not publish: %+v", status)
 	}
 }
 

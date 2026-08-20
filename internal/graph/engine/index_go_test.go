@@ -38,7 +38,7 @@ func (r *Runner) Run() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "development_incomplete" || result.NodeCount < 5 || result.EdgeCount < 7 || result.FileCount != 1 {
+	if result.Status != "ok" || result.NodeCount < 5 || result.EdgeCount < 7 || result.FileCount != 1 {
 		t.Fatalf("unexpected build result: %+v", result)
 	}
 	if result.Coverage.Status != "partial" || len(result.Coverage.Rows) != 1 || result.Coverage.Rows[0].Path != "web/view.ts" {

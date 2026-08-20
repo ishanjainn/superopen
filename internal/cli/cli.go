@@ -161,6 +161,10 @@ func (o *Out) Rows(kind string, cols []string, rows []map[string]any) {
 		o.Empty(kind)
 		return
 	}
+	// Keep compact text self-describing. Agents previously interpreted an
+	// unlabeled memory row's `tokens` value as its `id` and then fetched the
+	// wrong episode. JSON remains the preferred agent contract.
+	fmt.Fprintln(o.W, strings.Join(cols, "  "))
 	for _, row := range rows {
 		parts := make([]string, 0, len(cols))
 		for _, c := range cols {

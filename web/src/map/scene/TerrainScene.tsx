@@ -365,12 +365,6 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     ground.position.y = -0.32;
     group.add(ground);
 
-    const grid = new THREE.GridHelper(size * 2.8, 46, "#3a3a3a", "#262626");
-    (grid.material as THREE.Material).transparent = true;
-    (grid.material as THREE.Material).opacity = 0.9;
-    grid.position.y = -0.3;
-    group.add(grid);
-
     const plateDirs = sessionMap.dirs.filter((dir) => dir.depth <= 3 && dir.rect.w > 0 && dir.rect.d > 0);
     if (plateDirs.length > 0) {
       const plateGeo = new THREE.BoxGeometry(1, 1, 1);
