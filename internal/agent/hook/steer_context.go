@@ -13,6 +13,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/steer"
 	"github.com/ishanjainn/superopen/internal/graph/api"
 	"github.com/ishanjainn/superopen/internal/graph/client"
+	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 )
 
@@ -71,6 +72,7 @@ func emitSteerContext(vendor, event string, payload []byte) {
 func steerTextFor(vendor, event string, payload []byte) (text, hookEvent string, ok bool) {
 	ev := strings.TrimSpace(event)
 	var sessionEvent, toolEvent bool
+	var compactEvent bool
 	switch vendor {
 	case "claude-code", "codex":
 		sessionEvent = ev == "SessionStart" || ev == "UserPromptSubmit" || ev == "SubagentStart"
@@ -78,6 +80,7 @@ func steerTextFor(vendor, event string, payload []byte) (text, hookEvent string,
 	case "cursor":
 		sessionEvent = ev == "sessionStart" || ev == "beforeSubmitPrompt" || ev == "subagentStart"
 		toolEvent = ev == "preToolUse" || ev == "beforeReadFile"
+		compactEvent = ev == "preCompact"
 	case "gemini":
 		lower := strings.ToLower(ev)
 		sessionEvent = lower == "sessionstart" || lower == "beforeagent"
@@ -90,17 +93,94 @@ func steerTextFor(vendor, event string, payload []byte) (text, hookEvent string,
 	}
 
 	switch {
+	case compactEvent:
+		if text := memoryCompactText(payload); text != "" {
+			return text, ev, true
+		}
 	case sessionEvent:
-		if !claimSessionReminder(payload, vendor) {
+		var parts []string
+		if claimSessionReminder(payload, vendor) {
+			parts = append(parts, steer.HookReminder())
+		}
+		if vendor == "cursor" && (ev == "beforeSubmitPrompt") {
+			text := strings.TrimSpace(strings.Join(parts, "\n\n"))
+			if text == "" {
+				return "", "", false
+			}
+			return text, ev, true
+		}
+		if ev == "UserPromptSubmit" && (vendor == "claude-code" || vendor == "codex") {
+			if mem := nextTurnPack(payload); mem != "" {
+				parts = append(parts, mem)
+			}
+		} else if mem := claimMemoryPack(payload, vendor); mem != "" {
+			parts = append(parts, mem)
+		}
+		text := strings.TrimSpace(strings.Join(parts, "\n\n"))
+		if text == "" {
 			return "", "", false
 		}
-		return steer.HookReminder(), ev, true
+		return text, ev, true
 	case toolEvent:
 		if augment := exploreAugment(payload, vendor); augment != "" {
 			return augment, ev, true
 		}
 	}
 	return "", "", false
+}
+
+func claimMemoryPack(payload []byte, vendor string) string {
+	sessionID := steerSessionID(payload)
+	if sessionID != "" {
+		state := sessionstate.Load(sessionID, vendor)
+		if state.MemorySteerReminded {
+			return ""
+		}
+		state.MemorySteerReminded = true
+		sessionstate.Save(sessionID, vendor, state)
+	}
+	root := graphRoot(payload)
+	if root == "" {
+		return ""
+	}
+	cue := strings.TrimSpace(peekContext(payload).Prompt)
+	pack, err := memory.PackForRoot(root, cue, sessionID)
+	if err != nil || strings.TrimSpace(pack.Text) == "" {
+		return ""
+	}
+	text := pack.Text
+	if pack.AskDistill && sessionID != "" {
+		state := sessionstate.Load(sessionID, vendor)
+		if !state.MemoryDistillAsked {
+			state.MemoryDistillAsked = true
+			sessionstate.Save(sessionID, vendor, state)
+			if extra := memory.LiveDistillInstruction(pack.PendingSession); extra != "" {
+				text = text + "\n" + extra
+			}
+		}
+	}
+	return text
+}
+
+func nextTurnPack(payload []byte) string {
+	root := graphRoot(payload)
+	if root == "" {
+		return ""
+	}
+	cue := strings.TrimSpace(peekContext(payload).Prompt)
+	pack, err := memory.PackNextForRoot(root, cue, steerSessionID(payload))
+	if err != nil || strings.TrimSpace(pack.Text) == "" {
+		return ""
+	}
+	return pack.Text
+}
+
+func memoryCompactText(payload []byte) string {
+	root := graphRoot(payload)
+	if root == "" {
+		return ""
+	}
+	return memory.CompactSnapshot(root, steerSessionID(payload))
 }
 
 // claimSessionReminder reports whether this session still owes the durable

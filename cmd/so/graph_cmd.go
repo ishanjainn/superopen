@@ -15,6 +15,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/graph/mcp"
 	"github.com/ishanjainn/superopen/internal/graph/watch"
+	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/projects"
 )
 
@@ -67,7 +68,7 @@ func graphNativeCommands() []*cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			detach, _ := cmd.Flags().GetBool("detach")
 			force, _ := cmd.Flags().GetBool("force")
-			root := repoRoot()
+			root, _ := hookRepoAndSession()
 			if detach {
 				if engine.BuildBusy(root) {
 					fmt.Fprintln(cmd.OutOrStdout(), "graph refresh skipped: already in progress")
@@ -142,11 +143,14 @@ func graphMCPCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			client, err := client.Resolve()
+			c, err := client.Resolve()
 			if err != nil {
 				return err
 			}
-			return (mcp.Server{Root: absolute, Client: client}).Serve(cmd.Context(), os.Stdin, os.Stdout)
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			go memory.EnsureEmbedWorker()
+			return (mcp.Server{Root: absolute, Client: c}).Serve(cmd.Context(), os.Stdin, os.Stdout)
 		},
 	}
 	serve.Flags().StringVar(&root, "root", "", "Repository root (default: cwd / SUPEROPEN_ROOT / nearest .so or git root)")
@@ -160,7 +164,7 @@ func graphMCPCommand() *cobra.Command {
 			}
 			body, _ := json.MarshalIndent(map[string]any{
 				"mcpServers": map[string]any{
-					"superopen-graph": map[string]any{
+					"superopen": map[string]any{
 						"command": executable,
 						"args":    []string{"graph", "mcp", "serve"},
 					},

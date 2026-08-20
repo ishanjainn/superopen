@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+func TestPeekContextUsesWorkspaceRootsOnlyWhenCwdMissing(t *testing.T) {
+	got := peekContext([]byte(`{"cwd":"/tmp/tool-dir","workspace_roots":["/tmp/workspace"]}`))
+	if got.CWD != "/tmp/tool-dir" {
+		t.Fatalf("CWD = %q, want payload cwd (main-branch extraction)", got.CWD)
+	}
+	got = peekContext([]byte(`{"workspace_roots":["/tmp/workspace"]}`))
+	if got.CWD != "/tmp/workspace" {
+		t.Fatalf("CWD = %q, want workspace_roots fallback", got.CWD)
+	}
+}
+
 // TestForeignParentID ensures Cursor's self-parent echo
 // (parent_conversation_id == conversation.id) is not stamped as a
 // real parent link. That echo previously flipped is_subagent on the

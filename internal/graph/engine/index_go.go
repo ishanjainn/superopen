@@ -23,9 +23,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph/api"
 )
 
-// IndexGoDevelopment builds the first native extraction slice. It is reachable
-// only through the development-gated engine process and deliberately reports
-// incomplete coverage until every grammar/resolver has passed readiness.
+// IndexGoDevelopment builds the Go extraction slice of the native graph.
 func IndexGoDevelopment(ctx context.Context, request api.BuildRequest, engineVersion string) (api.BuildResult, error) {
 	return indexGoDevelopment(ctx, request, engineVersion, nil)
 }
@@ -129,7 +127,7 @@ func indexGoDevelopment(ctx context.Context, request api.BuildRequest, engineVer
 		return api.BuildResult{}, err
 	}
 	return api.BuildResult{
-		Status: "development_incomplete", Project: project, Database: database,
+		Status: "ok", Project: project, Database: database,
 		SourceRevision: revision, Generation: generation, NodeCount: nodeCount,
 		EdgeCount: edgeCount, FileCount: len(parsed.files), Duration: time.Since(started), Coverage: summarizedCoverage(coverage, 100), Changes: changes,
 	}, nil

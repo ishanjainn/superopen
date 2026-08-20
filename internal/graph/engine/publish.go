@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/ishanjainn/superopen/internal/memory"
 )
 
 // Publish builds and verifies a database beside the live database, then swaps
@@ -73,6 +75,14 @@ func publish(ctx context.Context, repoRoot string, build func(context.Context, s
 		return "", closeErr
 	}
 
+	if _, err := os.Stat(paths.Database); err == nil {
+		if err := memory.CopyInto(paths.Database, stagePath); err != nil {
+			return "", fmt.Errorf("preserve memory across graph publish: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+
 	backup := paths.Database + ".previous"
 	removeDatabaseFamily(backup)
 	hadPrior := false
@@ -89,6 +99,9 @@ func publish(ctx context.Context, repoRoot string, build func(context.Context, s
 			_ = os.Rename(backup, paths.Database)
 		}
 		return "", fmt.Errorf("publish graph: %w", err)
+	}
+	if _, err := os.Stat(stagePath + ".key"); err == nil {
+		_ = os.Rename(stagePath+".key", paths.Database+".key")
 	}
 	removeDatabaseFamily(backup)
 	return paths.Database, nil

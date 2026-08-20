@@ -11,6 +11,7 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/checkpoint"
 	"github.com/ishanjainn/superopen/internal/cli"
+	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/projects"
 	"github.com/ishanjainn/superopen/internal/session"
@@ -66,16 +67,20 @@ func cmdSessions() *cobra.Command {
 			if len(args) == 1 {
 				id = strings.TrimSpace(args[0])
 			}
+			root, hookID := hookRepoAndSession()
+			if id == "" {
+				id = hookID
+			}
 			detach, _ := cmd.Flags().GetBool("detach")
 			if detach {
-				spawn := []string{"sessions", "finalize"}
+				spawn := []string{"--root", root, "sessions", "finalize"}
 				if id != "" {
 					spawn = append(spawn, id)
 				}
-				cli.SpawnSO(repoRoot(), spawn...)
+				cli.SpawnSO(root, spawn...)
 				return nil
 			}
-			return finalizeSession(repoRoot(), id)
+			return finalizeSession(root, id)
 		},
 	}
 	finalize.Flags().Bool("detach", false, "Materialize in a background process")
@@ -247,6 +252,15 @@ func finalizeSession(root, requestedID string) error {
 		_ = err
 	}
 	fmt.Printf("Finalized session %s\n", id)
+	if ing, err := memory.IngestSession(root, id); err != nil {
+		fmt.Fprintf(os.Stderr, "so memory ingest: %v\n", err)
+	} else {
+		_ = ing
+		if err := memory.SleepRoot(root); err != nil {
+			fmt.Fprintf(os.Stderr, "so memory sleep: %v\n", err)
+		}
+		_ = memory.MaybeDistill(root, id, true)
+	}
 	return nil
 }
 

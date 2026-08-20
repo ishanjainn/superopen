@@ -114,7 +114,7 @@ func TestEachAgentDeclaresToolsAndABudget(t *testing.T) {
 		if !strings.HasPrefix(text, "---\n") {
 			t.Fatalf("%s: missing frontmatter", name)
 		}
-		if !strings.Contains(text, "mcp__superopen-graph__graph_query") {
+		if !strings.Contains(text, "mcp__superopen__graph_query") {
 			t.Fatalf("%s: does not allowlist the graph tools", name)
 		}
 		if !strings.Contains(text, "permissionMode: plan") {

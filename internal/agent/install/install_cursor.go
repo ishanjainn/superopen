@@ -39,13 +39,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-)
 
-// cursorOwnedCommandMarker identifies hook entries this CLI authored.
-// We match on a substring of the `command` string so the marker
-// survives whatever absolute path patchManifestBytes inlined.
-const cursorOwnedCommandMarker = "so coding hook --vendor=cursor"
+	"github.com/ishanjainn/superopen/internal/paths"
+)
 
 // installCursorHooks merges our hook entries into ~/.cursor/hooks.json.
 // Returns the absolute path of the file it touched (or would touch in
@@ -191,8 +187,7 @@ func isOurHookEntry(raw json.RawMessage) bool {
 	if err := json.Unmarshal(raw, &entry); err != nil {
 		return false
 	}
-	return entry.Command != "" && (strings.Contains(entry.Command, cursorOwnedCommandMarker) ||
-		strings.Contains(entry.Command, "sessions finalize"))
+	return paths.IsSuperopenHookCommand(entry.Command)
 }
 
 // readCursorHooksFile returns the file's parsed contents, or an empty

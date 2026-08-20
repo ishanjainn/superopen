@@ -5,11 +5,11 @@ tools:
   - Read
   - Grep
   - Glob
-  - mcp__superopen-graph__graph_query
-  - mcp__superopen-graph__graph_search
-  - mcp__superopen-graph__graph_snippet
-  - mcp__superopen-graph__graph_trace
-mcpServers: [superopen-graph]
+  - mcp__superopen__graph_query
+  - mcp__superopen__graph_search
+  - mcp__superopen__graph_snippet
+  - mcp__superopen__graph_trace
+mcpServers: [superopen]
 permissionMode: plan
 skills: [so]
 ---
@@ -18,7 +18,7 @@ Tier 1 — Scout. Answer with about 3-4 narrow graph calls and at most one or tw
 
 Budget and stop rule:
 
-1. Run one `graph_query` with the full question.
+1. Run one `graph_query` with the full question (or `__SO_BIN__ --json graph query` if MCP is missing / returns graph_not_indexed). Do not retry MCP after that.
 2. Stop as soon as the NODE/EDGE lines answer it. Do not continue through the remaining steps out of habit.
 3. If a specific symbol is still unresolved, `graph_search` for it, then `graph_snippet` on the qualified name.
 4. Use `graph_trace` only when callers or callees are the actual question, and pass a fully qualified name — short names return an ambiguous suggestion list and cost a turn.

@@ -31,6 +31,18 @@ func TestRowsJSON(t *testing.T) {
 	}
 }
 
+func TestRowsTextIncludesColumnNames(t *testing.T) {
+	var buf bytes.Buffer
+	o := &Out{W: &buf, ErrW: &buf}
+	o.Rows("memories", []string{"id", "tokens"}, []map[string]any{
+		{"id": 1, "tokens": 44},
+	})
+	got := buf.String()
+	if !strings.HasPrefix(got, "id  tokens\n1  44\n") {
+		t.Fatalf("ambiguous text rows: %q", got)
+	}
+}
+
 func TestTruncate(t *testing.T) {
 	o := &Out{}
 	s := o.Truncate(strings.Repeat("x", 100), 10)

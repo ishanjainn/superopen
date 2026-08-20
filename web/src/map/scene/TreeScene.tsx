@@ -337,12 +337,6 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     ground.position.y = -0.25;
     group.add(ground);
 
-    const grid = new THREE.GridHelper(size * 2.4, 40, "#383838", "#242424");
-    (grid.material as THREE.Material).transparent = true;
-    (grid.material as THREE.Material).opacity = 0.85;
-    grid.position.y = -0.24;
-    group.add(grid);
-
     // branch skeleton, one segment soup with per-vertex colors
     const positions: number[] = [];
     const edgeMeta: { childPath?: string; childFileId?: number; vertexCount: number }[] = [];

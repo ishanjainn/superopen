@@ -1088,12 +1088,38 @@ class So < Formula
     end
   end
 
+  depends_on "node"
+
   def install
     if build.head?
       system "go", "build", "-o", bin/"so", "./cmd/so"
+      web_src = buildpath/"web"
     else
       bin.install Dir["so*"].first => "so"
+      system "curl", "-fsSL", "-o", "src.tar.gz",
+             "https://github.com/ishanjainn/superopen/archive/refs/tags/cli-#{{version}}.tar.gz"
+      system "tar", "-xzf", "src.tar.gz"
+      web_src = Dir["*/web"].first
+      odie "web UI missing from GitHub source archive" if web_src.nil?
+      web_src = Pathname.new(web_src)
     end
+    dst = share/"superopen/web"
+    dst.mkpath
+    web_src.children.each do |child|
+      next if %w[node_modules .next].include?(child.basename.to_s)
+      cp_r child, dst/child.basename
+    end
+    cd dst do
+      system "npm", "install", "--ignore-scripts"
+      system "npm", "run", "build"
+    end
+  end
+
+  def caveats
+    <<~EOS
+      Run `so install` once to wire coding-agent hooks and MCP.
+      Then in any repo: `so init` and `so dev`.
+    EOS
   end
 
   test do

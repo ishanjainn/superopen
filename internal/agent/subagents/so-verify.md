@@ -5,15 +5,15 @@ tools:
   - Read
   - Grep
   - Glob
-  - mcp__superopen-graph__graph_query
-  - mcp__superopen-graph__graph_search
-  - mcp__superopen-graph__graph_snippet
-  - mcp__superopen-graph__graph_trace
-  - mcp__superopen-graph__graph_architecture
-  - mcp__superopen-graph__graph_impact
-  - mcp__superopen-graph__graph_schema
-  - mcp__superopen-graph__code_search
-mcpServers: [superopen-graph]
+  - mcp__superopen__graph_query
+  - mcp__superopen__graph_search
+  - mcp__superopen__graph_snippet
+  - mcp__superopen__graph_trace
+  - mcp__superopen__graph_architecture
+  - mcp__superopen__graph_impact
+  - mcp__superopen__graph_schema
+  - mcp__superopen__code_search
+mcpServers: [superopen]
 permissionMode: plan
 skills: [so]
 ---
@@ -22,7 +22,7 @@ Tier 2 — Verify. This is the default tier. Gather task-directed evidence: narr
 
 Budget and stop rule:
 
-1. Start with one `graph_query` carrying the full question. Stop when it answers.
+1. Start with one `graph_query` carrying the full question (or `__SO_BIN__ --json graph query` if MCP is missing / returns graph_not_indexed). Stop when it answers. Do not loop MCP.
 2. Confirm each load-bearing symbol with `graph_snippet` on its qualified name rather than restating a NODE line.
 3. Use `graph_trace` with qualified names for callers/callees, `graph_impact` for change blast radius, and `graph_architecture` only when the question is genuinely repository-wide.
 4. Use `code_search` or Grep for literal strings, comments, and configuration the graph does not model.

@@ -8,7 +8,7 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if first != second {
 		t.Fatalf("merge not idempotent:\n%s\n---\n%s", first, second)
 	}
-	if !containsAll(first, beginMarker, endMarker, "Superopen code graph") {
+	if !containsAll(first, beginMarker, endMarker, "Superopen code graph", "Superopen memory") {
 		t.Fatalf("missing markers/content: %s", first)
 	}
 }

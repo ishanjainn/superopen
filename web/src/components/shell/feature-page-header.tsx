@@ -3,7 +3,8 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, LayoutDashboard } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { GraphIcon } from "@/components/shell/nav-icons";
 import { SIDEBAR_ITEMS } from "@/constants/sidebar";
 import { cn } from "@/lib/utils";
 import type { SidebarActionItem } from "@/types/sidebar";
@@ -76,7 +77,7 @@ export default function FeaturePageHeader({
   const pathname = usePathname() || "";
   const resolved =
     icon ?? iconForPath(pathname) ?? iconForTitle(title) ?? (
-      <LayoutDashboard className="size-4" />
+      <GraphIcon className="size-4" />
     );
 
   return (

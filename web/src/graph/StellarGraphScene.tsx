@@ -11,6 +11,7 @@ import {
   RenderPass,
 } from "postprocessing";
 import { useThemeOptional } from "@/components/shell/theme-provider";
+import { configureMapControls, fitDistance, GROUND, SKY } from "@/map/scene/sceneUtils";
 import { DEFAULT_EDGE_COLOR, EDGE_COLORS, labelColor } from "./colors";
 import {
   bloomIntensityScale,
@@ -44,6 +45,10 @@ export interface StellarGraphSceneProps {
   focusIds?: Set<number> | null;
   showLabels?: boolean;
   display?: GraphDisplaySettings;
+  /** Paper is unused on product stages. Night is the black map/graph surface. */
+  stage?: "paper" | "night";
+  /** Lay the constellation on the XZ ground (Memory). Graph stays in 3D. */
+  flat?: boolean;
   className?: string;
   onHover?: (node: GraphNode | null) => void;
   onNodeClick?: (node: GraphNode) => void;
@@ -62,7 +67,7 @@ function clusterKey(path?: string): string {
 }
 
 /** Fit camera to the highlighted set: center plus spread-scaled distance. */
-function cameraTarget(nodes: GraphNode[], ids: Set<number>) {
+function cameraTarget(nodes: GraphNode[], ids: Set<number>, flat: boolean) {
   let x = 0;
   let y = 0;
   let z = 0;
@@ -86,10 +91,82 @@ function cameraTarget(nodes: GraphNode[], ids: Set<number>) {
   }
   const base = count <= 5 ? 300 : 200;
   const distance = Math.max(base, spread * 3);
+  if (flat) {
+    return {
+      lookAt: new THREE.Vector3(x, y, z),
+      position: new THREE.Vector3(
+        x + distance * 0.45,
+        y + distance * 0.85,
+        z + distance * 0.65,
+      ),
+    };
+  }
   return {
     lookAt: new THREE.Vector3(x, y, z),
     position: new THREE.Vector3(x + distance * 0.2, y + distance * 0.15, z + distance),
   };
+}
+
+/** Memory polar layout lives in XY; night stage maps that ring onto the XZ ground. */
+function layOnNightGround(nodes: GraphNode[]): GraphNode[] {
+  return nodes.map((node) => ({
+    ...node,
+    x: node.x,
+    y: 6 + node.size * 0.8 + node.z * 0.15,
+    z: node.y,
+  }));
+}
+
+function addNightGround(scene: THREE.Scene, nodes: GraphNode[]) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const node of nodes) {
+    minX = Math.min(minX, node.x);
+    maxX = Math.max(maxX, node.x);
+    minZ = Math.min(minZ, node.z);
+    maxZ = Math.max(maxZ, node.z);
+  }
+  if (!Number.isFinite(minX)) {
+    minX = maxX = minZ = maxZ = 0;
+  }
+  const span = Math.max(120, maxX - minX, maxZ - minZ);
+  const size = span * 2.8;
+  const cx = (minX + maxX) / 2;
+  const cz = (minZ + maxZ) / 2;
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(size * 2.5, size * 2.5),
+    new THREE.MeshBasicMaterial({ color: GROUND }),
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.set(cx, -0.26, cz);
+  scene.add(ground);
+  scene.fog = new THREE.Fog(SKY, size * 1.6, size * 3.6);
+  return { size, cx, cz };
+}
+
+function frameNodes(
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+  nodes: GraphNode[],
+  flat: boolean,
+) {
+  if (nodes.length === 0) return;
+  const points = nodes.map((node) => new THREE.Vector3(node.x, node.y, node.z));
+  const box = new THREE.Box3().setFromPoints(points);
+  const center = box.getCenter(new THREE.Vector3());
+  const dir = flat
+    ? new THREE.Vector3(0.42, 0.72, 0.55).normalize()
+    : new THREE.Vector3(0.22, 0.16, 1).normalize();
+  const local = points.map((point) => point.clone().sub(center));
+  let distance = fitDistance(camera, dir, local);
+  if (distance == null || !Number.isFinite(distance) || distance <= 0) {
+    const size = box.getSize(new THREE.Vector3());
+    distance = Math.max(size.x, size.y, size.z, 120) * 1.6;
+  }
+  camera.position.copy(center).add(dir.multiplyScalar(distance * 1.22));
+  controls.target.copy(center);
 }
 
 /** Dark stage glows above white; light stage fades toward paper instead. */
@@ -300,6 +377,8 @@ export function StellarGraphScene({
   focusIds = null,
   showLabels = true,
   display = DEFAULT_GRAPH_DISPLAY,
+  stage = "paper",
+  flat = false,
   className,
   onHover,
   onNodeClick,
@@ -314,7 +393,9 @@ export function StellarGraphScene({
   const viewRef = useRef<{ position: THREE.Vector3; target: THREE.Vector3 } | null>(
     null,
   );
-  const dark = useThemeOptional()?.resolved === "dark";
+  const themeDark = useThemeOptional()?.resolved === "dark";
+  const night = stage === "night";
+  const dark = night || themeDark;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -323,29 +404,30 @@ export function StellarGraphScene({
       host.style.position = "relative";
     }
 
+    const nodes = flat ? layOnNightGround(data.nodes) : data.nodes;
     const scene = new THREE.Scene();
-    // Transparent canvas: the paper grid behind the stage stays visible.
-    scene.background = null;
+    if (night) {
+      scene.background = SKY;
+    } else {
+      // Transparent canvas: the paper grid behind the stage stays visible.
+      scene.background = null;
+    }
     const camera = new THREE.PerspectiveCamera(
       50,
       host.clientWidth / Math.max(host.clientHeight, 1),
       0.1,
       100_000,
     );
-    if (viewRef.current) {
-      camera.position.copy(viewRef.current.position);
-    } else {
-      camera.position.set(0, 0, 800);
-    }
+    camera.position.set(0, 0, 1);
 
     const renderer = new THREE.WebGLRenderer({
       antialias: false,
-      alpha: true,
+      alpha: !night,
       powerPreference: "high-performance",
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.setSize(host.clientWidth || 1, host.clientHeight || 1);
-    renderer.setClearColor(0x000000, 0);
+    renderer.setClearColor(0x000000, night ? 1 : 0);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.domElement.style.display = "block";
@@ -353,6 +435,8 @@ export function StellarGraphScene({
     renderer.domElement.style.height = "100%";
     renderer.domElement.style.touchAction = "none";
     host.appendChild(renderer.domElement);
+
+    if (flat) addNightGround(scene, nodes);
 
     // Bloom only reads as light on the dark stage; skip it on paper.
     let composer: EffectComposer | null = null;
@@ -382,28 +466,39 @@ export function StellarGraphScene({
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.rotateSpeed = 0.5;
-    controls.zoomSpeed = 1.5;
+    controls.zoomSpeed = 1.35;
     controls.minDistance = 10;
-    controls.maxDistance = 50_000;
+    controls.maxDistance = 80_000;
     controls.autoRotateSpeed = 0.4;
-    if (viewRef.current) {
-      controls.target.copy(viewRef.current.target);
-      controls.update();
+    controls.zoomToCursor = true;
+    controls.screenSpacePanning = true;
+    if (flat) {
+      configureMapControls(controls);
+      controls.autoRotate = false;
+      controls.autoRotateSpeed = 0;
+      controls.zoomToCursor = true;
     }
+    if (viewRef.current) {
+      camera.position.copy(viewRef.current.position);
+      controls.target.copy(viewRef.current.target);
+    } else {
+      frameNodes(camera, controls, nodes, flat);
+    }
+    controls.update();
 
     const graph = new THREE.Group();
     scene.add(graph);
     const hasHighlight = Boolean(highlightedIds?.size);
-    const nodeBoost = nodeBoostScale(data.nodes.length) * display.nodeGlow;
+    const nodeBoost = nodeBoostScale(nodes.length) * display.nodeGlow;
     const blending = dark ? THREE.AdditiveBlending : THREE.NormalBlending;
     const tempColor = new THREE.Color();
     let pickObject: THREE.Object3D;
 
-    if (data.nodes.length > POINT_MODE_THRESHOLD) {
-      const positions = new Float32Array(data.nodes.length * 3);
-      const colors = new Float32Array(data.nodes.length * 3);
-      for (let i = 0; i < data.nodes.length; i++) {
-        const node = data.nodes[i];
+    if (nodes.length > POINT_MODE_THRESHOLD) {
+      const positions = new Float32Array(nodes.length * 3);
+      const colors = new Float32Array(nodes.length * 3);
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
         positions.set([node.x, node.y, node.z], i * 3);
         tempColor.set(node.color);
         paintNode(
@@ -430,13 +525,13 @@ export function StellarGraphScene({
       graph.add(points);
       pickObject = points;
     } else {
-      const [radius, widthSegments, heightSegments] = sphereDetail(data.nodes.length);
+      const [radius, widthSegments, heightSegments] = sphereDetail(nodes.length);
       const geometry = new THREE.SphereGeometry(radius, widthSegments, heightSegments);
       const material = new THREE.MeshBasicMaterial({
         vertexColors: true,
         toneMapped: false,
       });
-      const cloud = new THREE.InstancedMesh(geometry, material, data.nodes.length);
+      const cloud = new THREE.InstancedMesh(geometry, material, nodes.length);
       cloud.frustumCulled = false;
       const matrix = new THREE.Matrix4();
       const offset = new THREE.Vector3();
@@ -445,9 +540,9 @@ export function StellarGraphScene({
       const color = new THREE.Color();
       // vertexColors reads the geometry's `color` attribute, so it must be an
       // instanced attribute - setColorAt would leave every sphere black.
-      const colors = new Float32Array(data.nodes.length * 3);
-      for (let i = 0; i < data.nodes.length; i++) {
-        const node = data.nodes[i];
+      const colors = new Float32Array(nodes.length * 3);
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
         const lit = !hasHighlight || Boolean(highlightedIds?.has(node.id));
         const size = node.size * (lit ? 0.5 : 0.2);
         offset.set(node.x, node.y, node.z);
@@ -464,7 +559,7 @@ export function StellarGraphScene({
       pickObject = cloud;
     }
 
-    const byID = new Map(data.nodes.map((node) => [node.id, node]));
+    const byID = new Map(nodes.map((node) => [node.id, node]));
     const edgePositions = new Float32Array(data.edges.length * 6);
     const edgeColors = new Float32Array(data.edges.length * 6);
     const density = edgeIntensityScale(data.edges.length) * display.edgeBrightness;
@@ -522,8 +617,8 @@ export function StellarGraphScene({
     if (showLabels) {
       const labelNodes = (
         hasHighlight
-          ? data.nodes.filter((node) => highlightedIds?.has(node.id))
-          : [...data.nodes]
+          ? nodes.filter((node) => highlightedIds?.has(node.id))
+          : [...nodes]
       )
         .sort((a, b) => b.size - a.size)
         .slice(0, 80);
@@ -537,7 +632,7 @@ export function StellarGraphScene({
     let animationTarget: ReturnType<typeof cameraTarget> = null;
     let animationProgress = 1;
     if (focusIds?.size) {
-      animationTarget = cameraTarget(data.nodes, focusIds);
+      animationTarget = cameraTarget(nodes, focusIds, flat);
       animationProgress = 0;
     }
 
@@ -561,14 +656,14 @@ export function StellarGraphScene({
       const hit = raycaster.intersectObject(pickObject, false)[0];
       const index =
         hit?.instanceId ?? (typeof hit?.index === "number" ? hit.index : undefined);
-      return index !== undefined ? data.nodes[index] ?? null : null;
+      return index !== undefined ? nodes[index] ?? null : null;
     };
     const onMove = (event: PointerEvent) => {
       if (hoverFrame) return;
       hoverFrame = requestAnimationFrame(() => {
         hoverFrame = 0;
         const node = pick(event);
-        const index = node ? data.nodes.indexOf(node) : -1;
+        const index = node ? nodes.indexOf(node) : -1;
         if (index === hoveredIndex) return;
         hoveredIndex = index;
         tooltipNode = node;
@@ -633,7 +728,7 @@ export function StellarGraphScene({
 
     let frame = 0;
     const render = () => {
-      controls.autoRotate = Date.now() - lastInteraction > IDLE_ROTATE_MS;
+      controls.autoRotate = !flat && Date.now() - lastInteraction > IDLE_ROTATE_MS;
       if (animationTarget && animationProgress < 1) {
         animationProgress = Math.min(1, animationProgress + 0.02);
         const easing = 1 - Math.pow(1 - animationProgress, 3);
@@ -669,7 +764,7 @@ export function StellarGraphScene({
       scene.clear();
       if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement);
     };
-  }, [data, highlightedIds, focusIds, showLabels, display, dark]);
+  }, [data, highlightedIds, focusIds, showLabels, display, dark, night, flat]);
 
   return <div ref={hostRef} className={className || "h-full w-full"} />;
 }

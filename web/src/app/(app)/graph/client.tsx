@@ -826,7 +826,8 @@ export default function GraphPage() {
             <div className="viewport">
               {filteredData && filteredData.nodes.length > 0 ? (
                 <StellarGraphScene
-                  className="session-map"
+                  className="session-map session-map-night"
+                  stage="night"
                   data={filteredData}
                   highlightedIds={highlightedIds}
                   focusIds={highlightedIds}

@@ -10,9 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/projects"
 )
 
 // uninstallVendor removes the host plugin manifest set for one vendor
@@ -161,36 +163,78 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 	return removed, errs
 }
 
-// purgeShared removes shared residual config/cache state. Triggered by
-// `--purge`; left out by default so re-onboarding keeps local preferences.
-func purgeShared(dryRun bool) (removed []string, errs []string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, []string{err.Error()}
-	}
-
-	// 1. ~/.config/superopen/ - `so configure` output. We
-	//    intentionally remove the whole directory rather than just
-	//    config.env so any future managed-config side files
-	//    (audit logs, key cache, …) are swept up by the same flag.
-	configDir := filepath.Join(home, ".config", "so")
-	if p, e := removePath(configDir, dryRun); p != "" {
-		removed = append(removed, p)
+// purgeShared removes Superopen machine-local state. Homebrew's so binary
+// is left in place (users run `brew uninstall so` for that). The curl
+// installer prefix (~/.superopen) is removed because that IS the product
+// binary location for that channel.
+func purgeShared(dryRun, keepData bool) (removed []string, errs []string) {
+	appendPath := func(path string, e error) {
+		if path == "" {
+			return
+		}
+		removed = append(removed, path)
 		if e != nil {
 			errs = append(errs, e.Error())
 		}
 	}
 
-	// 2. <UserCacheDir>/superopen/ - session-state cache. Path
-	//    resolution matches the sessionstate package so we don't
-	//    drift if XDG_CACHE_HOME is set.
-	if cacheRoot, err := os.UserCacheDir(); err == nil && cacheRoot != "" {
-		sharedCache := filepath.Join(cacheRoot, "so")
-		if p, e := removePath(sharedCache, dryRun); p != "" {
-			removed = append(removed, p)
-			if e != nil {
-				errs = append(errs, e.Error())
+	if !keepData {
+		if list, err := projects.List(); err == nil {
+			for _, p := range list {
+				if p.SoRoot == "" {
+					continue
+				}
+				path, e := removePath(p.SoRoot, dryRun)
+				appendPath(path, e)
 			}
+		}
+		if wd, err := os.Getwd(); err == nil {
+			path, e := removePath(filepath.Join(wd, paths.DirName), dryRun)
+			appendPath(path, e)
+		}
+	}
+
+	if dir, err := paths.ConfigDir(); err == nil {
+		path, e := removePath(dir, dryRun)
+		appendPath(path, e)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		path, e := removePath(filepath.Join(home, ".config", "so"), dryRun)
+		appendPath(path, e)
+	}
+	if cfg, err := os.UserConfigDir(); err == nil && cfg != "" {
+		path, e := removePath(filepath.Join(cfg, "so"), dryRun)
+		appendPath(path, e)
+	}
+	if dir, err := paths.DataDir(); err == nil {
+		path, e := removePath(dir, dryRun)
+		appendPath(path, e)
+	}
+	if cacheRoot, err := os.UserCacheDir(); err == nil && cacheRoot != "" {
+		path, e := removePath(filepath.Join(cacheRoot, "so"), dryRun)
+		appendPath(path, e)
+		path, e = removePath(filepath.Join(cacheRoot, "superopen"), dryRun)
+		appendPath(path, e)
+	}
+	if bin, err := paths.UserBinPath(); err == nil && !paths.IsPackageManagedPath(bin) {
+		if !dryRun {
+			unlockRunningInstallBinary(bin)
+		}
+	}
+	if root, err := paths.CurlInstallRoot(); err == nil && !paths.IsPackageManagedPath(root) {
+		path, e := removePath(root, dryRun)
+		appendPath(path, e)
+	}
+	if bin, err := paths.UserBinPath(); err == nil && !paths.IsPackageManagedPath(bin) {
+		root, _ := paths.CurlInstallRoot()
+		if !paths.PathUnder(bin, root) {
+			path, e := removePath(bin, dryRun)
+			appendPath(path, e)
+		}
+	}
+	if !dryRun {
+		for _, path := range paths.RemoveUserBinFromPATH() {
+			appendPath(path, nil)
 		}
 	}
 	return removed, errs
@@ -275,7 +319,10 @@ func stripGeminiHooks(path string, dryRun bool) (string, error) {
 			for _, rawEntry := range entries {
 				entry, _ := rawEntry.(map[string]any)
 				command, _ := entry["command"].(string)
-				if strings.Contains(command, "coding hook --vendor=gemini") || strings.Contains(command, "sessions finalize") {
+				if strings.Contains(command, "coding hook --vendor=gemini") ||
+					strings.Contains(command, "sessions finalize") ||
+					strings.Contains(command, "sessions refresh") ||
+					strings.Contains(command, "graph refresh") {
 					changed = true
 					continue
 				}
@@ -376,6 +423,16 @@ func removePath(p string, dryRun bool) (string, error) {
 		return p, err
 	}
 	return p, nil
+}
+
+// unlockRunningInstallBinary renames the release-installer binary on Windows
+// so the following RemoveAll can delete ~/.superopen while this process is
+// still running. Unix can unlink a running binary; Windows cannot.
+func unlockRunningInstallBinary(bin string) {
+	if runtime.GOOS != "windows" || bin == "" {
+		return
+	}
+	_ = os.Rename(bin, bin+".old")
 }
 
 // disableClaudeCodePlugin asks the `claude` CLI to drop the superopen-cc

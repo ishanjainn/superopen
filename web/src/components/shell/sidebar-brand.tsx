@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { ChevronsLeft, ChevronsRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -11,6 +12,27 @@ import {
 
 export default function SidebarBrand() {
   const { isExpanded, toggleSidebar } = useSidebarLayout();
+  const [version, setVersion] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/meta")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body) => {
+        if (cancelled) return;
+        const raw =
+          (typeof body?.version_display === "string" && body.version_display) ||
+          (typeof body?.version === "string" && body.version) ||
+          "";
+        setVersion(displayVersion(raw || undefined));
+      })
+      .catch(() => {
+        if (!cancelled) setVersion(displayVersion());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className={playgroundTopBarClassName("relative gap-2 px-3")}>
@@ -45,20 +67,22 @@ export default function SidebarBrand() {
           className="size-8 shrink-0 object-contain"
         />
         {isExpanded ? (
-          <>
+          <div className="flex min-w-0 items-end gap-1.5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/brand-wordmark.png"
               alt="superopen"
               className="h-5 w-auto min-w-0 max-w-[9rem] object-contain object-left"
             />
-            <p
-              className="shrink-0 text-[10px] text-neutral-400"
-              title={`Superopen ${displayVersion()}`}
-            >
-              {displayVersion()}
-            </p>
-          </>
+            {version ? (
+              <span
+                className="mb-[3px] shrink-0 text-[10px] leading-none text-neutral-400"
+                title={`Superopen ${version}`}
+              >
+                {version}
+              </span>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>

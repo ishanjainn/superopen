@@ -107,6 +107,12 @@ type State struct {
 	GraphSteerCount    int      `json:"graph_steer_count,omitempty"`
 	GraphSteerTerms    []string `json:"graph_steer_terms,omitempty"`
 
+	// Memory pack is injected once per session (same token-economy rule as
+	// the graph reminder). MemoryDistillAsked keeps the live-agent rollup
+	// request to a single memory_capture even if SessionStart fires again.
+	MemorySteerReminded bool `json:"memory_steer_reminded,omitempty"`
+	MemoryDistillAsked  bool `json:"memory_distill_asked,omitempty"`
+
 	// SessionRolledUp counters that Phase C's minimal mode emits on
 	// sessionEnd in lieu of per-event spans. Always safe to populate;
 	// only consumed when the active capture mode is "minimal".

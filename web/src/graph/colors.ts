@@ -11,6 +11,13 @@ export const LABEL_COLORS: Record<string, string> = {
   Method: "#06b6d4",
   Route: "#eab308",
   Variable: "#64748b",
+  Prompt: "#94a3b8",
+  Tool: "#64748b",
+  Session: "#e2e8f0",
+  Pin: "#a8a29e",
+  Teaching: "#d6d3d1",
+  Working: "#78716c",
+  Memory: "#737373",
 };
 
 export const DEFAULT_LABEL_COLOR = "#94a3b8";
@@ -47,6 +54,11 @@ export const EDGE_COLORS: Record<string, string> = {
   TESTS_FILE: "#06b6d4",
   USAGE: "#64748b",
   CONFIGURES: "#f59e0b",
+  contradicts: "#ef4444",
+  same_session: "#737373",
+  rolled_up_from: "#d6d3d1",
+  taught_from: "#a8a29e",
+  next: "#94a3b8",
 };
 
 export const DEFAULT_EDGE_COLOR = "#1C8585";

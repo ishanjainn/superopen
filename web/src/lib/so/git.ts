@@ -2,7 +2,8 @@ import { execFileSync } from "child_process";
 import { basename } from "path";
 import { fileExists } from "./nodeio";
 import { processRepoRoot, repoName, repoRoot } from "./root";
-import { VERSION, displayVersion } from "@/lib/version";
+import { soBinary } from "./exec";
+import { displayVersion, parseSoVersion } from "@/lib/version";
 
 /** Parse `owner/repo` from a git remote URL (HTTPS, SSH, or SSH aliases). */
 function slugFromRemoteURL(url: string): string | null {
@@ -139,15 +140,39 @@ export function gitAuthorAvatar(repo = repoRoot()): {
   return { initials, avatar_url };
 }
 
+/** Running `so` semver. Falls back to the UI constant if the CLI is missing. */
+let cachedCliVersion: string | null = null;
+
+function cliVersion(): string {
+  if (cachedCliVersion) return cachedCliVersion;
+  try {
+    const out = execFileSync(soBinary(), ["version"], {
+      encoding: "utf8",
+      timeout: 2000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const parsed = parseSoVersion(out);
+    if (parsed) {
+      cachedCliVersion = parsed;
+      return parsed;
+    }
+  } catch {
+    // optional
+  }
+  cachedCliVersion = displayVersion();
+  return cachedCliVersion;
+}
+
 export function currentRepoMeta() {
   const root = repoRoot();
+  const version = cliVersion();
   return {
     repo: repoName(),
     root,
     slug: repoSlug(root),
     remote: gitRemoteURL(root),
     author: gitAuthorAvatar(root),
-    version: VERSION,
-    version_display: displayVersion(),
+    version,
+    version_display: displayVersion(version),
   };
 }

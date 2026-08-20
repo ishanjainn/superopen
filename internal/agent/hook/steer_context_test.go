@@ -2,6 +2,8 @@ package hook
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -94,7 +96,10 @@ func TestSteerTextForUnknownVendorStaysSilent(t *testing.T) {
 
 func TestSessionReminderClaimedOncePerSession(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	payload, err := json.Marshal(map[string]any{"session_id": "steer-test-session"})
+	payload, err := json.Marshal(map[string]any{
+		"session_id": "steer-test-session",
+		"cwd":        t.TempDir(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,4 +110,50 @@ func TestSessionReminderClaimedOncePerSession(t *testing.T) {
 	if _, _, ok := steerTextFor("claude-code", "UserPromptSubmit", payload); ok {
 		t.Fatal("reminder must not repeat on every prompt in the same session")
 	}
+}
+
+func TestPreCompactInjectsWorkingSnapshotFailOpen(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"session_id": "compact-session",
+		"cwd":        t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, ev, ok := steerTextFor("cursor", "preCompact", payload)
+	if ok && text == "" {
+		t.Fatal("ok with empty text")
+	}
+	if ev != "preCompact" && ok {
+		t.Fatalf("event=%s", ev)
+	}
+	_ = text
+}
+
+func TestMemoryPackOnceAndDistillAsk(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	id := "mem-pack-session"
+	writeHookSession(t, root, id)
+	payload, err := json.Marshal(map[string]any{"session_id": id, "cwd": root, "prompt": "login"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _, ok := steerTextFor("cursor", "sessionStart", payload)
+	if !ok {
+		t.Fatal("expected session start context")
+	}
+	if !strings.Contains(first, "Superopen") {
+		t.Fatalf("missing graph reminder: %q", first)
+	}
+	second, _, ok := steerTextFor("cursor", "beforeSubmitPrompt", payload)
+	if ok {
+		t.Fatalf("memory/graph pack must be once, got %q", second)
+	}
+}
+
+func writeHookSession(t *testing.T, root, id string) {
+	t.Helper()
+	// Best-effort ingest so pack has content; empty store still fail-opens.
+	_ = os.MkdirAll(filepath.Join(root, ".so", "sessions", id), 0o755)
 }

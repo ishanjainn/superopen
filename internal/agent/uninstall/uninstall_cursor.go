@@ -19,11 +19,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-)
 
-// Ownership markers must stay in sync with install/install_cursor.go.
-const cursorOwnedCommandMarker = "so coding hook --vendor=cursor"
+	"github.com/ishanjainn/superopen/internal/paths"
+)
 
 // uninstallCursorHooks performs the two cleanup steps. Returns the
 // absolute paths it removed or rewrote, plus any non-fatal errors.
@@ -150,8 +148,7 @@ func isOurHookEntry(raw json.RawMessage) bool {
 	if err := json.Unmarshal(raw, &entry); err != nil {
 		return false
 	}
-	return entry.Command != "" && (strings.Contains(entry.Command, cursorOwnedCommandMarker) ||
-		strings.Contains(entry.Command, "sessions finalize"))
+	return paths.IsSuperopenHookCommand(entry.Command)
 }
 
 func userCursorHooksPath() (string, error) {

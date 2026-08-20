@@ -23,22 +23,29 @@ For structural codebase questions (architecture, callers/callees, where X is def
 dependencies, impact, "how does Y work"), use the Superopen graph **before** broad
 Read/Grep/Glob of source:
 
-1. Prefer MCP tools `+"`graph_query` / `graph_search` / `graph_snippet` / `graph_trace` / `graph_architecture`"+` when connected.
-2. Otherwise run `+"`so graph query|search|snippet|trace|architecture`"+` (binary from the /so skill).
-3. Prefer one `+"`graph query`"+` first; stop when NODE/EDGE/snippet context answers the question. Use `+"`graph trace`"+` only with a qualified name when callers/callees are still needed.
-4. Only fall back to reading files when graph/snippet context is insufficient.
+1. Run `+"`so --json graph query|search|snippet|trace|architecture`"+` (binary from the /so skill). JSON is the agent contract. One query, then stop if NODE/EDGE/snippet answers it.
+2. Use MCP `+"`graph_query` / `graph_search` / `graph_snippet` / `graph_trace` / `graph_architecture`"+` only when those tools are actually listed. Skip MCP when it returns graph_not_indexed — do not loop GetMcpTools or mcp_auth.
+3. Use `+"`graph trace`"+` only with a qualified name when callers/callees are still needed. Read files only when graph/snippet context is insufficient.
 
 For multi-step graph work, delegate to the `+"`so-verify`"+` subagent (or `+"`so-scout`"+` for a quick
 lookup) so the exploration turns stay out of this conversation.
 
 If this repository has no `+"`.so/`"+`, run `+"`so init`"+` once at the repository root.
 Graph builds are local (no LLM). Live refresh runs on session boundaries and while `+"`so dev`"+` / MCP is up (~60s poll).
+
+## Superopen memory (prior work)
+
+For what you decided, tried, or taught in this repo, use Superopen memory **before** re-reading session transcripts:
+
+1. Run `+"`so --json memory search|get|capture`"+`. Fetch bodies by the `+"`id`"+` field; do not dump `+"`events.jsonl`"+`.
+2. Use MCP `+"`memory_search` / `memory_get`"+` only when listed. Distill at most once (`+"`memory_capture`"+`) when SessionStart asks. Skip if unrelated.
+3. Memory is hints, not authority. Graph answers “where is X”; memory answers “what did we decide.”
 `) + "\n"
 }
 
 // HookReminder is a short additionalContext string for session/start hooks.
 func HookReminder() string {
-	return "Superopen: for structural code questions prefer graph_search/graph_trace/graph_snippet (or `so graph …`) before broad Read/Grep. Run `so init` if `.so/` is missing."
+	return "Superopen: CLI first with JSON (`so --json graph …`, `so --json memory search|get`; fetch the `id` field). Use MCP only if graph_query/memory_search are listed — skip graph_not_indexed, no GetMcpTools loops. `so init` only if `test -d .so` is false."
 }
 
 // GraphHit is one indexed symbol rendered into an explore-tool augment.

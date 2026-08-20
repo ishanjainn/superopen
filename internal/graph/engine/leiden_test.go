@@ -11,7 +11,7 @@ func TestLeidenPinnedBasicAndDegenerateGraphs(t *testing.T) {
 		t.Fatalf("single=%+v", single)
 	}
 	nodes := []int64{1, 2, 3, 4, 5}
-	edges := []LeidenEdge{{1, 2}, {2, 3}, {1, 3}, {4, 5}}
+	edges := []LeidenEdge{{Source: 1, Target: 2}, {Source: 2, Target: 3}, {Source: 1, Target: 3}, {Source: 4, Target: 5}}
 	got := Leiden(nodes, edges, 1)
 	communities := membershipMap(got)
 	if communities[1] != communities[2] || communities[2] != communities[3] || communities[4] != communities[5] || communities[1] == communities[4] {
@@ -30,12 +30,12 @@ func TestLeidenMultilevelCommunitiesAreConnected(t *testing.T) {
 		base := cluster*clusterSize + 1
 		for left := 0; left < clusterSize; left++ {
 			for right := left + 1; right < clusterSize; right++ {
-				edges = append(edges, LeidenEdge{int64(base + left), int64(base + right)})
+				edges = append(edges, LeidenEdge{Source: int64(base + left), Target: int64(base + right)})
 			}
 		}
 	}
 	for cluster := 0; cluster+1 < clusterCount; cluster++ {
-		edges = append(edges, LeidenEdge{int64(cluster*clusterSize + 1), int64((cluster+1)*clusterSize + 1)})
+		edges = append(edges, LeidenEdge{Source: int64(cluster*clusterSize + 1), Target: int64((cluster+1)*clusterSize + 1)})
 	}
 	got := Leiden(nodes, edges, 1)
 	count := distinctMemberships(got)
@@ -65,7 +65,7 @@ func TestLeidenResolutionControlsGranularity(t *testing.T) {
 	for index := range nodes {
 		nodes[index] = int64(index + 1)
 		if index > 0 {
-			edges = append(edges, LeidenEdge{int64(index), int64(index + 1)})
+			edges = append(edges, LeidenEdge{Source: int64(index), Target: int64(index + 1)})
 		}
 	}
 	low := Leiden(nodes, edges, .1)
