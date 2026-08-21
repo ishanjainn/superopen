@@ -767,12 +767,12 @@ export function listMapSessions(): MapSessionMeta[] {
   if (!fileExists(dir)) return [];
   const root = repoRoot();
   const out: MapSessionMeta[] = [];
-  for (const name of readdirSync(dir)) {
+  for (const name of readdirSync(/* turbopackIgnore: true */dir)) {
     if (name === "index.json" || name.startsWith(".") || name.endsWith(".json"))
       continue;
     const sessionDir = join(dir, name);
     try {
-      if (!statSync(sessionDir).isDirectory()) continue;
+      if (!statSync(/* turbopackIgnore: true */sessionDir).isDirectory()) continue;
     } catch {
       continue;
     }
@@ -826,12 +826,12 @@ function resolveNestedMapSession(selector: string): MapSessionMeta | null {
   const dir = soPath("sessions");
   if (!fileExists(dir)) return null;
   const root = repoRoot();
-  for (const name of readdirSync(dir)) {
+  for (const name of readdirSync(/* turbopackIgnore: true */dir)) {
     if (name === "index.json" || name.startsWith(".") || name.endsWith(".json"))
       continue;
     const sessionDir = join(dir, name);
     try {
-      if (!statSync(sessionDir).isDirectory()) continue;
+      if (!statSync(/* turbopackIgnore: true */sessionDir).isDirectory()) continue;
     } catch {
       continue;
     }
@@ -897,7 +897,7 @@ function subagentMarksFromChildren(
   const dir = soPath("sessions");
   if (!fileExists(dir)) return [];
   const marks: TraceMark[] = [];
-  for (const name of readdirSync(dir)) {
+  for (const name of readdirSync(/* turbopackIgnore: true */dir)) {
     if (name === "index.json" || name.startsWith(".") || name === parentId)
       continue;
     try {

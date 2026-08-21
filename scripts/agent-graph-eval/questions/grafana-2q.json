@@ -1,0 +1,25 @@
+{
+  "corpus": "grafana/grafana",
+  "instruction": "question-only prompt, identical for every arm",
+  "questions": [
+    {
+      "id": "provisioning-dashboards",
+      "prompt": "How does dashboard YAML provisioning load and apply dashboards?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["pkg/services/provisioning", "provisioning/dashboards", "pkg.services.provisioning"]},
+        {"id": "reader", "aliases": ["configReader", "file provisioner", "DashboardProvisioner", "provisioner"]},
+        {"id": "yaml", "aliases": ["yaml", "YAML"]},
+        {"id": "apply", "aliases": ["Provision", "provision dashboards", "apply dashboards", "CreateDashboard"]}
+      ]
+    },
+    {
+      "id": "grafana-live",
+      "prompt": "How does Grafana Live / streaming attach to a dashboard?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["pkg/services/live", "GrafanaLive", "grafana live"]},
+        {"id": "stream", "aliases": ["centrifuge", "websocket", "streaming", "channel"]},
+        {"id": "dash", "aliases": ["dashboard", "LiveChannel", "pipeline"]}
+      ]
+    }
+  ]
+}

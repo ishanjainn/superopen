@@ -19,8 +19,8 @@ sh scripts/install.sh                 # macOS / Linux
 That:
 
 1. Builds into `~/.superopen/bin/so` (`so.exe` on Windows)
-2. Installs the Sessions/Memory/Graph UI into `~/.superopen/share/superopen/web` (npm install --ignore-scripts + production build)
-3. Runs `so install` (hooks, skill, MCP, guidance for every supported agent)
+2. Installs the Sessions/Memory/Graph UI into `~/.superopen/share/superopen/web` as the same Next standalone tree curl users get (`npm install --ignore-scripts` + production build, then `scripts/pack-web.sh`)
+3. Runs `so install` (hooks, skill, guidance for every supported agent)
 4. Puts `~/.superopen/bin` on PATH in shell rc files (Windows: user PATH)
 
 `so dev` in any inited repo uses that prefix. It does not search for a Superopen git clone.

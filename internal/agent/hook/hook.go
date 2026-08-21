@@ -58,6 +58,7 @@ func NewCmd() *cobra.Command {
 	var (
 		vendor string
 		event  string
+		kind   string
 	)
 
 	cmd := &cobra.Command{
@@ -72,18 +73,19 @@ never blocks a developer's prompt.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return run(cmd, vendor, event)
+			return run(cmd, vendor, event, kind)
 		},
 	}
 
 	cmd.Flags().StringVar(&vendor, "vendor", "", "Vendor: cc | claude-code | cursor | codex")
 	cmd.Flags().StringVar(&event, "event", "", "Hook event name (vendor-specific; e.g. SessionStart, PreToolUse)")
+	cmd.Flags().StringVar(&kind, "kind", "", "Graph-gate kind for PreToolUse: search | read")
 	_ = cmd.MarkFlagRequired("vendor")
 
 	return cmd
 }
 
-func run(cmd *cobra.Command, vendor, event string) (rerr error) {
+func run(cmd *cobra.Command, vendor, event, kind string) (rerr error) {
 	// Top-level recover - we promise to never crash the host agent.
 	defer func() {
 		if r := recover(); r != nil {
@@ -470,7 +472,7 @@ func run(cmd *cobra.Command, vendor, event string) (rerr error) {
 
 	// Graph-first nudge on supported control-plane events. Fail-open: never
 	// block the host if stdout JSON cannot be written.
-	emitSteerContext(vendor, event, capturedPayload)
+	emitSteerContext(vendor, event, kind, capturedPayload)
 
 	// Always succeed back to the agent.
 	return nil

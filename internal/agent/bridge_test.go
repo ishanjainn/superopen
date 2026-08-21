@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -86,6 +87,48 @@ func TestStatusClaudeCodeOKWithValidBinaryPath(t *testing.T) {
 	got := Status(home, []string{"claude-code"})
 	if !got["claude-code"] {
 		t.Fatal("expected claude-code status to be true when the hook's binary path is executable")
+	}
+}
+
+func TestInstallReturnsReport(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+	t.Setenv("APPDATA", filepath.Join(home, ".config"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	t.Setenv("COPILOT_HOME", filepath.Join(home, ".copilot"))
+	binDir := filepath.Join(home, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	soName := "so"
+	if runtime.GOOS == "windows" {
+		soName += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(binDir, soName), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Install("", []string{"claude-code"}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Skills) == 0 {
+		t.Fatal("expected skill paths")
+	}
+	if report.CursorRule == "" {
+		t.Fatal("expected Cursor rule path")
+	}
+	if len(report.Hooks["claude-code"]) == 0 {
+		t.Fatal("expected claude-code hook paths")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "agents", "so-scout.md")); !os.IsNotExist(err) {
+		t.Fatal("so install must not write so-scout")
 	}
 }
 

@@ -46,7 +46,7 @@
     "preToolUse": [
       {
         "command": "so coding hook --vendor=cursor --event=preToolUse",
-        "timeout": 15000
+        "timeout": 5000
       }
     ],
     "postToolUse": [
@@ -99,8 +99,8 @@
     ],
     "beforeReadFile": [
       {
-        "command": "so coding hook --vendor=cursor --event=beforeReadFile",
-        "timeout": 15000
+        "command": "so coding hook --vendor=cursor --event=beforeReadFile --kind=read",
+        "timeout": 5000
       }
     ],
     "afterFileEdit": [

@@ -325,7 +325,8 @@ jobs:
             --pattern 'so-darwin-arm64.tar.gz.sha256' \
             --pattern 'so-darwin-amd64.tar.gz.sha256' \
             --pattern 'so-linux-arm64.tar.gz.sha256' \
-            --pattern 'so-linux-amd64.tar.gz.sha256'
+            --pattern 'so-linux-amd64.tar.gz.sha256' \
+            --pattern 'so-web.tar.gz.sha256'
 
       - name: Generate and validate formula
         env:

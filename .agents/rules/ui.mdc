@@ -1,0 +1,9 @@
+---
+description: so dev Next.js UI
+globs: web/**/*
+alwaysApply: false
+---
+
+Read @web/AGENTS.md before changing pages, API routes, or graph/map components.
+
+Run `make test-web` before finishing.

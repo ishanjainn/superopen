@@ -21,3 +21,16 @@ func TestResolveAndEnsureDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestManaged(t *testing.T) {
+	dir := t.TempDir()
+	if paths.Managed(dir) {
+		t.Fatal("empty tree is not managed")
+	}
+	if err := paths.Resolve(dir).EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	if !paths.Managed(dir) {
+		t.Fatal("expected managed after .so exists")
+	}
+}

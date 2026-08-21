@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 # Superopen CLI (`so`) installer for macOS + Linux.
 #
-# Release (no checkout): downloads the latest GitHub Release tarball into
-# $HOME/.superopen/bin/so. Then run: so install
+# Release (no checkout): downloads the latest GitHub Release CLI tarball and
+# the prebuilt UI bundle (so-web.tar.gz) into $HOME/.superopen. Then: so install
 #
 # Local checkout: builds from source into the same prefix and runs
 # `so install` (same layout as production curl users).
@@ -72,60 +72,49 @@ web_dst() {
 	printf '%s\n' "$(dirname "$SUPEROPEN_INSTALL_DIR")/share/superopen/web"
 }
 
-# Copy UI sources into the prefix, then npm install + production build.
-# --ignore-scripts: do not run package lifecycle scripts.
-stage_web_ui() {
+# Local checkout: npm build, then install the same standalone tree curl users get.
+stage_web_ui_from_source() {
 	web_src=$1
 	if [ ! -f "$web_src/package.json" ]; then
 		fatal "web UI sources missing at $web_src"
 	fi
-	dst=$(web_dst)
-	info "Installing web UI into $dst"
-	rm -rf "$dst"
-	mkdir -p "$(dirname "$dst")"
-	if command -v rsync >/dev/null 2>&1; then
-		mkdir -p "$dst"
-		rsync -a --delete --exclude node_modules --exclude .next "$web_src/" "$dst/"
-	else
-		cp -R "$web_src" "$dst"
-		rm -rf "$dst/node_modules" "$dst/.next"
-	fi
 	need npm
 	info "npm install --ignore-scripts (web UI)"
-	(cd "$dst" && npm install --ignore-scripts)
+	(cd "$web_src" && npm install --ignore-scripts)
 	info "npm run build (web UI)"
-	(cd "$dst" && npm run build)
+	(cd "$web_src" && npm run build)
+	dst=$(web_dst)
+	info "Installing prebuilt web UI into $dst"
+	sh "$SCRIPT_DIR/pack-web.sh" --from "$web_src" --dest "$dst"
 }
 
-# Curl/brew users have no Superopen clone. Pull web/ from the same GitHub repo/tag.
-fetch_web_sources() {
-	tmpdir=$1
-	if [ "$SUPEROPEN_VERSION" = "latest" ]; then
-		src_url="https://github.com/${SUPEROPEN_REPO}/archive/refs/heads/main.tar.gz"
-	else
-		src_url="https://github.com/${SUPEROPEN_REPO}/archive/refs/tags/cli-${SUPEROPEN_VERSION}.tar.gz"
+# Release asset so-web.tar.gz: Next standalone output (no npm on the user machine).
+install_web_tarball() {
+	archive=$1
+	dst=$(web_dst)
+	info "Installing prebuilt web UI into $dst"
+	rm -rf "$dst"
+	mkdir -p "$dst"
+	if ! tar -xzf "$archive" -C "$dst"; then
+		fatal "extract failed; $archive may be corrupt"
 	fi
-	info "Downloading web UI sources"
-	if ! curl -fsSL --retry 3 --retry-delay 1 -o "$tmpdir/src.tar.gz" "$src_url"; then
-		fatal "download failed: $src_url"
+	if [ ! -f "$dst/server.js" ]; then
+		fatal "so-web.tar.gz is missing server.js (not a standalone UI bundle)"
 	fi
-	mkdir -p "$tmpdir/src"
-	tar -xzf "$tmpdir/src.tar.gz" -C "$tmpdir/src"
-	found=$(find "$tmpdir/src" -maxdepth 2 -type d -name web -print -quit)
-	if [ -z "$found" ] || [ ! -f "$found/package.json" ]; then
-		fatal "no web/ in $src_url"
-	fi
-	printf '%s\n' "$found"
 }
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || true)
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../cmd/so/main.go" ] && command -v go >/dev/null 2>&1; then
 	info "Building so from local source into $SUPEROPEN_INSTALL_DIR (same layout as the curl installer)…"
 	mkdir -p "$SUPEROPEN_INSTALL_DIR"
-	(cd "$SCRIPT_DIR/.." && go build -o "$SUPEROPEN_INSTALL_DIR/so" ./cmd/so)
+	(cd "$SCRIPT_DIR/.." && if command -v clang >/dev/null 2>&1 || command -v gcc >/dev/null 2>&1; then
+		CGO_ENABLED=1 go build -tags tsnative,sqlite_fts5 -o "$SUPEROPEN_INSTALL_DIR/so" ./cmd/so
+	else
+		go build -o "$SUPEROPEN_INSTALL_DIR/so" ./cmd/so
+	fi)
 	chmod +x "$SUPEROPEN_INSTALL_DIR/so"
 	info "Installed: $SUPEROPEN_INSTALL_DIR/so"
-	stage_web_ui "$SCRIPT_DIR/../web"
+	stage_web_ui_from_source "$SCRIPT_DIR/../web"
 	export PATH="$SUPEROPEN_INSTALL_DIR:$PATH"
 	"$SUPEROPEN_INSTALL_DIR/so" install
 	path_hint
@@ -209,8 +198,35 @@ mv "$extracted" "$target"
 chmod +x "$target"
 
 info "Installed: $target"
-web_src=$(fetch_web_sources "$tmpdir")
-stage_web_ui "$web_src"
+
+web_asset="so-web.tar.gz"
+if [ "$SUPEROPEN_VERSION" = "latest" ]; then
+	web_url="https://github.com/${SUPEROPEN_REPO}/releases/latest/download/${web_asset}"
+else
+	web_url="https://github.com/${SUPEROPEN_REPO}/releases/download/cli-${SUPEROPEN_VERSION}/${web_asset}"
+fi
+info "Downloading ${web_asset}"
+if ! curl -fsSL --retry 3 --retry-delay 1 -o "$tmpdir/$web_asset" "$web_url"; then
+	fatal "download failed: $web_url (UI bundle missing from this release?)"
+fi
+web_sha_url="${web_url}.sha256"
+if curl -fsSL --retry 3 --retry-delay 1 -o "$tmpdir/$web_asset.sha256" "$web_sha_url" 2>/dev/null; then
+	if [ -n "$sha256_cmd" ]; then
+		expected=$(awk '{print $1}' "$tmpdir/$web_asset.sha256")
+		# shellcheck disable=SC2086
+		actual=$($sha256_cmd "$tmpdir/$web_asset" | awk '{print $1}')
+		if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+			fatal "checksum mismatch for ${web_asset} - expected ${expected:-<empty>}, got ${actual}. Refusing to install."
+		fi
+		info "Verified sha256 ${actual}"
+	else
+		warn "no sha256/shasum command found - skipping checksum verification"
+	fi
+else
+	warn "sha256 sidecar not available at ${web_sha_url}; skipping checksum verification"
+fi
+install_web_tarball "$tmpdir/$web_asset"
+
 export PATH="$SUPEROPEN_INSTALL_DIR:$PATH"
 "$target" install
 path_hint

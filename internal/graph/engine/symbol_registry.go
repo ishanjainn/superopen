@@ -76,6 +76,46 @@ func registryDefinitionLabel(label string) bool {
 }
 
 func (registry symbolRegistry) resolve(callee, module string, imports map[string]string) symbolResolution {
+	session := newResolveSession(module, imports)
+	return registry.resolveWith(session, callee)
+}
+
+type resolveSession struct {
+	module  string
+	imports map[string]string
+	results map[string]symbolResolution
+	reach   map[string]bool
+}
+
+func newResolveSession(module string, imports map[string]string) *resolveSession {
+	return &resolveSession{
+		module:  module,
+		imports: imports,
+		results: map[string]symbolResolution{},
+		reach:   map[string]bool{},
+	}
+}
+
+func (registry symbolRegistry) resolveWith(session *resolveSession, callee string) symbolResolution {
+	if session != nil {
+		if cached, ok := session.results[callee]; ok {
+			return cached
+		}
+	}
+	resolution := registry.resolveUncached(callee, session)
+	if session != nil {
+		session.results[callee] = resolution
+	}
+	return resolution
+}
+
+func (registry symbolRegistry) resolveUncached(callee string, session *resolveSession) symbolResolution {
+	module := ""
+	var imports map[string]string
+	if session != nil {
+		module = session.module
+		imports = session.imports
+	}
 	prefix, suffix := splitRegistryCallee(callee)
 	if resolved := imports[prefix]; resolved != "" {
 		if suffix == "" {
@@ -114,7 +154,7 @@ func (registry symbolRegistry) resolve(callee, module string, imports map[string
 	}
 	if len(candidates) == 1 {
 		confidence := .75
-		if len(imports) > 0 && !registryImportReachable(candidates[0].QualifiedName, imports) {
+		if len(imports) > 0 && !registryImportReachableCached(candidates[0].QualifiedName, imports, session) {
 			confidence *= .5
 		}
 		return symbolResolution{qn: candidates[0].QualifiedName, strategy: "unique_name", confidence: confidence, candidates: 1}
@@ -125,7 +165,7 @@ func (registry symbolRegistry) resolve(callee, module string, imports map[string
 	reachable := make([]api.Node, 0, len(candidates))
 	if len(imports) > 0 {
 		for _, candidate := range candidates {
-			if registryImportReachable(candidate.QualifiedName, imports) {
+			if registryImportReachableCached(candidate.QualifiedName, imports, session) {
 				reachable = append(reachable, candidate)
 			}
 		}
@@ -182,6 +222,19 @@ func registryQualifiedSuffix(callee string, candidates []api.Node) string {
 	return match
 }
 
+func registryImportReachableCached(candidate string, imports map[string]string, session *resolveSession) bool {
+	if session != nil {
+		if cached, ok := session.reach[candidate]; ok {
+			return cached
+		}
+	}
+	reachable := registryImportReachable(candidate, imports)
+	if session != nil {
+		session.reach[candidate] = reachable
+	}
+	return reachable
+}
+
 func registryImportReachable(candidate string, imports map[string]string) bool {
 	module := candidate
 	if index := strings.LastIndexByte(module, '.'); index >= 0 {
@@ -213,9 +266,12 @@ func registryBestCandidate(candidates []api.Node, module string) api.Node {
 // case-sensitive and deliberately asymmetric: `Fixture` but not `fixture`,
 // `spec` but not `Spec`.
 func isTestQualifiedName(qn string) bool {
-	for _, marker := range []string{"Test", "test", "Mock", "mock", "Stub", "stub",
-		"Fake", "fake", "Fixture", "spec"} {
-		if strings.Contains(qn, marker) {
+	return bytesContainAny(qn, []string{"Test", "test", "Mock", "mock", "Stub", "stub", "Fake", "fake", "Fixture", "spec"})
+}
+
+func bytesContainAny(value string, markers []string) bool {
+	for _, marker := range markers {
+		if strings.Contains(value, marker) {
 			return true
 		}
 	}
@@ -223,12 +279,32 @@ func isTestQualifiedName(qn string) bool {
 }
 
 func registryCommonPrefix(left, right string) int {
-	a, b := strings.Split(left, "."), strings.Split(right, ".")
 	count := 0
-	for count < len(a) && count < len(b) && a[count] == b[count] {
+	leftAt, rightAt := 0, 0
+	for {
+		leftSeg, leftNext := scanDottedSegment(left, leftAt)
+		rightSeg, rightNext := scanDottedSegment(right, rightAt)
+		if leftSeg != rightSeg {
+			return count
+		}
 		count++
+		if leftNext < 0 || rightNext < 0 {
+			return count
+		}
+		leftAt, rightAt = leftNext, rightNext
 	}
-	return count
+}
+
+func scanDottedSegment(value string, start int) (string, int) {
+	if start > len(value) {
+		return "", -1
+	}
+	rest := value[start:]
+	index := strings.IndexByte(rest, '.')
+	if index < 0 {
+		return rest, -1
+	}
+	return rest[:index], start + index + 1
 }
 
 func registryCandidatePenalty(base float64, count int) float64 {

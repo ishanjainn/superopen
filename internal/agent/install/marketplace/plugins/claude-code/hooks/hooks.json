@@ -29,12 +29,22 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "*",
+        "matcher": "Bash|Grep",
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=cc --event=PreToolUse",
-            "timeout": 15
+            "command": "so coding hook --vendor=cc --event=PreToolUse --kind=search",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "so coding hook --vendor=cc --event=PreToolUse --kind=read",
+            "timeout": 5
           }
         ]
       }
@@ -62,6 +72,18 @@
           {
             "type": "command",
             "command": "so graph refresh --detach",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "so coding hook --vendor=cc --event=SubagentStart",
             "timeout": 15
           }
         ]

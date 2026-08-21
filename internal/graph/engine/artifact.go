@@ -28,7 +28,7 @@ type ArtifactManifest struct {
 	Format         int    `json:"format"`
 	Protocol       int    `json:"protocol"`
 	Schema         int    `json:"schema"`
-	AssetRevision string `json:"asset_revision"`
+	AssetRevision  string `json:"asset_revision"`
 	Project        string `json:"project"`
 	Generation     string `json:"generation"`
 	DatabaseSHA256 string `json:"database_sha256"`

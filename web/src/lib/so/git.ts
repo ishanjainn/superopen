@@ -55,7 +55,7 @@ export function gitRemoteURL(repo: string): string | null {
   if (fileExists(repo)) {
     try {
       url =
-        execFileSync("git", ["-C", repo, "remote", "get-url", "origin"], {
+        execFileSync(/* turbopackIgnore: true */"git", ["-C", repo, "remote", "get-url", "origin"], {
           encoding: "utf8",
           timeout: 2000,
           stdio: ["ignore", "pipe", "ignore"],
@@ -82,7 +82,7 @@ function gitConfig(repo: string, key: string): string {
   if (!fileExists(repo)) return "";
   try {
     return (
-      execFileSync("git", ["-C", repo, "config", "--get", key], {
+      execFileSync(/* turbopackIgnore: true */"git", ["-C", repo, "config", "--get", key], {
         encoding: "utf8",
         timeout: 2000,
         stdio: ["ignore", "pipe", "ignore"],
@@ -146,7 +146,7 @@ let cachedCliVersion: string | null = null;
 function cliVersion(): string {
   if (cachedCliVersion) return cachedCliVersion;
   try {
-    const out = execFileSync(soBinary(), ["version"], {
+    const out = execFileSync(/* turbopackIgnore: true */soBinary(), ["version"], {
       encoding: "utf8",
       timeout: 2000,
       stdio: ["ignore", "pipe", "ignore"],

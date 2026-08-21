@@ -41,3 +41,17 @@ func TestTraceCompactAmbiguous(t *testing.T) {
 		t.Fatalf("%q", text)
 	}
 }
+
+func TestHelpForQuery(t *testing.T) {
+	hints := format.HelpForQuery(api.QueryResult{
+		Seeds: []api.RankedNode{{
+			Node: api.Node{Name: "bar", QualifiedName: "pkg.Foo.bar"},
+		}},
+	})
+	if len(hints) != 1 {
+		t.Fatalf("len=%d hints=%v", len(hints), hints)
+	}
+	if hints[0] != "so graph snippet pkg.Foo.bar" {
+		t.Fatalf("snippet hint: %q", hints[0])
+	}
+}

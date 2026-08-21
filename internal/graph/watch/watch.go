@@ -96,6 +96,9 @@ func (r *Runner) Stop() {
 }
 
 func (r *Runner) tick(ctx context.Context) {
+	if !paths.Managed(r.Root) {
+		return
+	}
 	sig := gitSignature(r.Root)
 	r.mu.Lock()
 	unchanged := sig != "" && sig == r.lastSig
@@ -106,7 +109,7 @@ func (r *Runner) tick(ctx context.Context) {
 	if unchanged || sig == "" {
 		return
 	}
-	if engine.BuildBusy(r.Root) {
+	if engine.BuildBusy(r.Root) || engine.BuildPoolFull() {
 		return
 	}
 	var result api.BuildResult

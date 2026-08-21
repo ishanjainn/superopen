@@ -122,9 +122,9 @@ func (o *Out) flushHints() {
 	if o.Flags.JSON || len(o.hints) == 0 {
 		return
 	}
-	fmt.Fprintln(o.W, "next:")
+	fmt.Fprintf(o.W, "help[%d]:\n", len(o.hints))
 	for _, h := range o.hints {
-		fmt.Fprintf(o.W, "  - %s\n", h)
+		fmt.Fprintf(o.W, "  %s\n", h)
 	}
 }
 

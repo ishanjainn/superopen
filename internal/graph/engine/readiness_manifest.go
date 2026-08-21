@@ -18,11 +18,11 @@ var (
 )
 
 type readinessManifestDocument struct {
-	AssetRevision string                       `json:"asset_revision"`
-	SourceRevision string                       `json:"source_revision"`
-	Project        string                       `json:"project"`
-	GateProofs     map[string]readinessGateProof   `json:"gate_proofs"`
-	GateOverrides  map[string]string            `json:"gate_overrides,omitempty"`
+	AssetRevision  string                        `json:"asset_revision"`
+	SourceRevision string                        `json:"source_revision"`
+	Project        string                        `json:"project"`
+	GateProofs     map[string]readinessGateProof `json:"gate_proofs"`
+	GateOverrides  map[string]string             `json:"gate_overrides,omitempty"`
 }
 
 type readinessGateProof struct {

@@ -44,9 +44,12 @@ func loadPretrainedVectors(files fs.FS, tokensPath, vectorsPath, tokenDigest, ve
 	if err != nil {
 		return nil, err
 	}
-	vectorBytes, err := fs.ReadFile(files, vectorsPath)
+	vectorBytes, err := mmapFSFile(files, vectorsPath)
 	if err != nil {
-		return nil, err
+		vectorBytes, err = fs.ReadFile(files, vectorsPath)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if digestBytes(tokenBytes) != tokenDigest || digestBytes(vectorBytes) != vectorDigest {
 		return nil, fmt.Errorf("pretrained semantic assets failed content verification")

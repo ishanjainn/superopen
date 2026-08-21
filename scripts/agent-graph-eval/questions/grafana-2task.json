@@ -1,0 +1,40 @@
+{
+  "corpus": "grafana/grafana",
+  "instruction": "question-only prompt, identical for every arm; no mention of Superopen, graph, or memory",
+  "questions": [
+    {
+      "id": "provisioning-error-path",
+      "kind": "task",
+      "prompt": "Dashboard YAML provisioning fails to read its config with the wrap \"Failed to read dashboards config\". Include the config directory in that error. One small change, no refactor.",
+      "key_facts": [
+        {"id": "wrap", "aliases": ["Failed to read dashboards config"]},
+        {"id": "dir", "aliases": ["configDirectory", "config directory"]}
+      ],
+      "expect_path_contains": [
+        {
+          "path": "pkg/services/provisioning/dashboards/dashboard.go",
+          "needles": ["Failed to read dashboards config", "configDirectory"]
+        }
+      ]
+    },
+    {
+      "id": "provisioning-skip-log",
+      "kind": "task",
+      "prompt": "Continue the dashboard YAML provisioning work from last session. Do not revert that error wrap. If files that are not .yaml/.yml in the provisioning folder are skipped silently, log that skip.",
+      "key_facts": [
+        {"id": "skip", "aliases": ["yaml", "yml", "skip"]},
+        {"id": "keep", "aliases": ["Failed to read dashboards config", "configDirectory"]}
+      ],
+      "expect_memory": true,
+      "expect_diff_files": [
+        "pkg/services/provisioning/dashboards/config_reader.go"
+      ],
+      "expect_path_contains": [
+        {
+          "path": "pkg/services/provisioning/dashboards/dashboard.go",
+          "needles": ["Failed to read dashboards config", "configDirectory"]
+        }
+      ]
+    }
+  ]
+}

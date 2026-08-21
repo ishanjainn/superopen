@@ -31,3 +31,18 @@ func TestFindEnvironmentAccessesDoesNotParseEmbeddedOtherLanguages(t *testing.T)
 		t.Fatalf("embedded Python was treated as Go environment access: %v", got)
 	}
 }
+
+func TestEnvironmentAccessesFromCalls(t *testing.T) {
+	parsed := ParsedSyntaxFile{
+		File: FileRecord{Language: "go", Path: "main.go"},
+		Extraction: FileResult{Calls: []SyntaxFact{
+			{Name: "os.Getenv", FirstStringArg: "HOME", StartByte: 10, Scope: "load"},
+			{Name: "os.LookupEnv", FirstStringArg: "CODEX_HOME", StartByte: 40, Scope: "load"},
+			{Name: "fmt.Println", FirstStringArg: "HOME", StartByte: 80, Scope: "load"},
+		}},
+	}
+	got := environmentAccessesFromCalls(parsed)
+	if len(got) != 2 || got[0].name != "HOME" || got[1].name != "CODEX_HOME" || got[0].owner != "load" {
+		t.Fatalf("got=%#v", got)
+	}
+}

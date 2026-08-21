@@ -99,6 +99,15 @@ func nativeArtifactLeaf(use string, operation api.Operation) *cobra.Command {
 
 func nativeGraphLeaf(use, short string, operation api.Operation, params func(*cobra.Command, []string) any) *cobra.Command {
 	return &cobra.Command{Use: use, Short: short, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		if operation == api.OpBuild {
+			root := repoRoot()
+			if len(args) == 1 {
+				root = args[0]
+			}
+			if skipIfUnmanaged(cmd, root) {
+				return nil
+			}
+		}
 		client, err := client.Resolve()
 		if err != nil {
 			return err
@@ -112,17 +121,23 @@ func nativeGraphLeaf(use, short string, operation api.Operation, params func(*co
 			if err := json.Unmarshal(result, &query); err != nil {
 				return err
 			}
+			payload := any(query)
+			if !out().Flags.Full {
+				payload = format.QueryAgentJSON(query)
+			}
+			out().Next(format.HelpForQuery(query)...)
 			return out().HumanOrJSON("graph_query", func() {
 				fmt.Fprint(cmd.OutOrStdout(), query.Text)
 				if !strings.HasSuffix(query.Text, "\n") {
 					fmt.Fprintln(cmd.OutOrStdout())
 				}
-			}, query)
+			}, payload)
 		}
 		var display any
 		if err := json.Unmarshal(result, &display); err != nil {
 			return err
 		}
+		out().Next(graphHelp(operation, result)...)
 		return out().HumanOrJSON("graph_"+strings.ReplaceAll(string(operation), "_", "-"), func() {
 			text := compactGraphText(operation, result)
 			fmt.Fprint(cmd.OutOrStdout(), text)
@@ -131,6 +146,27 @@ func nativeGraphLeaf(use, short string, operation api.Operation, params func(*co
 			}
 		}, display)
 	}}
+}
+
+func graphHelp(operation api.Operation, result json.RawMessage) []string {
+	switch operation {
+	case api.OpSearch:
+		var search api.SearchResult
+		if json.Unmarshal(result, &search) == nil {
+			return format.HelpForSearch(search)
+		}
+	case api.OpTrace:
+		var trace api.TraceResult
+		if json.Unmarshal(result, &trace) == nil {
+			return format.HelpForTrace(trace)
+		}
+	case api.OpSnippet:
+		var snippet api.SnippetResult
+		if json.Unmarshal(result, &snippet) == nil {
+			return format.HelpForSnippet(snippet)
+		}
+	}
+	return nil
 }
 
 func compactGraphText(operation api.Operation, result json.RawMessage) string {

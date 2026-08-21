@@ -8,8 +8,54 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if first != second {
 		t.Fatalf("merge not idempotent:\n%s\n---\n%s", first, second)
 	}
-	if !containsAll(first, beginMarker, endMarker, "Superopen code graph", "Superopen memory") {
+	if !containsAll(first, beginMarker, endMarker, "so graph query") {
 		t.Fatalf("missing markers/content: %s", first)
+	}
+	if contains(first, "so-verify") || contains(first, "so-scout") || contains(first, "so-auditor") {
+		t.Fatalf("always-on block must not name subagents: %s", first)
+	}
+	if contains(first, "MCP") || contains(first, "--json") {
+		t.Fatalf("always-on block must not mention MCP or --json: %s", first)
+	}
+	if contains(first, "run `so init` once") {
+		t.Fatalf("block must not auto-init unmanaged repos: %s", first)
+	}
+	if !contains(first, "ignore Superopen entirely") {
+		t.Fatalf("block must gate unmanaged repos: %s", first)
+	}
+	if !contains(first, "Do not spawn Explore") {
+		t.Fatalf("block must close the Explore hole: %s", first)
+	}
+	if contains(first, "so graph search") {
+		t.Fatalf("always-on block must not list so graph search as the default: %s", first)
+	}
+}
+
+func TestNudgesAreMandatoryOneLiners(t *testing.T) {
+	if contains(SearchNudge(), "so graph search") || contains(ReadNudge(), "so graph search") {
+		t.Fatal("nudges must not list so graph search (spray menu)")
+	}
+	if !contains(SearchNudge(), "MANDATORY") || !contains(ReadNudge(), "MANDATORY") {
+		t.Fatal("nudges must stay MANDATORY")
+	}
+	if !contains(ReadNudge(), "so graph snippet") || !contains(ReadNudge(), "so graph trace") {
+		t.Fatal("read nudge should list snippet/trace as focused follow-ups")
+	}
+}
+
+func TestCursorRuleIsShortGate(t *testing.T) {
+	rule := CursorRule()
+	if !contains(rule, "ignore Superopen entirely") {
+		t.Fatalf("missing gate: %s", rule)
+	}
+	if contains(rule, "memory_search") {
+		t.Fatalf("alwaysApply rule must not dump the memory playbook: %s", rule)
+	}
+	if !contains(rule, "query") {
+		t.Fatalf("alwaysApply rule should mention query-first: %s", rule)
+	}
+	if !contains(rule, "subagent") {
+		t.Fatalf("alwaysApply rule must apply to spawned subagents: %s", rule)
 	}
 }
 

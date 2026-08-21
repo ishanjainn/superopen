@@ -56,8 +56,11 @@ var typeSyntax = map[string]bool{
 	"builtin_type": true, "type_annotation": true, "simple_type": true,
 }
 
-func syntaxMinHash(root SyntaxNode) (minHashFingerprint, bool) {
-	tokens := collectMinHashTokens(root)
+func syntaxMinHash(root syntaxView) (minHashFingerprint, bool) {
+	return minHashFromTokens(collectMinHashTokens(root))
+}
+
+func minHashFromTokens(tokens []string) (minHashFingerprint, bool) {
 	var fingerprint minHashFingerprint
 	for index := range fingerprint {
 		fingerprint[index] = math.MaxUint32
@@ -91,23 +94,25 @@ func syntaxMinHash(root SyntaxNode) (minHashFingerprint, bool) {
 	return fingerprint, len(unique) >= minHashMinUniqueTrigrams
 }
 
-func collectMinHashTokens(root SyntaxNode) []string {
+func collectMinHashTokens(root syntaxView) []string {
 	tokens := make([]string, 0, 128)
-	stack := make([]SyntaxNode, 1, minHashWalkStack)
+	stack := make([]syntaxView, 1, minHashWalkStack)
 	stack[0] = root
 	for len(stack) > 0 && len(tokens) < minHashMaxTokens {
 		last := len(stack) - 1
 		node := stack[last]
 		stack = stack[:last]
-		if len(node.Children) == 0 {
-			if node.Type != "" {
-				tokens = append(tokens, normalizeSyntaxType(node.Type))
+		if node == nil {
+			continue
+		}
+		count := node.ChildCount()
+		if count == 0 {
+			if node.Kind() != "" {
+				tokens = append(tokens, normalizeSyntaxType(node.Kind()))
 			}
 			continue
 		}
-		for index := len(node.Children) - 1; index >= 0 && len(stack) < minHashWalkStack; index-- {
-			stack = append(stack, node.Children[index])
-		}
+		stack = viewPushChildrenReversed(node, stack, minHashWalkStack)
 	}
 	return tokens
 }

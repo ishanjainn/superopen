@@ -65,6 +65,23 @@ jobs:
         # default 10m package timeout on slower runners.
         run: go test -race -timeout 30m -count=1 ./...
 
+  test-native:
+    name: Test / Native Tree-sitter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.mod
+          check-latest: true
+      - name: go test tsnative
+        env:
+          CGO_ENABLED: "1"
+        run: go test -tags tsnative,sqlite_fts5 -timeout 30m -count=1 ./internal/graph/engine ./internal/graph/engine/tsnative
+
   cross-compile:
     name: Build / ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ubuntu-latest

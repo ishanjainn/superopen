@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
@@ -51,22 +52,37 @@ func ParseSyntaxRepository(ctx context.Context, parser SyntaxParser, root, proje
 	if workers < 1 {
 		workers = 1
 	}
-	if workers > 32 {
-		workers = 32
+	if workers > maxParseWorkers {
+		workers = maxParseWorkers
 	}
 	discoveryPosition := make(map[string]int, len(files))
 	for index, rel := range files {
 		discoveryPosition[filepath.ToSlash(rel)] = index
 	}
 	tasks := make(chan string)
-	results := make(chan syntaxOutcome, len(files))
+	results := make(chan syntaxOutcome, workers*2)
+	var parsedCount atomic.Int64
+	total := int64(len(files))
+	factory, _ := parser.(parseSessionFactory)
 	var group sync.WaitGroup
 	for worker := 0; worker < workers; worker++ {
 		group.Add(1)
 		go func() {
 			defer group.Done()
+			local := parser
+			if factory != nil {
+				session := factory.NewParseSession(ctx)
+				defer session.Close(ctx)
+				local = session
+			}
 			for rel := range tasks {
-				results <- parseSyntaxFile(ctx, parser, root, project, rel, overrides)
+				outcome := parseSyntaxFile(ctx, local, root, project, rel, overrides)
+				reclaimAfterParse()
+				done := parsedCount.Add(1)
+				if lang := outcomeLanguage(outcome); lang != "" && (done%10 == 0 || done == total) {
+					reportIndexProgress("parse %d/%d %s", done, total, lang)
+				}
+				results <- outcome
 			}
 		}()
 	}
@@ -85,7 +101,7 @@ func ParseSyntaxRepository(ctx context.Context, parser SyntaxParser, root, proje
 		close(results)
 	}()
 
-	repository := SyntaxRepository{Root: root, GoModule: readGoModulePath(root), Coverage: api.Coverage{IndexMode: "tree-sitter-wasm", RecordingStatus: "complete"}}
+	repository := SyntaxRepository{Root: root, GoModule: readGoModulePath(root), Coverage: api.Coverage{IndexMode: parserIndexMode(parser), RecordingStatus: "complete"}}
 	var generationParts []string
 	for result := range results {
 		if result.err != nil {
@@ -160,9 +176,8 @@ func parseSyntaxFile(ctx context.Context, parser SyntaxParser, root, project, re
 	if !ok {
 		return syntaxOutcome{}
 	}
-	hash := sha256.Sum256(body)
 	record := FileRecord{
-		Project: project, Path: filepath.ToSlash(rel), SHA256: hex.EncodeToString(hash[:]),
+		Project: project, Path: filepath.ToSlash(rel), SHA256: fileContentDigest(body),
 		Size: int64(len(body)), Language: detection.Language,
 	}
 	if info, statErr := os.Stat(abs); statErr == nil {
@@ -177,7 +192,10 @@ func parseSyntaxFile(ctx context.Context, parser SyntaxParser, root, project, re
 		return syntaxOutcome{file: &ParsedSyntaxFile{File: record, Detection: detection}, generation: generation,
 			coverage: &api.CoverageRow{Path: record.Path, Kind: "transform", Detail: "container has no registered transform"}}
 	}
-	tree, err := parser.Parse(ctx, detection.Grammar, body)
+	extraction, err := extractSyntaxFile(ctx, parser, detection.Language, detection.Grammar, body)
+	if err == nil {
+		extraction = enrichCFamilyExtract(ctx, parser, detection.Language, detection.Grammar, record.Path, body, extraction)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return syntaxOutcome{err: ctx.Err()}
@@ -187,19 +205,23 @@ func parseSyntaxFile(ctx context.Context, parser SyntaxParser, root, project, re
 			coverage: &api.CoverageRow{Path: record.Path, Kind: "parse", Detail: err.Error()},
 		}
 	}
-	extraction, err := ExtractSyntaxFacts(detection.Language, tree, body)
-	if err != nil {
-		return syntaxOutcome{
-			file: &ParsedSyntaxFile{File: record, Detection: detection}, generation: generation,
-			coverage: &api.CoverageRow{Path: record.Path, Kind: "extract", Detail: err.Error()},
-		}
-	}
-	parsed := &ParsedSyntaxFile{File: record, Detection: detection, Extraction: extraction, Body: body}
+	parsed := &ParsedSyntaxFile{File: record, Detection: detection, Extraction: extraction}
 	result := syntaxOutcome{file: parsed, generation: generation}
 	if extraction.Partial {
 		result.coverage = &api.CoverageRow{Path: record.Path, Kind: "parse_partial", Detail: "Tree-sitter recovered a partial syntax tree"}
 	}
 	return result
+}
+
+func extractSyntaxFile(ctx context.Context, parser SyntaxParser, language, grammar string, body []byte) (FileResult, error) {
+	if extractor, ok := parser.(factExtractor); ok {
+		return extractor.ExtractFacts(ctx, language, grammar, body)
+	}
+	tree, err := parser.Parse(ctx, grammar, body)
+	if err != nil {
+		return FileResult{}, err
+	}
+	return ExtractSyntaxFacts(language, tree, body)
 }
 
 func parseObjectScriptExport(ctx context.Context, parser SyntaxParser, record FileRecord, detection DetectedLanguage, generation string, body []byte) syntaxOutcome {
@@ -235,10 +257,17 @@ func parseObjectScriptExport(ctx context.Context, parser SyntaxParser, record Fi
 		combined.Partial = combined.Partial || extraction.Partial
 	}
 	sortSyntaxFacts(&combined)
-	parsed := &ParsedSyntaxFile{File: record, Detection: detection, Extraction: combined, Body: body}
+	parsed := &ParsedSyntaxFile{File: record, Detection: detection, Extraction: combined}
 	result := syntaxOutcome{file: parsed, generation: generation}
 	if combined.Partial {
 		result.coverage = &api.CoverageRow{Path: record.Path, Kind: "parse_partial", Detail: "Tree-sitter recovered a partial transcoded syntax tree"}
 	}
 	return result
+}
+
+func outcomeLanguage(outcome syntaxOutcome) string {
+	if outcome.file != nil && outcome.file.File.Language != "" {
+		return outcome.file.File.Language
+	}
+	return ""
 }

@@ -57,8 +57,8 @@ function readProjectsFile(): ProjectsFile {
 
 function writeProjectsFile(value: ProjectsFile) {
   const path = projectsFile();
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ projects: value.projects, active_project_id: value.active_project_id || "" }, null, 2)}\n`, "utf8");
+  mkdirSync(/* turbopackIgnore: true */ dirname(path), { recursive: true });
+  writeFileSync(/* turbopackIgnore: true */ path, `${JSON.stringify({ projects: value.projects, active_project_id: value.active_project_id || "" }, null, 2)}\n`, "utf8");
 }
 
 export function listProjects(activeRoot = processRepoRoot()): { projects: Project[]; active: Project } {
@@ -105,7 +105,7 @@ export function removeProject(selector: string, purge = false): RemoveProjectRes
   writeProjectsFile(value);
   if (purge) {
     if (basename(soPath.replace(/\/+$/, "")) !== ".so") throw new Error(`refusing to delete non-.so path: ${soPath}`);
-    rmSync(soPath, { recursive: true, force: true });
+    rmSync(/* turbopackIgnore: true */ soPath, { recursive: true, force: true });
   }
   return { project, unregistered: true, purged_so: purge, so_path: soPath, repo_missing: Boolean(project.missing) };
 }

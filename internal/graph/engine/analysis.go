@@ -308,16 +308,17 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 	}
 	budget := req.Budget
 	if budget <= 0 {
-		budget = 1200
+		budget = queryDefaultBudget
 	}
-	maxChars := budget * 4
+	maxChars := budget * queryCharsPerToken
 
 	terms := queryTerms(req.Question, req.Terms)
-	candidates, err := s.querySeedCandidates(ctx, req.Project)
+	candidates, files, err := s.querySeedCandidates(ctx, req.Project, req.Question, terms)
 	if err != nil {
 		return api.QueryResult{}, err
 	}
 	seeded := scoreQuerySeeds(candidates, terms)
+	seeded = prependFileSeeds(seeded, files)
 	if len(seeded.seeds) == 0 {
 		return api.QueryResult{
 			Text:   "No matching nodes found.",
@@ -326,189 +327,62 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 	}
 
 	communityByID, _ := s.communityLabelByNodeID(ctx, req.Project)
+	degrees, err := s.nodeDegrees(ctx, req.Project)
+	if err != nil {
+		return api.QueryResult{}, err
+	}
 
 	result := api.QueryResult{Seeds: seeded.seeds}
-	seenNodes := map[int64]bool{}
 	seenEdges := map[int64]bool{}
-	type nodeHit struct {
-		node api.Node
-		hop  int
-		seed bool
-	}
-	nodesByID := map[int64]nodeHit{}
-	var edgeLines []string
+	nodesByID := map[int64]queryNodeHit{}
 	seedOrder := make([]int64, 0, len(seeded.seeds))
 	seedLabels := make([]string, 0, len(seeded.seeds))
-	expandLimit := len(seeded.primary)
-	if expandLimit == 0 {
-		expandLimit = seedMaxK
-		if expandLimit > len(seeded.seeds) {
-			expandLimit = len(seeded.seeds)
-		}
-	}
-	expandIDs := map[int64]bool{}
-	for i, seed := range seeded.primary {
-		if i >= seedMaxK {
-			break
-		}
-		expandIDs[seed.ID] = true
-	}
-	if len(expandIDs) == 0 {
-		for i, seed := range seeded.seeds {
-			if i >= expandLimit {
-				break
-			}
-			expandIDs[seed.ID] = true
-		}
-	}
-
+	seedIDs := map[int64]bool{}
 	for _, seed := range seeded.seeds {
 		seedOrder = append(seedOrder, seed.ID)
-		seedLabels = append(seedLabels, seed.Name)
-		nodesByID[seed.ID] = nodeHit{node: seed.Node, hop: 0, seed: true}
-		seenNodes[seed.ID] = true
+		seedLabels = append(seedLabels, queryNodeDisplayName(seed.Node))
+		seedIDs[seed.ID] = true
+		nodesByID[seed.ID] = queryNodeHit{node: seed.Node, hop: 0, seed: true, deg: degrees[seed.ID]}
 		result.Nodes = append(result.Nodes, seed.Node)
-
-		// Expand only gap-selected primary seeds; per-term guarantee seeds stay
-		// as NODE anchors without flooding BFS neighborhoods.
-		if !expandIDs[seed.ID] {
-			continue
-		}
-
-		trace, err := s.Trace(ctx, api.TraceRequest{
-			Project: seed.Project, Start: seed.QualifiedName, Direction: "both", Depth: depth, Limit: 80,
-		})
-		if err != nil || trace.Status == "ambiguous" {
-			continue
-		}
-		for _, path := range trace.Paths {
-			for _, step := range path {
-				if !seenNodes[step.Node.ID] {
-					seenNodes[step.Node.ID] = true
-					result.Nodes = append(result.Nodes, step.Node)
-					nodesByID[step.Node.ID] = nodeHit{node: step.Node, hop: step.Hop}
-				} else if existing := nodesByID[step.Node.ID]; !existing.seed && step.Hop < existing.hop {
-					existing.hop = step.Hop
-					nodesByID[step.Node.ID] = existing
-				}
-				if step.Via == nil || seenEdges[step.Via.ID] {
-					continue
-				}
-				seenEdges[step.Via.ID] = true
-				result.Edges = append(result.Edges, *step.Via)
-				previous := path[0].Node
-				if step.Hop > 0 && len(path) >= 2 {
-					previous = path[len(path)-2].Node
-				}
-				from, to := previous.Name, step.Node.Name
-				if step.Via.SourceID == step.Node.ID {
-					from, to = to, from
-				}
-				at := ""
-				if step.Via.Evidence != nil && step.Via.Evidence.Location != nil && step.Via.Evidence.Location.StartLine > 0 {
-					at = fmt.Sprintf(" at=%s:L%d", step.Via.Evidence.Location.File, step.Via.Evidence.Location.StartLine)
-				}
-				line := fmt.Sprintf("EDGE %s --%s --> %s%s", from, step.Via.Type, to, at)
-				if queryEdgePreferred(step.Via.Type) {
-					edgeLines = append([]string{line}, edgeLines...)
-				} else {
-					edgeLines = append(edgeLines, line)
-				}
-			}
-		}
 	}
 
-	orderedNodes := make([]nodeHit, 0, len(nodesByID))
-	for _, id := range seedOrder {
-		if hit, ok := nodesByID[id]; ok {
-			orderedNodes = append(orderedNodes, hit)
+	expand := seeded.primary
+	if len(expand) == 0 {
+		n := seedMaxK
+		if n > len(seeded.seeds) {
+			n = len(seeded.seeds)
 		}
+		expand = seeded.seeds[:n]
+	} else if len(expand) > seedMaxK {
+		expand = expand[:seedMaxK]
 	}
-	rest := make([]nodeHit, 0, len(nodesByID))
-	for id, hit := range nodesByID {
-		if hit.seed {
-			continue
-		}
-		_ = id
-		rest = append(rest, hit)
+
+	edgeLines, err := s.queryExpandBFS(ctx, expand, seedIDs, depth, degrees, nodesByID, seenEdges, &result.Edges)
+	if err != nil {
+		return api.QueryResult{}, err
 	}
-	sort.SliceStable(rest, func(i, j int) bool {
-		if rest[i].hop != rest[j].hop {
-			return rest[i].hop < rest[j].hop
-		}
-		return rest[i].node.QualifiedName < rest[j].node.QualifiedName
-	})
-	orderedNodes = append(orderedNodes, rest...)
+
+	orderedNodes := orderQueryNodes(seedOrder, nodesByID)
+	result.Nodes = result.Nodes[:0]
+	for _, hit := range orderedNodes {
+		result.Nodes = append(result.Nodes, hit.node)
+	}
 
 	var body strings.Builder
 	for _, hit := range orderedNodes {
-		community := communityByID[hit.node.ID]
-		if community == "" {
-			community = packagePrefix(hit.node.QualifiedName)
-		}
-		fmt.Fprintf(&body, "NODE %s [src=%s loc=L%d community=%s]\n",
-			hit.node.Name, hit.node.Location.File, hit.node.Location.StartLine, community)
+		body.WriteString(formatQueryNodeLine(hit, communityByID))
 	}
 	for _, line := range edgeLines {
 		body.WriteString(line)
 		body.WriteByte('\n')
 	}
 
-	snippetSeeds := querySnippetSeeds(seeded.seeds, 3)
-	for _, seed := range snippetSeeds {
-		snippet, err := s.Snippet(ctx, api.SnippetRequest{
-			Project: seed.Project, QualifiedName: seed.QualifiedName, ContextLines: 0,
-		})
-		if err != nil || strings.TrimSpace(snippet.Code) == "" {
-			continue
-		}
-		fmt.Fprintf(&body, "\n### snippet %s (%s:%d-%d)\n%s\n",
-			seed.QualifiedName, snippet.Location.File, snippet.Location.StartLine, snippet.Location.EndLine, snippet.Code)
-	}
-
 	header := fmt.Sprintf("Traversal: BFS depth=%d | Start: %v | %d nodes found\n\n", depth, seedLabels, len(orderedNodes))
-	output := header + body.String()
-	truncated := false
-	if len(output) > maxChars {
-		truncated = true
-		cutAt := strings.LastIndex(output[:maxChars], "\n")
-		if cutAt < len(header) {
-			cutAt = maxChars
-		}
-		// Never cut seed NODE block.
-		seedBlockEnd := len(header)
-		for i := 0; i < len(seedOrder) && i < len(orderedNodes); i++ {
-			line := fmt.Sprintf("NODE %s [src=%s loc=L%d community=%s]\n",
-				orderedNodes[i].node.Name, orderedNodes[i].node.Location.File, orderedNodes[i].node.Location.StartLine, communityByID[orderedNodes[i].node.ID])
-			seedBlockEnd += len(line)
-		}
-		if cutAt < seedBlockEnd {
-			cutAt = seedBlockEnd
-			if cutAt > len(output) {
-				cutAt = len(output)
-			}
-		}
-		shownNodes := strings.Count(output[:cutAt], "\nNODE ")
-		if strings.Contains(output[:cutAt], "\n\nNODE ") || strings.HasPrefix(strings.TrimPrefix(output[len(header):cutAt], "\n"), "NODE ") {
-			// recounted via prefix
-		}
-		totalNodes := len(orderedNodes)
-		if shownNodes == 0 && totalNodes > 0 {
-			shownNodes = strings.Count(output[:cutAt], "NODE ")
-		}
-		cutCount := totalNodes - shownNodes
-		if cutCount < 0 {
-			cutCount = 0
-		}
-		output = fmt.Sprintf(
-			"[!] TRUNCATED: showing %d of %d nodes (~%d-token budget). The answer may be among the %d cut nodes — raise the token budget (CLI: --budget) or narrow the query (e.g. edge filter CALLS, or graph snippet for a specific symbol).\n\n%s\n... (truncated — %d more nodes cut by ~%d-token budget. Narrow with graph_trace or graph_snippet for a specific symbol)",
-			shownNodes, totalNodes, budget, cutCount, output[:cutAt], cutCount, budget,
-		)
-	}
+	output, truncated := applyQueryBudget(header, body.String(), len(seedOrder), orderedNodes, communityByID, budget, maxChars)
 
 	result.Text = output
 	result.Budget.RequestedTokens = budget
-	result.Budget.ReturnedTokens = (len(output) + 3) / 4
+	result.Budget.ReturnedTokens = (len(output) + queryCharsPerToken - 1) / queryCharsPerToken
 	result.Budget.Truncated = truncated
 	result.Page.Total = len(result.Nodes)
 	result.Page.Truncated = truncated

@@ -1,13 +1,11 @@
 ---
 name: so
-description: "Superopen native code graph and coding-session observability. Use automatically for structural codebase questions: architecture, callers/callees, where X is defined, dependencies, impact analysis, how does Y work, explore the codebase, find symbols, trace call chains. Also use when initializing a repo or inspecting agent sessions."
+description: "Use for any question about a codebase, its architecture, file relationships, or project content — especially when .so/ exists, where the question should be treated as a Superopen graph query first. Native code graph with query, path, and snippet tools. If .so/ is missing, do not run so or so init unless the user explicitly asks."
 ---
 
 # Superopen (`/so`)
 
-Superopen provides a native repository code graph and observability-derived coding sessions.
-
-**Use the graph automatically** for structural questions — do not wait for the user to say `/so`.
+**If `test -d .so` is false, stop.** Do not run `so` and do not run `so init` unless the user explicitly asked to initialize this repo.
 
 ## Binary
 
@@ -19,119 +17,18 @@ __SO_BIN__
 
 If that path is missing, fall back to `$SUPEROPEN_SO_BIN` or `so` on `PATH`.
 
-## Prerequisites
+## Fast path — existing graph
 
-1. Run **`so install` once per machine** (from any directory) to install this skill, observability hooks, durable graph-first guidance, and user-global MCP.
-2. In a repository, run **`/so init`** only when `.so/` is missing. Check with `test -d .so` — `ls` hides dot directories. If `.so/` exists, the graph is already there; do not run `so init` (it prints immediately and no-ops unless `--force`).
-3. `so init` defaults to the **repository root** (nearest existing `.so` or git top-level). Use `--root` / `SUPEROPEN_ROOT` only for an explicit nested package graph.
+When `.so/` exists and the request is about the codebase (how does X work, where is Y, callers, files, architecture — not an explicit rebuild): **run `so graph query "<question>"` immediately.** Do not detect. Do not spawn Explore/Agent. Do not grep first. The graph is already built — use it.
 
-## Graph playbook (prefer graph over Read)
-
-Do **not** Read/Grep/Glob source until graph/snippet context is insufficient.
-
-| Intent | CLI (default) | MCP (only if listed) |
-|--------|---------------|----------------------|
-| Natural-language / how does X work | `__SO_BIN__ --json graph query "..."` | `graph_query` |
-| Find a symbol | `__SO_BIN__ --json graph search <name>` | `graph_search` |
-| Function body | `__SO_BIN__ --json graph snippet <qn>` | `graph_snippet` |
-| Callers / callees (slim) | `__SO_BIN__ --json graph trace <qn> --direction outgoing` | `graph_trace` |
-| Architecture overview | `__SO_BIN__ --json graph architecture` | `graph_architecture` |
-
-**Stop-early loop (prefer fewer turns):**
-1. Run **one** `graph query` with the full question.
-2. If the answer is already clear from NODE/EDGE lines and any included snippets, **stop**.
-3. Otherwise `graph search` for the exact symbol, then `graph snippet <qualified_name>`.
-4. Use `graph trace` only when you need callers/callees; prefer a fully qualified name (short names may return an ambiguous suggestion list).
-5. Read source files only if graph/snippet context is still insufficient.
-
-Do **not** run long multi-step graph checklists after a good query/snippet already answers the question.
-
-## Memory playbook (prior work)
-
-Use memory for what this repo already decided or tried. Do not dump `.so/sessions/*/events.jsonl`.
-
-| Intent | CLI (default) | MCP (only if listed) |
-|--------|---------------|----------------------|
-| Find a prior decision / moment | `__SO_BIN__ --json memory search "..."` | `memory_recall` / `memory_search` |
-| Read one hit | `__SO_BIN__ --json memory get <id>` | `memory_get` |
-| Save a rollup (at most once) | `__SO_BIN__ memory capture --request … --learned … --next …` | `memory_capture` |
-| Correct a stale fact | `__SO_BIN__ memory contradict <id> --text "…"` | `memory_contradict` |
-| Teach a convention | `__SO_BIN__ memory teach --text "…"` | `memory_teach` |
-
-Memory is hints, not authority. Distill at most once when SessionStart asks; skip if unrelated. Graph answers “where is X”; memory answers “what did we decide.”
-
-## Graph vocabulary
-
-Node labels: `Function`, `Method`, `Class`, `Struct`, `Interface`, `Type`, `Variable`, `EnvVar`,
-`Decorator`, `Route`, `Module`, `Package`, `File`, `Folder`, `Section`, `Branch`, `Project`.
-
-Edge types: `CALLS`, `CALL_REFERENCE`, `DEFINES`, `DEFINES_METHOD`, `IMPORTS`, `DEPENDS_ON`,
-`IMPLEMENTS`, `OVERRIDE`, `USAGE`, `WRITES`, `RAISES`, `CONFIGURES`, `DECORATES`, `HTTP_CALLS`,
-`TESTS`, `TESTS_FILE`, `CONTAINS_FILE`, `CONTAINS_FOLDER`, `FILE_CHANGES_WITH`, `HAS_BRANCH`,
-`SIMILAR_TO`, `SEMANTICALLY_RELATED`.
-
-Run `__SO_BIN__ graph schema` for this repository's live counts and edge properties.
-For query recipes (dead code, fan-in/fan-out, routes, config keys, impact), load
-`references/query.md` — do not paste it in unless the task needs it.
-
-## Delegate to a subagent for multi-step graph work
-
-`so install` ships three subagents. Delegating keeps the exploration turns and their tokens
-out of the parent conversation:
-
-| Agent | Use when |
-|-------|----------|
-| `so-scout` | Fast provisional lookup — where is X, what calls Y. No absence claims. |
-| `so-verify` | Default. Task-directed evidence with snippets for anything you will act on. |
-| `so-auditor` | Bounded-scope exhaustive claims (dead code, complete impact). Needs a scope. |
-
-## Gotchas
-
-1. `graph trace` needs an exact qualified name — a short name returns an ambiguous
-   suggestion list and costs a turn. `graph search` first, then trace the qualified name.
-2. `graph query` output is truncated to a budget. A `TRUNCATED` banner means narrow the
-   question or move to `graph search` + `graph snippet`, not that the graph is incomplete.
-3. Common short terms (`init`, `run`, `New`) match broadly. Add the package or type
-   (`Openlit.init`, `engine.Query`) to get a usable ranking.
-4. `--direction outgoing` shows callees only; callers need `incoming`, and cross-package
-   answers usually need `both`.
-5. Search covers indexed symbols. Literal strings, comments, and unindexed config need
-   `code_search`/Grep — reach for those only after graph search comes back empty.
-6. Compact text is the default view; `--json` (CLI) returns full fidelity including
-   coverage and edge properties when you actually need them.
-
-## Other commands
-
-| Intent | Command |
-|--------|---------|
-| Initialize this repo (skip if `test -d .so`) | `__SO_BIN__ init` |
-| Rebuild / refresh graph | `__SO_BIN__ graph build` or `__SO_BIN__ graph refresh` |
-| Force full rebuild | `__SO_BIN__ graph build --force` |
-| Session list | `__SO_BIN__ sessions list` |
-| Memory search | `__SO_BIN__ memory search` |
-| Local UI + live watcher | `__SO_BIN__ dev` or `__SO_BIN__ dev -d` |
-| Print MCP config (diagnostic) | `__SO_BIN__ graph mcp config` |
-
-## MCP
-
-`so install` wires user-global MCP (`__SO_BIN__ graph mcp serve`). **CLI is primary** — agents must use `__SO_BIN__ --json graph …` / `__SO_BIN__ --json memory …` from the workspace. JSON is the agent contract; compact text is for humans. Use MCP tools only when they are listed and return graph hits. If MCP says `graph_not_indexed`, switch to CLI once. Do not loop GetMcpTools or mcp_auth.
-
-## Layout
-
-```text
-.so/
-  sessions/   # observability sessions (gitignored)
-  db/so.db    # shared Superopen SQLite store (graph + memory, gitignored)
+```bash
+__SO_BIN__ graph query "<question>"
 ```
 
-Optional path excludes: `.soignore` at the repository root (gitignore-style patterns).
+Answer from NODE/EDGE lines and their `src=` paths. Read those files to edit or debug specific lines. Grep only after query has oriented you, or for a literal string the graph does not index.
 
-A user-wide project index lives under the Superopen config dir (OS-agnostic: XDG / `%APPDATA%\superopen`).
+If a NODE line already names the symbol, use `so graph snippet "<qualified_name>"` for the body or `so graph trace "<qn>"` for callers/callees. Do not start a `so graph search` spray after a truncated query — raise `--budget` or narrow the question instead.
 
-## Notes
+Do not initialize a repository because `.so/` is missing.
 
-- Durable graph-first guidance is installed into each agent’s **user-level** instruction surface (sentinel-managed; uninstall removes only Superopen’s block).
-- Graph refresh also runs detached on SessionStart / SessionEnd via observability hooks.
-- Live poll while `so dev` / MCP is up defaults to **60 seconds**. Builds are local Tree-sitter + SQLite — they do **not** call an LLM or the live coding agent.
-- Optional LLM API keys are not required for the AST graph or for memory ingest (local embeddings). Session rollup uses an authenticated headless CLI when present, otherwise one live `memory_capture` at next SessionStart.
-- `so init` does **not** start `so dev` unless `--dev` is passed.
+Recipes (dead code, fan-in/out, routes): `references/query.md`. Prior-work memory: `references/memory.md`.

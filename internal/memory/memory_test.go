@@ -13,6 +13,25 @@ import (
 	"github.com/ishanjainn/superopen/internal/session/trace"
 )
 
+func testRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := paths.Resolve(root).EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func TestOpenRootRefusesUnmanaged(t *testing.T) {
+	_, err := OpenRoot(t.TempDir())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "so init") {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestEmbedSimilarPhrasesCloserThanUnrelated(t *testing.T) {
 	a := EmbedSentence("the login bug we hit last Thursday")
 	b := EmbedSentence("login issue from Thursday")
@@ -85,7 +104,7 @@ func TestIngestIdempotentAndRedactSkip(t *testing.T) {
 }
 
 func TestWorkingMemoryAppearsInTimelineAndLayout(t *testing.T) {
-	root := t.TempDir()
+	root := testRoot(t)
 	store, err := OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +138,7 @@ func TestWorkingMemoryAppearsInTimelineAndLayout(t *testing.T) {
 }
 
 func TestContradictDownranksStale(t *testing.T) {
-	root := t.TempDir()
+	root := testRoot(t)
 	store, err := OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +165,7 @@ func TestContradictDownranksStale(t *testing.T) {
 }
 
 func TestTeachPinFadeRescue(t *testing.T) {
-	root := t.TempDir()
+	root := testRoot(t)
 	path := filepath.Join(root, "note.md")
 	if err := os.WriteFile(path, []byte("always run go test ./internal/memory"), 0o644); err != nil {
 		t.Fatal(err)
@@ -207,7 +226,7 @@ func TestTeachPinFadeRescue(t *testing.T) {
 }
 
 func TestPackBudgetAndEconomy(t *testing.T) {
-	root := t.TempDir()
+	root := testRoot(t)
 	store, err := OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
@@ -308,7 +327,7 @@ func writeSession(t *testing.T, root, id string, spans []trace.Span) {
 }
 
 func TestEncryptRoundTripAfterReopen(t *testing.T) {
-	root := t.TempDir()
+	root := testRoot(t)
 	store, err := OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
@@ -338,8 +357,8 @@ func TestEncryptRoundTripAfterReopen(t *testing.T) {
 }
 
 func TestCopyIntoPreservesEpisodes(t *testing.T) {
-	srcRoot := t.TempDir()
-	dstRoot := t.TempDir()
+	srcRoot := testRoot(t)
+	dstRoot := testRoot(t)
 	src, err := OpenRoot(srcRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -401,7 +420,7 @@ func toolSpan(spanID, tool, path string) trace.Span {
 }
 
 func TestSuccessorRanksTop10(t *testing.T) {
-	root := t.TempDir()
+	root := testRoot(t)
 	store, err := OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
@@ -437,7 +456,7 @@ func TestSuccessorRanksTop10(t *testing.T) {
 }
 
 func TestHistoricalWordingHitAt10(t *testing.T) {
-	root := t.TempDir()
+	root := testRoot(t)
 	store, err := OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
@@ -467,7 +486,7 @@ func TestHistoricalWordingHitAt10(t *testing.T) {
 }
 
 func TestContradictionChainSuccessorLeads(t *testing.T) {
-	root := t.TempDir()
+	root := testRoot(t)
 	store, err := OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
@@ -498,7 +517,7 @@ func TestContradictionChainSuccessorLeads(t *testing.T) {
 }
 
 func TestSleepClustersAndShapeRecall(t *testing.T) {
-	root := t.TempDir()
+	root := testRoot(t)
 	store, err := OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
@@ -530,7 +549,7 @@ func TestSleepClustersAndShapeRecall(t *testing.T) {
 }
 
 func TestStatusCountsAndCoverage(t *testing.T) {
-	root := t.TempDir()
+	root := testRoot(t)
 	store, err := OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
@@ -566,7 +585,7 @@ func TestStatusCountsAndCoverage(t *testing.T) {
 }
 
 func TestTemporalRecallAsOf(t *testing.T) {
-	root := t.TempDir()
+	root := testRoot(t)
 	store, err := OpenRoot(root)
 	if err != nil {
 		t.Fatal(err)
@@ -600,7 +619,7 @@ func TestTemporalRecallAsOf(t *testing.T) {
 }
 
 func TestTeachChunkAndDedup(t *testing.T) {
-	root := t.TempDir()
+	root := testRoot(t)
 	path := filepath.Join(root, "runbook.md")
 	body := strings.Repeat("Keep GPU metrics canonical. ", 80)
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {

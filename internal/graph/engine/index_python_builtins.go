@@ -113,7 +113,6 @@ func indexPythonBuiltins(project string, files []ParsedSyntaxFile, graph *goGrap
 				evidence: syntaxEvidence(parsed.File.Path, call, "python_builtin")})
 		}
 	}
-	sortGraph(graph)
 }
 
 func splitSyntaxScope(scope string) []string {

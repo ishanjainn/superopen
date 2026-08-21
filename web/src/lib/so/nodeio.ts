@@ -32,7 +32,7 @@ export function readText(filePath: string): string {
 
 export function writeText(filePath: string, body: string): void {
   const p = filePath;
-  mkdirSync(dirname(p), { recursive: true });
+  mkdirSync(/* turbopackIgnore: true */ dirname(p), { recursive: true });
   writeFileSync(/* turbopackIgnore: true */ p, body);
 }
 

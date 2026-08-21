@@ -20,11 +20,15 @@ func enrichGoResolvedCalls(ctx context.Context, root string, files []ParsedSynta
 	fileSet := token.NewFileSet()
 	for index := range files {
 		parsed := &files[index]
-		if parsed.File.Language != "go" || len(parsed.Body) == 0 {
+		if parsed.File.Language != "go" {
+			continue
+		}
+		body := parsedSource(root, *parsed)
+		if len(body) == 0 {
 			continue
 		}
 		abs := filepath.Join(root, filepath.FromSlash(parsed.File.Path))
-		file, err := parser.ParseFile(fileSet, abs, parsed.Body, parser.AllErrors)
+		file, err := parser.ParseFile(fileSet, abs, body, parser.AllErrors)
 		if err != nil || file == nil {
 			continue
 		}
@@ -125,5 +129,4 @@ func joinResolvedCalls(graph *goGraph, files []ParsedSyntaxFile, registry symbol
 			_ = registry
 		}
 	}
-	sortGraph(graph)
 }

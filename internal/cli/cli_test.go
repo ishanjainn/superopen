@@ -15,8 +15,8 @@ func TestEmptyText(t *testing.T) {
 	if !strings.Contains(got, "0 sessions") {
 		t.Fatalf("got %q", got)
 	}
-	if !strings.Contains(got, "so init") {
-		t.Fatalf("missing next: %q", got)
+	if !strings.Contains(got, "help[1]:") {
+		t.Fatalf("missing AXI help: %q", got)
 	}
 }
 

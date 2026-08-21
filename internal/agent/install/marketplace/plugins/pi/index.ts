@@ -40,6 +40,31 @@ function runFinalize() {
   }
 }
 
+function additionalContext(stdout: string): string {
+  try {
+    const line = stdout.trim().split(/\n/).find((l) => l.includes("additionalContext"));
+    if (!line) return "";
+    const parsed = JSON.parse(line) as { additionalContext?: string };
+    return typeof parsed.additionalContext === "string" ? parsed.additionalContext : "";
+  } catch {
+    return "";
+  }
+}
+
+function shellSafeNudge(text: string): string {
+  return text.replace(/`/g, "").replace(/\$\(/g, "(").replace(/"/g, "'");
+}
+
+function isExploreTool(name: string): boolean {
+  const n = name.toLowerCase();
+  if (n.startsWith("graph_")) return false;
+  return n === "bash" || n === "shell" || n === "grep" || n === "glob" || n === "read" || n === "readfile";
+}
+
+function prependBashNudge(command: string, nudge: string): string {
+  return "echo " + JSON.stringify(shellSafeNudge(nudge)) + " ; " + command;
+}
+
 function runSoGraph(args: string[], cwd?: string): string {
   try {
     const r = spawnSync(soBin(), ["graph", ...args], {
@@ -167,6 +192,7 @@ export default function (pi: ExtensionAPI) {
   let lastSessionId: string | undefined;
   let lastCwd: string | undefined;
   let lastSessionFile: string | undefined;
+  let reminded = false;
 
   registerGraphTools(pi, () => lastCwd);
 
@@ -245,15 +271,16 @@ export default function (pi: ExtensionAPI) {
       (event as { args?: Record<string, unknown>; input?: Record<string, unknown> }).args ||
       (event as { input?: Record<string, unknown> }).input ||
       {};
-    fire(
+    const toolName = String((event as { toolName?: string }).toolName || "");
+    const stdout = fire(
       "tool.execute.before",
       {
         type: "tool.execute.before",
         cwd: ctx.cwd,
         session_file: ctx.sessionManager.getSessionFile(),
         session_id: sid(ctx),
-        tool_name: (event as { toolName?: string }).toolName,
-        toolName: (event as { toolName?: string }).toolName,
+        tool_name: toolName,
+        toolName,
         toolCallId: (event as { toolCallId?: string }).toolCallId,
         command: args.command || args.cmd,
         path: args.path || args.file_path,
@@ -262,6 +289,20 @@ export default function (pi: ExtensionAPI) {
       },
       true
     );
+    if (reminded || toolName.toLowerCase().startsWith("graph_")) return;
+    const nudge = additionalContext(stdout);
+    const cmd = typeof args.command === "string" ? args.command : typeof args.cmd === "string" ? args.cmd : "";
+    if (nudge && isExploreTool(toolName) && cmd) {
+      const rewritten = prependBashNudge(cmd, nudge);
+      if (typeof args.command === "string") args.command = rewritten;
+      else if (typeof args.cmd === "string") args.cmd = rewritten;
+      const evArgs = (event as { args?: Record<string, unknown> }).args;
+      if (evArgs && typeof evArgs === "object") {
+        if (typeof evArgs.command === "string") evArgs.command = rewritten;
+        else if (typeof evArgs.cmd === "string") evArgs.cmd = rewritten;
+      }
+      reminded = true;
+    }
   });
 
   pi.on("tool_execution_end", async (event, ctx) => {

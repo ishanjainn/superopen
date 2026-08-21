@@ -50,6 +50,7 @@ type SyntaxFact struct {
 	MaxAccessDepth     int
 	Lines              int
 	MayBeCallReference bool
+	SourceOrigin       string
 }
 
 // SyntaxArgument preserves the observable call-site information consumed by
@@ -71,10 +72,10 @@ type FileResult struct {
 	Definitions         []SyntaxFact
 	Imports             []SyntaxFact
 	Calls               []SyntaxFact
-	Usages              []SyntaxFact
+	Usages              []OccurrenceFact
 	CallableReferences  []SyntaxFact
-	Bindings            []SyntaxFact
-	Writes              []SyntaxFact
+	Bindings            []OccurrenceFact
+	Writes              []OccurrenceFact
 	Throws              []SyntaxFact
 	Decorators          []SyntaxFact
 	Inheritance         []SyntaxFact
@@ -125,35 +126,45 @@ type SyntaxExtraction = FileResult
 // ExtractSyntaxFacts performs the language-neutral portion of Superopen's
 // extraction pipeline using its generated language specification. Family
 // resolvers enrich and resolve these grounded facts in later passes.
-func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (SyntaxExtraction, error) {
+func ExtractSyntaxFacts(language string, root syntaxView, source []byte) (SyntaxExtraction, error) {
 	spec, ok := PinnedLanguageSpec(language)
 	if !ok {
 		return SyntaxExtraction{}, fmt.Errorf("no pinned extraction spec for %s", language)
 	}
-	sets := syntaxSpecSets(spec)
+	return extractSyntaxFactsWithSets(language, root, source, syntaxSpecSets(spec))
+}
+
+func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte, sets specSets) (SyntaxExtraction, error) {
 	lines := sourceLineIndex(source)
-	result := FileResult{Partial: root.HasError, RootModule: sets.modules[root.Type], ParseStatus: ParseStatus{Parsed: true, Partial: root.HasError}}
-	var walk func(SyntaxNode, SyntaxNode, []*SyntaxNode, []string, bool, int, bool, bool, int, bool, bool)
-	walk = func(node, parent SyntaxNode, ancestors []*SyntaxNode, scope []string, local bool, variableDepth int, enclosedByVariable bool, exactCallee bool, importDepth int, inClass bool, inClassMethod bool) {
+	result := FileResult{Partial: root.HasErr(), RootModule: sets.modules[root.Kind()], ParseStatus: ParseStatus{Parsed: true, Partial: root.HasErr()}}
+	var walk func(syntaxView, syntaxView, []syntaxView, []string, bool, int, bool, bool, int, bool, bool)
+	walk = func(node, parent syntaxView, ancestors []syntaxView, scope []string, local bool, variableDepth int, enclosedByVariable bool, exactCallee bool, importDepth int, inClass bool, inClassMethod bool) {
+		if node.Kind() == "ERROR" {
+			startLine, startColumn := bytePosition(lines, node.StartByte())
+			endLine, endColumn := bytePosition(lines, node.EndByte())
+			result.ParseStatus.ErrorRanges = append(result.ParseStatus.ErrorRanges, api.Location{
+				StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn,
+			})
+		}
 		currentScope := strings.Join(scope, ".")
 		definitionKind := ""
-		if language == "go" && (node.Type == "var_declaration" || node.Type == "const_declaration") {
+		if language == "go" && (node.Kind() == "var_declaration" || node.Kind() == "const_declaration") {
 			for _, fact := range syntaxGoDeclarationFacts(node, source, currentScope, lines, local) {
 				result.Definitions = append(result.Definitions, fact)
 			}
 		}
 		switch {
-		case sets.functions[node.Type]:
+		case specHit(sets.functions, sets.functionIDs, node):
 			definitionKind = "function"
-		case sets.classes[node.Type]:
+		case specHit(sets.classes, sets.classIDs, node):
 			definitionKind = "class"
-		case sets.fields[node.Type]:
+		case specHit(sets.fields, sets.fieldIDs, node):
 			definitionKind = "field"
-		case sets.variables[node.Type]:
-			if language != "go" || (node.Type != "var_declaration" && node.Type != "const_declaration") {
+		case specHit(sets.variables, sets.variableIDs, node):
+			if language != "go" || (node.Kind() != "var_declaration" && node.Kind() != "const_declaration") {
 				definitionKind = "variable"
 			}
-		case sets.modules[node.Type] && node.Start != root.Start:
+		case specHit(sets.modules, sets.moduleIDs, node) && node.StartByte() != root.StartByte():
 			definitionKind = "module"
 		}
 		promotedName := ""
@@ -169,7 +180,7 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 		// (direct program children, optionally wrapped by export_statement).
 		// Nested bindings inside declare module / functions stay unpublished.
 		if definitionKind == "variable" && isJSLanguage(language) &&
-			(node.Type == "lexical_declaration" || node.Type == "variable_declaration") {
+			(node.Kind() == "lexical_declaration" || node.Kind() == "variable_declaration") {
 			if isJSModuleLevelVariable(ancestors) {
 				for _, fact := range extractJSLexicalVariables(node, source, currentScope, lines, local, variableDepth, enclosedByVariable) {
 					result.Definitions = append(result.Definitions, fact)
@@ -180,13 +191,13 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 			if name == "" {
 				name = definitionName(language, node, source, definitionKind)
 			}
-			if name == "" && definitionKind == "function" && node.Type == "arrow_function" && parent.Type == "pair" {
+			if name == "" && definitionKind == "function" && node.Kind() == "arrow_function" && parent.Kind() == "pair" {
 				if key, ok := findField(parent, "key"); ok {
 					name = strings.TrimSpace(nodeText(key, source))
 				}
 			}
 			if name == "" && definitionKind == "function" && isJSLanguage(language) &&
-				(parent.Type == "public_field_definition" || parent.Type == "field_definition") {
+				(parent.Kind() == "public_field_definition" || parent.Kind() == "field_definition") {
 				if key, ok := findField(parent, "name"); ok {
 					name = strings.TrimSpace(nodeText(key, source))
 				} else if key, ok := findField(parent, "property"); ok {
@@ -214,7 +225,7 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 					scopeForChildren = nil
 				}
 				fact := syntaxFact(definitionKind, name, publishScope, node, lines, 1)
-				fact.Local = local || (language == "bash" && definitionKind == "variable" && parent.Type != root.Type)
+				fact.Local = local || (language == "bash" && definitionKind == "variable" && parent.Kind() != root.Kind())
 				fact.EnclosedByVariable = enclosedByVariable
 				fact.VariableDepth = variableDepth
 				// Superopen derives export visibility from the name for every
@@ -233,13 +244,14 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 						fact.ParamTypes = syntaxParameterTypes(value, source)
 					}
 					fact.ParamNames = parameters
+					fillCFamilyFunctionParams(language, node, source, &fact)
 					for _, field := range []string{"result", "return_type", "type"} {
 						if value, ok := findField(node, field); ok {
 							fact.ReturnType = strings.TrimSpace(nodeText(value, source))
 							break
 						}
 					}
-					if language == "go" && node.Type == "method_declaration" {
+					if language == "go" && node.Kind() == "method_declaration" {
 						if receiver, ok := findField(node, "receiver"); ok {
 							fact.ParentClass = syntaxGoReceiverType(receiver, source)
 						}
@@ -250,12 +262,11 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 					fact.LoopCount = metrics.loopCount
 					fact.LoopDepth = metrics.loopDepth
 					fact.MaxAccessDepth = metrics.maxAccessDepth
-					fact.BodyTokens = syntaxBodyTokens(body, source)
-					if profile, ok := ComputeASTProfile(body, source, parameters); ok {
-						fact.StructuralProfile = profile.String()
-					}
-					if fingerprint, ok := syntaxMinHash(body); ok {
-						fact.MinHash = minHashHex(fingerprint)
+					fillFunctionBodyFacts(&fact, body, source, parameters)
+				}
+				if definitionKind == "field" {
+					if value, ok := findField(node, "type"); ok {
+						fact.ReturnType = strings.TrimSpace(nodeText(value, source))
 					}
 				}
 				if definitionKind == "class" {
@@ -268,9 +279,9 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 						baseFact.TypeKind = fact.TypeKind
 						result.Inheritance = append(result.Inheritance, baseFact)
 					}
-					if language == "go" && node.Type == "type_spec" {
+					if language == "go" && node.Kind() == "type_spec" {
 						if value, ok := findField(node, "type"); ok {
-							switch value.Type {
+							switch value.Kind() {
 							case "interface_type":
 								fact.TypeKind = "interface"
 							case "struct_type":
@@ -280,7 +291,7 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 					}
 				}
 				result.Definitions = append(result.Definitions, fact)
-				if definitionKind == "class" && isEnumDeclarationNode(node.Type) {
+				if definitionKind == "class" && isEnumDeclarationNode(node.Kind()) {
 					memberScope := joinSyntaxScope(currentScope, name)
 					for _, member := range extractEnumMemberFacts(node, source, memberScope, lines) {
 						result.Definitions = append(result.Definitions, member)
@@ -294,12 +305,12 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 				// INI sections are Class nodes but Superopen does not push a
 				// lexical scope for them; settings stay module-flat.
 				if definitionKind == "function" || definitionKind == "module" ||
-					(definitionKind == "class" && !(language == "ini" && node.Type == "section")) {
+					(definitionKind == "class" && !(language == "ini" && node.Kind() == "section")) {
 					childScope = append(append([]string(nil), scopeForChildren...), name)
 				}
 			}
 		}
-		if sets.calls[node.Type] {
+		if specHit(sets.calls, sets.callIDs, node) {
 			if name := relationshipName(node, source, []string{"function", "callee", "name", "method"}); name != "" {
 				base := name
 				if index := strings.LastIndexAny(base, ".:"); index >= 0 {
@@ -315,7 +326,7 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 		// Superopen extract_jsx_component_ref: uppercase JSX tags are CALL sites
 		// that require import/same-module resolution (LSP strategies).
 		if isJSLanguage(language) &&
-			(node.Type == "jsx_self_closing_element" || node.Type == "jsx_opening_element") {
+			(node.Kind() == "jsx_self_closing_element" || node.Kind() == "jsx_opening_element") {
 			if nameNode, ok := findField(node, "name"); ok {
 				name := strings.TrimSpace(nodeText(nameNode, source))
 				if name != "" && name[0] >= 'A' && name[0] <= 'Z' {
@@ -335,9 +346,9 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 				// bound name are then suppressed as locally shadowed.
 				case syntaxBindingOccurrence(language, node, ancestors, sets),
 					syntaxWriteOccurrence(language, node, ancestors, sets):
-					result.Bindings = append(result.Bindings, syntaxFact("binding", name, currentScope, node, lines, .9))
+					result.Bindings = append(result.Bindings, occurrenceFact(name, currentScope, node, lines, .9))
 				default:
-					fact := syntaxFact("usage", name, currentScope, node, lines, .7)
+					fact := occurrenceFact(name, currentScope, node, lines, .7)
 					// Superopen stamps may_be_call_reference for direct argument
 					// values so the usages pass can emit CALL_REFERENCE when the
 					// target is a proven callable.
@@ -346,7 +357,7 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 				}
 			}
 		}
-		if (sets.imports[node.Type] || sets.importsFrom[node.Type]) && (language != "bash" || parent.Type == root.Type) &&
+		if (sets.imports[node.Kind()] || sets.importsFrom[node.Kind()]) && (language != "bash" || parent.Kind() == root.Kind()) &&
 			syntaxEmitsImportFacts(language, node) {
 			imports := syntaxImportFacts(language, node, source, currentScope, lines)
 			if len(imports) > 0 {
@@ -358,25 +369,25 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 			}
 		}
 		// CommonJS require("...") is a call_expression, not an import_statement.
-		if isJSLanguage(language) && node.Type == "call_expression" {
+		if isJSLanguage(language) && node.Kind() == "call_expression" {
 			if fact, ok := syntaxCommonJSRequireFact(node, parent, source, currentScope, lines); ok {
 				result.Imports = append(result.Imports, fact)
 			}
 		}
-		if sets.assignments[node.Type] {
+		if sets.assignments[node.Kind()] {
 			if name := syntaxAssignmentWriteName(language, node, source); name != "" && !isLanguageKeyword(language, name) {
-				result.Writes = append(result.Writes, syntaxFact("write", name, currentScope, node, lines, 1))
+				result.Writes = append(result.Writes, occurrenceFact(name, currentScope, node, lines, 1))
 			}
 		}
-		if sets.branches[node.Type] {
-			result.Branches = append(result.Branches, syntaxFact("branch", node.Type, currentScope, node, lines, 1))
+		if sets.branches[node.Kind()] {
+			result.Branches = append(result.Branches, syntaxFact("branch", node.Kind(), currentScope, node, lines, 1))
 		}
-		if sets.throws[node.Type] {
+		if sets.throws[node.Kind()] {
 			if name := syntaxExceptionName(node, source); name != "" {
 				result.Throws = append(result.Throws, syntaxFact("throw", name, currentScope, node, lines, 1))
 			}
 		}
-		if language == "markdown" && node.Type == "atx_heading" {
+		if language == "markdown" && node.Kind() == "atx_heading" {
 			name := strings.TrimSpace(strings.TrimLeft(nodeText(node, source), "#"))
 			if name != "" {
 				result.Sections = append(result.Sections, syntaxFact("section", name, "", node, lines, 1))
@@ -385,7 +396,7 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 		// Anonymous functions still introduce a local binding boundary. Class
 		// wrappers such as Go's type_declaration do not: only a class with an
 		// extracted name creates a nested definition scope.
-		iniSection := language == "ini" && node.Type == "section"
+		iniSection := language == "ini" && node.Kind() == "section"
 		childLocal := local || definitionKind == "function" || definitionEstablished &&
 			(definitionKind == "class" && !iniSection || isJSLanguage(language) && definitionKind == "variable")
 		childVariableDepth := variableDepth
@@ -408,9 +419,10 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 				childInClassMethod = true
 			}
 		}
-		childAncestors := append(ancestors, &node)
-		for _, child := range node.Children {
-			childExactCallee := syntaxExactCalleeChild(node, child, exactCallee, sets.calls[node.Type])
+		childAncestors := append(ancestors, node)
+		for i := 0; i < node.ChildCount(); i++ {
+			child := node.ChildAt(i)
+			childExactCallee := syntaxExactCalleeChild(node, child, exactCallee, specHit(sets.calls, sets.callIDs, node))
 			walk(child, node, childAncestors, childScope, childLocal, childVariableDepth,
 				enclosedByVariable || (isJSLanguage(language) && definitionKind == "variable"), childExactCallee, childImportDepth,
 				childInClass, childInClassMethod)
@@ -423,22 +435,23 @@ func ExtractSyntaxFacts(language string, root SyntaxNode, source []byte) (Syntax
 	return result, nil
 }
 
-func attachSyntaxDocstrings(language string, root SyntaxNode, source []byte, definitions []SyntaxFact) {
+func attachSyntaxDocstrings(language string, root syntaxView, source []byte, definitions []SyntaxFact) {
 	byStart := make(map[uint32][]int, len(definitions))
 	for index := range definitions {
 		byStart[definitions[index].StartByte] = append(byStart[definitions[index].StartByte], index)
 	}
-	var walk func(SyntaxNode)
-	walk = func(parent SyntaxNode) {
-		var previous SyntaxNode
-		for _, child := range parent.Children {
-			if isSyntaxComment(previous.Type) {
-				if indexes := byStart[child.Start]; len(indexes) > 0 {
+	var walk func(syntaxView)
+	walk = func(parent syntaxView) {
+		var previous syntaxView
+		for i := 0; i < parent.ChildCount(); i++ {
+			child := parent.ChildAt(i)
+			if !viewMissing(previous) && isSyntaxComment(previous.Kind()) {
+				if indexes := byStart[child.StartByte()]; len(indexes) > 0 {
 					for _, index := range indexes {
 						definitions[index].Docstring = truncateSyntaxComment(nodeText(previous, source), 500)
 					}
 				}
-				if language == "go" && child.Type == "type_declaration" {
+				if language == "go" && child.Kind() == "type_declaration" {
 					attachGoTypeDocstring(child, truncateSyntaxComment(nodeText(previous, source), 500), byStart, definitions)
 				}
 			}
@@ -449,10 +462,11 @@ func attachSyntaxDocstrings(language string, root SyntaxNode, source []byte, def
 	walk(root)
 }
 
-func attachGoTypeDocstring(node SyntaxNode, value string, byStart map[uint32][]int, definitions []SyntaxFact) {
-	for _, child := range node.Children {
-		if child.Type == "type_spec" || child.Type == "type_alias" {
-			for _, index := range byStart[child.Start] {
+func attachGoTypeDocstring(node syntaxView, value string, byStart map[uint32][]int, definitions []SyntaxFact) {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if child.Kind() == "type_spec" || child.Kind() == "type_alias" {
+			for _, index := range byStart[child.StartByte()] {
 				definitions[index].Docstring = value
 			}
 		}
@@ -479,10 +493,11 @@ func truncateSyntaxComment(value string, limit int) string {
 	return value[:end]
 }
 
-func syntaxGoDeclarationFacts(node SyntaxNode, source []byte, scope string, lines []uint32, local bool) []SyntaxFact {
+func syntaxGoDeclarationFacts(node syntaxView, source []byte, scope string, lines []uint32, local bool) []SyntaxFact {
 	var result []SyntaxFact
-	for _, child := range node.Children {
-		if !child.Named || (child.Type != "var_spec" && child.Type != "const_spec") {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if !child.IsNamed() || (child.Kind() != "var_spec" && child.Kind() != "const_spec") {
 			continue
 		}
 		name, ok := findField(child, "name")
@@ -501,25 +516,27 @@ func syntaxGoDeclarationFacts(node SyntaxNode, source []byte, scope string, line
 	return result
 }
 
-func syntaxExceptionName(node SyntaxNode, source []byte) string {
-	for _, child := range node.Children {
-		if child.Type == "raise" || child.Type == "throw" || child.Type == ";" || child.Type == "(" || child.Type == ")" {
+func syntaxExceptionName(node syntaxView, source []byte) string {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if child.Kind() == "raise" || child.Kind() == "throw" || child.Kind() == ";" || child.Kind() == "(" || child.Kind() == ")" {
 			continue
 		}
-		switch child.Type {
+		switch child.Kind() {
 		case "call", "call_expression", "new_expression", "object_creation_expression", "instance_expression":
 			for _, field := range []string{"function", "constructor", "type"} {
 				if target, ok := findField(child, field); ok {
 					return strings.TrimSpace(nodeText(target, source))
 				}
 			}
-			for _, target := range child.Children {
-				if target.Named {
+			for i := 0; i < child.ChildCount(); i++ {
+				target := child.ChildAt(i)
+				if target.IsNamed() {
 					return strings.TrimSpace(nodeText(target, source))
 				}
 			}
 		default:
-			if child.Named {
+			if child.IsNamed() {
 				return strings.TrimSpace(nodeText(child, source))
 			}
 		}
@@ -531,9 +548,9 @@ func syntaxExceptionName(node SyntaxNode, source []byte) string {
 // syntaxExactCalleeChild matches Superopen's occurrence rule: a call consumes
 // only its callable expression (and the terminal callable leaf). Receivers,
 // qualifiers, computed keys, arguments, and nested bodies remain value usages.
-func syntaxExactCalleeChild(parent, child SyntaxNode, parentIsCallee, parentIsCall bool) bool {
+func syntaxExactCalleeChild(parent, child syntaxView, parentIsCallee, parentIsCall bool) bool {
 	if parentIsCall {
-		switch child.Field {
+		switch child.FieldName() {
 		case "function", "callee", "method", "name":
 			return true
 		}
@@ -542,22 +559,23 @@ func syntaxExactCalleeChild(parent, child SyntaxNode, parentIsCallee, parentIsCa
 	if !parentIsCallee {
 		return false
 	}
-	switch child.Field {
+	switch child.FieldName() {
 	case "field", "property", "method", "name":
 		return true
 	case "object", "receiver", "namespace", "scope":
 		return false
 	}
 	named := 0
-	for _, candidate := range parent.Children {
-		if candidate.Named {
+	for i := 0; i < parent.ChildCount(); i++ {
+		candidate := parent.ChildAt(i)
+		if candidate.IsNamed() {
 			named++
 		}
 	}
-	return named == 1 && child.Named
+	return named == 1 && child.IsNamed()
 }
 
-func syntaxImportFacts(language string, node SyntaxNode, source []byte, scope string, lines []uint32) []SyntaxFact {
+func syntaxImportFacts(language string, node syntaxView, source []byte, scope string, lines []uint32) []SyntaxFact {
 	if isJSLanguage(language) || language == "javascript" {
 		return syntaxESImportFacts(node, source, scope, lines)
 	}
@@ -568,9 +586,9 @@ func syntaxImportFacts(language string, node SyntaxNode, source []byte, scope st
 		return nil
 	}
 	var result []SyntaxFact
-	var visit func(SyntaxNode)
-	visit = func(current SyntaxNode) {
-		if current.Type == "import_spec" {
+	var visit func(syntaxView)
+	visit = func(current syntaxView) {
+		if current.Kind() == "import_spec" {
 			pathNode, ok := findField(current, "path")
 			if !ok {
 				return
@@ -588,7 +606,8 @@ func syntaxImportFacts(language string, node SyntaxNode, source []byte, scope st
 			result = append(result, fact)
 			return
 		}
-		for _, child := range current.Children {
+		for i := 0; i < current.ChildCount(); i++ {
+			child := current.ChildAt(i)
 			visit(child)
 		}
 	}
@@ -596,15 +615,15 @@ func syntaxImportFacts(language string, node SyntaxNode, source []byte, scope st
 	return result
 }
 
-func syntaxPythonImportFacts(node SyntaxNode, source []byte, scope string, lines []uint32) []SyntaxFact {
-	if node.Type == "future_import_statement" {
+func syntaxPythonImportFacts(node syntaxView, source []byte, scope string, lines []uint32) []SyntaxFact {
+	if node.Kind() == "future_import_statement" {
 		fact := syntaxFact("import", "__future__", scope, node, lines, 1)
 		fact.LocalName = "__future__"
 		return []SyntaxFact{fact}
 	}
-	if node.Type == "import_statement" {
+	if node.Kind() == "import_statement" {
 		if name, found := findField(node, "name"); found {
-			if name.Type == "aliased_import" {
+			if name.Kind() == "aliased_import" {
 				if fact, ok := syntaxPythonAliasedImport(name, "", source, scope, lines); ok {
 					return []SyntaxFact{fact}
 				}
@@ -618,8 +637,9 @@ func syntaxPythonImportFacts(node SyntaxNode, source []byte, scope string, lines
 			}
 		}
 		var result []SyntaxFact
-		for _, child := range node.Children {
-			switch child.Type {
+		for i := 0; i < node.ChildCount(); i++ {
+			child := node.ChildAt(i)
+			switch child.Kind() {
 			case "dotted_name", "identifier":
 				modulePath := strings.TrimSpace(nodeText(child, source))
 				if modulePath != "" {
@@ -636,12 +656,13 @@ func syntaxPythonImportFacts(node SyntaxNode, source []byte, scope string, lines
 		return result
 	}
 
-	var moduleNode SyntaxNode
+	var moduleNode syntaxView
 	if candidate, found := findField(node, "module_name"); found {
 		moduleNode = candidate
 	} else {
-		for _, child := range node.Children {
-			if child.Type == "dotted_name" || child.Type == "relative_import" {
+		for i := 0; i < node.ChildCount(); i++ {
+			child := node.ChildAt(i)
+			if child.Kind() == "dotted_name" || child.Kind() == "relative_import" {
 				moduleNode = child
 				break
 			}
@@ -649,11 +670,12 @@ func syntaxPythonImportFacts(node SyntaxNode, source []byte, scope string, lines
 	}
 	modulePath := strings.TrimSpace(nodeText(moduleNode, source))
 	var result []SyntaxFact
-	for _, child := range node.Children {
-		if child.Start == moduleNode.Start && child.End == moduleNode.End && moduleNode.End > moduleNode.Start {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if child.StartByte() == moduleNode.StartByte() && child.EndByte() == moduleNode.EndByte() && moduleNode.EndByte() > moduleNode.StartByte() {
 			continue
 		}
-		switch child.Type {
+		switch child.Kind() {
 		case "identifier", "dotted_name":
 			name := strings.TrimSpace(nodeText(child, source))
 			if name == "" {
@@ -686,7 +708,7 @@ func syntaxPythonImportFacts(node SyntaxNode, source []byte, scope string, lines
 	return result
 }
 
-func syntaxPythonAliasedImport(node SyntaxNode, prefix string, source []byte, scope string, lines []uint32) (SyntaxFact, bool) {
+func syntaxPythonAliasedImport(node syntaxView, prefix string, source []byte, scope string, lines []uint32) (SyntaxFact, bool) {
 	nameNode, found := findField(node, "name")
 	if !found {
 		return SyntaxFact{}, false
@@ -715,7 +737,7 @@ func pythonImportRoot(modulePath string) string {
 	return modulePath
 }
 
-func syntaxESImportFacts(node SyntaxNode, source []byte, scope string, lines []uint32) []SyntaxFact {
+func syntaxESImportFacts(node syntaxView, source []byte, scope string, lines []uint32) []SyntaxFact {
 	sourceNode, ok := findField(node, "source")
 	if !ok {
 		return nil
@@ -725,9 +747,9 @@ func syntaxESImportFacts(node SyntaxNode, source []byte, scope string, lines []u
 		return nil
 	}
 	var names []string
-	var visit func(SyntaxNode)
-	visit = func(current SyntaxNode) {
-		switch current.Type {
+	var visit func(syntaxView)
+	visit = func(current syntaxView) {
+		switch current.Kind() {
 		case "import_specifier":
 			if alias, found := findField(current, "alias"); found {
 				names = append(names, strings.TrimSpace(nodeText(alias, source)))
@@ -741,8 +763,9 @@ func syntaxESImportFacts(node SyntaxNode, source []byte, scope string, lines []u
 				return
 			}
 		}
-		for _, child := range current.Children {
-			if child.Start == sourceNode.Start && child.End == sourceNode.End {
+		for i := 0; i < current.ChildCount(); i++ {
+			child := current.ChildAt(i)
+			if child.StartByte() == sourceNode.StartByte() && child.EndByte() == sourceNode.EndByte() {
 				continue
 			}
 			visit(child)
@@ -751,12 +774,14 @@ func syntaxESImportFacts(node SyntaxNode, source []byte, scope string, lines []u
 	visit(node)
 	names = append(names, esImportLocalNames(nodeText(node, source))...)
 	// Default imports are commonly a direct identifier in import_clause.
-	for _, child := range node.Children {
-		if child.Type != "import_clause" {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if child.Kind() != "import_clause" {
 			continue
 		}
-		for _, item := range child.Children {
-			if isIdentifierNode(item.Type) {
+		for i := 0; i < child.ChildCount(); i++ {
+			item := child.ChildAt(i)
+			if isIdentifierNode(item.Kind()) {
 				if name := identifierText(item, source); name != "" && name != "type" {
 					names = append(names, name)
 				}
@@ -838,11 +863,12 @@ func importPathLast(value string) string {
 	return value[last:]
 }
 
-func syntaxCallArguments(call SyntaxNode, source []byte) ([]SyntaxArgument, string) {
+func syntaxCallArguments(call syntaxView, source []byte) ([]SyntaxArgument, string) {
 	arguments, ok := findField(call, "arguments")
 	if !ok {
-		for _, child := range call.Children {
-			if child.Type == "argument_list" || child.Type == "arguments" || child.Type == "method_args" {
+		for i := 0; i < call.ChildCount(); i++ {
+			child := call.ChildAt(i)
+			if child.Kind() == "argument_list" || child.Kind() == "arguments" || child.Kind() == "method_args" {
 				arguments, ok = child, true
 				break
 			}
@@ -854,13 +880,14 @@ func syntaxCallArguments(call SyntaxNode, source []byte) ([]SyntaxArgument, stri
 	result := make([]SyntaxArgument, 0, 8)
 	firstString := ""
 	position := 0
-	for _, child := range arguments.Children {
-		if !child.Named || len(result) == 8 {
+	for i := 0; i < arguments.ChildCount(); i++ {
+		child := arguments.ChildAt(i)
+		if !child.IsNamed() || len(result) == 8 {
 			continue
 		}
 		argument := SyntaxArgument{Index: position}
 		valueNode := child
-		if child.Type == "keyword_argument" || child.Type == "pair" {
+		if child.Kind() == "keyword_argument" || child.Kind() == "pair" {
 			if key, found := findField(child, "name"); found {
 				argument.Keyword = strings.TrimSpace(nodeText(key, source))
 			} else if key, found := findField(child, "key"); found {
@@ -884,11 +911,11 @@ func syntaxCallArguments(call SyntaxNode, source []byte) ([]SyntaxArgument, stri
 	return result, firstString
 }
 
-func isStringLikeSyntaxNode(node SyntaxNode) bool {
-	if isStringNode(node.Type) {
+func isStringLikeSyntaxNode(node syntaxView) bool {
+	if isStringNode(node.Kind()) {
 		return true
 	}
-	switch node.Type {
+	switch node.Kind() {
 	case "template_string", "template_literal", "raw_string_literal", "interpreted_string_literal",
 		"string_content", "heredoc_body", "concatenated_string":
 		return true
@@ -904,12 +931,12 @@ func isJSLanguage(language string) bool {
 // isJSModuleLevelVariable matches Superopen extract_variables for JS/TS: only
 // direct program children, optionally wrapped by export_statement /
 // expression_statement / statement, become Variable nodes.
-func isJSModuleLevelVariable(ancestors []*SyntaxNode) bool {
+func isJSModuleLevelVariable(ancestors []syntaxView) bool {
 	switch len(ancestors) {
 	case 1:
 		return true
 	case 2:
-		switch ancestors[1].Type {
+		switch ancestors[1].Kind() {
 		case "export_statement", "expression_statement", "statement":
 			return true
 		}
@@ -920,11 +947,11 @@ func isJSModuleLevelVariable(ancestors []*SyntaxNode) bool {
 // syntaxOpensImportContext matches Superopen is_import_context_kind: re-export
 // export_statement forms suppress nested usages, but `export const/function/...`
 // declarations must still emit ordinary USAGE edges in their bodies.
-func syntaxOpensImportContext(language string, node SyntaxNode, sets specSets) bool {
-	if !sets.imports[node.Type] && !sets.importsFrom[node.Type] {
+func syntaxOpensImportContext(language string, node syntaxView, sets specSets) bool {
+	if !sets.imports[node.Kind()] && !sets.importsFrom[node.Kind()] {
 		return false
 	}
-	if isJSLanguage(language) && node.Type == "export_statement" {
+	if isJSLanguage(language) && node.Kind() == "export_statement" {
 		if _, ok := findField(node, "source"); ok {
 			return true
 		}
@@ -933,14 +960,15 @@ func syntaxOpensImportContext(language string, node SyntaxNode, sets specSets) b
 		if _, ok := findField(node, "declaration"); ok {
 			hasDeclaration = true
 		}
-		for _, child := range node.Children {
-			if !child.Named {
+		for i := 0; i < node.ChildCount(); i++ {
+			child := node.ChildAt(i)
+			if !child.IsNamed() {
 				continue
 			}
-			if child.Type == "export_clause" {
+			if child.Kind() == "export_clause" {
 				hasExportClause = true
 			}
-			if child.Field == "declaration" {
+			if child.FieldName() == "declaration" {
 				hasDeclaration = true
 			}
 		}
@@ -952,8 +980,8 @@ func syntaxOpensImportContext(language string, node SyntaxNode, sets specSets) b
 // syntaxEmitsImportFacts rejects JS/TS export statements that carry no module
 // source. `export default App` and `export { App }` bind local symbols, so
 // Superopen never records them as imports.
-func syntaxEmitsImportFacts(language string, node SyntaxNode) bool {
-	if !isJSLanguage(language) || node.Type != "export_statement" {
+func syntaxEmitsImportFacts(language string, node syntaxView) bool {
+	if !isJSLanguage(language) || node.Kind() != "export_statement" {
 		return true
 	}
 	_, ok := findField(node, "source")
@@ -962,12 +990,12 @@ func syntaxEmitsImportFacts(language string, node SyntaxNode) bool {
 
 // jsClassMethodNode reports whether a published function is a class member
 // (method_definition or class-field arrow), matching extract_class_methods.
-func jsClassMethodNode(node, parent SyntaxNode) bool {
-	switch node.Type {
+func jsClassMethodNode(node, parent syntaxView) bool {
+	switch node.Kind() {
 	case "method_definition":
 		return true
 	case "arrow_function", "function_expression", "generator_function":
-		switch parent.Type {
+		switch parent.Kind() {
 		case "public_field_definition", "field_definition":
 			return true
 		}
@@ -975,23 +1003,24 @@ func jsClassMethodNode(node, parent SyntaxNode) bool {
 	return false
 }
 
-func functionVariableName(node SyntaxNode, source []byte) string {
-	var declarator SyntaxNode
-	if node.Type == "variable_declarator" {
+func functionVariableName(node syntaxView, source []byte) string {
+	var declarator syntaxView
+	if node.Kind() == "variable_declarator" {
 		declarator = node
 	} else {
-		for _, child := range node.Children {
-			if child.Type == "variable_declarator" {
+		for i := 0; i < node.ChildCount(); i++ {
+			child := node.ChildAt(i)
+			if child.Kind() == "variable_declarator" {
 				declarator = child
 				break
 			}
 		}
 	}
-	if declarator.Type == "" {
+	if viewMissing(declarator) {
 		return ""
 	}
 	value, ok := findField(declarator, "value")
-	if !ok || value.Type != "arrow_function" {
+	if !ok || value.Kind() != "arrow_function" {
 		return ""
 	}
 	name, ok := findField(declarator, "name")
@@ -1016,25 +1045,27 @@ func pinnedIsExported(name, language string) bool {
 	}
 }
 
-func collectParameterNames(node SyntaxNode, source []byte, result *[]string) {
-	if isIdentifierNode(node.Type) {
+func collectParameterNames(node syntaxView, source []byte, result *[]string) {
+	if isIdentifierNode(node.Kind()) {
 		if value := trimSyntaxLiteral(nodeText(node, source)); value != "" {
 			*result = append(*result, value)
 		}
 		return
 	}
-	for _, child := range node.Children {
-		if child.Field == "type" || strings.Contains(child.Type, "type") {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if child.FieldName() == "type" || strings.Contains(child.Kind(), "type") {
 			continue
 		}
 		collectParameterNames(child, source, result)
 	}
 }
 
-func syntaxParameterNames(parameters SyntaxNode, source []byte) []string {
+func syntaxParameterNames(parameters syntaxView, source []byte) []string {
 	result := make([]string, 0, 8)
-	for _, parameter := range parameters.Children {
-		if !parameter.Named {
+	for i := 0; i < parameters.ChildCount(); i++ {
+		parameter := parameters.ChildAt(i)
+		if !parameter.IsNamed() {
 			continue
 		}
 		if name, ok := findField(parameter, "name"); ok {
@@ -1043,7 +1074,7 @@ func syntaxParameterNames(parameters SyntaxNode, source []byte) []string {
 			}
 			continue
 		}
-		if parameter.Type == "identifier" {
+		if parameter.Kind() == "identifier" {
 			if value := strings.TrimSpace(nodeText(parameter, source)); value != "" {
 				result = append(result, value)
 			}
@@ -1052,11 +1083,12 @@ func syntaxParameterNames(parameters SyntaxNode, source []byte) []string {
 	return result
 }
 
-func syntaxParameterTypes(parameters SyntaxNode, source []byte) []string {
+func syntaxParameterTypes(parameters syntaxView, source []byte) []string {
 	seen := map[string]bool{}
 	result := make([]string, 0, 8)
-	for _, parameter := range parameters.Children {
-		if !parameter.Named {
+	for i := 0; i < parameters.ChildCount(); i++ {
+		parameter := parameters.ChildAt(i)
+		if !parameter.IsNamed() {
 			continue
 		}
 		typeNode, ok := findField(parameter, "type")
@@ -1098,26 +1130,27 @@ func syntaxBuiltinType(value string) bool {
 	}
 }
 
-func syntaxGoReceiverType(receiver SyntaxNode, source []byte) string {
-	var find func(SyntaxNode, int) string
-	find = func(node SyntaxNode, depth int) string {
+func syntaxGoReceiverType(receiver syntaxView, source []byte) string {
+	var find func(syntaxView, int) string
+	find = func(node syntaxView, depth int) string {
 		if depth > 4 {
 			return ""
 		}
-		if node.Type == "type_identifier" {
+		if node.Kind() == "type_identifier" {
 			return strings.TrimSpace(nodeText(node, source))
 		}
-		if node.Type == "parameter_declaration" {
+		if node.Kind() == "parameter_declaration" {
 			if value, ok := findField(node, "type"); ok {
 				return find(value, depth+1)
 			}
 		}
-		if node.Type == "pointer_type" || node.Type == "generic_type" {
+		if node.Kind() == "pointer_type" || node.Kind() == "generic_type" {
 			if value, ok := findField(node, "type"); ok {
 				return find(value, depth+1)
 			}
 		}
-		for _, child := range node.Children {
+		for i := 0; i < node.ChildCount(); i++ {
+			child := node.ChildAt(i)
 			if value := find(child, depth+1); value != "" {
 				return value
 			}
@@ -1138,7 +1171,7 @@ func syntaxBaseTypeNode(kind string) bool {
 
 // syntaxBaseName trims a generic argument list off a captured base type, since
 // Superopen stores `Base` for `Base<T>`.
-func syntaxBaseName(node SyntaxNode, source []byte) string {
+func syntaxBaseName(node syntaxView, source []byte) string {
 	text := strings.TrimSpace(nodeText(node, source))
 	if index := strings.IndexByte(text, '<'); index >= 0 {
 		text = text[:index]
@@ -1149,32 +1182,33 @@ func syntaxBaseName(node SyntaxNode, source []byte) string {
 // collectSyntaxBases matches Superopen collect_bases_from_field: it reads base
 // types out of a heritage field, falling back to the field's raw text when no
 // recognized child kind is present.
-func collectSyntaxBases(field SyntaxNode, source []byte) []string {
-	if syntaxBaseTypeNode(field.Type) {
+func collectSyntaxBases(field syntaxView, source []byte) []string {
+	if syntaxBaseTypeNode(field.Kind()) {
 		if name := syntaxBaseName(field, source); name != "" {
 			return []string{name}
 		}
 		return nil
 	}
 	var result []string
-	for _, child := range field.Children {
-		if !child.Named {
+	for i := 0; i < field.ChildCount(); i++ {
+		child := field.ChildAt(i)
+		if !child.IsNamed() {
 			continue
 		}
 		switch {
 		// Python carries a bare `identifier` for `class C(Base)` and an
 		// `attribute` for a dotted base such as `mod.Base`.
-		case syntaxBaseTypeNode(child.Type), child.Type == "identifier", child.Type == "attribute":
+		case syntaxBaseTypeNode(child.Kind()), child.Kind() == "identifier", child.Kind() == "attribute":
 			if name := syntaxBaseName(child, source); name != "" {
 				result = append(result, name)
 			}
 		// A parameterized Python base such as `Generic[T]` stores only the
 		// subscripted value; the bracketed arguments must not leak in.
-		case child.Type == "subscript":
+		case child.Kind() == "subscript":
 			value, ok := findField(child, "value")
 			if !ok {
 				if named := firstNamedChild(child); named != nil {
-					value, ok = *named, true
+					value, ok = named, true
 				}
 			}
 			if ok {
@@ -1182,9 +1216,10 @@ func collectSyntaxBases(field SyntaxNode, source []byte) []string {
 					result = append(result, name)
 				}
 			}
-		case child.Type == "type_list", child.Type == "interface_type_list":
-			for _, entry := range child.Children {
-				if entry.Named && syntaxBaseTypeNode(entry.Type) {
+		case child.Kind() == "type_list", child.Kind() == "interface_type_list":
+			for i := 0; i < child.ChildCount(); i++ {
+				entry := child.ChildAt(i)
+				if entry.IsNamed() && syntaxBaseTypeNode(entry.Kind()) {
 					if name := syntaxBaseName(entry, source); name != "" {
 						result = append(result, name)
 					}
@@ -1200,16 +1235,17 @@ func collectSyntaxBases(field SyntaxNode, source []byte) []string {
 	return result
 }
 
-func firstNamedChild(node SyntaxNode) *SyntaxNode {
-	for index := range node.Children {
-		if node.Children[index].Named {
-			return &node.Children[index]
+func firstNamedChild(node syntaxView) syntaxView {
+	for index := 0; index < node.ChildCount(); index++ {
+		child := node.ChildAt(index)
+		if child.IsNamed() {
+			return child
 		}
 	}
 	return nil
 }
 
-func syntaxBaseClasses(language string, node SyntaxNode, source []byte) []string {
+func syntaxBaseClasses(language string, node syntaxView, source []byte) []string {
 	// TypeScript/TSX heritage lives under class_heritage / extends_type_clause;
 	// the generic field walker would otherwise capture the "extends" keyword
 	// text (e.g. "extends Guard") instead of the type name.
@@ -1227,16 +1263,18 @@ func syntaxBaseClasses(language string, node SyntaxNode, source []byte) []string
 	}
 	// Some grammars expose heritage as a named child rather than a field, such
 	// as Java `interface X extends A, B` producing `extends_interfaces`.
-	for _, child := range node.Children {
-		if child.Type == "extends_interfaces" || child.Type == "super_interfaces" {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if child.Kind() == "extends_interfaces" || child.Kind() == "super_interfaces" {
 			result = append(result, collectSyntaxBases(child, source)...)
 		}
 	}
 	if len(result) > 0 {
 		return result
 	}
-	for _, child := range node.Children {
-		switch child.Type {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		switch child.Kind() {
 		case "superclass", "superinterfaces", "type_inheritance_clause", "class_heritage",
 			"delegation_specifiers", "super_interfaces", "extends_clause", "implements_clause",
 			"extends_type_clause", "argument_list", "inheritance_specifier", "base_class_clause",
@@ -1253,12 +1291,14 @@ func syntaxBaseClasses(language string, node SyntaxNode, source []byte) []string
 // syntaxTSBaseClasses matches Superopen extract_ts_bases: walk class_heritage
 // (extends_clause + implements_clause) or a bare interface extends_type_clause,
 // reading type names rather than keyword text.
-func syntaxTSBaseClasses(node SyntaxNode, source []byte) []string {
+func syntaxTSBaseClasses(node syntaxView, source []byte) []string {
 	var result []string
-	for _, child := range node.Children {
-		switch child.Type {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		switch child.Kind() {
 		case "class_heritage":
-			for _, clause := range child.Children {
+			for i := 0; i < child.ChildCount(); i++ {
+				clause := child.ChildAt(i)
 				result = append(result, collectTSBases(clause, source)...)
 			}
 		case "extends_type_clause":
@@ -1268,8 +1308,8 @@ func syntaxTSBaseClasses(node SyntaxNode, source []byte) []string {
 	return result
 }
 
-func collectTSBases(clause SyntaxNode, source []byte) []string {
-	switch clause.Type {
+func collectTSBases(clause syntaxView, source []byte) []string {
+	switch clause.Kind() {
 	case "extends_clause":
 		if value, ok := findField(clause, "value"); ok {
 			if name := syntaxBaseName(value, source); name != "" {
@@ -1279,11 +1319,12 @@ func collectTSBases(clause SyntaxNode, source []byte) []string {
 		return nil
 	case "implements_clause", "extends_type_clause":
 		var result []string
-		for _, child := range clause.Children {
-			if !child.Named || child.Type == "type_arguments" {
+		for i := 0; i < clause.ChildCount(); i++ {
+			child := clause.ChildAt(i)
+			if !child.IsNamed() || child.Kind() == "type_arguments" {
 				continue
 			}
-			if child.Type == "generic_type" {
+			if child.Kind() == "generic_type" {
 				if nameNode, ok := findField(child, "name"); ok {
 					if name := syntaxBaseName(nameNode, source); name != "" {
 						result = append(result, name)
@@ -1305,9 +1346,9 @@ type syntaxComplexityMetrics struct {
 	cyclomatic, cognitive, loopCount, loopDepth, maxAccessDepth int
 }
 
-func syntaxComplexity(root SyntaxNode, branches map[string]bool) syntaxComplexityMetrics {
+func syntaxComplexity(root syntaxView, branches map[string]bool) syntaxComplexityMetrics {
 	type frame struct {
-		node                   SyntaxNode
+		node                   syntaxView
 		branchDepth, loopDepth int
 		accessDepth            int
 	}
@@ -1317,26 +1358,27 @@ func syntaxComplexity(root SyntaxNode, branches map[string]bool) syntaxComplexit
 		current := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 		childBranch, childLoop, childAccess := current.branchDepth, current.loopDepth, 0
-		if branches[current.node.Type] {
+		if branches[current.node.Kind()] {
 			result.cyclomatic++
 			result.cognitive += 1 + current.branchDepth
 			childBranch++
 		}
-		if current.node.Named && syntaxLoopNode(current.node.Type) {
+		if current.node.IsNamed() && syntaxLoopNode(current.node.Kind()) {
 			result.loopCount++
 			childLoop++
 			if childLoop > result.loopDepth {
 				result.loopDepth = childLoop
 			}
 		}
-		if current.node.Named && syntaxAccessNode(current.node.Type) {
+		if current.node.IsNamed() && syntaxAccessNode(current.node.Kind()) {
 			childAccess = current.accessDepth + 1
 			if childAccess > result.maxAccessDepth {
 				result.maxAccessDepth = childAccess
 			}
 		}
-		for index := len(current.node.Children) - 1; index >= 0; index-- {
-			stack = append(stack, frame{node: current.node.Children[index], branchDepth: childBranch,
+		kids := viewPushChildrenReversed(current.node, nil, 0)
+		for _, child := range kids {
+			stack = append(stack, frame{node: child, branchDepth: childBranch,
 				loopDepth: childLoop, accessDepth: childAccess})
 		}
 	}
@@ -1366,26 +1408,113 @@ func syntaxAccessNode(kind string) bool {
 	}
 }
 
-func syntaxBodyTokens(root SyntaxNode, source []byte) string {
+func fillFunctionBodyFacts(fact *SyntaxFact, body syntaxView, source []byte, parameters []string) {
+	tokens, profile, fingerprint, profileOK, hashOK := syntaxFusedBodyWalk(body, source, parameters)
+	fact.BodyTokens = tokens
+	if profileOK {
+		fact.StructuralProfile = profile.String()
+	}
+	if hashOK {
+		fact.MinHash = minHashHex(fingerprint)
+	}
+}
+
+func syntaxBodyTokens(root syntaxView, source []byte) string {
+	tokens, _, _, _, _ := syntaxFusedBodyWalk(root, source, nil)
+	return tokens
+}
+
+func syntaxFusedBodyWalk(root syntaxView, source []byte, parameterNames []string) (string, ASTProfile, minHashFingerprint, bool, bool) {
+	var profile ASTProfile
+	profile[profileParameters] = uint16(len(parameterNames))
+	type frame struct {
+		node  syntaxView
+		depth int
+	}
+	stack := []frame{{node: root}}
 	seen := map[string]bool{}
 	values := make([]string, 0, 128)
-	stack := []SyntaxNode{root}
-	for len(stack) > 0 && len(values) < 128 {
-		current := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		if len(current.Children) == 0 && syntaxBodyIdentifier(current.Type) {
-			value := nodeText(current, source)
+	minhashTokens := make([]string, 0, 128)
+	operatorSet, operandSet := map[uint32]bool{}, map[uint32]bool{}
+	totalDepth, nodeCount := 0, 0
+	for len(stack) > 0 {
+		last := len(stack) - 1
+		current := stack[last]
+		stack = stack[:last]
+		node := current.node
+		if node == nil {
+			continue
+		}
+		kind := node.Kind()
+		count := node.ChildCount()
+		if len(minhashTokens) < minHashMaxTokens && count == 0 && kind != "" {
+			minhashTokens = append(minhashTokens, normalizeSyntaxType(kind))
+		}
+		if len(values) < 128 && count == 0 && syntaxBodyIdentifier(kind) {
+			value := nodeText(node, source)
 			if len(value) > 0 && len(value) < 64 && !seen[value] {
 				seen[value] = true
 				values = append(values, value)
 			}
+		}
+		if nodeCount < 2048 && (node.IsNamed() || count > 0) {
+			nodeCount++
+			totalDepth += current.depth
+			if current.depth > int(profile[profileMaxDepth]) {
+				profile[profileMaxDepth] = uint16(current.depth)
+			}
+			accumulateProfileKind(&profile, kind)
+			if profileOperator(kind) {
+				profile[profileTotalOperators]++
+				hash := profileHash(kind)
+				if !operatorSet[hash] && len(operatorSet) < 512 {
+					operatorSet[hash] = true
+					profile[profileUniqueOperators]++
+				}
+			}
+			if count == 0 && profileOperand(kind) {
+				profile[profileTotalOperands]++
+				profile[profileBodyTokens]++
+				hash := profileHash(kind)
+				if !operandSet[hash] && len(operandSet) < 512 {
+					operandSet[hash] = true
+					profile[profileUniqueOperands]++
+				}
+			}
+		}
+		if len(minhashTokens) >= minHashMaxTokens && len(values) >= 128 && nodeCount >= 2048 {
 			continue
 		}
-		for index := len(current.Children) - 1; index >= 0; index-- {
-			stack = append(stack, current.Children[index])
+		limit := minHashWalkStack
+		if len(values) < 128 {
+			limit = 0
+		}
+		var kids []syntaxView
+		viewEachChild(node, func(child syntaxView) { kids = append(kids, child) })
+		for index := len(kids) - 1; index >= 0; index-- {
+			if limit > 0 && len(stack) >= limit {
+				break
+			}
+			stack = append(stack, frame{node: kids[index], depth: current.depth + 1})
 		}
 	}
-	return strings.Join(values, " ")
+	bodyTokens := strings.Join(values, " ")
+	var fingerprint minHashFingerprint
+	hashOK := false
+	if len(minhashTokens) >= minHashMinLeaves {
+		fingerprint, hashOK = minHashFromTokens(minhashTokens)
+	}
+	profileOK := nodeCount > 0
+	if profileOK {
+		profile[profileAverageDepthX10] = uint16(totalDepth * 10 / nodeCount)
+		lines := sourceLineIndex(source)
+		startLine, _ := bytePosition(lines, root.StartByte())
+		endLine, _ := bytePosition(lines, root.EndByte())
+		if endLine >= startLine {
+			profile[profileBodyLines] = uint16(endLine - startLine + 1)
+		}
+	}
+	return bodyTokens, profile, fingerprint, profileOK, hashOK
 }
 
 func syntaxBodyIdentifier(kind string) bool {
@@ -1401,6 +1530,16 @@ func syntaxBodyIdentifier(kind string) bool {
 
 type specSets struct {
 	functions, classes, fields, modules, calls, imports, importsFrom, variables, assignments, branches, throws, decorators map[string]bool
+	functionIDs, classIDs, fieldIDs, moduleIDs, callIDs, variableIDs                                                       map[uint16]bool
+}
+
+func specHit(names map[string]bool, ids map[uint16]bool, node syntaxView) bool {
+	if len(ids) > 0 {
+		if keyed, ok := node.(interface{ KindId() uint16 }); ok {
+			return ids[keyed.KindId()]
+		}
+	}
+	return names[node.Kind()]
 }
 
 func syntaxSpecSets(spec LanguageSpec) specSets {
@@ -1413,15 +1552,15 @@ func syntaxSpecSets(spec LanguageSpec) specSets {
 	}
 }
 
-func isSyntaxReferenceNode(language string, node, parent SyntaxNode, ancestors []*SyntaxNode) bool {
-	kind := node.Type
+func isSyntaxReferenceNode(language string, node, parent syntaxView, ancestors []syntaxView) bool {
+	kind := node.Kind()
 	if language == "python" && kind == "attribute" && syntaxDirectArgumentValue(node, ancestors) {
 		return false
 	}
-	if language == "rust" && (kind == "identifier" || kind == "scoped_identifier") && parent.Type == "scoped_identifier" {
+	if language == "rust" && (kind == "identifier" || kind == "scoped_identifier") && parent.Kind() == "scoped_identifier" {
 		return false
 	}
-	if kind == "identifier" && (language == "puppet" && parent.Type == "variable" || language == "vim" && parent.Type == "argument") {
+	if kind == "identifier" && (language == "puppet" && parent.Kind() == "variable" || language == "vim" && parent.Kind() == "argument") {
 		return false
 	}
 	if isIdentifierNode(kind) || kind == "simple_identifier" {
@@ -1497,9 +1636,9 @@ func isSyntaxReferenceNode(language string, node, parent SyntaxNode, ancestors [
 	}
 }
 
-func syntaxReferenceName(language string, node SyntaxNode, source []byte) string {
+func syntaxReferenceName(language string, node syntaxView, source []byte) string {
 	value := strings.TrimSpace(nodeText(node, source))
-	if language == "makefile" && node.Type == "variable_reference" {
+	if language == "makefile" && node.Kind() == "variable_reference" {
 		if strings.HasPrefix(value, "$(") && strings.HasSuffix(value, ")") && len(value) > 3 {
 			value = value[2 : len(value)-1]
 		}
@@ -1507,106 +1646,106 @@ func syntaxReferenceName(language string, node SyntaxNode, source []byte) string
 	return strings.TrimSpace(trimSyntaxLiteral(value))
 }
 
-func syntaxBindingOccurrence(language string, node SyntaxNode, ancestors []*SyntaxNode, sets specSets) bool {
-	field := node.Field
+func syntaxBindingOccurrence(language string, node syntaxView, ancestors []syntaxView, sets specSets) bool {
+	field := node.FieldName()
 	for index := len(ancestors) - 1; index >= 0; index-- {
 		parent := ancestors[index]
 		if syntaxValueField(field) || field == "type" {
 			return false
 		}
-		if syntaxWholeBindingNode(parent.Type) || syntaxLanguageWholeBindingNode(language, parent.Type) {
+		if syntaxWholeBindingNode(parent.Kind()) || syntaxLanguageWholeBindingNode(language, parent.Kind()) {
 			return true
 		}
-		declared := sets.functions[parent.Type] || sets.classes[parent.Type] || sets.fields[parent.Type] ||
-			sets.variables[parent.Type] || syntaxFieldBindingNode(parent.Type)
+		declared := sets.functions[parent.Kind()] || sets.classes[parent.Kind()] || sets.fields[parent.Kind()] ||
+			sets.variables[parent.Kind()] || syntaxFieldBindingNode(parent.Kind())
 		if declared && syntaxBindingField(field) {
 			return true
 		}
-		field = parent.Field
+		field = parent.FieldName()
 	}
 	return false
 }
 
-func syntaxWriteOccurrence(language string, node SyntaxNode, ancestors []*SyntaxNode, sets specSets) bool {
-	field := node.Field
+func syntaxWriteOccurrence(language string, node syntaxView, ancestors []syntaxView, sets specSets) bool {
+	field := node.FieldName()
 	for index := len(ancestors) - 1; index >= 0; index-- {
 		parent := ancestors[index]
 		if syntaxValueField(field) {
 			return false
 		}
-		assignment := sets.assignments[parent.Type] || syntaxLanguageWriteNode(language, parent.Type)
+		assignment := sets.assignments[parent.Kind()] || syntaxLanguageWriteNode(language, parent.Kind())
 		if assignment {
-			if syntaxAssignmentReadsTarget(*parent) {
+			if syntaxAssignmentReadsTarget(parent) {
 				return false
 			}
-			if language == "linkerscript" && parent.Type == "assignment" {
-				return syntaxFirstChildContains(*parent, node)
+			if language == "linkerscript" && parent.Kind() == "assignment" {
+				return syntaxFirstChildContains(parent, node)
 			}
 			if field == "left" || field == "name" || field == "target" || field == "destination" {
 				return true
 			}
-			if syntaxFirstNamedChildIsWrite(language) && syntaxNamedChildContains(*parent, 0, node) {
+			if syntaxFirstNamedChildIsWrite(language) && syntaxNamedChildContains(parent, 0, node) {
 				return true
 			}
 			return false
 		}
-		field = parent.Field
+		field = parent.FieldName()
 	}
 	return false
 }
 
-func syntaxCallArgumentLabel(node SyntaxNode, ancestors []*SyntaxNode) bool {
+func syntaxCallArgumentLabel(node syntaxView, ancestors []syntaxView) bool {
 	contained := node
 	for index := len(ancestors) - 1; index >= 0; index-- {
 		parent := ancestors[index]
-		switch parent.Type {
+		switch parent.Kind() {
 		case "keyword_argument", "named_argument", "labeled_argument":
-			return contained.Field == "name" || contained.Field == "label" || contained.Field == "key"
+			return contained.FieldName() == "name" || contained.FieldName() == "label" || contained.FieldName() == "key"
 		case "arguments", "argument_list", "value_arguments":
 			return false
 		}
-		contained = *parent
+		contained = parent
 	}
 	return false
 }
 
-func syntaxDirectArgumentValue(node SyntaxNode, ancestors []*SyntaxNode) bool {
+func syntaxDirectArgumentValue(node syntaxView, ancestors []syntaxView) bool {
 	if len(ancestors) == 0 {
 		return false
 	}
 	parent := ancestors[len(ancestors)-1]
-	switch parent.Type {
+	switch parent.Kind() {
 	case "keyword_argument", "named_argument", "labeled_argument":
-		if node.Field != "value" {
+		if node.FieldName() != "value" {
 			return false
 		}
-		return syntaxDirectArgumentValue(*parent, ancestors[:len(ancestors)-1])
+		return syntaxDirectArgumentValue(parent, ancestors[:len(ancestors)-1])
 	case "arguments", "argument_list", "value_arguments":
 		return true
 	case "list_expression":
-		return parent.Field == "arguments"
+		return parent.FieldName() == "arguments"
 	case "argument", "value_argument":
 		if len(ancestors) < 2 {
 			return false
 		}
-		switch ancestors[len(ancestors)-2].Type {
+		switch ancestors[len(ancestors)-2].Kind() {
 		case "arguments", "argument_list", "value_arguments":
 			return true
 		}
 		return false
 	}
-	return node.Field == "arguments"
+	return node.FieldName() == "arguments"
 }
 
-func syntaxForwardSiblingCallee(language string, node, parent SyntaxNode) bool {
-	if language == "dart" && node.Type == "identifier" {
+func syntaxForwardSiblingCallee(language string, node, parent syntaxView) bool {
+	if language == "dart" && node.Kind() == "identifier" {
 		return syntaxNextNamedSiblingType(parent, node) == "selector"
 	}
 	if language != "vhdl" {
 		return false
 	}
 	owner := node
-	for depth := 0; depth < 4 && syntaxVHDLCalleeWrapper(owner.Type); depth++ {
+	for depth := 0; depth < 4 && syntaxVHDLCalleeWrapper(owner.Kind()); depth++ {
 		if syntaxNextNamedSiblingType(parent, owner) == "parenthesis_group" {
 			return true
 		}
@@ -1624,16 +1763,17 @@ func syntaxVHDLCalleeWrapper(kind string) bool {
 	}
 }
 
-func syntaxNextNamedSiblingType(parent, node SyntaxNode) string {
+func syntaxNextNamedSiblingType(parent, node syntaxView) string {
 	seen := false
-	for _, child := range parent.Children {
-		if !child.Named {
+	for i := 0; i < parent.ChildCount(); i++ {
+		child := parent.ChildAt(i)
+		if !child.IsNamed() {
 			continue
 		}
 		if seen {
-			return child.Type
+			return child.Kind()
 		}
-		if child.Start == node.Start && child.End == node.End && child.Type == node.Type {
+		if child.StartByte() == node.StartByte() && child.EndByte() == node.EndByte() && child.Kind() == node.Kind() {
 			seen = true
 		}
 	}
@@ -1740,15 +1880,16 @@ func syntaxFirstNamedChildIsWrite(language string) bool {
 	}
 }
 
-func syntaxAssignmentReadsTarget(assignment SyntaxNode) bool {
-	switch assignment.Type {
+func syntaxAssignmentReadsTarget(assignment syntaxView) bool {
+	switch assignment.Kind() {
 	case "augmented_assignment", "augmented_assignment_expression", "compound_assignment_expr",
 		"compound_assignment_expression", "operator_assignment", "operator_assign", "update_exp",
 		"postfix_unary_expression", "prefix_unary_expression":
 		return true
 	}
-	for _, child := range assignment.Children {
-		switch child.Type {
+	for i := 0; i < assignment.ChildCount(); i++ {
+		child := assignment.ChildAt(i)
+		switch child.Kind() {
 		case "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "??=", "++", "--":
 			return true
 		}
@@ -1758,7 +1899,7 @@ func syntaxAssignmentReadsTarget(assignment SyntaxNode) bool {
 
 // syntaxAssignmentWriteName resolves the variable written by an assignment
 // node, mirroring resolve_write_lhs_node plus resolve_lhs_write_name Superopen.
-func syntaxAssignmentWriteName(language string, node SyntaxNode, source []byte) string {
+func syntaxAssignmentWriteName(language string, node syntaxView, source []byte) string {
 	left, ok := syntaxWriteTargetNode(node)
 	if !ok {
 		return ""
@@ -1766,19 +1907,20 @@ func syntaxAssignmentWriteName(language string, node SyntaxNode, source []byte) 
 	return syntaxWriteTargetName(left, source)
 }
 
-func syntaxWriteTargetNode(node SyntaxNode) (SyntaxNode, bool) {
+func syntaxWriteTargetNode(node syntaxView) (syntaxView, bool) {
 	if left, ok := findField(node, "left"); ok {
 		return left, true
 	}
-	switch node.Type {
+	switch node.Kind() {
 	case "postfix_unary_expression", "prefix_unary_expression", "update_expression":
 		// Only ++/-- mutate their operand; other unary forms read it.
 		increment := false
-		for _, child := range node.Children {
-			if child.Named {
+		for i := 0; i < node.ChildCount(); i++ {
+			child := node.ChildAt(i)
+			if child.IsNamed() {
 				continue
 			}
-			if child.Type == "++" || child.Type == "--" {
+			if child.Kind() == "++" || child.Kind() == "--" {
 				increment = true
 				break
 			}
@@ -1786,11 +1928,12 @@ func syntaxWriteTargetNode(node SyntaxNode) (SyntaxNode, bool) {
 		if !increment {
 			return SyntaxNode{}, false
 		}
-		for _, child := range node.Children {
-			if !child.Named {
+		for i := 0; i < node.ChildCount(); i++ {
+			child := node.ChildAt(i)
+			if !child.IsNamed() {
 				continue
 			}
-			switch child.Type {
+			switch child.Kind() {
 			case "identifier", "simple_identifier", "member_access_expression", "field_expression",
 				"field_access", "selector_expression", "subscript_expression", "index_expression":
 				return child, true
@@ -1798,17 +1941,18 @@ func syntaxWriteTargetNode(node SyntaxNode) (SyntaxNode, bool) {
 		}
 		return SyntaxNode{}, false
 	}
-	if len(node.Children) > 0 {
-		return node.Children[0], true
+	if node.ChildCount() > 0 {
+		return node.ChildAt(0), true
 	}
 	return SyntaxNode{}, false
 }
 
-func syntaxWriteTargetName(left SyntaxNode, source []byte) string {
-	if left.Type == "expression_list" {
-		named := make([]SyntaxNode, 0, len(left.Children))
-		for _, child := range left.Children {
-			if child.Named {
+func syntaxWriteTargetName(left syntaxView, source []byte) string {
+	if left.Kind() == "expression_list" {
+		named := make([]syntaxView, 0, left.ChildCount())
+		for i := 0; i < left.ChildCount(); i++ {
+			child := left.ChildAt(i)
+			if child.IsNamed() {
 				named = append(named, child)
 			}
 		}
@@ -1817,7 +1961,7 @@ func syntaxWriteTargetName(left SyntaxNode, source []byte) string {
 		}
 		left = named[0]
 	}
-	switch left.Type {
+	switch left.Kind() {
 	case "identifier", "simple_identifier":
 		return nodeText(left, source)
 	case "index_expression", "subscript_expression":
@@ -1826,14 +1970,15 @@ func syntaxWriteTargetName(left SyntaxNode, source []byte) string {
 			base, ok = findField(left, "object")
 		}
 		if !ok {
-			for _, child := range left.Children {
-				if child.Named {
+			for i := 0; i < left.ChildCount(); i++ {
+				child := left.ChildAt(i)
+				if child.IsNamed() {
 					base, ok = child, true
 					break
 				}
 			}
 		}
-		if ok && (base.Type == "identifier" || base.Type == "simple_identifier") {
+		if ok && (base.Kind() == "identifier" || base.Kind() == "simple_identifier") {
 			return nodeText(base, source)
 		}
 		return ""
@@ -1850,17 +1995,18 @@ func syntaxWriteTargetName(left SyntaxNode, source []byte) string {
 	return ""
 }
 
-func syntaxFirstChildContains(parent, node SyntaxNode) bool {
-	if len(parent.Children) == 0 {
+func syntaxFirstChildContains(parent, node syntaxView) bool {
+	if parent.ChildCount() == 0 {
 		return false
 	}
-	return syntaxNodeContains(parent.Children[0], node)
+	return syntaxNodeContains(parent.ChildAt(0), node)
 }
 
-func syntaxNamedChildContains(parent SyntaxNode, index int, node SyntaxNode) bool {
+func syntaxNamedChildContains(parent syntaxView, index int, node syntaxView) bool {
 	named := 0
-	for _, child := range parent.Children {
-		if !child.Named {
+	for i := 0; i < parent.ChildCount(); i++ {
+		child := parent.ChildAt(i)
+		if !child.IsNamed() {
 			continue
 		}
 		if named == index {
@@ -1871,14 +2017,14 @@ func syntaxNamedChildContains(parent SyntaxNode, index int, node SyntaxNode) boo
 	return false
 }
 
-func syntaxNodeContains(outer, inner SyntaxNode) bool {
-	return outer.Start <= inner.Start && outer.End >= inner.End
+func syntaxNodeContains(outer, inner syntaxView) bool {
+	return outer.StartByte() <= inner.StartByte() && outer.EndByte() >= inner.EndByte()
 }
 
-func collectSyntaxDecorators(node SyntaxNode, source []byte, decoratorKinds map[string]bool, lines []uint32, definitions []SyntaxFact, result *[]SyntaxFact) {
-	var walk func(SyntaxNode)
-	walk = func(current SyntaxNode) {
-		if decoratorKinds[current.Type] {
+func collectSyntaxDecorators(node syntaxView, source []byte, decoratorKinds map[string]bool, lines []uint32, definitions []SyntaxFact, result *[]SyntaxFact) {
+	var walk func(syntaxView)
+	walk = func(current syntaxView) {
+		if decoratorKinds[current.Kind()] {
 			name := relationshipName(current, source, []string{"name", "function", "attribute"})
 			name = strings.TrimLeft(compactRelationshipText(name), "@#[]")
 			if index := strings.IndexAny(name, "(,["); index >= 0 {
@@ -1889,11 +2035,11 @@ func collectSyntaxDecorators(node SyntaxNode, source []byte, decoratorKinds map[
 			bestDistance := ^uint32(0)
 			for _, definition := range definitions {
 				span := definition.EndByte - definition.StartByte
-				if definition.StartByte <= current.Start && current.End <= definition.EndByte && span < bestSpan {
+				if definition.StartByte <= current.StartByte() && current.EndByte() <= definition.EndByte && span < bestSpan {
 					target, bestSpan = joinSyntaxScope(definition.Scope, definition.Name), span
 				}
-				if target == "" && definition.StartByte >= current.End && definition.StartByte-current.End < bestDistance {
-					target, bestDistance = joinSyntaxScope(definition.Scope, definition.Name), definition.StartByte-current.End
+				if target == "" && definition.StartByte >= current.EndByte() && definition.StartByte-current.EndByte() < bestDistance {
+					target, bestDistance = joinSyntaxScope(definition.Scope, definition.Name), definition.StartByte-current.EndByte()
 				}
 			}
 			if name != "" && target != "" {
@@ -1901,7 +2047,8 @@ func collectSyntaxDecorators(node SyntaxNode, source []byte, decoratorKinds map[
 			}
 			return
 		}
-		for _, child := range current.Children {
+		for i := 0; i < current.ChildCount(); i++ {
+			child := current.ChildAt(i)
 			walk(child)
 		}
 	}
@@ -1918,15 +2065,16 @@ func stringSet(values []string) map[string]bool {
 
 // extractJSLexicalVariables matches Superopen extract_js_vars: skip function
 // assignments and plain require() bindings, but keep destructured require names.
-func extractJSLexicalVariables(node SyntaxNode, source []byte, scope string, lines []uint32, local bool, variableDepth int, enclosedByVariable bool) []SyntaxFact {
+func extractJSLexicalVariables(node syntaxView, source []byte, scope string, lines []uint32, local bool, variableDepth int, enclosedByVariable bool) []SyntaxFact {
 	var facts []SyntaxFact
-	for _, child := range node.Children {
-		if !child.Named || child.Type != "variable_declarator" {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if !child.IsNamed() || child.Kind() != "variable_declarator" {
 			continue
 		}
 		value, hasValue := findField(child, "value")
 		if hasValue {
-			switch value.Type {
+			switch value.Kind() {
 			case "arrow_function", "function_expression", "generator_function":
 				continue
 			}
@@ -1936,7 +2084,7 @@ func extractJSLexicalVariables(node SyntaxNode, source []byte, scope string, lin
 			continue
 		}
 		isRequire := hasValue && isRequireImportCall(value, source)
-		switch nameNode.Type {
+		switch nameNode.Kind() {
 		case "object_pattern", "array_pattern":
 			for _, binding := range destructurePatternNames(nameNode, source) {
 				fact := syntaxFact("variable", binding, scope, child, lines, 1)
@@ -1961,23 +2109,24 @@ func extractJSLexicalVariables(node SyntaxNode, source []byte, scope string, lin
 	return facts
 }
 
-func isRequireImportCall(node SyntaxNode, source []byte) bool {
-	if node.Type != "call_expression" {
+func isRequireImportCall(node syntaxView, source []byte) bool {
+	if node.Kind() != "call_expression" {
 		return false
 	}
 	fn, ok := findField(node, "function")
-	if !ok || fn.Type != "identifier" || strings.TrimSpace(nodeText(fn, source)) != "require" {
+	if !ok || fn.Kind() != "identifier" || strings.TrimSpace(nodeText(fn, source)) != "require" {
 		return false
 	}
 	args, ok := findField(node, "arguments")
 	if !ok {
 		return false
 	}
-	for _, child := range args.Children {
-		if !child.Named {
+	for i := 0; i < args.ChildCount(); i++ {
+		child := args.ChildAt(i)
+		if !child.IsNamed() {
 			continue
 		}
-		if child.Type == "string" || child.Type == "string_literal" || child.Type == "template_string" {
+		if child.Kind() == "string" || child.Kind() == "string_literal" || child.Kind() == "template_string" {
 			return true
 		}
 	}
@@ -1986,17 +2135,18 @@ func isRequireImportCall(node SyntaxNode, source []byte) bool {
 
 // syntaxCommonJSRequireFact mirrors process_commonjs_require: emit one IMPORT
 // for require("path"), preferring the enclosing declarator identifier as local_name.
-func syntaxCommonJSRequireFact(node, parent SyntaxNode, source []byte, scope string, lines []uint32) (SyntaxFact, bool) {
+func syntaxCommonJSRequireFact(node, parent syntaxView, source []byte, scope string, lines []uint32) (SyntaxFact, bool) {
 	if !isRequireImportCall(node, source) {
 		return SyntaxFact{}, false
 	}
 	args, _ := findField(node, "arguments")
 	modulePath := ""
-	for _, child := range args.Children {
-		if !child.Named {
+	for i := 0; i < args.ChildCount(); i++ {
+		child := args.ChildAt(i)
+		if !child.IsNamed() {
 			continue
 		}
-		if child.Type == "string" || child.Type == "string_literal" || child.Type == "template_string" {
+		if child.Kind() == "string" || child.Kind() == "string_literal" || child.Kind() == "template_string" {
 			modulePath = trimSyntaxLiteral(strings.TrimSpace(nodeText(child, source)))
 			break
 		}
@@ -2005,8 +2155,8 @@ func syntaxCommonJSRequireFact(node, parent SyntaxNode, source []byte, scope str
 		return SyntaxFact{}, false
 	}
 	localName := importPathLast(modulePath)
-	if parent.Type == "variable_declarator" {
-		if nameNode, ok := findField(parent, "name"); ok && isIdentifierNode(nameNode.Type) {
+	if parent.Kind() == "variable_declarator" {
+		if nameNode, ok := findField(parent, "name"); ok && isIdentifierNode(nameNode.Kind()) {
 			if name := strings.TrimSpace(nodeText(nameNode, source)); name != "" {
 				localName = name
 			}
@@ -2017,14 +2167,15 @@ func syntaxCommonJSRequireFact(node, parent SyntaxNode, source []byte, scope str
 	return fact, true
 }
 
-func destructurePatternNames(pattern SyntaxNode, source []byte) []string {
+func destructurePatternNames(pattern syntaxView, source []byte) []string {
 	var names []string
-	for _, child := range pattern.Children {
-		if !child.Named {
+	for i := 0; i < pattern.ChildCount(); i++ {
+		child := pattern.ChildAt(i)
+		if !child.IsNamed() {
 			continue
 		}
 		ident := destructureIdent(child)
-		if ident.Type == "" {
+		if ident.Kind() == "" {
 			continue
 		}
 		if name := strings.TrimSpace(nodeText(ident, source)); name != "" {
@@ -2034,8 +2185,8 @@ func destructurePatternNames(pattern SyntaxNode, source []byte) []string {
 	return names
 }
 
-func destructureIdent(node SyntaxNode) SyntaxNode {
-	switch node.Type {
+func destructureIdent(node syntaxView) syntaxView {
+	switch node.Kind() {
 	case "shorthand_property_identifier_pattern", "identifier":
 		return node
 	case "pair_pattern":
@@ -2043,8 +2194,9 @@ func destructureIdent(node SyntaxNode) SyntaxNode {
 			return value
 		}
 	}
-	for _, child := range node.Children {
-		if child.Named {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if child.IsNamed() {
 			return child
 		}
 	}
@@ -2060,21 +2212,22 @@ func isEnumMemberNode(kind string) bool {
 		kind == "enum_member" || kind == "enum_assignment" || kind == "enumerator"
 }
 
-func extractEnumMemberFacts(node SyntaxNode, source []byte, scope string, lines []uint32) []SyntaxFact {
+func extractEnumMemberFacts(node syntaxView, source []byte, scope string, lines []uint32) []SyntaxFact {
 	body := findEnumBody(node)
-	if body.Type == "" {
+	if body.Kind() == "" {
 		return nil
 	}
 	var facts []SyntaxFact
-	for _, member := range body.Children {
-		if !member.Named || !isEnumMemberNode(member.Type) {
+	for i := 0; i < body.ChildCount(); i++ {
+		member := body.ChildAt(i)
+		if !member.IsNamed() || !isEnumMemberNode(member.Kind()) {
 			continue
 		}
 		nameNode, ok := findField(member, "name")
 		if !ok {
 			nameNode = findChildByType(member, "identifier")
 		}
-		if nameNode.Type == "" {
+		if nameNode.Kind() == "" {
 			continue
 		}
 		name := strings.TrimSpace(nodeText(nameNode, source))
@@ -2087,28 +2240,29 @@ func extractEnumMemberFacts(node SyntaxNode, source []byte, scope string, lines 
 	return facts
 }
 
-func findEnumBody(node SyntaxNode) SyntaxNode {
+func findEnumBody(node syntaxView) syntaxView {
 	if body, ok := findField(node, "body"); ok {
 		return body
 	}
 	for _, kind := range []string{"enum_body", "declaration_list", "field_declaration_list", "class_body"} {
-		if child := findChildByType(node, kind); child.Type != "" {
+		if child := findChildByType(node, kind); child.Kind() != "" {
 			return child
 		}
 	}
 	return SyntaxNode{}
 }
 
-func findChildByType(node SyntaxNode, kind string) SyntaxNode {
-	for _, child := range node.Children {
-		if child.Type == kind {
+func findChildByType(node syntaxView, kind string) syntaxView {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if child.Kind() == kind {
 			return child
 		}
 	}
 	return SyntaxNode{}
 }
 
-func yamlInfraURLRoute(node SyntaxNode, source []byte, key string, lines []uint32) SyntaxFact {
+func yamlInfraURLRoute(node syntaxView, source []byte, key string, lines []uint32) SyntaxFact {
 	if key == "" || isUpstreamConfigKey(key) {
 		return SyntaxFact{}
 	}
@@ -2138,13 +2292,15 @@ func isUpstreamConfigKey(keyPath string) bool {
 
 // findIniSectionName matches Superopen find_ini_section_name: prefer the bare
 // text child inside section_name so brackets/newlines never enter the QN.
-func findIniSectionName(node SyntaxNode, source []byte) string {
-	for _, child := range node.Children {
-		if child.Type != "section_name" {
+func findIniSectionName(node syntaxView, source []byte) string {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if child.Kind() != "section_name" {
 			continue
 		}
-		for _, inner := range child.Children {
-			if inner.Type == "text" {
+		for i := 0; i < child.ChildCount(); i++ {
+			inner := child.ChildAt(i)
+			if inner.Kind() == "text" {
 				if name := strings.TrimSpace(nodeText(inner, source)); name != "" {
 					return name
 				}
@@ -2158,28 +2314,29 @@ func findIniSectionName(node SyntaxNode, source []byte) string {
 }
 
 // findIniSettingName matches Superopen extract_ini_vars.
-func findIniSettingName(node SyntaxNode, source []byte) string {
-	for _, child := range node.Children {
-		if child.Type == "setting_name" || child.Type == "name" {
+func findIniSettingName(node syntaxView, source []byte) string {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if child.Kind() == "setting_name" || child.Kind() == "name" {
 			return strings.TrimSpace(nodeText(child, source))
 		}
 	}
-	if len(node.Children) > 0 {
-		return strings.TrimSpace(nodeText(node.Children[0], source))
+	if node.ChildCount() > 0 {
+		return strings.TrimSpace(nodeText(node.ChildAt(0), source))
 	}
 	return ""
 }
 
-func definitionName(language string, node SyntaxNode, source []byte, kind string) string {
+func definitionName(language string, node syntaxView, source []byte, kind string) string {
 	if language == "ini" {
-		if kind == "class" && node.Type == "section" {
+		if kind == "class" && node.Kind() == "section" {
 			return findIniSectionName(node, source)
 		}
-		if kind == "variable" && node.Type == "setting" {
+		if kind == "variable" && node.Kind() == "setting" {
 			return findIniSettingName(node, source)
 		}
 	}
-	if kind == "function" && node.Type == "rule" {
+	if kind == "function" && node.Kind() == "rule" {
 		line := nodeText(node, source)
 		if end := strings.IndexAny(line, ":\r\n"); end >= 0 {
 			line = line[:end]
@@ -2195,12 +2352,12 @@ func definitionName(language string, node SyntaxNode, source []byte, kind string
 		// Bash and PowerShell expose function names as bare grammar-specific
 		// children rather than identifier/name fields. Match the pinned
 		// extractor by reading the declaration token for those forms.
-		if name := commandLanguageFunctionName(node.Type, nodeText(node, source)); name != "" {
+		if name := commandLanguageFunctionName(node.Kind(), nodeText(node, source)); name != "" {
 			return name
 		}
 	}
 	if language == "python" && kind == "variable" {
-		if left, ok := findField(node, "left"); ok && (left.Type == "attribute" || left.Type == "subscript") {
+		if left, ok := findField(node, "left"); ok && (left.Kind() == "attribute" || left.Kind() == "subscript") {
 			return ""
 		}
 	}
@@ -2208,7 +2365,7 @@ func definitionName(language string, node SyntaxNode, source []byte, kind string
 		if child, ok := findField(node, field); ok {
 			// Superopen engine helper keeps the full computed_property_name
 			// text (e.g. [Symbol.asyncIterator]), not the nested identifier.
-			if child.Type == "computed_property_name" {
+			if child.Kind() == "computed_property_name" {
 				if name := strings.TrimSpace(nodeText(child, source)); name != "" {
 					return name
 				}
@@ -2224,7 +2381,8 @@ func definitionName(language string, node SyntaxNode, source []byte, kind string
 		}
 	}
 	if kind == "variable" || kind == "field" {
-		for _, child := range node.Children {
+		for i := 0; i < node.ChildCount(); i++ {
+			child := node.ChildAt(i)
 			if name := identifierText(child, source); name != "" {
 				return name
 			}
@@ -2271,7 +2429,7 @@ func commandLanguageFunctionName(nodeType, text string) string {
 	return name
 }
 
-func relationshipName(node SyntaxNode, source []byte, fields []string) string {
+func relationshipName(node syntaxView, source []byte, fields []string) string {
 	for _, field := range fields {
 		if child, ok := findField(node, field); ok {
 			if text := compactRelationshipText(nodeText(child, source)); text != "" {
@@ -2279,8 +2437,9 @@ func relationshipName(node SyntaxNode, source []byte, fields []string) string {
 			}
 		}
 	}
-	for _, child := range node.Children {
-		if isIdentifierNode(child.Type) || isStringNode(child.Type) || strings.Contains(child.Type, "member") || strings.Contains(child.Type, "selector") {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if isIdentifierNode(child.Kind()) || isStringNode(child.Kind()) || strings.Contains(child.Kind(), "member") || strings.Contains(child.Kind(), "selector") {
 			if text := compactRelationshipText(nodeText(child, source)); text != "" {
 				return text
 			}
@@ -2289,21 +2448,35 @@ func relationshipName(node SyntaxNode, source []byte, fields []string) string {
 	return ""
 }
 
-func findField(node SyntaxNode, field string) (SyntaxNode, bool) {
-	for _, child := range node.Children {
-		if child.Field == field {
-			return child, true
-		}
+func findField(node syntaxView, field string) (syntaxView, bool) {
+	if node == nil {
+		return SyntaxNode{}, false
 	}
-	return SyntaxNode{}, false
+	if lookup, ok := node.(fieldLookupView); ok {
+		return lookup.ChildByField(field)
+	}
+	var found syntaxView
+	ok := false
+	viewEachChild(node, func(child syntaxView) {
+		if ok || child.FieldName() != field {
+			return
+		}
+		found = child
+		ok = true
+	})
+	if !ok {
+		return SyntaxNode{}, false
+	}
+	return found, true
 }
 
-func identifierText(node SyntaxNode, source []byte) string {
-	if isIdentifierNode(node.Type) || isStringNode(node.Type) {
+func identifierText(node syntaxView, source []byte) string {
+	if isIdentifierNode(node.Kind()) || isStringNode(node.Kind()) {
 		return trimSyntaxLiteral(nodeText(node, source))
 	}
-	for _, child := range node.Children {
-		if child.Field == "parameters" || child.Field == "body" || child.Type == "parameter_list" || strings.Contains(child.Type, "body") {
+	for i := 0; i < node.ChildCount(); i++ {
+		child := node.ChildAt(i)
+		if child.FieldName() == "parameters" || child.FieldName() == "body" || child.Kind() == "parameter_list" || strings.Contains(child.Kind(), "body") {
 			continue
 		}
 		if value := identifierText(child, source); value != "" {
@@ -2324,11 +2497,11 @@ func isStringNode(kind string) bool {
 		strings.HasSuffix(kind, "_string")
 }
 
-func nodeText(node SyntaxNode, source []byte) string {
-	if node.Start > node.End || uint64(node.End) > uint64(len(source)) {
+func nodeText(node syntaxView, source []byte) string {
+	if node == nil || node.StartByte() > node.EndByte() || uint64(node.EndByte()) > uint64(len(source)) {
 		return ""
 	}
-	return string(source[node.Start:node.End])
+	return string(source[node.StartByte():node.EndByte()])
 }
 
 func trimSyntaxLiteral(value string) string {
@@ -2355,11 +2528,11 @@ func sourceLineIndex(source []byte) []uint32 {
 	return lines
 }
 
-func syntaxFact(kind, name, scope string, node SyntaxNode, lines []uint32, confidence float64) SyntaxFact {
-	startLine, startColumn := bytePosition(lines, node.Start)
-	endLine, endColumn := bytePosition(lines, node.End)
+func syntaxFact(kind, name, scope string, node syntaxView, lines []uint32, confidence float64) SyntaxFact {
+	startLine, startColumn := bytePosition(lines, node.StartByte())
+	endLine, endColumn := bytePosition(lines, node.EndByte())
 	return SyntaxFact{
-		Kind: kind, Name: name, Scope: scope, NodeType: node.Type, StartByte: node.Start, EndByte: node.End,
+		Kind: kind, Name: internString(name), Scope: internString(scope), NodeType: internString(node.Kind()), StartByte: node.StartByte(), EndByte: node.EndByte(),
 		StartLine: startLine, StartColumn: startColumn, EndLine: endLine, EndColumn: endColumn, Confidence: confidence,
 		Lines: endLine - startLine + 1,
 	}
@@ -2387,12 +2560,12 @@ func sortSyntaxFacts(result *SyntaxExtraction) {
 	}
 	less(result.Definitions)
 	less(result.Calls)
-	less(result.Usages)
-	less(result.Writes)
 	less(result.Imports)
 	less(result.Decorators)
 	less(result.Sections)
 	less(result.Branches)
-	less(result.Bindings)
 	less(result.Inheritance)
+	sortOccurrenceFacts(result.Usages)
+	sortOccurrenceFacts(result.Writes)
+	sortOccurrenceFacts(result.Bindings)
 }

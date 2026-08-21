@@ -54,7 +54,7 @@ func readinessGateDefinitions() []api.ReadinessGate {
 		gate("resolver.php", "resolution", gatePending, "PHP semantic resolver"),
 		gate("resolver.csharp", "resolution", gatePending, "C# semantic resolver"),
 		gate("resolver.go", "resolution", gateInProgress, "Go AST/types resolver enriches FileResult.ResolvedCalls; golden precision/recall pending"),
-		gate("resolver.c-cpp", "resolution", gatePending, "C and C++ semantic resolver"),
+		gate("resolver.c-cpp", "resolution", gateInProgress, "C/C++/CUDA preprocessor second pass plus in-process type-registry ResolvedCalls; clang-level templates/ADL pending"),
 		gate("resolver.java", "resolution", gatePending, "Java semantic resolver"),
 		gate("resolver.kotlin", "resolution", gatePending, "Kotlin semantic resolver"),
 		gate("resolver.rust", "resolution", gatePending, "Rust semantic resolver"),

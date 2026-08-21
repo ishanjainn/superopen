@@ -21,7 +21,6 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/install"
 	"github.com/ishanjainn/superopen/internal/agent/skills"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
-	"github.com/ishanjainn/superopen/internal/agent/subagents"
 	"github.com/spf13/cobra"
 )
 
@@ -100,10 +99,6 @@ func RemoveAll(purge, keepData, dryRun bool, stdout, stderr io.Writer) (removed 
 		for _, path := range steer.RemoveAll() {
 			removed = append(removed, path)
 			fmt.Fprintf(stdout, "guidance: removed %s\n", path)
-		}
-		for _, path := range subagents.RemoveAll() {
-			removed = append(removed, path)
-			fmt.Fprintf(stdout, "subagents: removed %s\n", path)
 		}
 		for _, path := range install.RemoveUserMCP() {
 			removed = append(removed, path)

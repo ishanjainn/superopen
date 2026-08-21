@@ -98,14 +98,14 @@ func indexGoDevelopment(ctx context.Context, request api.BuildRequest, engineVer
 				}
 				if _, err := builder.PutEdge(api.Edge{
 					Project: project, SourceID: source, TargetID: target, Type: edge.kind,
-					Properties: edge.properties, Evidence: edge.evidence,
+					Properties: edge.dumpProperties(), Evidence: edge.evidence,
 				}); err != nil {
 					return err
 				}
 			}
 			for _, edge := range parsed.unresolved {
 				if err := builder.PutUnresolved(api.UnresolvedRelationship{Project: project, Source: edge.source,
-					TargetText: edge.target, Type: edge.kind, Properties: edge.properties, Evidence: edge.evidence}); err != nil {
+					TargetText: edge.target, Type: edge.kind, Properties: edge.dumpProperties(), Evidence: edge.evidence}); err != nil {
 					return err
 				}
 			}
@@ -138,14 +138,66 @@ type goGraph struct {
 	nodes      []api.Node
 	edges      []pendingEdge
 	unresolved []pendingEdge
+	intern     *graphIntern
+	edgeSeen   map[edgeKey]struct{}
+}
+
+func (g *goGraph) ensureIntern() *graphIntern {
+	if g.intern == nil {
+		g.intern = newGraphIntern(len(g.nodes) + len(g.edges) + 8)
+	}
+	return g.intern
+}
+
+func (g *goGraph) addEdge(edge pendingEdge) {
+	intern := g.ensureIntern()
+	if g.edgeSeen == nil {
+		g.edgeSeen = make(map[edgeKey]struct{}, 1024)
+	}
+	key := edgeIdentityKey(intern, edge)
+	if _, ok := g.edgeSeen[key]; ok {
+		return
+	}
+	g.edgeSeen[key] = struct{}{}
+	g.edges = append(g.edges, edge)
+}
+
+func (g *goGraph) addEdges(edges []pendingEdge) {
+	for _, edge := range edges {
+		g.addEdge(edge)
+	}
 }
 
 type pendingEdge struct {
 	source     string
 	target     string
 	kind       string
+	callee     string
 	properties api.Properties
 	evidence   *api.Evidence
+}
+
+func (e pendingEdge) dumpProperties() api.Properties {
+	if e.callee == "" {
+		return e.properties
+	}
+	if e.properties == nil {
+		return api.Properties{"callee": e.callee}
+	}
+	out := make(api.Properties, len(e.properties)+1)
+	for key, value := range e.properties {
+		out[key] = value
+	}
+	out["callee"] = e.callee
+	return out
+}
+
+func (e pendingEdge) Callee() string {
+	if e.callee != "" {
+		return e.callee
+	}
+	value, _ := e.properties["callee"].(string)
+	return value
 }
 
 type parsedFile struct {
@@ -1467,21 +1519,30 @@ func sortGraph(graph *goGraph) {
 		unique = append(unique, node)
 	}
 	graph.nodes = unique
+	uniqueEdgesHashSet(graph)
 	sort.Slice(graph.edges, func(i, j int) bool {
-		a, b := graph.edges[i], graph.edges[j]
-		return graphEdgeIdentity(a) < graphEdgeIdentity(b)
+		return graphEdgeLessPair(graph.edges[i], graph.edges[j])
 	})
-	uniqueEdges := graph.edges[:0]
-	for _, edge := range graph.edges {
-		if len(uniqueEdges) > 0 {
-			prior := uniqueEdges[len(uniqueEdges)-1]
-			if graphEdgeIdentity(prior) == graphEdgeIdentity(edge) {
-				continue
-			}
-		}
-		uniqueEdges = append(uniqueEdges, edge)
+}
+
+func uniqueEdgesHashSet(graph *goGraph) {
+	if len(graph.edges) == 0 {
+		graph.edgeSeen = map[edgeKey]struct{}{}
+		return
 	}
-	graph.edges = uniqueEdges
+	intern := graph.ensureIntern()
+	seen := make(map[edgeKey]struct{}, len(graph.edges))
+	unique := graph.edges[:0]
+	for _, edge := range graph.edges {
+		key := edgeIdentityKey(intern, edge)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		unique = append(unique, edge)
+	}
+	graph.edges = unique
+	graph.edgeSeen = seen
 }
 
 func graphEdgeIdentity(edge pendingEdge) string {
@@ -1491,6 +1552,24 @@ func graphEdgeIdentity(edge pendingEdge) string {
 		key += "\x00" + localName
 	}
 	return key
+}
+
+func graphEdgeLessPair(a, b pendingEdge) bool {
+	if a.source != b.source {
+		return a.source < b.source
+	}
+	if a.kind != b.kind {
+		return a.kind < b.kind
+	}
+	if a.target != b.target {
+		return a.target < b.target
+	}
+	if a.kind == "IMPORTS" {
+		left, _ := a.properties["local_name"].(string)
+		right, _ := b.properties["local_name"].(string)
+		return left < right
+	}
+	return false
 }
 
 func nodeCollisionPriority(label string) int {

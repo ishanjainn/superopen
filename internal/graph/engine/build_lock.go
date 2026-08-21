@@ -2,6 +2,8 @@ package engine
 
 import (
 	"errors"
+
+	"github.com/ishanjainn/superopen/internal/graph/buildpool"
 )
 
 // ErrBuildInProgress is returned when a non-blocking build lock cannot be
@@ -24,4 +26,9 @@ func BuildBusy(repoRoot string) bool {
 	}
 	unlock()
 	return false
+}
+
+// BuildPoolFull reports whether the global build slot pool is exhausted.
+func BuildPoolFull() bool {
+	return buildpool.Full()
 }

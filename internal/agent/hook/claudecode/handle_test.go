@@ -243,3 +243,22 @@ func TestClaudeSessionDurationCachedAcrossInvocations(t *testing.T) {
 		t.Errorf("ended session duration = %s, want >= 30s (cache should have rewound start)", dur)
 	}
 }
+
+func TestClaudeStopPersistsLoopEvent(t *testing.T) {
+	withIsolatedCache(t)
+	em := &recordingEmitter{}
+	in := inputBuilder(t, em)
+	if err := handle(context.Background(), in("Stop", map[string]any{
+		"hook_event_name": "Stop",
+		"session_id":      "cc-stop-obs",
+		"cwd":             "/tmp/work",
+	})); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if len(em.events) != 1 {
+		t.Fatalf("Stop must still record a loop event, got %d", len(em.events))
+	}
+	if em.events[0].Name != "coding_agent.session.loop.stop" {
+		t.Fatalf("Stop event name = %q", em.events[0].Name)
+	}
+}

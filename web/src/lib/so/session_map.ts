@@ -103,7 +103,7 @@ function walkFiles(root: string): { path: string; bytes: number }[] {
     const dir = stack.pop()!;
     let entries;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      entries = readdirSync(/* turbopackIgnore: true */dir, { withFileTypes: true });
     } catch {
       continue;
     }
@@ -119,7 +119,7 @@ function walkFiles(root: string): { path: string; bytes: number }[] {
       if (!e.isFile()) continue;
       let bytes = 0;
       try {
-        bytes = statSync(abs).size;
+        bytes = statSync(/* turbopackIgnore: true */abs).size;
       } catch {
         continue;
       }
@@ -431,7 +431,7 @@ export function seatTracePaths(
     let bytes = 0;
     let ghost = true;
     try {
-      const st = statSync(absoluteFor(path, root, districts));
+      const st = statSync(/* turbopackIgnore: true */absoluteFor(path, root, districts));
       if (st.isFile()) {
         bytes = st.size;
         ghost = false;
@@ -521,7 +521,7 @@ function computeRoots(
   }
   const isGit = (path: string) => {
     try {
-      return statSync(join(path, ".git")) != null;
+      return statSync(/* turbopackIgnore: true */join(path, ".git")) != null;
     } catch {
       return false;
     }

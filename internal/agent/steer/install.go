@@ -32,6 +32,25 @@ func InstallAll() ([]string, error) {
 	return written, nil
 }
 
+// InstallProjectCursorRule writes <repo>/.cursor/rules/superopen.mdc so this
+// repository always includes Superopen guidance even without the user-global rule.
+func InstallProjectCursorRule(repoRoot string) (string, error) {
+	path := filepath.Join(repoRoot, ".cursor", "rules", "superopen.mdc")
+	if err := writeCursorRule(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// RemoveProjectCursorRule deletes the per-repo Cursor rule if Superopen wrote it.
+func RemoveProjectCursorRule(repoRoot string) string {
+	path := filepath.Join(repoRoot, ".cursor", "rules", "superopen.mdc")
+	if err := os.Remove(path); err == nil {
+		return path
+	}
+	return ""
+}
+
 // RemoveAll strips Superopen durable blocks from user-level instruction files.
 func RemoveAll() []string {
 	home, err := os.UserHomeDir()
@@ -80,8 +99,8 @@ func durableTargets(home string) []string {
 }
 
 func writeCursorRule(path string) error {
-	body := "---\ndescription: Superopen native code graph — prefer graph tools for structural code questions\nalwaysApply: true\n---\n\n" +
-		beginMarker + "\n" + Block() + endMarker + "\n"
+	body := "---\ndescription: Superopen — ignore unless this workspace has a .so directory\nalwaysApply: true\n---\n\n" +
+		beginMarker + "\n" + CursorRule() + endMarker + "\n"
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

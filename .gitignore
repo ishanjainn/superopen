@@ -1,6 +1,7 @@
 .bin/
 bin/
 dist/
+.env
 *.exe
 .DS_Store
 web/tsconfig.tsbuildinfo

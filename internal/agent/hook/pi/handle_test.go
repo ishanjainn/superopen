@@ -69,3 +69,35 @@ func TestPiSkipsUnknownSession(t *testing.T) {
 		t.Fatalf("expected skip, got %d turns", len(em.turns))
 	}
 }
+
+func TestPiSessionPromptToolParity(t *testing.T) {
+	em := &rec{}
+	sid := "019fdd1a-6662-7a13-8fad-c54abef89fd4"
+	start, _ := json.Marshal(map[string]any{"session_id": sid, "cwd": "/tmp/repo"})
+	if err := handle(normalize.Input{Vendor: "pi", Event: "session_start", Payload: start, Emit: em}); err != nil {
+		t.Fatal(err)
+	}
+	prompt, _ := json.Marshal(map[string]any{"session_id": sid, "prompt": "where is graphGate"})
+	if err := handle(normalize.Input{Vendor: "pi", Event: "before_agent_start", Payload: prompt, Emit: em, ContentCapture: "full"}); err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := json.Marshal(map[string]any{
+		"session_id": sid, "toolName": "bash", "toolCallId": "t1", "result": "ok",
+	})
+	if err := handle(normalize.Input{Vendor: "pi", Event: "tool_execution_end", Payload: tool, Emit: em, ContentCapture: "full"}); err != nil {
+		t.Fatal(err)
+	}
+	stop, _ := json.Marshal(map[string]any{"session_id": sid})
+	if err := handle(normalize.Input{Vendor: "pi", Event: "session_shutdown", Payload: stop, Emit: em}); err != nil {
+		t.Fatal(err)
+	}
+	if len(em.sessions) < 1 {
+		t.Fatalf("want EmitSession, got %d", len(em.sessions))
+	}
+	if len(em.turns) < 1 {
+		t.Fatalf("want EmitLLMTurn, got %d", len(em.turns))
+	}
+	if len(em.tools) < 1 {
+		t.Fatalf("want EmitToolCall, got %d", len(em.tools))
+	}
+}

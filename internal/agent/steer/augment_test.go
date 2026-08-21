@@ -10,7 +10,7 @@ func TestExploreAugmentRendersHits(t *testing.T) {
 		{QualifiedName: "internal/api.HandleRequest", Label: "Function", File: "internal/api/handler.go", Lines: "42-88"},
 		{QualifiedName: "internal/api.handleRequestV2", Label: "Function", File: "internal/api/v2.go", Lines: "10-31"},
 	})
-	if !strings.Contains(text, "12 indexed match") {
+	if !strings.Contains(text, "2 hit") {
 		t.Fatalf("missing total: %s", text)
 	}
 	for _, want := range []string{"internal/api.HandleRequest", "Function", "internal/api/handler.go", "42-88"} {
@@ -18,7 +18,7 @@ func TestExploreAugmentRendersHits(t *testing.T) {
 			t.Fatalf("missing %q in:\n%s", want, text)
 		}
 	}
-	if !strings.Contains(text, "graph_snippet") {
+	if !strings.Contains(text, "so graph snippet") {
 		t.Fatalf("augment should tell the agent what to call next: %s", text)
 	}
 }

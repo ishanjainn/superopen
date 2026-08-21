@@ -12,11 +12,13 @@ on:
     branches: ["main"]
     paths:
       - "web/**"
+      - "scripts/pack-web.sh"
       - ".github/workflows/ci-web.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "web/**"
+      - "scripts/pack-web.sh"
       - ".github/workflows/ci-web.yml"
   workflow_dispatch:
 
@@ -56,3 +58,20 @@ jobs:
         env:
           # Build should not require a live .so/ workspace
           SUPEROPEN_ROOT: ${{ github.workspace }}
+      - name: Pack standalone UI
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          sh scripts/pack-web.sh --from web --tar dist/so-web.tar.gz
+          # Consume tar fully. `tar | grep -q` closes the pipe early; GNU tar
+          # then exits 2 ("stdout: write error") under pipefail.
+          list=$(tar -tzf dist/so-web.tar.gz)
+          case "$list" in
+            *server.js*) ;;
+            *) echo "::error::so-web.tar.gz is missing server.js"; exit 1 ;;
+          esac
+          case "$list" in
+            *.next/BUILD_ID*) ;;
+            *) echo "::error::so-web.tar.gz is missing .next/BUILD_ID"; exit 1 ;;
+          esac

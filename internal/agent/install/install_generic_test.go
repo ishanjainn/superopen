@@ -59,6 +59,9 @@ func TestInstallOpenCodeAndPiUseHostDiscoveryPaths(t *testing.T) {
 	if !strings.Contains(string(body), "client.session.message") {
 		t.Fatalf("opencode plugin should hydrate assistant parts via client.session.message")
 	}
+	if !strings.Contains(string(body), "prependBashNudge") || !strings.Contains(string(body), `" ; "`) {
+		t.Fatalf("opencode plugin should apply Windows-safe bash echo nudge")
+	}
 
 	writtenPi, err := installGenericVendor("pi", false)
 	if err != nil {
@@ -70,6 +73,19 @@ func TestInstallOpenCodeAndPiUseHostDiscoveryPaths(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".pi", "extensions", "superopen")); !os.IsNotExist(err) {
 		t.Fatalf("stale ~/.pi/extensions/superopen should be removed")
+	}
+	piBody, err := os.ReadFile(wantPi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(piBody), "registerGraphTools") {
+		t.Fatalf("pi plugin should keep native graph_* tools")
+	}
+	if !strings.Contains(string(piBody), "prependBashNudge") {
+		t.Fatalf("pi plugin should apply bash echo nudge")
+	}
+	if !strings.Contains(string(piBody), "startsWith(\"graph_\")") {
+		t.Fatalf("pi plugin must skip graph_* tools when rewriting commands")
 	}
 }
 
@@ -192,5 +208,22 @@ func TestGenericVendorHonorsConfigOverrides(t *testing.T) {
 	}
 	if !strings.Contains(string(body)[sessionEndIdx:], "sessions finalize --detach") {
 		t.Fatal("Copilot sessionEnd must still detach finalize")
+	}
+}
+
+func TestPatchPluginSoBinWindowsExe(t *testing.T) {
+	src := `function soBin(): string {
+  return process.env.SUPEROPEN_SO_BIN?.trim() || "so";
+}`
+	got := patchPluginSoBin(src, `C:\Users\me\AppData\Local\superopen\so.exe`)
+	if strings.Contains(got, `|| "so";`) {
+		t.Fatalf("windows so.exe must replace fallback so, got:\n%s", got)
+	}
+	if !strings.Contains(got, "so.exe") {
+		t.Fatalf("patched plugin must pin so.exe, got:\n%s", got)
+	}
+	// strconv.Quote JSON-escapes backslashes so the TS string stays valid.
+	if !strings.Contains(got, `C:\\Users\\me\\AppData\\Local\\superopen\\so.exe`) {
+		t.Fatalf("windows path must be JS-quoted, got:\n%s", got)
 	}
 }

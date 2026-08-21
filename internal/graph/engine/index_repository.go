@@ -79,7 +79,6 @@ func indexRepositoryBranch(ctx context.Context, root, project string, graph *goG
 		graph.edges = append(graph.edges, pendingEdge{source: qn, target: target, kind: "CONTAINS_FOLDER",
 			evidence: &api.Evidence{Strategy: "repository_layout", Confidence: 1}})
 	}
-	sortGraph(graph)
 }
 
 // gitBranchSlug matches Superopen slug_from_branch: non-alnum runes collapse to

@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 async function runGraphQuery(question: string): Promise<{ ok: boolean; answer: string; error?: string }> {
   const bin = soBinary();
-  const child = spawn(bin, ["graph", "query", question], {
+  const child = spawn(/* turbopackIgnore: true */ bin, ["graph", "query", question], {
     cwd: repoCwd(),
     env: { ...process.env, SUPEROPEN_ROOT: repoRoot() },
     stdio: ["ignore", "pipe", "pipe"],

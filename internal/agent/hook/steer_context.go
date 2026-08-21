@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/steer"
 	"github.com/ishanjainn/superopen/internal/graph/api"
 	"github.com/ishanjainn/superopen/internal/graph/client"
+	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 )
@@ -33,32 +35,53 @@ const (
 
 // emitSteerContext writes vendor-specific additionalContext when the event
 // supports it. Unknown protocols get no stdout (fail-open).
-func emitSteerContext(vendor, event string, payload []byte) {
-	text, hookEvent, ok := steerTextFor(vendor, event, payload)
-	if !ok || text == "" {
+func emitSteerContext(vendor, event, kind string, payload []byte) {
+	decision, ok := steerDecisionFor(vendor, event, kind, payload)
+	if !ok {
 		return
 	}
 	var body any
 	switch vendor {
 	case "claude-code":
-		body = map[string]any{
-			"hookSpecificOutput": map[string]any{
-				"hookEventName":     hookEvent,
-				"additionalContext": text,
-			},
+		hso := map[string]any{
+			"hookEventName": decision.hookEvent,
 		}
+		if decision.deny {
+			hso["permissionDecision"] = "deny"
+			hso["permissionDecisionReason"] = decision.text
+		} else if decision.text != "" {
+			hso["additionalContext"] = decision.text
+		} else {
+			return
+		}
+		body = map[string]any{"hookSpecificOutput": hso}
 	case "cursor":
-		body = map[string]any{"additional_context": text}
+		if decision.deny || decision.text == "" {
+			// Cursor has no PreToolUse deny contract matching Claude.
+			if decision.text == "" {
+				return
+			}
+		}
+		body = map[string]any{"additional_context": decision.text}
 	case "codex":
+		// Codex Desktop rejects additionalContext on PreToolUse.
+		if event == "PreToolUse" {
+			return
+		}
+		if decision.text == "" {
+			return
+		}
 		body = map[string]any{
 			"hookSpecificOutput": map[string]any{
-				"hookEventName":     hookEvent,
-				"additionalContext": text,
+				"hookEventName":     decision.hookEvent,
+				"additionalContext": decision.text,
 			},
 		}
-	case "gemini", "copilot-cli":
-		// Best-effort shared shape used by several CLI hosts.
-		body = map[string]any{"additionalContext": text}
+	case "gemini", "copilot-cli", "opencode", "pi":
+		if decision.text == "" {
+			return
+		}
+		body = map[string]any{"additionalContext": decision.text}
 	default:
 		return
 	}
@@ -69,7 +92,24 @@ func emitSteerContext(vendor, event string, payload []byte) {
 	}
 }
 
+type steerDecision struct {
+	text      string
+	hookEvent string
+	deny      bool
+}
+
 func steerTextFor(vendor, event string, payload []byte) (text, hookEvent string, ok bool) {
+	d, ok := steerDecisionFor(vendor, event, "", payload)
+	if !ok {
+		return "", "", false
+	}
+	return d.text, d.hookEvent, true
+}
+
+func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision, bool) {
+	if !managedFromPayload(payload) {
+		return steerDecision{}, false
+	}
 	ev := strings.TrimSpace(event)
 	var sessionEvent, toolEvent bool
 	var compactEvent bool
@@ -88,91 +128,130 @@ func steerTextFor(vendor, event string, payload []byte) (text, hookEvent string,
 	case "copilot-cli":
 		sessionEvent = ev == "sessionStart" || ev == "userPromptSubmitted"
 		toolEvent = ev == "preToolUse"
+	case "opencode":
+		lower := strings.ToLower(ev)
+		sessionEvent = strings.Contains(lower, "session.created") || strings.Contains(lower, "session.end") ||
+			strings.Contains(lower, "session.deleted") || strings.Contains(lower, "session.idle") ||
+			lower == "sessionstart" || lower == "session_start"
+		toolEvent = strings.Contains(lower, "tool.execute.before") || lower == "pretooluse"
+	case "pi":
+		lower := strings.ToLower(ev)
+		sessionEvent = lower == "session_start" || lower == "sessionstart" ||
+			lower == "before_agent_start" || lower == "session_shutdown" || lower == "agent_end"
+		toolEvent = lower == "tool.execute.before" || lower == "tool_execution_start"
 	default:
-		return "", "", false
+		return steerDecision{}, false
 	}
 
 	switch {
 	case compactEvent:
 		if text := memoryCompactText(payload); text != "" {
-			return text, ev, true
+			return steerDecision{text: text, hookEvent: ev}, true
 		}
 	case sessionEvent:
-		var parts []string
-		if claimSessionReminder(payload, vendor) {
-			parts = append(parts, steer.HookReminder())
+		if ev == "SubagentStart" || ev == "subagentStart" {
+			// Explore subagents never see SessionStart; inject a one-line reminder.
+			return steerDecision{text: steer.HookReminder(), hookEvent: ev}, true
 		}
-		if vendor == "cursor" && (ev == "beforeSubmitPrompt") {
-			text := strings.TrimSpace(strings.Join(parts, "\n\n"))
-			if text == "" {
-				return "", "", false
-			}
-			return text, ev, true
-		}
-		if ev == "UserPromptSubmit" && (vendor == "claude-code" || vendor == "codex") {
-			if mem := nextTurnPack(payload); mem != "" {
-				parts = append(parts, mem)
-			}
-		} else if mem := claimMemoryPack(payload, vendor); mem != "" {
-			parts = append(parts, mem)
-		}
-		text := strings.TrimSpace(strings.Join(parts, "\n\n"))
-		if text == "" {
-			return "", "", false
-		}
-		return text, ev, true
+		// SessionStart, UserPromptSubmit, Stop, SessionEnd, and other
+		// lifecycle events are observability-only. Do not inject memory
+		// packs or steer text — PreToolUse is the Graphify-shaped nudge.
+		return steerDecision{}, false
 	case toolEvent:
-		if augment := exploreAugment(payload, vendor); augment != "" {
-			return augment, ev, true
+		if vendor == "codex" {
+			return steerDecision{}, false
 		}
+		return graphGate(payload, vendor, kind, ev)
 	}
-	return "", "", false
+	return steerDecision{}, false
 }
 
-func claimMemoryPack(payload []byte, vendor string) string {
+func graphGate(payload []byte, vendor, kind, hookEvent string) (steerDecision, bool) {
+	tool := toolNameFromPayload(payload)
+	if strings.HasPrefix(strings.ToLower(tool), "graph_") {
+		return steerDecision{}, false
+	}
+	gate := strings.ToLower(strings.TrimSpace(kind))
+	if gate == "" {
+		switch {
+		case hookEvent == "beforeReadFile" || isReadTool(tool):
+			gate = "read"
+		case isSearchTool(tool):
+			gate = "search"
+		default:
+			return steerDecision{}, false
+		}
+	} else if gate == "search" && tool != "" && !isSearchTool(tool) && !isReadTool(tool) {
+		// Scoped matcher already filtered Claude; Cursor preToolUse is unscoped.
+		return steerDecision{}, false
+	} else if gate == "read" && tool != "" && !isReadTool(tool) && hookEvent != "beforeReadFile" {
+		return steerDecision{}, false
+	}
+	switch gate {
+	case "search":
+		// Static MANDATORY one-liner only. Do not append ExploreAugment hit lists.
+		return steerDecision{text: steer.SearchNudge(), hookEvent: hookEvent}, true
+	case "read":
+		if hookStrictEnabled() && claimStrictReadDeny(payload, vendor) && isSourceRead(payload, tool, hookEvent) {
+			return steerDecision{text: steer.ReadDenyReason(), hookEvent: hookEvent, deny: true}, true
+		}
+		return steerDecision{text: steer.ReadNudge(), hookEvent: hookEvent}, true
+	default:
+		return steerDecision{}, false
+	}
+}
+
+func hookStrictEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("SUPEROPEN_HOOK_STRICT")))
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return false
+	}
+}
+
+func claimStrictReadDeny(payload []byte, vendor string) bool {
+	if engine.QueryStampFresh(graphRoot(payload)) {
+		return false
+	}
 	sessionID := steerSessionID(payload)
-	if sessionID != "" {
-		state := sessionstate.Load(sessionID, vendor)
-		if state.MemorySteerReminded {
-			return ""
-		}
-		state.MemorySteerReminded = true
-		sessionstate.Save(sessionID, vendor, state)
+	if sessionID == "" {
+		return true
 	}
-	root := graphRoot(payload)
-	if root == "" {
-		return ""
+	state := sessionstate.Load(sessionID, vendor)
+	if state.StrictReadDenied {
+		return false
 	}
-	cue := strings.TrimSpace(peekContext(payload).Prompt)
-	pack, err := memory.PackForRoot(root, cue, sessionID)
-	if err != nil || strings.TrimSpace(pack.Text) == "" {
-		return ""
-	}
-	text := pack.Text
-	if pack.AskDistill && sessionID != "" {
-		state := sessionstate.Load(sessionID, vendor)
-		if !state.MemoryDistillAsked {
-			state.MemoryDistillAsked = true
-			sessionstate.Save(sessionID, vendor, state)
-			if extra := memory.LiveDistillInstruction(pack.PendingSession); extra != "" {
-				text = text + "\n" + extra
-			}
-		}
-	}
-	return text
+	state.StrictReadDenied = true
+	sessionstate.Save(sessionID, vendor, state)
+	return true
 }
 
-func nextTurnPack(payload []byte) string {
-	root := graphRoot(payload)
-	if root == "" {
-		return ""
+func isSourceRead(payload []byte, tool, hookEvent string) bool {
+	if hookEvent == "beforeReadFile" {
+		return true
 	}
-	cue := strings.TrimSpace(peekContext(payload).Prompt)
-	pack, err := memory.PackNextForRoot(root, cue, steerSessionID(payload))
-	if err != nil || strings.TrimSpace(pack.Text) == "" {
-		return ""
+	if !isReadTool(tool) {
+		return false
 	}
-	return pack.Text
+	path := peekContext(payload).ToolPath
+	if path == "" {
+		return true
+	}
+	lower := strings.ToLower(path)
+	if strings.Contains(lower, "/.so/") || strings.HasPrefix(filepath.Base(lower), ".") {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".c", ".h", ".cc", ".cpp", ".java", ".rb", ".php", ".cs", ".kt", ".swift":
+		return true
+	default:
+		return ext != ".md" && ext != ".json" && ext != ".lock"
+	}
 }
 
 func memoryCompactText(payload []byte) string {
@@ -290,6 +369,23 @@ func searchGraphForTerm(root, term string) (int, []steer.GraphHit) {
 	return total, hits
 }
 
+// managedFromPayload is true when the hook workspace already has .so/.
+func managedFromPayload(payload []byte) bool {
+	start := strings.TrimSpace(peekContext(payload).CWD)
+	if start == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return false
+		}
+		start = wd
+	}
+	root, err := paths.FindRoot(start)
+	if err != nil || root == "" {
+		root = start
+	}
+	return paths.Managed(root)
+}
+
 // graphRoot resolves the repository root for the tool call, and reports ""
 // when that repository has no Superopen graph to draw on.
 func graphRoot(payload []byte) string {
@@ -335,13 +431,25 @@ func toolNameFromPayload(payload []byte) string {
 }
 
 // isExploreTool matches the discovery tools whose input names a symbol or file
-// the graph can answer for. Shell and directory listings are deliberately
-// excluded: their arguments rarely yield a term worth a graph lookup, and
-// augmenting every one of them was the bulk of the old nudge's token cost.
+// the graph can answer for. Edit/Write stay out so the gate does not fire on
+// the mutation path.
 func isExploreTool(name string) bool {
+	return isSearchTool(name) || isReadTool(name)
+}
+
+func isSearchTool(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "grep", "glob", "read", "readfile", "read_file", "search",
-		"searchfiles", "semanticsearch", "codebase_search", "ripgrep":
+	case "grep", "glob", "bash", "shell", "search", "searchfiles", "semanticsearch",
+		"codebase_search", "ripgrep":
+		return true
+	default:
+		return false
+	}
+}
+
+func isReadTool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "read", "readfile", "read_file", "glob":
 		return true
 	default:
 		return false
@@ -384,7 +492,22 @@ func searchTermFromPayload(payload []byte) string {
 			}
 		}
 	}
+	if cmd, ok := input["command"].(string); ok && bashLooksLikeSearch(cmd) {
+		if term := longestTerm(cmd); term != "" {
+			return term
+		}
+	}
 	return ""
+}
+
+func bashLooksLikeSearch(cmd string) bool {
+	lower := strings.ToLower(cmd)
+	for _, tok := range []string{"grep", "ripgrep", "rg ", "rg\t", "find ", "fd ", "ack ", "ag "} {
+		if strings.Contains(lower, tok) {
+			return true
+		}
+	}
+	return false
 }
 
 // longestTerm picks the most selective identifier in a raw pattern.

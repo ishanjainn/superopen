@@ -85,6 +85,15 @@ func TestSessionEndFinalizeIsDetached(t *testing.T) {
 	if !strings.Contains(body, `so sessions finalize --detach`) {
 		t.Fatalf("Claude SessionEnd must detach finalize; hooks.json:\n%s", body)
 	}
+	if !strings.Contains(body, `"matcher": "Bash|Grep"`) || !strings.Contains(body, `"matcher": "Read|Glob"`) {
+		t.Fatalf("Claude PreToolUse must use Bash|Grep and Read|Glob matchers; hooks.json:\n%s", body)
+	}
+	if !strings.Contains(body, `--kind=search`) || !strings.Contains(body, `--kind=read`) {
+		t.Fatalf("Claude PreToolUse must pass --kind; hooks.json:\n%s", body)
+	}
+	if !strings.Contains(body, `"SubagentStart"`) || !strings.Contains(body, `--event=SubagentStart`) {
+		t.Fatalf("Claude must install SubagentStart (Explore hole); hooks.json:\n%s", body)
+	}
 	raw, err = marketplaceFS.ReadFile("marketplace/plugins/cursor/hooks/hooks.json")
 	if err != nil {
 		t.Fatal(err)
