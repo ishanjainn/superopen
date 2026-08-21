@@ -2,6 +2,12 @@
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ["three"],
+  // Release tarball (`so-web.tar.gz`) is `.next/standalone` plus static/public.
+  // Curl/brew users extract that; they do not run `next build`.
+  output: "standalone",
+  outputFileTracingExcludes: {
+    "*": ["**/*.test.ts", "**/*.test.tsx"],
+  },
   // UI is fully Next.js - no Go proxy. Data comes from `.so/` via route handlers.
   // Next.js 16 can auto-write AGENTS.md/CLAUDE.md with framework tips.
   // Disabled here so it does not collide with Superopen's own AGENTS.md /

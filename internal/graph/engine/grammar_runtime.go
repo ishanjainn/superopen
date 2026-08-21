@@ -57,48 +57,19 @@ type SyntaxNode struct {
 // Parse executes a combined Tree-sitter runtime+grammar WASI module. Grammar
 // assets use a deliberately tiny ABI so no C pointers escape into Go.
 func (r *GrammarRuntime) Parse(ctx context.Context, language string, source []byte) (SyntaxNode, error) {
-	if len(source) > 32<<20 {
-		return SyntaxNode{}, fmt.Errorf("source exceeds 32 MiB parser limit")
-	}
 	r.mu.Lock()
 	compiled := r.compiled[language]
+	runtime := r.runtime
 	r.mu.Unlock()
 	if compiled == nil {
 		return SyntaxNode{}, fmt.Errorf("grammar %s is not compiled", language)
 	}
-	module, err := r.runtime.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(""))
+	module, err := instantiateGrammarModule(ctx, runtime, compiled, language)
 	if err != nil {
-		return SyntaxNode{}, fmt.Errorf("instantiate grammar %s: %w", language, err)
+		return SyntaxNode{}, err
 	}
 	defer module.Close(ctx)
-	if initialize := module.ExportedFunction("_initialize"); initialize != nil {
-		if _, err := initialize.Call(ctx); err != nil {
-			return SyntaxNode{}, fmt.Errorf("initialize grammar %s: %w", language, err)
-		}
-	}
-	memory := module.Memory()
-	allocate := module.ExportedFunction("so_alloc")
-	parse := module.ExportedFunction("so_parse")
-	if memory == nil || allocate == nil || parse == nil {
-		return SyntaxNode{}, fmt.Errorf("grammar %s lacks the so-graph parser ABI", language)
-	}
-	allocated, err := allocate.Call(ctx, uint64(len(source)))
-	if err != nil || len(allocated) != 1 || allocated[0] == 0 {
-		return SyntaxNode{}, fmt.Errorf("allocate grammar input: %w", err)
-	}
-	pointer := uint32(allocated[0])
-	if !memory.Write(pointer, source) {
-		return SyntaxNode{}, fmt.Errorf("write grammar input outside WASM memory")
-	}
-	if release := module.ExportedFunction("so_free"); release != nil {
-		defer release.Call(ctx, uint64(pointer)) //nolint:errcheck
-	}
-	root, err := parse.Call(ctx, uint64(pointer), uint64(len(source)))
-	if err != nil || len(root) != 1 || root[0] == 0 {
-		return SyntaxNode{}, fmt.Errorf("parse %s source: %w", language, err)
-	}
-	count := 0
-	return readSyntaxNode(ctx, module, uint32(root[0]), &count)
+	return parseWASMModule(ctx, module, language, source)
 }
 
 func readSyntaxNode(ctx context.Context, module api.Module, handle uint32, count *int) (SyntaxNode, error) {

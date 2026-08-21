@@ -12,11 +12,13 @@ on:
     branches: ["main"]
     paths:
       - "web/**"
+      - "scripts/pack-web.sh"
       - ".github/workflows/ci-web.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "web/**"
+      - "scripts/pack-web.sh"
       - ".github/workflows/ci-web.yml"
   workflow_dispatch:
 
@@ -56,3 +58,11 @@ jobs:
         env:
           # Build should not require a live .so/ workspace
           SUPEROPEN_ROOT: ${{ github.workspace }}
+      - name: Pack standalone UI
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          sh scripts/pack-web.sh --from web --tar dist/so-web.tar.gz
+          tar -tzf dist/so-web.tar.gz | grep -q 'server.js'
+          tar -tzf dist/so-web.tar.gz | grep -q '.next/BUILD_ID'

@@ -7,8 +7,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ishanjainn/superopen/internal/graph/buildpool"
 	"github.com/ishanjainn/superopen/internal/memory"
 )
+
+// ErrBuildPoolFull is returned when the global max concurrent builds are already running.
+var ErrBuildPoolFull = buildpool.ErrFull
 
 // Publish builds and verifies a database beside the live database, then swaps
 // it into place while holding the per-repository process lock. build must close
@@ -44,6 +48,20 @@ func publish(ctx context.Context, repoRoot string, build func(context.Context, s
 		return "", err
 	}
 	defer unlock()
+
+	var poolUnlock func()
+	if nonBlocking {
+		poolUnlock, err = buildpool.TryAcquire(repoRoot)
+		if errors.Is(err, buildpool.ErrFull) {
+			return "", ErrBuildPoolFull
+		}
+	} else {
+		poolUnlock, err = buildpool.Acquire(repoRoot)
+	}
+	if err != nil {
+		return "", err
+	}
+	defer poolUnlock()
 
 	stage, err := os.CreateTemp(paths.Root, ".graph-*.db")
 	if err != nil {

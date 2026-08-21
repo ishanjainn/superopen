@@ -35,6 +35,21 @@ func TestInstallAllWritesSkill(t *testing.T) {
 		if bytes.Contains(body, []byte("__SO_BIN__")) {
 			t.Fatalf("%s still has placeholder", path)
 		}
+		if filepath.Base(path) == "SKILL.md" {
+			if !bytes.Contains(body, []byte("any question about a codebase")) {
+				t.Fatalf("%s description must trip on any codebase question: %s", path, body[:300])
+			}
+			if !bytes.Contains(body, []byte("graph query first")) {
+				t.Fatalf("%s description must treat codebase questions as graph query first", path)
+			}
+			if bytes.Contains(body, []byte("memory search first")) {
+				t.Fatalf("%s description must not lead with memory search: %s", path, body[:400])
+			}
+			if bytes.Contains(bytes.ToLower(body), []byte("so init")) &&
+				!bytes.Contains(body, []byte("unless the user explicitly")) {
+				t.Fatalf("%s must not tell the agent to so init unprompted", path)
+			}
+		}
 	}
 }
 
@@ -74,5 +89,8 @@ func TestInstallAllShipsReferences(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte("references/query.md")) {
 		t.Fatal("SKILL.md does not point at the reference file")
+	}
+	if !bytes.Contains(body, []byte("references/memory.md")) {
+		t.Fatal("SKILL.md does not point at the memory reference")
 	}
 }

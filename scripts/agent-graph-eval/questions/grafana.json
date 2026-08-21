@@ -1,0 +1,62 @@
+{
+  "corpus": "grafana/grafana",
+  "instruction": "identical wrap_prompt for every arm",
+  "questions": [
+    {
+      "id": "provisioning-dashboards",
+      "prompt": "How does dashboard YAML provisioning load and apply dashboards?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["pkg/services/provisioning", "provisioning/dashboards"]},
+        {"id": "reader", "aliases": ["configReader", "file provisioner", "DashboardProvisioner", "provisioner"]},
+        {"id": "yaml", "aliases": ["yaml", "YAML"]},
+        {"id": "apply", "aliases": ["Provision", "provision dashboards", "apply dashboards", "CreateDashboard"]}
+      ]
+    },
+    {
+      "id": "ngalert-eval",
+      "prompt": "How does ngalert evaluate rules and dispatch to Alertmanager?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["pkg/services/ngalert", "ngalert"]},
+        {"id": "eval", "aliases": ["eval", "Evaluate", "scheduler", "schedule"]},
+        {"id": "state", "aliases": ["state manager", "state.Manager", "alert instance"]},
+        {"id": "am", "aliases": ["Alertmanager", "alertmanager", "notifier"]}
+      ]
+    },
+    {
+      "id": "datasource-proxy",
+      "prompt": "How does the datasource proxy authenticate and forward queries?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["dataproxy", "DataProxy", "pluginproxy", "pkg/api"]},
+        {"id": "auth", "aliases": ["authenticate", "token", "oauth", "Authorization", "credentials"]},
+        {"id": "forward", "aliases": ["ReverseProxy", "forward", "SendRequest", "proxy"]}
+      ]
+    },
+    {
+      "id": "query-runner",
+      "prompt": "How does the frontend QueryRunner run a panel query?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["QueryRunner", "PanelQueryRunner", "public/app/features/query"]},
+        {"id": "run", "aliases": ["runRequest", "run query", "execute"]},
+        {"id": "ds", "aliases": ["DataSource", "datasource", "DataSourceApi"]}
+      ]
+    },
+    {
+      "id": "backend-plugins",
+      "prompt": "How are backend plugins discovered and started?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["pkg/plugins", "plugin manager", "PluginManager"]},
+        {"id": "load", "aliases": ["loader", "discover", "plugin.json"]},
+        {"id": "backend", "aliases": ["backendplugin", "backend plugin", "plugin.Client", "go plugin"]}
+      ]
+    },
+    {
+      "id": "grafana-live",
+      "prompt": "How does Grafana Live / streaming attach to a dashboard?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["pkg/services/live", "GrafanaLive", "grafana live"]},
+        {"id": "stream", "aliases": ["centrifuge", "websocket", "streaming", "channel"]},
+        {"id": "dash", "aliases": ["dashboard", "LiveChannel", "pipeline"]}
+      ]
+    }
+  ]
+}

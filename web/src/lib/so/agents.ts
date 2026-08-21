@@ -77,7 +77,7 @@ export function buildAgentGraph(rootKey: string): AgentGraph | null {
 
   type Row = { id: string; meta: SessionMetaFile; dir: string };
   const byParent = new Map<string, Row[]>();
-  for (const name of readdirSync(sessionsDir)) {
+  for (const name of readdirSync(/* turbopackIgnore: true */sessionsDir)) {
     if (name === "index.json" || name.startsWith(".") || name === root.id) continue;
     const childDir = join(sessionsDir, name);
     const meta = readMeta(childDir);

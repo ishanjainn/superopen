@@ -89,6 +89,36 @@ func TestStatusClaudeCodeOKWithValidBinaryPath(t *testing.T) {
 	}
 }
 
+func TestInstallReturnsReport(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
+	t.Setenv("APPDATA", filepath.Join(home, ".config"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	t.Setenv("COPILOT_HOME", filepath.Join(home, ".copilot"))
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Install("", []string{"claude-code"}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Skills) == 0 {
+		t.Fatal("expected skill paths")
+	}
+	if report.CursorRule == "" {
+		t.Fatal("expected Cursor rule path")
+	}
+	if len(report.Hooks["claude-code"]) == 0 {
+		t.Fatal("expected claude-code hook paths")
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "agents", "so-scout.md")); !os.IsNotExist(err) {
+		t.Fatal("so install must not write so-scout")
+	}
+}
+
 func TestStatusClaudeCodeMissingManifest(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

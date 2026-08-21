@@ -106,6 +106,8 @@ type State struct {
 	GraphSteerReminded bool     `json:"graph_steer_reminded,omitempty"`
 	GraphSteerCount    int      `json:"graph_steer_count,omitempty"`
 	GraphSteerTerms    []string `json:"graph_steer_terms,omitempty"`
+	// StrictReadDenied is true after strict-mode first-Read deny this session.
+	StrictReadDenied bool `json:"strict_read_denied,omitempty"`
 
 	// Memory pack is injected once per session (same token-economy rule as
 	// the graph reminder). MemoryDistillAsked keeps the live-agent rollup

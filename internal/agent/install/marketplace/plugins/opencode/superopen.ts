@@ -40,6 +40,33 @@ function runFinalize() {
   }
 }
 
+function additionalContext(stdout: string): string {
+  try {
+    const line = stdout.trim().split(/\n/).find((l) => l.includes("additionalContext"));
+    if (!line) return "";
+    const parsed = JSON.parse(line) as { additionalContext?: string };
+    return typeof parsed.additionalContext === "string" ? parsed.additionalContext : "";
+  } catch {
+    return "";
+  }
+}
+
+// Graphify-style: no backticks / $(...) in echo (bash command substitution).
+function shellSafeNudge(text: string): string {
+  return text.replace(/`/g, "").replace(/\$\(/g, "(").replace(/"/g, "'");
+}
+
+function isExploreTool(name: string): boolean {
+  const n = name.toLowerCase();
+  if (n.startsWith("graph_")) return false;
+  return n === "bash" || n === "shell" || n === "grep" || n === "glob" || n === "read" || n === "readfile";
+}
+
+function prependBashNudge(command: string, nudge: string): string {
+  // ';' not '&&' — Windows PowerShell 5.1 rejects '&&'.
+  return "echo " + JSON.stringify(shellSafeNudge(nudge)) + " ; " + command;
+}
+
 function isTerminalMessage(info: Record<string, unknown> | undefined): boolean {
   if (!info) return false;
   if (info.error) return true;
@@ -80,6 +107,7 @@ function toolsFromParts(parts: unknown): Array<Record<string, unknown>> {
 
 export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
   let lastSid: string | null = null;
+  let reminded = false;
 
   function rememberSid(...vals: unknown[]): string | null {
     for (const v of vals) {
@@ -238,7 +266,7 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
     "tool.execute.before": async (input, output) => {
       const sid = rememberSid((input as { sessionID?: string })?.sessionID);
       const args = (output as { args?: unknown })?.args ?? (input as { args?: unknown })?.args;
-      fire(
+      const stdout = fire(
         "tool.execute.before",
         {
           type: "tool.execute.before",
@@ -261,6 +289,20 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
         },
         true
       );
+      if (reminded) return;
+      const tool = String((input as { tool?: string })?.tool || "");
+      const nudge = additionalContext(stdout);
+      const outArgs = (output as { args?: { command?: string } }).args;
+      if (
+        nudge &&
+        isExploreTool(tool) &&
+        outArgs &&
+        typeof outArgs.command === "string" &&
+        outArgs.command.length > 0
+      ) {
+        outArgs.command = prependBashNudge(outArgs.command, nudge);
+        reminded = true;
+      }
     },
 
     "tool.execute.after": async (input, output) => {

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
@@ -44,26 +46,29 @@ func IndexSyntaxDevelopment(ctx context.Context, request api.BuildRequest, engin
 	if err != nil {
 		return api.BuildResult{}, err
 	}
+	applyMemoryBudget()
 	repository, err := ParseSyntaxRepository(ctx, parser, root, project, files, nil, workers)
 	if err != nil {
 		return api.BuildResult{}, err
 	}
 	graph, coverage := AssembleSyntaxGraph(repository, project)
+	dropExtractedOccurrences(repository.Files)
 	indexRepositoryBranch(ctx, root, project, &graph)
 	indexPythonBuiltins(project, repository.Files, &graph)
-	indexEnvironmentAccesses(project, repository.Files, &graph)
+	indexEnvironmentAccesses(project, root, repository.Files, &graph)
 	indexHTTPRoutes(project, repository.Files, &graph)
+	repository.Files = nil
 	separateUnresolvedRelationships(&graph)
 	revision := gitRevision(ctx, root)
 	if request.ExpectedSource != "" && request.ExpectedSource != revision {
 		return api.BuildResult{}, fmt.Errorf("source revision changed: expected %s, found %s", request.ExpectedSource, revision)
 	}
 	database, err := Publish(ctx, root, func(ctx context.Context, path string) error {
-		store, err := OpenWritable(path)
+		store, err := OpenWritableFresh(path)
 		if err != nil {
 			return err
 		}
-		buildErr := store.Build(ctx, func(builder *Builder) error {
+		buildErr := store.BuildFresh(ctx, func(builder *Builder) error {
 			if err := builder.PutProject(ProjectRecord{Name: project, RootPath: root, Generation: repository.Generation,
 				SourceRevision: revision, EngineVersion: engineVersion, IndexedAt: time.Now().UTC()}); err != nil {
 				return err
@@ -74,15 +79,22 @@ func IndexSyntaxDevelopment(ctx context.Context, request api.BuildRequest, engin
 				}
 			}
 			ids := make(map[string]int64, len(graph.nodes))
-			for _, node := range graph.nodes {
-				id, err := builder.PutNode(node)
+			for i := range graph.nodes {
+				node := &graph.nodes[i]
+				id, err := builder.PutNode(*node)
 				if err != nil {
 					return err
 				}
 				ids[node.QualifiedName] = id
 			}
+			if err := builder.flushNodeBatch(); err != nil {
+				return err
+			}
 			if err := putGraphSemantics(builder, graph, ids, project, nil); err != nil {
 				return err
+			}
+			for i := range graph.nodes {
+				graph.nodes[i].Properties = nil
 			}
 			for _, edge := range graph.edges {
 				source, sourceOK := ids[edge.source]
@@ -91,13 +103,13 @@ func IndexSyntaxDevelopment(ctx context.Context, request api.BuildRequest, engin
 					return fmt.Errorf("syntax edge endpoint missing: %s -[%s]-> %s", edge.source, edge.kind, edge.target)
 				}
 				if _, err := builder.PutEdge(api.Edge{Project: project, SourceID: source, TargetID: target,
-					Type: edge.kind, Properties: edge.properties, Evidence: edge.evidence}); err != nil {
+					Type: edge.kind, Properties: edge.dumpProperties(), Evidence: edge.evidence}); err != nil {
 					return err
 				}
 			}
 			for _, edge := range graph.unresolved {
 				if err := builder.PutUnresolved(api.UnresolvedRelationship{Project: project, Source: edge.source,
-					TargetText: edge.target, Type: edge.kind, Properties: edge.properties, Evidence: edge.evidence}); err != nil {
+					TargetText: edge.target, Type: edge.kind, Properties: edge.dumpProperties(), Evidence: edge.evidence}); err != nil {
 					return err
 				}
 			}
@@ -308,7 +320,7 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 			localBindings[scopeKey][write.Name] = true
 		}
 	}
-	indexGoModDependencies(project, repository.Files, &graph)
+	indexGoModDependencies(project, repository.Root, repository.Files, &graph)
 	// The pinned builtin symbols must exist before resolution: Superopen keeps
 	// one global registry, so any language's reference to a name such as `int`
 	// resolves against them.
@@ -318,6 +330,7 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 	for _, node := range graph.nodes {
 		nodeQNs[node.QualifiedName] = true
 	}
+	importIndex := newImportTargetIndex(graph.nodes)
 	importsByFile := make(map[string]map[string]string, len(repository.Files))
 	for _, parsed := range repository.Files {
 		rel := filepath.ToSlash(parsed.File.Path)
@@ -327,13 +340,13 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 			// Ambient declaration files publish type shapes; Superopen does not
 			// materialize IMPORTS edges from them into the comparable graph.
 			if strings.HasSuffix(strings.ToLower(rel), ".d.ts") {
-				qn := localSyntaxImportTargetForLanguage(parsed.File.Language, rel, fact.Name, repository.GoModule, graph.nodes)
+				qn := localSyntaxImportTargetForLanguage(parsed.File.Language, rel, fact.Name, repository.GoModule, importIndex)
 				if fact.LocalName != "" && qn != "" {
 					imports[fact.LocalName] = qn
 				}
 				continue
 			}
-			qn := localSyntaxImportTargetForLanguage(parsed.File.Language, rel, fact.Name, repository.GoModule, graph.nodes)
+			qn := localSyntaxImportTargetForLanguage(parsed.File.Language, rel, fact.Name, repository.GoModule, importIndex)
 			strategy := "module_path"
 			if qn == "" {
 				continue
@@ -347,140 +360,61 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 		importsByFile[rel] = imports
 	}
 
+	reportIndexProgress("assemble usages/calls files=%d", len(repository.Files))
+	resolveStarted := time.Now()
+	type fileResolveResult struct {
+		edges      []pendingEdge
+		unresolved []pendingEdge
+	}
+	resolved := make([]fileResolveResult, len(repository.Files))
+	workers := parseWorkerCount()
+	if workers < 1 {
+		workers = 1
+	}
+	var cursor atomic.Int64
+	var group sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for {
+				index := int(cursor.Add(1) - 1)
+				if index >= len(repository.Files) {
+					return
+				}
+				parsed := &repository.Files[index]
+				edges, unresolved := resolveSyntaxFileRelationships(project, parsed, registry, nodeQNs, byName, byFileScope, localBindings, importsByFile)
+				resolved[index] = fileResolveResult{edges: edges, unresolved: unresolved}
+				parsed.Extraction.Usages = nil
+				parsed.Extraction.Writes = nil
+			}
+		}()
+	}
+	group.Wait()
+	for _, result := range resolved {
+		graph.addEdges(result.edges)
+		graph.unresolved = append(graph.unresolved, result.unresolved...)
+	}
+	reportIndexProgress("assemble usages/calls elapsed=%s", indexElapsed(resolveStarted))
+
 	for _, parsed := range repository.Files {
 		rel := filepath.ToSlash(parsed.File.Path)
-		fileQN := fileQualifiedName(rel)
-		moduleQN := syntaxDefinitionModuleQN(parsed.File.Language, rel)
-		imports := importsByFile[rel]
-		defaultSource := fileQN
-		// Non-directory module languages provide their file module as the
-		// enclosing definition for top-level occurrences. Go/Java module QNs
-		// collide with structural Folder/Project containers; Superopen explicitly
-		// rejects those as occurrence owners and falls back to File.
-		if parsed.File.Language != "go" && parsed.File.Language != "java" && nodeQNs[moduleQN] {
-			defaultSource = moduleQN
-		}
-		for _, relationship := range []struct {
-			facts []SyntaxFact
-			kind  string
-		}{{parsed.Extraction.Usages, "USAGE"}, {parsed.Extraction.Writes, "WRITES"}} {
-			for _, fact := range relationship.facts {
-				// Superopen resolves write targets straight through the registry;
-				// only reference occurrences consult lexical shadowing.
-				if relationship.kind == "USAGE" && syntaxFactLocallyBound(rel, fact, localBindings) {
-					continue
-				}
-				source := syntaxOccurrenceSource(rel, fact.Scope, defaultSource, byFileScope)
-				resolution := registry.resolve(fact.Name, moduleQN, imports)
-				if resolution.qn == "" || resolution.qn == source {
-					continue
-				}
-				kind := relationship.kind
-				properties := api.Properties{}
-				if relationship.kind == "USAGE" {
-					properties["callee"] = fact.Name
-					// Approximate Superopen LSP call-reference join: a direct
-					// argument that resolves to a same-module callable becomes
-					// CALL_REFERENCE rather than USAGE.
-					if fact.MayBeCallReference {
-						if target, ok := registry.exact[resolution.qn]; ok &&
-							jsxCallableLabel(target.Label) &&
-							resolution.strategy == "same_module" {
-							// Only function/method scopes own CALL_REFERENCE in
-							// the reference graph (not module-level value uses).
-							if src, ok := registry.exact[source]; ok && jsxCallableLabel(src.Label) {
-								kind = "CALL_REFERENCE"
-							}
-						}
-					}
-				}
-				graph.edges = append(graph.edges, pendingEdge{source: source, target: resolution.qn, kind: kind,
-					properties: properties,
-					evidence:   syntaxEvidence(rel, fact, resolution.strategy, resolution.confidence)})
-			}
-		}
-		for _, fact := range parsed.Extraction.Throws {
-			source := syntaxOccurrenceSource(rel, fact.Scope, defaultSource, byFileScope)
-			resolution := registry.resolve(fact.Name, moduleQN, imports)
-			if resolution.qn == "" || resolution.qn == source {
-				continue
-			}
-			kind := "THROWS"
-			if strings.Contains(fact.Name, "Error") || strings.Contains(fact.Name, "Panic") ||
-				strings.Contains(fact.Name, "error") || strings.Contains(fact.Name, "panic") {
-				kind = "RAISES"
-			}
-			graph.edges = append(graph.edges, pendingEdge{source: source, target: resolution.qn, kind: kind,
-				evidence: syntaxEvidence(rel, fact, resolution.strategy, resolution.confidence)})
-		}
 		for _, fact := range parsed.Extraction.Decorators {
 			source, ok := byFileScope[rel+"\x00"+fact.Scope]
 			if !ok {
 				continue
 			}
 			name := syntaxCallBase(fact.Name)
-			resolved, strategy, confidence := resolveSyntaxCall(rel, fact.Scope, byName[parsed.File.Language+"\x00"+name])
-			target := resolved.qn
+			resolvedCall, strategy, confidence := resolveSyntaxCall(rel, fact.Scope, byName[parsed.File.Language+"\x00"+name])
+			target := resolvedCall.qn
 			if target == "" {
 				target = "<decorator:" + fact.Name + ">"
 				graph.nodes = append(graph.nodes, api.Node{Project: project, Label: "Decorator", Name: name,
 					QualifiedName: target, Properties: api.Properties{}})
 				strategy, confidence = "tree_sitter_synthetic_decorator", .7
 			}
-			graph.edges = append(graph.edges, pendingEdge{source: source.qn, target: target, kind: "DECORATES",
+			graph.addEdge(pendingEdge{source: source.qn, target: target, kind: "DECORATES",
 				properties: api.Properties{"decorator": fact.Name}, evidence: syntaxEvidence(rel, fact, strategy, confidence)})
-		}
-		for _, fact := range parsed.Extraction.Calls {
-			source := syntaxOccurrenceSource(rel, fact.Scope, defaultSource, byFileScope)
-			name := syntaxCallBase(fact.Name)
-			candidates := byName[parsed.File.Language+"\x00"+name]
-			resolution := registry.resolve(fact.Name, moduleQN, imports)
-			resolution = registry.applyFieldTypeHint(fact.Name, source, resolution)
-			if isJSXComponentCall(fact) {
-				// Superopen stamps requires_lsp_resolution: only import_map /
-				// same_module may mint CALLS (as lsp_ts_jsx*), and only when the
-				// target is callable. Non-callable bindings (e.g. lazy() vars)
-				// stay ordinary USAGE.
-				switch resolution.strategy {
-				case "import_map", "import_map_suffix":
-					resolution.strategy = "lsp_ts_jsx_import"
-					resolution.confidence = .95
-				case "same_module":
-					resolution.strategy = "lsp_ts_jsx"
-					resolution.confidence = .95
-				default:
-					resolution = symbolResolution{}
-				}
-				if resolution.qn != "" {
-					if target, ok := registry.exact[resolution.qn]; !ok || !jsxCallableLabel(target.Label) {
-						resolution = symbolResolution{}
-					}
-				}
-			}
-			if resolution.qn != "" && resolution.qn != source {
-				graph.edges = append(graph.edges, pendingEdge{source: source, target: resolution.qn, kind: "CALLS",
-					properties: syntaxCallProperties(fact, resolution), evidence: syntaxEvidence(rel, fact, resolution.strategy, resolution.confidence)})
-				continue
-			}
-			if isJSXComponentCall(fact) {
-				continue
-			}
-			if len(candidates) > 1 {
-				alternatives := make([]string, len(candidates))
-				for index := range candidates {
-					alternatives[index] = candidates[index].qn
-				}
-				sort.Strings(alternatives)
-				evidence := syntaxEvidence(rel, fact, "tree_sitter_ambiguous_call", .2)
-				evidence.Ambiguous, evidence.Alternatives, evidence.Unresolved = true, alternatives, "multiple local definitions"
-				graph.unresolved = append(graph.unresolved, pendingEdge{source: source, target: fact.Name, kind: "CALL_REFERENCE",
-					properties: api.Properties{"callee": fact.Name}, evidence: evidence})
-				continue
-			}
-			evidence := syntaxEvidence(rel, fact, "tree_sitter_unresolved_call", .35)
-			evidence.Unresolved = "no local definition"
-			graph.unresolved = append(graph.unresolved, pendingEdge{source: source, target: fact.Name, kind: "CALL_REFERENCE",
-				properties: api.Properties{"callee": fact.Name}, evidence: evidence})
 		}
 	}
 	dropUsagesShadowedByCalls(&graph)
@@ -502,6 +436,129 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 		}
 	}
 	return graph, coverage
+}
+
+func resolveSyntaxFileRelationships(
+	project string,
+	parsed *ParsedSyntaxFile,
+	registry symbolRegistry,
+	nodeQNs map[string]bool,
+	byName map[string][]syntaxDefinitionRef,
+	byFileScope map[string]syntaxDefinitionRef,
+	localBindings map[string]map[string]bool,
+	importsByFile map[string]map[string]string,
+) ([]pendingEdge, []pendingEdge) {
+	rel := filepath.ToSlash(parsed.File.Path)
+	fileQN := fileQualifiedName(rel)
+	moduleQN := syntaxDefinitionModuleQN(parsed.File.Language, rel)
+	imports := importsByFile[rel]
+	session := newResolveSession(moduleQN, imports)
+	defaultSource := fileQN
+	if parsed.File.Language != "go" && parsed.File.Language != "java" && nodeQNs[moduleQN] {
+		defaultSource = moduleQN
+	}
+	edges := make([]pendingEdge, 0, len(parsed.Extraction.Usages)+len(parsed.Extraction.Calls))
+	unresolved := make([]pendingEdge, 0)
+	for _, relationship := range []struct {
+		facts []OccurrenceFact
+		kind  string
+	}{{parsed.Extraction.Usages, "USAGE"}, {parsed.Extraction.Writes, "WRITES"}} {
+		for _, fact := range relationship.facts {
+			if relationship.kind == "USAGE" && occurrenceLocallyBound(rel, fact, localBindings) {
+				continue
+			}
+			source := syntaxOccurrenceSource(rel, fact.Scope, defaultSource, byFileScope)
+			resolution := registry.resolveWith(session, fact.Name)
+			if resolution.qn == "" || resolution.qn == source {
+				continue
+			}
+			kind := relationship.kind
+			callee := ""
+			if relationship.kind == "USAGE" {
+				callee = internString(fact.Name)
+				if fact.MayBeCallReference {
+					if target, ok := registry.exact[resolution.qn]; ok &&
+						jsxCallableLabel(target.Label) &&
+						resolution.strategy == "same_module" {
+						if src, ok := registry.exact[source]; ok && jsxCallableLabel(src.Label) {
+							kind = "CALL_REFERENCE"
+						}
+					}
+				}
+			}
+			edges = append(edges, pendingEdge{
+				source: internString(source), target: internString(resolution.qn), kind: internString(kind),
+				callee: callee, evidence: occurrenceEvidence(rel, fact, resolution.strategy, resolution.confidence),
+			})
+		}
+	}
+	for _, fact := range parsed.Extraction.Throws {
+		source := syntaxOccurrenceSource(rel, fact.Scope, defaultSource, byFileScope)
+		resolution := registry.resolveWith(session, fact.Name)
+		if resolution.qn == "" || resolution.qn == source {
+			continue
+		}
+		kind := "THROWS"
+		if strings.Contains(fact.Name, "Error") || strings.Contains(fact.Name, "Panic") ||
+			strings.Contains(fact.Name, "error") || strings.Contains(fact.Name, "panic") {
+			kind = "RAISES"
+		}
+		edges = append(edges, pendingEdge{source: source, target: resolution.qn, kind: kind,
+			evidence: syntaxEvidence(rel, fact, resolution.strategy, resolution.confidence)})
+	}
+	for _, fact := range parsed.Extraction.Calls {
+		source := syntaxOccurrenceSource(rel, fact.Scope, defaultSource, byFileScope)
+		name := syntaxCallBase(fact.Name)
+		candidates := byName[parsed.File.Language+"\x00"+name]
+		resolution := registry.resolveWith(session, fact.Name)
+		resolution = registry.applyFieldTypeHint(fact.Name, source, resolution)
+		if isJSXComponentCall(fact) {
+			switch resolution.strategy {
+			case "import_map", "import_map_suffix":
+				resolution.strategy = "lsp_ts_jsx_import"
+				resolution.confidence = .95
+			case "same_module":
+				resolution.strategy = "lsp_ts_jsx"
+				resolution.confidence = .95
+			default:
+				resolution = symbolResolution{}
+			}
+			if resolution.qn != "" {
+				if target, ok := registry.exact[resolution.qn]; !ok || !jsxCallableLabel(target.Label) {
+					resolution = symbolResolution{}
+				}
+			}
+		}
+		if resolution.qn != "" && resolution.qn != source {
+			edges = append(edges, pendingEdge{source: source, target: resolution.qn, kind: "CALLS",
+				properties: syntaxCallProperties(fact, resolution), evidence: syntaxEvidence(rel, fact, resolution.strategy, resolution.confidence)})
+			continue
+		}
+		if isCFamilyLanguage(parsed.File.Language) && coveredByResolvedCall(*parsed, fact) {
+			continue
+		}
+		if isJSXComponentCall(fact) {
+			continue
+		}
+		if len(candidates) > 1 {
+			alternatives := make([]string, len(candidates))
+			for index := range candidates {
+				alternatives[index] = candidates[index].qn
+			}
+			sort.Strings(alternatives)
+			evidence := syntaxEvidence(rel, fact, "tree_sitter_ambiguous_call", .2)
+			evidence.Ambiguous, evidence.Alternatives, evidence.Unresolved = true, alternatives, "multiple local definitions"
+			unresolved = append(unresolved, pendingEdge{source: source, target: fact.Name, kind: "CALL_REFERENCE",
+				properties: api.Properties{"callee": fact.Name}, evidence: evidence})
+			continue
+		}
+		evidence := syntaxEvidence(rel, fact, "tree_sitter_unresolved_call", .35)
+		evidence.Unresolved = "no local definition"
+		unresolved = append(unresolved, pendingEdge{source: source, target: fact.Name, kind: "CALL_REFERENCE",
+			properties: api.Properties{"callee": fact.Name}, evidence: evidence})
+	}
+	_ = project
+	return edges, unresolved
 }
 
 // dropUsagesShadowedByCalls removes a USAGE edge when the exact same
@@ -705,220 +762,6 @@ func syntaxCallProperties(fact SyntaxFact, resolution symbolResolution) api.Prop
 		properties["args"] = arguments
 	}
 	return properties
-}
-
-func localSyntaxImportTarget(sourceFile, imported string, nodes []api.Node) string {
-	return localSyntaxImportTargetForLanguage("", sourceFile, imported, "", nodes)
-}
-
-func localSyntaxImportTargetForLanguage(language, sourceFile, imported, goModule string, nodes []api.Node) string {
-	imported = strings.TrimSpace(strings.Trim(imported, "\"'`"))
-	if imported == "" {
-		return ""
-	}
-	if isJSLanguage(language) {
-		return jsSyntaxImportTarget(sourceFile, imported, nodes)
-	}
-	clean := filepath.ToSlash(imported)
-	if language == "go" && goModule != "" {
-		if clean == goModule {
-			clean = ""
-		} else if strings.HasPrefix(clean, goModule+"/") {
-			clean = strings.TrimPrefix(clean, goModule+"/")
-		}
-	}
-	if strings.HasPrefix(clean, ".") {
-		clean = filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(sourceFile), clean)))
-	} else {
-		clean = strings.TrimPrefix(clean, "@/")
-	}
-	if language == "go" && clean == "" {
-		for _, node := range nodes {
-			if node.Label == "Project" {
-				return node.QualifiedName
-			}
-		}
-	}
-	clean = strings.TrimSuffix(clean, filepath.Ext(clean))
-	var folderMatches []string
-	var moduleMatches []string
-	for _, node := range nodes {
-		if (node.Label != "Module" && node.Label != "Folder") || node.Location.File == "" {
-			continue
-		}
-		candidate := filepath.ToSlash(node.Location.File)
-		if node.Label == "Folder" {
-			exact := candidate == clean
-			suffix := !strings.HasPrefix(imported, ".") && strings.HasSuffix(candidate, "/"+clean)
-			if exact || suffix {
-				folderMatches = append(folderMatches, node.QualifiedName)
-			}
-			continue
-		}
-		candidate = strings.TrimSuffix(candidate, filepath.Ext(candidate))
-		candidateWithoutIndex := strings.TrimSuffix(candidate, "/index")
-		exact := candidate == clean || candidateWithoutIndex == clean
-		suffix := !strings.HasPrefix(imported, ".") && (strings.HasSuffix(candidate, "/"+clean) || strings.HasSuffix(candidateWithoutIndex, "/"+clean))
-		if exact || suffix {
-			moduleMatches = append(moduleMatches, node.QualifiedName)
-		}
-	}
-	if len(folderMatches) == 1 {
-		return folderMatches[0]
-	}
-	if len(moduleMatches) == 1 {
-		return moduleMatches[0]
-	}
-	if len(moduleMatches) != 1 {
-		// JS/TS bare package imports must not invent in-repo symbol targets
-		// (e.g. defineConfig → an unrelated Function). Relative paths may still
-		// use the pinned symbol/path fallbacks below.
-		if isJSLanguage(language) && !strings.HasPrefix(strings.TrimSpace(imported), ".") &&
-			!strings.HasPrefix(strings.TrimSpace(imported), "@/") {
-			return ""
-		}
-		if target := syntaxImportSymbolFallback(sourceFile, imported, nodes); target != "" {
-			return target
-		}
-		// Pinned Strategy 4 retries progressively shorter crate/module paths.
-		// This is why a standard import such as go/format can observably resolve
-		// to an in-repository `go.mod` Module named `go`.
-		work := strings.Trim(strings.NewReplacer("::", "/", "\\", "/").Replace(imported), " */\"'`")
-		for _, prefix := range []string{"crate/", "self/", "super/"} {
-			work = strings.TrimPrefix(work, prefix)
-		}
-		for work != "" {
-			candidate := strings.ReplaceAll(strings.TrimSuffix(work, filepath.Ext(work)), "/", ".")
-			for _, node := range nodes {
-				if node.QualifiedName == candidate && syntaxImportTargetable(node.Label) && node.QualifiedName != fileQualifiedName(sourceFile) {
-					return node.QualifiedName
-				}
-			}
-			index := strings.LastIndexByte(work, '/')
-			if index < 0 {
-				break
-			}
-			work = work[:index]
-		}
-		return ""
-	}
-	return moduleMatches[0]
-}
-
-// jsSyntaxImportTarget addresses JS/TS specifiers by qualified name instead of
-// by file path: the resolved path is dotted and matched against node qualified
-// names, retrying progressively shorter left-trimmed suffixes. Module qualified
-// names drop a leading dot, so a path inside a dot-directory (".config/bundler
-// /utils.ts" -> "config.bundler.utils") is unreachable and stays unresolved,
-// while "eslint/config" observably reaches the repository's own eslint.config.
-func jsSyntaxImportTarget(sourceFile, imported string, nodes []api.Node) string {
-	clean := filepath.ToSlash(imported)
-	if strings.HasPrefix(clean, ".") {
-		clean = filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(sourceFile), clean)))
-	} else {
-		clean = strings.TrimPrefix(clean, "@/")
-	}
-	clean = strings.Trim(strings.TrimSuffix(clean, filepath.Ext(clean)), "/")
-	own := fileQualifiedName(sourceFile)
-	for work := clean; work != ""; {
-		dotted := strings.ReplaceAll(work, "/", ".")
-		for _, candidate := range []string{dotted, dotted + ".index"} {
-			for _, node := range nodes {
-				if node.QualifiedName != candidate || node.QualifiedName == own {
-					continue
-				}
-				if node.Label == "Module" || node.Label == "Folder" {
-					return node.QualifiedName
-				}
-			}
-		}
-		index := strings.IndexByte(work, '/')
-		if index < 0 {
-			break
-		}
-		work = work[index+1:]
-	}
-	if !strings.HasPrefix(imported, ".") {
-		if target := jsBareImportModuleTarget(clean, own, nodes); target != "" {
-			return target
-		}
-	}
-	return jsImportTypeSymbolTarget(sourceFile, clean, nodes)
-}
-
-// jsBareImportModuleTarget lets a bare specifier reach a module by qualified
-// name suffix, which is how `import pluginJson from 'plugin.json'` observably
-// resolves to src.plugin. Folders are excluded because they keep the leading
-// dot of a dot-directory and are only reachable by an exact qualified name.
-func jsBareImportModuleTarget(clean, own string, nodes []api.Node) string {
-	dotted := strings.ReplaceAll(clean, "/", ".")
-	if dotted == "" {
-		return ""
-	}
-	var matches []string
-	for _, node := range nodes {
-		if node.Label != "Module" || node.QualifiedName == own {
-			continue
-		}
-		if strings.HasSuffix(node.QualifiedName, "."+dotted) {
-			matches = append(matches, node.QualifiedName)
-		}
-	}
-	if len(matches) != 1 {
-		return ""
-	}
-	return matches[0]
-}
-
-// jsImportTypeSymbolTarget resolves a specifier whose basename names a symbol,
-// which is how `import { BuildModeWebpackPlugin } from
-// './BuildModeWebpackPlugin.ts'` reaches the class and how a bare `path`
-// import reaches a same-named callable in another language. It matches the
-// last path segment against node names, mirroring the pinned symbol fallback.
-func jsImportTypeSymbolTarget(sourceFile, clean string, nodes []api.Node) string {
-	base := clean
-	if index := strings.LastIndexByte(base, '/'); index >= 0 {
-		base = base[index+1:]
-	}
-	if base == "" {
-		return ""
-	}
-	own := fileQualifiedName(sourceFile)
-	var candidates []string
-	for _, node := range nodes {
-		if node.Name != base || node.QualifiedName == own {
-			continue
-		}
-		if syntaxImportTargetable(node.Label) && node.Label != "Module" && node.Label != "File" {
-			candidates = append(candidates, node.QualifiedName)
-		}
-	}
-	if len(candidates) == 0 {
-		return ""
-	}
-	sort.Strings(candidates)
-	return candidates[0]
-}
-
-func syntaxImportSymbolFallback(sourceFile, imported string, nodes []api.Node) string {
-	trimmed := strings.TrimSpace(strings.Trim(imported, "\"'`"))
-	segments := strings.FieldsFunc(trimmed, func(value rune) bool {
-		return value == '.' || value == '/' || value == '\\' || value == ':'
-	})
-	for index := len(segments) - 1; index >= 0; index-- {
-		var candidates []string
-		for _, node := range nodes {
-			if node.Name != segments[index] || node.QualifiedName == fileQualifiedName(sourceFile) || !syntaxImportTargetable(node.Label) {
-				continue
-			}
-			candidates = append(candidates, node.QualifiedName)
-		}
-		if len(candidates) > 0 {
-			sort.Strings(candidates)
-			return candidates[0]
-		}
-	}
-	return ""
 }
 
 func syntaxImportTargetable(label string) bool {

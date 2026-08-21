@@ -181,6 +181,28 @@ func ArchitectureCompact(result api.ArchitectureResult) string {
 	return b.String()
 }
 
+// QueryAgentJSON is the default --json graph query payload: compact text plus
+// slim seeds. Full Node/Edge structs are omitted (default query output is text-only;
+// use --full for the complete QueryResult).
+func QueryAgentJSON(result api.QueryResult) map[string]any {
+	seeds := make([]map[string]any, 0, len(result.Seeds))
+	for _, seed := range result.Seeds {
+		seeds = append(seeds, map[string]any{
+			"qualified_name": seed.QualifiedName,
+			"name":           seed.Name,
+			"file":           seed.Location.File,
+			"lines":          lineRange(seed.Location.StartLine, seed.Location.EndLine),
+			"score":          seed.Score,
+		})
+	}
+	return map[string]any{
+		"text":      result.Text,
+		"budget":    result.Budget,
+		"seeds":     seeds,
+		"truncated": result.Budget.Truncated,
+	}
+}
+
 func lineRange(start, end int) string {
 	if start <= 0 {
 		return "-"

@@ -41,7 +41,6 @@ func appendTestRelationships(graph *goGraph) {
 			}
 		}
 	}
-	sortGraph(graph)
 }
 
 func isTestPath(path string) bool {

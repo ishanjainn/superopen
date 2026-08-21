@@ -15,7 +15,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ishanjainn/superopen/internal/agent/install"
 	"github.com/ishanjainn/superopen/internal/graph/client"
 	"github.com/ishanjainn/superopen/internal/graph/watch"
 	"github.com/ishanjainn/superopen/internal/memory"
@@ -32,13 +31,14 @@ func cmdDev() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "dev",
 		Short: "Start the Superopen file-backed Sessions UI",
-		Long: `Start the local Superopen UI. Pages are served from a production
-build, so they are compiled and prerendered before the first request.
-The build runs once and is reused until the UI sources change.
+		Long: `Start the local Superopen UI from the installed prefix
+(~/.superopen/share/superopen/web or Homebrew's share/superopen/web).
+Release installs are a prebuilt Next standalone bundle; so dev runs
+node server.js (Node.js required at runtime, not npm).
 
   so dev              # foreground (Ctrl+C to stop); opens the UI
   so dev -d           # detached (background); opens the UI when ready
-  so dev --hot        # next dev instead: on-demand compile + HMR
+  so dev --hot        # next dev (needs UI sources via SUPEROPEN_WEB_DIR)
   so dev stop         # stop a detached (or any tracked) UI
   so dev status       # show if the UI is running`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -84,11 +84,19 @@ func logFile(layout paths.Paths) string {
 }
 
 func runDev(uiPort int, detach, noOpen, hot bool) error {
-	root := repoRoot()
-	layout := paths.Resolve(root)
-	if !layout.Exists() {
-		return fmt.Errorf("run `so init` first")
+	explicit := strings.TrimSpace(cliFlags.Root)
+	if explicit == "" {
+		explicit = strings.TrimSpace(os.Getenv("SUPEROPEN_ROOT"))
 	}
+	if explicit != "" {
+		explicit = absPath(explicit)
+	}
+	wd, _ := os.Getwd()
+	root, err := projects.ResolveDevRoot(explicit, wd)
+	if err != nil {
+		return err
+	}
+	layout := paths.Resolve(root)
 	if err := os.MkdirAll(runDir(layout), 0o755); err != nil {
 		return err
 	}
@@ -181,12 +189,6 @@ func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot b
 		runner = &watch.Runner{Root: root, Client: graphClient}
 		runner.Start(context.Background())
 		defer runner.Stop()
-	}
-	fmt.Println("Ensuring user-global Superopen MCP entries (repo-neutral)…")
-	if written, err := install.InstallUserMCP(); err != nil {
-		fmt.Fprintf(os.Stderr, "so dev: mcp ensure: %v\n", err)
-	} else if len(written) > 0 {
-		fmt.Printf("MCP ready (%d agent config(s)); agents spawn: so graph mcp serve\n", len(written))
 	}
 	fmt.Println("Live graph refresh active (local git poll ~60s; no LLM).")
 	go func() {

@@ -147,6 +147,9 @@ CREATE TABLE IF NOT EXISTS community_nodes (
   PRIMARY KEY (project, community_id, node_id),
   FOREIGN KEY (project, community_id) REFERENCES communities(project, id) ON DELETE CASCADE
 );
+`
+
+const schemaFTSDDL = `
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
   name,
   qualified_name,
@@ -155,6 +158,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
   content='',
   tokenize='unicode61 remove_diacritics 2'
 );
+`
+
+const schemaIndexDDL = `
 CREATE INDEX IF NOT EXISTS idx_nodes_label ON nodes(project, label);
 CREATE INDEX IF NOT EXISTS idx_nodes_name ON nodes(project, name);
 CREATE INDEX IF NOT EXISTS idx_nodes_file ON nodes(project, file_path);
@@ -163,6 +169,8 @@ CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(project, target_id, type);
 CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(project, type);
 CREATE INDEX IF NOT EXISTS idx_file_hashes_language ON file_hashes(project, language);
 `
+
+const schemaSearchDDL = schemaFTSDDL + schemaIndexDDL
 
 type Store struct {
 	db   *sql.DB
@@ -188,10 +196,18 @@ type FileRecord struct {
 }
 
 func OpenWritable(path string) (*Store, error) {
+	return openWritable(path, true)
+}
+
+func OpenWritableFresh(path string) (*Store, error) {
+	return openWritable(path, false)
+}
+
+func openWritable(path string, withSearch bool) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open(sqliteDriverName, path)
 	if err != nil {
 		return nil, err
 	}
@@ -205,10 +221,16 @@ func OpenWritable(path string) (*Store, error) {
 		s.Close()
 		return nil, fmt.Errorf("initialize graph schema: %w", err)
 	}
+	if withSearch {
+		if _, err := db.Exec(schemaSearchDDL); err != nil {
+			s.Close()
+			return nil, fmt.Errorf("initialize graph search schema: %w", err)
+		}
+	}
 	meta := map[string]string{
 		"schema_version":   fmt.Sprint(api.SchemaVersion),
 		"protocol_version": fmt.Sprint(api.ProtocolVersion),
-		"asset_revision":  AssetRevision,
+		"asset_revision":   AssetRevision,
 	}
 	for key, value := range meta {
 		if _, err := db.Exec(`INSERT INTO store_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value); err != nil {
@@ -224,7 +246,7 @@ func OpenReadOnly(path string) (*Store, error) {
 		return nil, err
 	}
 	dsn := "file:" + filepath.ToSlash(path) + "?mode=ro"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open(sqliteDriverName, dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +295,15 @@ func (s *Store) Close() error {
 func (s *Store) Path() string { return s.path }
 
 type Builder struct {
-	tx *sql.Tx
+	tx         *sql.Tx
+	insertOnly bool
+	nextNodeID int64
+	nodeStmt   *sql.Stmt
+	ftsStmt    *sql.Stmt
+	edgeStmt   *sql.Stmt
+	nodeBatch  [][]any
+	ftsBatch   [][]any
+	edgeBatch  [][]any
 }
 
 func (s *Store) Build(ctx context.Context, fn func(*Builder) error) error {
@@ -319,6 +349,9 @@ func (b *Builder) PutNode(n api.Node) (int64, error) {
 	props, err := marshalObject(n.Properties)
 	if err != nil {
 		return 0, err
+	}
+	if b.insertOnly {
+		return b.putNodeInsert(n, props)
 	}
 	var oldID int64
 	var oldName, oldQN, oldLabel, oldFile string
@@ -366,6 +399,9 @@ func (b *Builder) PutEdge(e api.Edge) (int64, error) {
 	localName := ""
 	if e.Type == "IMPORTS" {
 		localName, _ = e.Properties["local_name"].(string)
+	}
+	if b.insertOnly {
+		return b.queueEdgeInsert(e.Project, e.SourceID, e.TargetID, e.Type, props, string(evidence), localName)
 	}
 	row := b.tx.QueryRow(`INSERT INTO edges(project,source_id,target_id,type,properties,evidence,local_name)
 		VALUES(?,?,?,?,?,?,?) ON CONFLICT(project,source_id,target_id,type,local_name) DO UPDATE SET
@@ -625,6 +661,9 @@ func (s *Store) verifySchema(ctx context.Context) error {
 }
 
 func (s *Store) Seal(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, "ANALYZE"); err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, "PRAGMA optimize"); err != nil {
 		return err
 	}

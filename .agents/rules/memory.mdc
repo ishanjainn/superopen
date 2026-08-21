@@ -1,0 +1,7 @@
+---
+description: Memory store and so memory commands
+globs: internal/memory/**/*
+alwaysApply: false
+---
+
+Read @internal/memory/AGENTS.md before changing memory schema, search/recall, or capture flows.

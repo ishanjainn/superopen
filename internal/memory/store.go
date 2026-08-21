@@ -250,10 +250,29 @@ type CaptureInput struct {
 
 func OpenRoot(root string) (*Store, error) {
 	layout := paths.Resolve(root)
+	if !layout.Exists() {
+		return nil, fmt.Errorf("%s", paths.UnmanagedMessage)
+	}
 	if err := layout.EnsureDirs(); err != nil {
 		return nil, err
 	}
 	return Open(layout.Database)
+}
+
+// HasEpisodes is true when this repository's store already has at least one
+// memory moment or rollup. Used to keep cold-clone MCP tools/list graph-only.
+func HasEpisodes(root string) bool {
+	layout := paths.Resolve(root)
+	store, err := OpenQuick(layout.Database)
+	if err != nil {
+		return false
+	}
+	defer store.Close()
+	var n int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM memory_episodes`).Scan(&n); err != nil {
+		return false
+	}
+	return n > 0
 }
 
 func Open(path string) (*Store, error) {

@@ -1,0 +1,7 @@
+---
+description: Graph engine — query, FTS, index pipeline
+globs: internal/graph/**/*
+alwaysApply: false
+---
+
+Read @internal/graph/AGENTS.md before changing query seeds, BFS, FTS, or agent graph output.

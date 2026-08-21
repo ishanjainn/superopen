@@ -1,8 +1,7 @@
 # Superopen CLI (`so`) installer for Windows.
 #
-# Release (no checkout): downloads the latest GitHub Release zip into
-# $env:USERPROFILE\.superopen\bin\so.exe and adds that directory to the
-# user-scope PATH. Then run: so install
+# Release (no checkout): downloads the latest GitHub Release zip (CLI) and
+# so-web.tar.gz (prebuilt UI) into $env:USERPROFILE\.superopen. Then: so install
 #
 # Local checkout: builds from source into the same prefix, adds PATH, and
 # runs `so install` (same layout as production install.ps1 users).
@@ -32,20 +31,18 @@ function Write-So($msg)     { Write-Host "so: $msg" }
 function Write-SoWarn($msg) { Write-Warning "so: $msg" }
 function Stop-So($msg)      { throw "so: $msg" }
 
-function Install-SoWeb([string]$WebSrc) {
+function Web-Dst {
+    Join-Path (Split-Path $InstallDir -Parent) 'share\superopen\web'
+}
+
+function Install-SoWebFromSource([string]$WebSrc) {
     $pkg = Join-Path $WebSrc 'package.json'
     if (-not (Test-Path $pkg)) { Stop-So "web UI sources missing at $WebSrc" }
-    $webDst = Join-Path (Split-Path $InstallDir -Parent) 'share\superopen\web'
-    Write-So "Installing web UI into $webDst"
-    if (Test-Path $webDst) { Remove-Item -Recurse -Force $webDst }
-    New-Item -ItemType Directory -Force -Path (Split-Path $webDst -Parent) | Out-Null
-    Copy-Item -Recurse $WebSrc $webDst
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $webDst 'node_modules'), (Join-Path $webDst '.next')
     if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-        Stop-So 'npm not found; Node.js is required to install the Superopen UI'
+        Stop-So 'npm not found; Node.js is required to build the Superopen UI from a checkout'
     }
     Write-So 'npm install --ignore-scripts (web UI)'
-    Push-Location $webDst
+    Push-Location $WebSrc
     try {
         npm install --ignore-scripts
         Write-So 'npm run build (web UI)'
@@ -53,7 +50,41 @@ function Install-SoWeb([string]$WebSrc) {
     } finally {
         Pop-Location
     }
+    $standalone = Join-Path $WebSrc '.next\standalone'
+    if (-not (Test-Path (Join-Path $standalone 'server.js'))) {
+        Stop-So "standalone UI missing at $standalone (next build did not produce output: standalone)"
+    }
+    $staticSrc = Join-Path $WebSrc '.next\static'
+    if (Test-Path $staticSrc) {
+        $staticDst = Join-Path $standalone '.next\static'
+        New-Item -ItemType Directory -Force -Path $staticDst | Out-Null
+        Copy-Item -Recurse -Force (Join-Path $staticSrc '*') $staticDst
+    }
+    $publicSrc = Join-Path $WebSrc 'public'
+    if (Test-Path $publicSrc) {
+        $publicDst = Join-Path $standalone 'public'
+        New-Item -ItemType Directory -Force -Path $publicDst | Out-Null
+        Copy-Item -Recurse -Force (Join-Path $publicSrc '*') $publicDst
+    }
+    $webDst = Web-Dst
+    Write-So "Installing prebuilt web UI into $webDst"
+    if (Test-Path $webDst) { Remove-Item -Recurse -Force $webDst }
+    Copy-Item -Recurse -Force $standalone $webDst
 }
+
+function Install-SoWebTarball([string]$Archive) {
+    $webDst = Web-Dst
+    Write-So "Installing prebuilt web UI into $webDst"
+    if (Test-Path $webDst) { Remove-Item -Recurse -Force $webDst }
+    New-Item -ItemType Directory -Force -Path $webDst | Out-Null
+    & tar -xzf $Archive -C $webDst
+    if ($LASTEXITCODE -ne 0) { Stop-So "extract failed; $Archive may be corrupt" }
+    if (-not (Test-Path (Join-Path $webDst 'server.js'))) {
+        Stop-So 'so-web.tar.gz is missing server.js (not a standalone UI bundle)'
+    }
+}
+
+function Add-SoUserPath([string]$Dir) {
     $currentUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if (-not $currentUserPath) { $currentUserPath = '' }
     $pathParts = $currentUserPath -split ';' | Where-Object { $_ -ne '' }
@@ -85,7 +116,7 @@ if ($ScriptDir) {
             Pop-Location
         }
         Write-So "Installed: $Out"
-        Install-SoWeb (Join-Path $Root 'web')
+        Install-SoWebFromSource (Join-Path $Root 'web')
         Add-SoUserPath $InstallDir
         & $Out install
         Write-So 'Done. In a test repo: so init && so dev'
@@ -144,21 +175,16 @@ try {
     Write-So "Installed: $target"
     Add-SoUserPath $InstallDir
 
-    $srcUrl = if ($Version -eq 'latest') {
-        "https://github.com/$Repo/archive/refs/heads/main.zip"
+    $webAsset = 'so-web.tar.gz'
+    $webUrl = if ($Version -eq 'latest') {
+        "https://github.com/$Repo/releases/latest/download/$webAsset"
     } else {
-        "https://github.com/$Repo/archive/refs/tags/cli-$Version.zip"
+        "https://github.com/$Repo/releases/download/cli-$Version/$webAsset"
     }
-    Write-So "Downloading web UI sources"
-    $srcZip = Join-Path $tmpDir 'src.zip'
-    Invoke-WebRequest -Uri $srcUrl -OutFile $srcZip -UseBasicParsing
-    $srcOut = Join-Path $tmpDir 'src'
-    Expand-Archive -Path $srcZip -DestinationPath $srcOut -Force
-    $webSrc = Get-ChildItem -Path $srcOut -Directory -Filter 'web' -Recurse |
-        Where-Object { Test-Path (Join-Path $_.FullName 'package.json') } |
-        Select-Object -First 1
-    if (-not $webSrc) { Stop-So "no web/ in $srcUrl" }
-    Install-SoWeb $webSrc.FullName
+    Write-So "Downloading $webAsset"
+    $webTar = Join-Path $tmpDir $webAsset
+    Invoke-WebRequest -Uri $webUrl -OutFile $webTar -UseBasicParsing
+    Install-SoWebTarball $webTar
     & $target install
     Write-So 'Done. In a test repo: so init && so dev'
 }

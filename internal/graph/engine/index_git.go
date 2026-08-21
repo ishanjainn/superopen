@@ -73,7 +73,6 @@ func indexGitCochange(ctx context.Context, root, project string, graph *goGraph)
 		})
 	}
 	applyFileTemporalProperties(temporal, fileNodes, graph)
-	sortGraph(graph)
 }
 
 func readGitCommits(ctx context.Context, root string) []gitCommit {

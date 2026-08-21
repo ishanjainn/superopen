@@ -2,8 +2,9 @@ name: Release / CLI
 
 # Build-only. Called by release-packages.yml, which owns version bumping,
 # tagging, release notes, the GitHub Release, and the Homebrew tap bump.
-# This workflow just cross-compiles the binaries and uploads them as
-# release-assets-* artifacts for the orchestrator to attach.
+# This workflow cross-compiles CLI binaries and builds the standalone
+# web UI tarball (so-web.tar.gz), then uploads them as release-assets-*
+# artifacts for the orchestrator to attach.
 on:
   workflow_call:
     inputs:
@@ -22,17 +23,17 @@ permissions:
 jobs:
   build:
     name: Build ${{ matrix.os }} / ${{ matrix.arch }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: linux, arch: amd64, ext: "" }
-          - { os: linux, arch: arm64, ext: "" }
-          - { os: darwin, arch: amd64, ext: "" }
-          - { os: darwin, arch: arm64, ext: "" }
-          - { os: windows, arch: amd64, ext: ".exe" }
-          - { os: windows, arch: arm64, ext: ".exe" }
+          - { os: linux, arch: amd64, ext: "", runner: ubuntu-latest, cgo: "1", tags: "tsnative,sqlite_fts5" }
+          - { os: linux, arch: arm64, ext: "", runner: ubuntu-24.04-arm, cgo: "1", tags: "tsnative,sqlite_fts5" }
+          - { os: darwin, arch: amd64, ext: "", runner: macos-13, cgo: "1", tags: "tsnative,sqlite_fts5" }
+          - { os: darwin, arch: arm64, ext: "", runner: macos-latest, cgo: "1", tags: "tsnative,sqlite_fts5" }
+          - { os: windows, arch: amd64, ext: ".exe", runner: windows-latest, cgo: "1", tags: "tsnative,sqlite_fts5" }
+          - { os: windows, arch: arm64, ext: ".exe", runner: ubuntu-latest, cgo: "0", tags: "" }
     steps:
       - uses: actions/checkout@v7
         with:
@@ -43,8 +44,12 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.mod
           check-latest: true
+      - name: Install MinGW
+        if: runner.os == 'Windows' && matrix.cgo == '1'
+        run: choco install mingw -y --no-progress
       - name: Resolve version
         id: ver
+        shell: bash
         env:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
@@ -56,20 +61,27 @@ jobs:
           fi
           echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
       - name: Build
+        shell: bash
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: 0
+          CGO_ENABLED: ${{ matrix.cgo }}
           VERSION: ${{ steps.ver.outputs.VERSION }}
           EXT: ${{ matrix.ext }}
+          TAGS: ${{ matrix.tags }}
         run: |
           set -euo pipefail
           mkdir -p dist
           COMMIT="$(git rev-parse --short HEAD)"
           PKG="github.com/ishanjainn/superopen/internal/version"
-          go build -trimpath -ldflags "-s -w -X ${PKG}.Version=$VERSION -X ${PKG}.Commit=$COMMIT" \
+          TAG_ARGS=()
+          if [ -n "$TAGS" ]; then
+            TAG_ARGS=(-tags "$TAGS")
+          fi
+          go build -trimpath "${TAG_ARGS[@]}" -ldflags "-s -w -X ${PKG}.Version=$VERSION -X ${PKG}.Commit=$COMMIT" \
             -o "dist/so-${GOOS}-${GOARCH}${EXT}" ./cmd/so
       - name: Package
+        shell: bash
         env:
           MATRIX_OS: ${{ matrix.os }}
           MATRIX_ARCH: ${{ matrix.arch }}
@@ -78,12 +90,23 @@ jobs:
           set -euo pipefail
           NAME="so-${MATRIX_OS}-${MATRIX_ARCH}"
           cd dist
+          checksum() {
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$1" > "$1.sha256"
+            else
+              shasum -a 256 "$1" > "$1.sha256"
+            fi
+          }
           if [ "$MATRIX_OS" = "windows" ]; then
-            zip "${NAME}.zip" "${NAME}${EXT}"
-            sha256sum "${NAME}.zip" > "${NAME}.zip.sha256"
+            if command -v zip >/dev/null 2>&1; then
+              zip "${NAME}.zip" "${NAME}${EXT}"
+            else
+              powershell.exe -NoProfile -Command "Compress-Archive -Force -Path '${NAME}${EXT}' -DestinationPath '${NAME}.zip'"
+            fi
+            checksum "${NAME}.zip"
           else
             tar -czf "${NAME}.tar.gz" "${NAME}${EXT}"
-            sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+            checksum "${NAME}.tar.gz"
           fi
       - uses: actions/upload-artifact@v7
         with:
@@ -92,4 +115,40 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/*.sha256
+          if-no-files-found: error
+
+  web:
+    name: Build web UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install and build
+        working-directory: web
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm run build
+        env:
+          SUPEROPEN_ROOT: ${{ github.workspace }}
+      - name: Package standalone UI
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          sh scripts/pack-web.sh --from web --tar dist/so-web.tar.gz
+          sha256sum dist/so-web.tar.gz > dist/so-web.tar.gz.sha256
+          tar -tzf dist/so-web.tar.gz | grep -q 'server.js'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-assets-so-web
+          path: |
+            dist/so-web.tar.gz
+            dist/so-web.tar.gz.sha256
           if-no-files-found: error

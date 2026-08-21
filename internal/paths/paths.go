@@ -75,6 +75,14 @@ func (paths Paths) Exists() bool {
 	return err == nil && info.IsDir()
 }
 
+// UnmanagedMessage is the CLI/MCP skip text when a tree has not been inited.
+const UnmanagedMessage = "not a Superopen repo; run so init"
+
+// Managed reports whether repoRoot has a .so/ directory (so init opt-in).
+func Managed(repoRoot string) bool {
+	return Resolve(repoRoot).Exists()
+}
+
 func (paths Paths) EnsureDirs() error {
 	for _, dir := range []string{paths.Root, paths.SessionsDir, paths.DBDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {

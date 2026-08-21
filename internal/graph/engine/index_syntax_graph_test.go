@@ -257,3 +257,46 @@ func TestAssembleSyntaxGraphUsesPinnedModuleAndTypeIdentities(t *testing.T) {
 		t.Fatalf("missing nodes: %#v", want)
 	}
 }
+
+func TestAssembleCompactUsagesPreserveEdgeHistogram(t *testing.T) {
+	repository := SyntaxRepository{Files: []ParsedSyntaxFile{{
+		File: FileRecord{Project: "fixture", Path: "app.py", Language: "python"},
+		Extraction: SyntaxExtraction{
+			Definitions: []SyntaxFact{
+				{Kind: "function", Name: "use", StartLine: 1},
+				{Kind: "function", Name: "helper", StartLine: 8},
+				{Kind: "variable", Name: "config", StartLine: 10},
+			},
+			Calls: []SyntaxFact{{Kind: "call", Name: "helper", Scope: "use", StartLine: 2}},
+			Usages: []OccurrenceFact{
+				{Name: "helper", Scope: "use", StartLine: 3, Confidence: 0.7},
+				{Name: "config", Scope: "use", StartLine: 4, Confidence: 0.7},
+			},
+			Writes:  []OccurrenceFact{{Name: "config", Scope: "use", StartLine: 5, Confidence: 1}},
+			Imports: []SyntaxFact{{Kind: "import", Name: "json", LocalName: "json", StartLine: 1}},
+		},
+	}}}
+	graph, _ := AssembleSyntaxGraph(repository, "fixture")
+	counts := map[string]int{}
+	for _, edge := range graph.edges {
+		counts[edge.kind]++
+	}
+	if counts["CALLS"] < 1 {
+		t.Fatalf("CALLS missing: %#v %#v", counts, graph.edges)
+	}
+	if counts["USAGE"] < 1 {
+		t.Fatalf("USAGE missing: %#v %#v", counts, graph.edges)
+	}
+	if counts["WRITES"] < 1 {
+		t.Fatalf("WRITES missing: %#v %#v", counts, graph.edges)
+	}
+	found := false
+	for _, edge := range graph.edges {
+		if edge.kind == "USAGE" && edge.Callee() != "" && edge.evidence != nil && edge.evidence.Location != nil && edge.evidence.Location.StartLine > 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("USAGE missing callee/evidence: %#v", graph.edges)
+	}
+}

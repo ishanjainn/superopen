@@ -24,7 +24,7 @@ export async function soJSON<T = unknown>(
 ): Promise<SoJSON<T>> {
   const cwd = opts?.cwd ?? repoCwd();
   const bin = soBinary();
-  const child = spawn(bin, [...args, "--json"], {
+  const child = spawn(/* turbopackIgnore: true */ bin, [...args, "--json"], {
     cwd,
     env: {
       ...process.env,

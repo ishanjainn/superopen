@@ -29,6 +29,7 @@ func IndexAllDevelopment(ctx context.Context, request api.BuildRequest, engineVe
 	if err := MigrateLegacyCacheIfNeeded(root); err != nil {
 		return api.BuildResult{}, err
 	}
+	applyMemoryBudget()
 	project := request.Project
 	if project == "" {
 		project, err = ProjectName(root)
@@ -37,7 +38,9 @@ func IndexAllDevelopment(ctx context.Context, request api.BuildRequest, engineVe
 		}
 	}
 	if !request.Force {
-		if unchanged, ok, err := tryUnchangedBuild(ctx, root, project, request.Exclude, started); err != nil {
+		if !databaseExists(root) {
+			// First init has no prior generation; skip the SHA walk.
+		} else if unchanged, ok, err := tryUnchangedBuild(ctx, root, project, request.Exclude, started); err != nil {
 			return api.BuildResult{}, err
 		} else if ok {
 			return unchanged, nil
@@ -47,15 +50,31 @@ func IndexAllDevelopment(ctx context.Context, request api.BuildRequest, engineVe
 	if err != nil {
 		return api.BuildResult{}, err
 	}
-	runtime, _, err := LoadGrammarAssets(ctx, assets, "assets/grammars/manifest.json")
+	reportIndexProgress("Building native graph...")
+	grammars := grammarsForFiles(root, files, nil)
+	var grammarRuntime *GrammarRuntime
+	if len(grammars) == 0 {
+		grammarRuntime, _, err = loadGrammarAssets(ctx, assets, "assets/grammars/manifest.json", false)
+	} else {
+		reportIndexProgress("Loading %d grammars...", len(grammars))
+		grammarRuntime, _, err = loadSelectedGrammarAssets(ctx, assets, "assets/grammars/manifest.json", false, grammars)
+	}
 	if err != nil {
 		return api.BuildResult{}, err
 	}
-	defer runtime.Close(ctx)
-	repository, err := ParseSyntaxRepository(ctx, runtime, root, project, files, nil, 8)
+	defer grammarRuntime.Close(ctx)
+	parser := SyntaxParser(grammarRuntime)
+	if native := nativeSyntaxParser(); native != nil {
+		parser = &fallbackSyntaxParser{native: native, wasm: grammarRuntime}
+	}
+	workers := parseWorkerCount()
+	reportIndexProgress("parse 0/%d workers=%d", len(files), workers)
+	parseStarted := time.Now()
+	repository, err := ParseSyntaxRepository(ctx, parser, root, project, files, nil, workers)
 	if err != nil {
 		return api.BuildResult{}, err
 	}
+	reportIndexProgress("parse done files=%d elapsed=%s", len(repository.Files), indexElapsed(parseStarted))
 	fileOrder := make(map[string]int, len(files))
 	for index, path := range files {
 		fileOrder[path] = index
@@ -63,27 +82,37 @@ func IndexAllDevelopment(ctx context.Context, request api.BuildRequest, engineVe
 	sort.SliceStable(repository.Files, func(i, j int) bool {
 		return fileOrder[repository.Files[i].File.Path] < fileOrder[repository.Files[j].File.Path]
 	})
-	if err := enrichGoResolvedCalls(ctx, root, repository.Files); err != nil {
+	assembleStarted := time.Now()
+	if err := enrichCResolvedCalls(ctx, repository.Files); err != nil {
 		return api.BuildResult{}, err
 	}
 	graph, coverage := AssembleSyntaxGraph(repository, project)
 	registry := newSymbolRegistry(graph.nodes)
-	applyPackageMap(project, repository, &graph)
+	reportIndexProgress("assemble overlays...")
+	overlayStarted := time.Now()
+	clockOverlay := func(name string, fn func()) {
+		started := time.Now()
+		fn()
+		reportIndexProgress("assemble %s elapsed=%s", name, indexElapsed(started))
+	}
+	clockOverlay("env", func() { indexEnvironmentAccesses(project, root, repository.Files, &graph) })
+	clockOverlay("pkgmap", func() { applyPackageMap(project, repository, &graph) })
 	joinResolvedCalls(&graph, repository.Files, registry)
-	indexSyntaxInheritance(project, repository.Files, &graph, registry)
-	indexSyntaxGoImplements(&graph)
+	clockOverlay("inheritance", func() { indexSyntaxInheritance(project, repository.Files, &graph, registry) })
+	clockOverlay("implements", func() { indexSyntaxGoImplements(&graph) })
 	indexSyntaxExplicitOverrides(&graph)
-	// Builtins participate in the pinned global registry and therefore must be
-	// present before family resolvers perform cross-language name fallback.
 	indexPythonBuiltins(project, repository.Files, &graph)
 	indexRepositoryBranch(ctx, root, project, &graph)
-	indexEnvironmentAccesses(project, repository.Files, &graph)
-	indexConfigLinks(&graph)
-	indexHTTPRoutes(project, repository.Files, &graph)
+	clockOverlay("configlinks", func() { indexConfigLinks(&graph) })
+	clockOverlay("routes", func() { indexHTTPRoutes(project, repository.Files, &graph) })
+	dropExtractedOccurrences(repository.Files)
+	repository.Files = nil
 	appendTestRelationships(&graph)
-	indexGitCochange(ctx, root, project, &graph)
+	clockOverlay("git", func() { indexGitCochange(ctx, root, project, &graph) })
 	annotateCrossRepositoryEdges(&graph)
+	reportIndexProgress("assemble overlays elapsed=%s", indexElapsed(overlayStarted))
 	separateUnresolvedRelationships(&graph)
+	reportIndexProgress("assemble done nodes=%d edges=%d elapsed=%s", len(graph.nodes), len(graph.edges), indexElapsed(assembleStarted))
 	model, err := loadPinnedPretrainedVectors(assets, "assets/model/code_tokens.txt", "assets/model/code_vectors.bin")
 	if err != nil {
 		return api.BuildResult{}, err
@@ -104,6 +133,9 @@ func IndexAllDevelopment(ctx context.Context, request api.BuildRequest, engineVe
 	if err != nil {
 		if errors.Is(err, ErrBuildInProgress) {
 			return api.BuildResult{Status: "refresh_in_progress", Project: project, Duration: time.Since(started)}, nil
+		}
+		if errors.Is(err, ErrBuildPoolFull) {
+			return api.BuildResult{Status: "pool_full", Project: project, Duration: time.Since(started)}, nil
 		}
 		return api.BuildResult{}, err
 	}
@@ -281,11 +313,11 @@ func publishDevelopmentGraph(ctx context.Context, root, project, engineVersion, 
 		publishFn = PublishNonBlocking
 	}
 	return publishFn(ctx, root, func(ctx context.Context, path string) error {
-		store, err := OpenWritable(path)
+		store, err := OpenWritableFresh(path)
 		if err != nil {
 			return err
 		}
-		buildErr := store.Build(ctx, func(builder *Builder) error {
+		buildErr := store.BuildFresh(ctx, func(builder *Builder) error {
 			if err := builder.PutProject(ProjectRecord{Name: project, RootPath: root, Generation: generation,
 				SourceRevision: revision, EngineVersion: engineVersion, IndexedAt: time.Now().UTC()}); err != nil {
 				return err
@@ -296,18 +328,30 @@ func publishDevelopmentGraph(ctx context.Context, root, project, engineVersion, 
 				}
 			}
 			ids := make(map[string]int64, len(graph.nodes))
-			for _, node := range graph.nodes {
-				id, err := builder.PutNode(node)
+			for i := range graph.nodes {
+				node := &graph.nodes[i]
+				id, err := builder.PutNode(*node)
 				if err != nil {
 					return err
 				}
 				ids[node.QualifiedName] = id
+				if (i+1)%dumpPartitionSize == 0 {
+					reportIndexProgress("dump %d/%d", i+1, len(graph.nodes))
+				}
 			}
+			if err := builder.flushNodeBatch(); err != nil {
+				return err
+			}
+			semanticsStarted := time.Now()
 			if err := putGraphSemantics(builder, graph, ids, project, model); err != nil {
 				return err
 			}
 			if err := emitSemanticEdges(builder, graph, ids, project); err != nil {
 				return err
+			}
+			reportIndexProgress("semantics elapsed=%s", indexElapsed(semanticsStarted))
+			for i := range graph.nodes {
+				graph.nodes[i].Properties = nil
 			}
 			for _, edge := range graph.edges {
 				source, sourceOK := ids[edge.source]
@@ -316,13 +360,13 @@ func publishDevelopmentGraph(ctx context.Context, root, project, engineVersion, 
 					return fmt.Errorf("graph edge endpoint missing: %s -[%s]-> %s", edge.source, edge.kind, edge.target)
 				}
 				if _, err := builder.PutEdge(api.Edge{Project: project, SourceID: source, TargetID: target,
-					Type: edge.kind, Properties: edge.properties, Evidence: edge.evidence}); err != nil {
+					Type: edge.kind, Properties: edge.dumpProperties(), Evidence: edge.evidence}); err != nil {
 					return err
 				}
 			}
 			for _, edge := range graph.unresolved {
 				if err := builder.PutUnresolved(api.UnresolvedRelationship{Project: project, Source: edge.source,
-					TargetText: edge.target, Type: edge.kind, Properties: edge.properties, Evidence: edge.evidence}); err != nil {
+					TargetText: edge.target, Type: edge.kind, Properties: edge.dumpProperties(), Evidence: edge.evidence}); err != nil {
 					return err
 				}
 			}

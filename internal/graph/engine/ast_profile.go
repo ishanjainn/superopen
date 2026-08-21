@@ -36,11 +36,11 @@ const (
 
 type ASTProfile [semanticProfileDims]uint16
 
-func ComputeASTProfile(root SyntaxNode, source []byte, parameterNames []string) (ASTProfile, bool) {
+func ComputeASTProfile(root syntaxView, source []byte, parameterNames []string) (ASTProfile, bool) {
 	var profile ASTProfile
 	profile[profileParameters] = uint16(len(parameterNames))
 	type frame struct {
-		node  SyntaxNode
+		node  syntaxView
 		depth int
 	}
 	stack := []frame{{node: root}}
@@ -51,33 +51,38 @@ func ComputeASTProfile(root SyntaxNode, source []byte, parameterNames []string) 
 		current := stack[last]
 		stack = stack[:last]
 		node := current.node
-		if node.Named || len(node.Children) > 0 {
+		if node == nil {
+			continue
+		}
+		if node.IsNamed() || node.ChildCount() > 0 {
 			nodeCount++
 			totalDepth += current.depth
 			if current.depth > int(profile[profileMaxDepth]) {
 				profile[profileMaxDepth] = uint16(current.depth)
 			}
-			accumulateProfileKind(&profile, node.Type)
-			if profileOperator(node.Type) {
+			accumulateProfileKind(&profile, node.Kind())
+			if profileOperator(node.Kind()) {
 				profile[profileTotalOperators]++
-				hash := profileHash(node.Type)
+				hash := profileHash(node.Kind())
 				if !operatorSet[hash] && len(operatorSet) < 512 {
 					operatorSet[hash] = true
 					profile[profileUniqueOperators]++
 				}
 			}
-			if len(node.Children) == 0 && profileOperand(node.Type) {
+			if node.ChildCount() == 0 && profileOperand(node.Kind()) {
 				profile[profileTotalOperands]++
 				profile[profileBodyTokens]++
-				hash := profileHash(node.Type)
+				hash := profileHash(node.Kind())
 				if !operandSet[hash] && len(operandSet) < 512 {
 					operandSet[hash] = true
 					profile[profileUniqueOperands]++
 				}
 			}
 		}
-		for index := len(node.Children) - 1; index >= 0 && len(stack) < 2048; index-- {
-			stack = append(stack, frame{node: node.Children[index], depth: current.depth + 1})
+		var kids []syntaxView
+		viewEachChild(node, func(child syntaxView) { kids = append(kids, child) })
+		for index := len(kids) - 1; index >= 0 && len(stack) < 2048; index-- {
+			stack = append(stack, frame{node: kids[index], depth: current.depth + 1})
 		}
 	}
 	if nodeCount == 0 {
@@ -85,8 +90,8 @@ func ComputeASTProfile(root SyntaxNode, source []byte, parameterNames []string) 
 	}
 	profile[profileAverageDepthX10] = uint16(totalDepth * 10 / nodeCount)
 	lines := sourceLineIndex(source)
-	startLine, _ := bytePosition(lines, root.Start)
-	endLine, _ := bytePosition(lines, root.End)
+	startLine, _ := bytePosition(lines, root.StartByte())
+	endLine, _ := bytePosition(lines, root.EndByte())
 	if endLine >= startLine {
 		profile[profileBodyLines] = uint16(endLine - startLine + 1)
 	}

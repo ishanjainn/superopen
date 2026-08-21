@@ -81,14 +81,6 @@ func run(cmd *cobra.Command, vendor string, dryRun bool) error {
 			fmt.Fprintf(cmd.OutOrStdout(), "  - %s\n", p)
 		}
 		if !dryRun {
-			// Post-install hint: Codex is the only vendor whose
-			// hooks require explicit user trust on first run. Per
-			// Codex's security model the user has to open `/hooks`
-			// inside the TUI and review each plugin's hook entries
-			// once - otherwise the registered hooks stay listed
-			// but inactive, and nothing reaches the OTLP backend. Surfacing
-			// this here is the difference between "I installed and
-			// see no data" (bad) and a clean first session.
 			if v == "codex" {
 				fmt.Fprintln(cmd.OutOrStdout(), "")
 				fmt.Fprintln(cmd.OutOrStdout(), "Next steps for Codex:")

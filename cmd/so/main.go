@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ishanjainn/superopen/internal/agent"
+	"github.com/ishanjainn/superopen/internal/agent/config"
+	"github.com/ishanjainn/superopen/internal/agent/steer"
 	codinguninstall "github.com/ishanjainn/superopen/internal/agent/uninstall"
 	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/graph/api"
@@ -44,6 +46,14 @@ func newRootCommand() *cobra.Command {
 		RunE:          runRoot,
 	}
 	cli.Bind(root, &cliFlags)
+	prev := root.PersistentPreRunE
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		_ = config.PromoteFileToEnv()
+		if prev != nil {
+			return prev(cmd, args)
+		}
+		return nil
+	}
 	root.Version = version.Display()
 	root.SetVersionTemplate("so {{.Version}}\n")
 	root.AddCommand(
@@ -206,6 +216,7 @@ func gitTopLevel(dir string) string {
 
 func cmdInstall() *cobra.Command {
 	var vendors []string
+	var strict bool
 	command := &cobra.Command{
 		Use:   "install",
 		Short: "Install /so skill and coding-agent observability hooks (user-global)",
@@ -214,22 +225,28 @@ func cmdInstall() *cobra.Command {
 Run from any directory (not tied to a repository). After install, open your
 agent and run /so init inside a repo to create .so/ and build the graph.
 
-Installs the /so skill, observability hooks, durable graph-first guidance,
-and user-global MCP entries (repo-neutral; no project files written).`,
-		RunE: func(*cobra.Command, []string) error {
-			if err := agent.Install(repoRoot(), vendors); err != nil {
+Installs the /so skill, observability hooks, and durable graph-first guidance
+(no project files written). Superopen does not install MCP.
+
+--strict denies the first in-repo source Read once per session so the agent
+must query the graph first.`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			report, err := agent.Install(repoRoot(), vendors, agent.Options{Strict: strict})
+			if err != nil {
 				return err
 			}
 			_ = memory.FetchModels()
-			fmt.Println("Installed user-global /so skill, hooks, graph-first guidance, and MCP.")
+			report.Write(cmd.OutOrStdout())
 			if findWebDir("") == "" {
-				fmt.Printf("note: web UI is not in %s; re-run sh scripts/install.sh (or brew) so so dev works from any repo.\n", expectedWebDir())
+				fmt.Fprintf(cmd.OutOrStdout(), "note: web UI is not in %s; re-run sh scripts/install.sh (or brew) so so dev works from any repo.\n", expectedWebDir())
 			}
-			fmt.Println("Next: open your coding agent and run /so init in a repository.")
+			fmt.Fprintln(cmd.OutOrStdout(), "Next: open your coding agent and run /so init in a repository.")
+			fmt.Fprintln(cmd.OutOrStdout(), "Restart the agent so it loads the new hooks.")
 			return nil
 		},
 	}
 	command.Flags().StringSliceVar(&vendors, "vendor", nil, "Install selected vendor hooks (default: all supported)")
+	command.Flags().BoolVar(&strict, "strict", false, "Deny the first in-repo source Read once per session (graph-first)")
 	return command
 }
 
@@ -242,7 +259,7 @@ func cmdUninstall() *cobra.Command {
 macOS, Linux, and Windows. No source checkout is required.
 
 Removes:
-  - hooks, /so skill, MCP, durable guidance, and subagents for every
+  - hooks, /so skill, MCP, and durable guidance for every
     supported coding agent (Claude Code, Cursor, Codex, Gemini CLI,
     OpenCode, Copilot CLI, Pi)
   - project index (config dir)
@@ -264,7 +281,7 @@ Chocolatey). Use that manager's uninstall after this command.
 					fmt.Printf("The so binary is still provided by a package manager. Remove it with: %s\n", hint)
 				}
 			}
-			fmt.Println("Restart your coding agent so it drops in-memory hooks and MCP.")
+			fmt.Println("Restart your coding agent so it drops in-memory hooks.")
 			return nil
 		},
 	}
@@ -275,6 +292,7 @@ Chocolatey). Use that manager's uninstall after this command.
 func cmdInit() *cobra.Command {
 	var force bool
 	var withDev bool
+	var cursorRules bool
 	command := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize .so/ session storage and the native graph for this repository",
@@ -286,10 +304,11 @@ and registers the project in the user-wide Superopen index.
 Init defaults to the repository root (nearest existing .so or git top-level).
 Pass --root / SUPEROPEN_ROOT for an explicit nested package graph.
 
-Does not re-run user-global so install (hooks/MCP). Does not rebuild an
+Does not re-run user-global so install (hooks/skill/guidance). Does not rebuild an
 existing graph unless --force is passed.
 
-Does not start so dev by default. Pass --dev to start the UI after init.`,
+Does not start so dev by default. Pass --dev to start the UI after init.
+Pass --cursor-rules to also write this repo's .cursor/rules/superopen.mdc.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
 			root := initRoot()
@@ -306,6 +325,13 @@ Does not start so dev by default. Pass --dev to start the UI after init.`,
 				if err := os.WriteFile(ignorePath, soGitignoreContents(), 0o644); err != nil {
 					return err
 				}
+			}
+			if cursorRules {
+				path, err := steer.InstallProjectCursorRule(root)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "Cursor rule:  %s\n", path)
 			}
 			_, dbErr := os.Stat(layout.Database)
 			already := dbErr == nil
@@ -343,7 +369,7 @@ Does not start so dev by default. Pass --dev to start the UI after init.`,
 			fmt.Fprintf(out, "Session data: %s\n", layout.SessionsDir)
 			fmt.Fprintf(out, "Shared DB:    %s\n", layout.Database)
 			if withDev {
-				fmt.Fprintln(out, "Starting so dev -d (UI + live watcher; MCP is user-global)...")
+				fmt.Fprintln(out, "Starting so dev -d (UI + live watcher)...")
 				prev := cliFlags.Root
 				cliFlags.Root = root
 				defer func() { cliFlags.Root = prev }()
@@ -355,6 +381,7 @@ Does not start so dev by default. Pass --dev to start the UI after init.`,
 	}
 	command.Flags().BoolVar(&force, "force", false, "Force native graph rebuild")
 	command.Flags().BoolVar(&withDev, "dev", false, "After init, start so dev -d (idempotent if already running)")
+	command.Flags().BoolVar(&cursorRules, "cursor-rules", false, "Write .cursor/rules/superopen.mdc in this repository")
 	return command
 }
 
@@ -368,7 +395,7 @@ func cmdQuery() *cobra.Command {
 	})
 	command.Args = cobra.ExactArgs(1)
 	command.Flags().Int("depth", 2, "Traversal depth")
-	command.Flags().Int("budget", 1200, "Approximate output token budget")
+	command.Flags().Int("budget", 2000, "Approximate output token budget")
 	return command
 }
 

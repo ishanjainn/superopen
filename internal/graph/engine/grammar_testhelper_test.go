@@ -20,7 +20,7 @@ func testSyntaxGrammarRuntime(t *testing.T) *GrammarRuntime {
 			EngineAssets,
 			"assets/grammars/manifest.json",
 			false,
-			[]string{"go", "javascript", "python", "typescript", "yaml"},
+			[]string{"go", "javascript", "python", "typescript", "yaml", "rst", "makefile", "kconfig", "assembly", "devicetree", "c"},
 		)
 	})
 	if testSyntaxRuntimeErr != nil {

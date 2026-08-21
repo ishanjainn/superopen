@@ -43,9 +43,43 @@ func indexSyntaxGoImplements(graph *goGraph) {
 			interfaces[edge.source] = required
 		}
 	}
+	structsByMethod := map[string][]string{}
 	for concrete, methods := range structMethods {
-		for iface, required := range interfaces {
-			if concrete == iface || len(required) == 0 || !containsMethods(methods, required) {
+		for name := range methods {
+			structsByMethod[name] = append(structsByMethod[name], concrete)
+		}
+	}
+	for iface, required := range interfaces {
+		if len(required) == 0 {
+			continue
+		}
+		var candidates []string
+		first := true
+		for name := range required {
+			owners := structsByMethod[name]
+			if first {
+				candidates = append(candidates, owners...)
+				first = false
+				continue
+			}
+			allowed := make(map[string]bool, len(owners))
+			for _, owner := range owners {
+				allowed[owner] = true
+			}
+			filtered := candidates[:0]
+			for _, concrete := range candidates {
+				if allowed[concrete] {
+					filtered = append(filtered, concrete)
+				}
+			}
+			candidates = filtered
+			if len(candidates) == 0 {
+				break
+			}
+		}
+		for _, concrete := range candidates {
+			methods := structMethods[concrete]
+			if concrete == iface || !containsMethods(methods, required) {
 				continue
 			}
 			graph.edges = append(graph.edges, pendingEdge{
@@ -63,7 +97,6 @@ func indexSyntaxGoImplements(graph *goGraph) {
 			}
 		}
 	}
-	sortGraph(graph)
 }
 
 func graphNodeName(qn string) string {
@@ -86,6 +119,7 @@ func indexSyntaxInheritance(_ string, files []ParsedSyntaxFile, graph *goGraph, 
 	for _, node := range graph.nodes {
 		nodeQNs[node.QualifiedName] = true
 	}
+	importIndex := newImportTargetIndex(graph.nodes)
 	for _, parsed := range files {
 		rel := filepath.ToSlash(parsed.File.Path)
 		moduleQN := syntaxDefinitionModuleQN(parsed.File.Language, rel)
@@ -94,7 +128,7 @@ func indexSyntaxInheritance(_ string, files []ParsedSyntaxFile, graph *goGraph, 
 			if fact.LocalName == "" {
 				continue
 			}
-			qn := localSyntaxImportTargetForLanguage(parsed.File.Language, rel, fact.Name, "", graph.nodes)
+			qn := localSyntaxImportTargetForLanguage(parsed.File.Language, rel, fact.Name, "", importIndex)
 			if qn == "" {
 				continue
 			}
@@ -123,7 +157,6 @@ func indexSyntaxInheritance(_ string, files []ParsedSyntaxFile, graph *goGraph, 
 			})
 		}
 	}
-	sortGraph(graph)
 }
 
 // indexSyntaxExplicitOverrides implements Superopen: for each
@@ -171,7 +204,6 @@ func indexSyntaxExplicitOverrides(graph *goGraph) {
 		}
 	}
 	graph.edges = append(graph.edges, added...)
-	sortGraph(graph)
 }
 
 func semanticBaseEdgeType(label string) string {

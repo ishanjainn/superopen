@@ -17,30 +17,34 @@ func buildPackageMap(root string, files []ParsedSyntaxFile) packageMap {
 	result := packageMap{aliases: map[string]string{}, modules: map[string]string{}}
 	for _, parsed := range files {
 		rel := filepath.ToSlash(parsed.File.Path)
+		body := parsedSource(root, parsed)
+		if len(body) == 0 {
+			continue
+		}
 		switch filepath.Base(rel) {
 		case "package.json":
-			indexPackageJSON(root, rel, parsed.Body, &result)
+			indexPackageJSON(root, rel, body, &result)
 		case "go.mod":
-			indexGoModPackageMap(parsed.Body, &result)
+			indexGoModPackageMap(body, &result)
 		case "Cargo.toml":
-			indexCargoToml(parsed.Body, &result)
+			indexCargoToml(body, &result)
 		case "pyproject.toml":
-			indexPyProjectToml(parsed.Body, &result)
+			indexPyProjectToml(body, &result)
 		case "composer.json":
-			indexComposerJSON(parsed.Body, &result)
+			indexComposerJSON(body, &result)
 		case "pubspec.yaml":
-			indexPubspecYAML(parsed.Body, &result)
+			indexPubspecYAML(body, &result)
 		case "pom.xml":
-			indexPomXML(parsed.Body, &result)
+			indexPomXML(body, &result)
 		case "build.gradle", "build.gradle.kts":
-			indexGradle(parsed.Body, &result)
+			indexGradle(body, &result)
 		case "mix.exs":
-			indexMixExs(parsed.Body, &result)
+			indexMixExs(body, &result)
 		case "Package.swift":
-			indexPackageSwift(parsed.Body, &result)
+			indexPackageSwift(body, &result)
 		}
 		if strings.HasSuffix(rel, ".gemspec") {
-			indexGemspec(parsed.Body, &result)
+			indexGemspec(body, &result)
 		}
 	}
 	return result
@@ -190,19 +194,27 @@ func indexGemspec(body []byte, result *packageMap) {
 	}
 }
 
-func (m packageMap) resolveBareImport(specifier, sourceFile string, nodes []api.Node) string {
+func (m packageMap) resolveBareImport(specifier, sourceFile string, index *importTargetIndex) string {
 	specifier = strings.TrimSpace(strings.Trim(specifier, "\"'`"))
 	if specifier == "" || strings.HasPrefix(specifier, ".") || strings.HasPrefix(specifier, "/") {
-		return localSyntaxImportTargetForLanguage("", sourceFile, specifier, "", nodes)
+		return localSyntaxImportTargetForLanguage("", sourceFile, specifier, "", index)
 	}
-	if path, ok := m.modules[specifier]; ok {
-		for _, node := range nodes {
-			if node.Label != "Module" && node.Label != "Folder" {
-				continue
+	if path, ok := m.modules[specifier]; ok && index != nil {
+		if path == "" {
+			for _, node := range index.nodes {
+				if node.Label == "Module" || node.Label == "Folder" {
+					return node.QualifiedName
+				}
 			}
-			candidate := filepath.ToSlash(node.Location.File)
-			if path == "" || candidate == path || strings.HasSuffix(candidate, "/"+path) {
-				return node.QualifiedName
+		} else {
+			for _, node := range index.nodes {
+				if node.Label != "Module" && node.Label != "Folder" {
+					continue
+				}
+				candidate := filepath.ToSlash(node.Location.File)
+				if candidate == path || strings.HasSuffix(candidate, "/"+path) {
+					return node.QualifiedName
+				}
 			}
 		}
 	}
@@ -217,8 +229,9 @@ func applyPackageMap(_ string, repository SyntaxRepository, graph *goGraph) {
 	if len(mapping.modules) == 0 && len(mapping.aliases) == 0 {
 		return
 	}
-	for index := range graph.edges {
-		edge := &graph.edges[index]
+	index := newImportTargetIndex(graph.nodes)
+	for i := range graph.edges {
+		edge := &graph.edges[i]
 		if edge.kind != "IMPORTS" {
 			continue
 		}
@@ -227,7 +240,7 @@ func applyPackageMap(_ string, repository SyntaxRepository, graph *goGraph) {
 		if specifier == "" {
 			specifier = edge.target
 		}
-		if resolved := mapping.resolveBareImport(specifier, "", graph.nodes); resolved != "" && resolved != edge.target {
+		if resolved := mapping.resolveBareImport(specifier, "", index); resolved != "" && resolved != edge.target {
 			edge.target = resolved
 			if edge.evidence == nil {
 				edge.evidence = &api.Evidence{Strategy: "pkgmap", Confidence: .95}
@@ -237,5 +250,4 @@ func applyPackageMap(_ string, repository SyntaxRepository, graph *goGraph) {
 			}
 		}
 	}
-	sortGraph(graph)
 }

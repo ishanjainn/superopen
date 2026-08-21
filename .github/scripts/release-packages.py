@@ -1024,30 +1024,36 @@ def verify_version_files(version_files: list[str], version: str) -> None:
             raise ReleaseError(f"existing version in {relative} is {actual}, expected {version}")
 
 
+def load_sha256_sidecar(directory: Path, asset: str) -> str:
+    sidecar = directory / f"{asset}.sha256"
+    try:
+        fields = sidecar.read_text(encoding="utf-8").split()
+    except OSError as exc:
+        raise ReleaseError(f"missing Homebrew checksum sidecar: {sidecar.name}") from exc
+    if not fields or not SHA256_RE.fullmatch(fields[0]):
+        raise ReleaseError(f"invalid SHA-256 in {sidecar.name}")
+    if len(fields) != 2 or Path(fields[1]).name != asset:
+        raise ReleaseError(f"checksum sidecar {sidecar.name} names the wrong asset")
+    return fields[0]
+
+
 def load_homebrew_checksums(directory: Path) -> dict[tuple[str, str], str]:
     checksums: dict[tuple[str, str], str] = {}
     for operating_system, architecture in HOMEBREW_ASSETS:
         asset = f"so-{operating_system}-{architecture}.tar.gz"
-        sidecar = directory / f"{asset}.sha256"
-        try:
-            fields = sidecar.read_text(encoding="utf-8").split()
-        except OSError as exc:
-            raise ReleaseError(f"missing Homebrew checksum sidecar: {sidecar.name}") from exc
-        if not fields or not SHA256_RE.fullmatch(fields[0]):
-            raise ReleaseError(f"invalid SHA-256 in {sidecar.name}")
-        if len(fields) != 2 or Path(fields[1]).name != asset:
-            raise ReleaseError(f"checksum sidecar {sidecar.name} names the wrong asset")
-        checksums[(operating_system, architecture)] = fields[0]
+        checksums[(operating_system, architecture)] = load_sha256_sidecar(directory, asset)
     return checksums
 
 
-def render_homebrew_formula(version: str, checksums: dict[tuple[str, str], str]) -> str:
+def render_homebrew_formula(version: str, checksums: dict[tuple[str, str], str], web_checksum: str) -> str:
     if not SEMVER_RE.fullmatch(version):
         raise ReleaseError(f"invalid Homebrew formula version: {version}")
     if set(checksums) != set(HOMEBREW_ASSETS):
         raise ReleaseError("Homebrew formula requires checksums for all supported platforms")
     if any(not SHA256_RE.fullmatch(value) for value in checksums.values()):
         raise ReleaseError("Homebrew formula contains an invalid SHA-256")
+    if not SHA256_RE.fullmatch(web_checksum):
+        raise ReleaseError("Homebrew formula contains an invalid web UI SHA-256")
     return f'''# typed: strict
 # frozen_string_literal: true
 
@@ -1088,30 +1094,42 @@ class So < Formula
     end
   end
 
+  resource "web" do
+    url "https://github.com/ishanjainn/superopen/releases/download/cli-#{{version}}/so-web.tar.gz"
+    sha256 "{web_checksum}"
+  end
+
   depends_on "node"
 
   def install
     if build.head?
       system "go", "build", "-o", bin/"so", "./cmd/so"
-      web_src = buildpath/"web"
+      cd "web" do
+        system "npm", "install", "--ignore-scripts"
+        system "npm", "run", "build"
+      end
+      standalone = buildpath/"web/.next/standalone"
+      odie "web UI standalone build missing" unless (standalone/"server.js").exist?
+      static_dir = buildpath/"web/.next/static"
+      if static_dir.exist?
+        (standalone/".next/static").mkpath
+        static_dir.children.each {{ |child| cp_r child, standalone/".next/static"/child.basename }}
+      end
+      public_dir = buildpath/"web/public"
+      if public_dir.exist?
+        (standalone/"public").mkpath
+        public_dir.children.each {{ |child| cp_r child, standalone/"public"/child.basename }}
+      end
+      dst = share/"superopen/web"
+      dst.mkpath
+      standalone.children.each {{ |child| cp_r child, dst/child.basename }}
     else
       bin.install Dir["so*"].first => "so"
-      system "curl", "-fsSL", "-o", "src.tar.gz",
-             "https://github.com/ishanjainn/superopen/archive/refs/tags/cli-#{{version}}.tar.gz"
-      system "tar", "-xzf", "src.tar.gz"
-      web_src = Dir["*/web"].first
-      odie "web UI missing from GitHub source archive" if web_src.nil?
-      web_src = Pathname.new(web_src)
-    end
-    dst = share/"superopen/web"
-    dst.mkpath
-    web_src.children.each do |child|
-      next if %w[node_modules .next].include?(child.basename.to_s)
-      cp_r child, dst/child.basename
-    end
-    cd dst do
-      system "npm", "install", "--ignore-scripts"
-      system "npm", "run", "build"
+      resource("web").stage do
+        dst = share/"superopen/web"
+        dst.mkpath
+        Pathname(".").children.each {{ |child| cp_r child, dst/child.basename }}
+      end
     end
   end
 
@@ -1119,6 +1137,7 @@ class So < Formula
     <<~EOS
       Run `so install` once to wire coding-agent hooks and MCP.
       Then in any repo: `so init` and `so dev`.
+      `so dev` needs Node.js (already installed as a dependency).
     EOS
   end
 
@@ -1130,10 +1149,12 @@ end
 
 
 def homebrew_formula(args: argparse.Namespace) -> None:
-    checksums = load_homebrew_checksums(Path(args.checksums_dir))
+    checksums_dir = Path(args.checksums_dir)
+    checksums = load_homebrew_checksums(checksums_dir)
+    web_checksum = load_sha256_sidecar(checksums_dir, "so-web.tar.gz")
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(render_homebrew_formula(args.version, checksums), encoding="utf-8")
+    output.write_text(render_homebrew_formula(args.version, checksums, web_checksum), encoding="utf-8")
 
 
 def bump(args: argparse.Namespace) -> None:

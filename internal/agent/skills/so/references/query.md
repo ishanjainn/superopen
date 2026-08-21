@@ -49,7 +49,7 @@ __SO_BIN__ graph cypher "MATCH (f:Function)-[:USAGE]->(v:EnvVar) RETURN v.name, 
 
 ## Quality analysis
 
-These are the claims that need `so-auditor` and a bounded scope, because the graph records
+These are the claims that need a bounded scope, because the graph records
 what it indexed, not what exists.
 
 ```bash

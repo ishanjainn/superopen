@@ -33,10 +33,10 @@ func Capabilities() api.CapabilitySet {
 	summary := readinessSummary(gates)
 	return api.CapabilitySet{
 		AssetRevision: AssetRevision,
-		Complete:       summary.Verified == summary.Total,
-		Languages:      append([]string(nil), Languages...),
-		Readiness:         summary,
-		Gates:          gates,
+		Complete:      summary.Verified == summary.Total,
+		Languages:     append([]string(nil), Languages...),
+		Readiness:     summary,
+		Gates:         gates,
 		Capabilities: []api.Capability{
 			{Name: "provider_neutral_protocol", State: "in_progress", Notes: "schema and Cypher dispatch implemented; full operation differential pending"},
 			{Name: "sqlite_store", State: "in_progress", Notes: "storage snapshot differential now includes properties, locations, vectors, coverage, and file metadata"},

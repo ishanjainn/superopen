@@ -69,7 +69,7 @@ func findWebDir(_ string) string {
 		)
 	}
 	for _, candidate := range candidates {
-		if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
+		if isStandaloneWeb(candidate) || webFileExists(candidate, "package.json") {
 			return candidate
 		}
 	}
@@ -81,6 +81,19 @@ func expectedWebDir() string {
 		return filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "share", "superopen", "web"))
 	}
 	return "~/.superopen/share/superopen/web"
+}
+
+func webFileExists(dir, name string) bool {
+	_, err := os.Stat(filepath.Join(dir, name))
+	return err == nil
+}
+
+func isStandaloneWeb(webDir string) bool {
+	return webFileExists(webDir, "server.js")
+}
+
+func hasWebSources(webDir string) bool {
+	return webFileExists(webDir, "next.config.mjs") || webFileExists(webDir, "next.config.ts") || webFileExists(webDir, "next.config.js")
 }
 
 func npmCommand(args ...string) *exec.Cmd {
@@ -134,31 +147,64 @@ func buildNextUI(webDir, repoRoot string) error {
 	return command.Run()
 }
 
-// startNextUI serves the prebuilt UI so pages are compiled and prerendered up
-// front. hot swaps in next dev (on-demand compile, HMR) for UI development.
+func uiServeCommand(webDir, repoRoot, binary string, port int, hot bool) (*exec.Cmd, error) {
+	if hot {
+		if !hasWebSources(webDir) {
+			return nil, fmt.Errorf("so dev --hot needs UI sources; set SUPEROPEN_WEB_DIR to a Superopen checkout's web/ directory")
+		}
+		if !webFileExists(webDir, "node_modules") {
+			return nil, fmt.Errorf("web dependencies missing; run npm install --ignore-scripts in %s", webDir)
+		}
+		command := npmCommand("run", "dev", "--", "-p", strconv.Itoa(port), "-H", "127.0.0.1")
+		command.Dir = webDir
+		command.Env = append(os.Environ(), "SUPEROPEN_ROOT="+repoRoot, "SUPEROPEN_SO_BIN="+binary, "NODE_ENV=development")
+		return command, nil
+	}
+	if isStandaloneWeb(webDir) {
+		command := exec.Command("node", "server.js")
+		command.Dir = webDir
+		command.Env = append(os.Environ(),
+			"SUPEROPEN_ROOT="+repoRoot,
+			"SUPEROPEN_SO_BIN="+binary,
+			"NODE_ENV=production",
+			"PORT="+strconv.Itoa(port),
+			"HOSTNAME=127.0.0.1",
+		)
+		return command, nil
+	}
+	if !webFileExists(webDir, "node_modules") {
+		return nil, fmt.Errorf("web dependencies missing; run npm install --ignore-scripts in %s", webDir)
+	}
+	command := npmCommand("run", "start", "--", "-p", strconv.Itoa(port), "-H", "127.0.0.1")
+	command.Dir = webDir
+	command.Env = append(os.Environ(), "SUPEROPEN_ROOT="+repoRoot, "SUPEROPEN_SO_BIN="+binary, "NODE_ENV=production")
+	return command, nil
+}
+
+// startNextUI serves the installed UI. Curl/brew prefixes contain a Next
+// standalone bundle (`node server.js`). A source checkout can still use
+// `next start` or `so dev --hot` (next dev).
 func startNextUI(repoRoot string, port int, hot bool) (*exec.Cmd, string, error) {
 	webDir := findWebDir(repoRoot)
 	if webDir == "" {
 		return nil, "", fmt.Errorf("web UI missing from the Superopen prefix (%s); re-run the installer", expectedWebDir())
 	}
-	if _, err := os.Stat(filepath.Join(webDir, "node_modules")); err != nil {
-		return nil, "", fmt.Errorf("web dependencies missing; run npm install --ignore-scripts in %s", webDir)
-	}
-
-	script, mode := "start", "production"
-	if hot {
-		script, mode = "dev", "development"
-	} else if buildStale(webDir) {
+	if !hot && !isStandaloneWeb(webDir) && buildStale(webDir) {
 		fmt.Println("Building the UI once (first run after a change)…")
 		if err := buildNextUI(webDir, repoRoot); err != nil {
 			return nil, "", fmt.Errorf("build UI: %w", err)
 		}
 	}
-
-	command := npmCommand("run", script, "--", "-p", strconv.Itoa(port), "-H", "127.0.0.1")
-	command.Dir = webDir
+	if isStandaloneWeb(webDir) && !hot {
+		if _, err := exec.LookPath("node"); err != nil {
+			return nil, "", fmt.Errorf("node is required to run the Superopen UI; install Node.js then retry")
+		}
+	}
 	binary, _ := os.Executable()
-	command.Env = append(os.Environ(), "SUPEROPEN_ROOT="+repoRoot, "SUPEROPEN_SO_BIN="+binary, "NODE_ENV="+mode)
+	command, err := uiServeCommand(webDir, repoRoot, binary, port, hot)
+	if err != nil {
+		return nil, "", err
+	}
 	command.Stdout, command.Stderr = os.Stdout, os.Stderr
 	if err := command.Start(); err != nil {
 		return nil, "", err

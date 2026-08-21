@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
+	"github.com/ishanjainn/superopen/internal/paths"
 )
 
 type Server struct {
@@ -49,6 +50,9 @@ func (s Server) dispatch(ctx context.Context, req api.Request) (any, *api.Error)
 		var params api.BuildRequest
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, invalidParams(err)
+		}
+		if !paths.Managed(params.RepoRoot) {
+			return nil, &api.Error{Code: "not_managed", Message: paths.UnmanagedMessage}
 		}
 		result, err := IndexAllDevelopment(ctx, params, s.EngineVersion, s.Assets)
 		if err != nil {
@@ -129,6 +133,7 @@ func (s Server) dispatch(ctx context.Context, req api.Request) (any, *api.Error)
 		if err != nil {
 			return nil, storeError("query", err)
 		}
+		RecordQueryStamp(params.RepoRoot)
 		return result, nil
 	case api.OpCypher:
 		var params api.CypherRequest

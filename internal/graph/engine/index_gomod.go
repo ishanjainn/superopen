@@ -12,13 +12,17 @@ import (
 // indexGoModDependencies reproduces the pinned engine's observable go.mod
 // package surface. Package identity is repository-global while every go.mod
 // file retains its own DEPENDS_ON relationship.
-func indexGoModDependencies(project string, files []ParsedSyntaxFile, graph *goGraph) {
+func indexGoModDependencies(project, root string, files []ParsedSyntaxFile, graph *goGraph) {
 	for _, parsed := range files {
 		rel := filepath.ToSlash(parsed.File.Path)
-		if filepath.Base(rel) != "go.mod" || len(parsed.Body) == 0 {
+		if filepath.Base(rel) != "go.mod" {
 			continue
 		}
-		for _, dependency := range goModRequirements(parsed.Body) {
+		body := parsedSource(root, parsed)
+		if len(body) == 0 {
+			continue
+		}
+		for _, dependency := range goModRequirements(body) {
 			variableQN := syntaxModuleQN(rel) + "." + dependency
 			graph.nodes = append(graph.nodes, api.Node{Project: project, Label: "Variable", Name: dependency,
 				QualifiedName: variableQN, Location: api.Location{File: rel, StartLine: 1},

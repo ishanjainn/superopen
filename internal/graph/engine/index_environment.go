@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
 )
@@ -27,7 +28,7 @@ type environmentAccess struct {
 	owner  string
 }
 
-func indexEnvironmentAccesses(project string, files []ParsedSyntaxFile, graph *goGraph) {
+func indexEnvironmentAccesses(project, root string, files []ParsedSyntaxFile, graph *goGraph) {
 	byFileName := map[string][]api.Node{}
 	modules := map[string]string{}
 	for _, node := range graph.nodes {
@@ -46,10 +47,17 @@ func indexEnvironmentAccesses(project string, files []ParsedSyntaxFile, graph *g
 		sort.Slice(byFileName[key], func(i, j int) bool { return byFileName[key][i].QualifiedName < byFileName[key][j].QualifiedName })
 	}
 	for _, parsed := range files {
-		if len(parsed.Body) == 0 {
-			continue
+		var accesses []environmentAccess
+		if parsed.File.Language == "go" {
+			accesses = environmentAccessesFromCalls(parsed)
+		} else {
+			body := parsedSource(root, parsed)
+			if len(body) == 0 {
+				continue
+			}
+			accesses = findEnvironmentAccesses(parsed.File.Language, body)
 		}
-		for _, access := range findEnvironmentAccesses(parsed.File.Language, parsed.Body) {
+		for _, access := range accesses {
 			target := "__env__" + access.name
 			graph.nodes = append(graph.nodes, api.Node{Project: project, Label: "EnvVar", Name: access.name,
 				QualifiedName: target, Properties: api.Properties{"env_key": access.name}})
@@ -77,7 +85,36 @@ func indexEnvironmentAccesses(project string, files []ParsedSyntaxFile, graph *g
 				evidence:   &api.Evidence{Strategy: "env_access", Confidence: 1}})
 		}
 	}
-	sortGraph(graph)
+}
+
+func environmentAccessesFromCalls(parsed ParsedSyntaxFile) []environmentAccess {
+	result := make([]environmentAccess, 0)
+	for _, fact := range parsed.Extraction.Calls {
+		base := syntaxCallBase(fact.Name)
+		if base != "Getenv" && base != "LookupEnv" {
+			continue
+		}
+		if fact.Name != "Getenv" && fact.Name != "LookupEnv" &&
+			!strings.HasSuffix(fact.Name, ".Getenv") && !strings.HasSuffix(fact.Name, ".LookupEnv") {
+			continue
+		}
+		name := fact.FirstStringArg
+		if name == "" {
+			continue
+		}
+		owner := fact.Scope
+		if index := strings.LastIndexByte(owner, '.'); index >= 0 {
+			owner = owner[index+1:]
+		}
+		result = append(result, environmentAccess{name: name, offset: fact.StartByte, owner: owner})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].offset != result[j].offset {
+			return result[i].offset < result[j].offset
+		}
+		return result[i].name < result[j].name
+	})
+	return result
 }
 
 func findEnvironmentAccesses(language string, body []byte) []environmentAccess {

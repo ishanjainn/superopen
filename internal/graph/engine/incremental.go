@@ -2,9 +2,7 @@ package engine
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -38,27 +36,29 @@ func PlanIncremental(ctx context.Context, repoRoot, project string, excludes []s
 	}
 	prior := incrementalSnapshot{files: map[string]string{}}
 	store, err := OpenReadOnly(paths.Database)
-	if err == nil {
-		defer store.Close()
-		rows, queryErr := store.db.QueryContext(ctx, `SELECT rel_path,sha256 FROM file_hashes WHERE project=? ORDER BY rel_path`, project)
-		if queryErr != nil {
-			return api.ChangeSet{}, queryErr
-		}
-		for rows.Next() {
-			var path, digest string
-			if err := rows.Scan(&path, &digest); err != nil {
-				rows.Close()
-				return api.ChangeSet{}, err
-			}
-			prior.files[path] = digest
-		}
-		if err := rows.Close(); err != nil {
+	if os.IsNotExist(err) {
+		return api.ChangeSet{RequiresFull: true, Reason: "no compatible prior generation", SourceRevision: gitRevision(ctx, root)}, nil
+	}
+	if err != nil {
+		return api.ChangeSet{}, err
+	}
+	defer store.Close()
+	rows, queryErr := store.db.QueryContext(ctx, `SELECT rel_path,sha256 FROM file_hashes WHERE project=? ORDER BY rel_path`, project)
+	if queryErr != nil {
+		return api.ChangeSet{}, queryErr
+	}
+	for rows.Next() {
+		var path, digest string
+		if err := rows.Scan(&path, &digest); err != nil {
+			rows.Close()
 			return api.ChangeSet{}, err
 		}
-		if err := store.db.QueryRowContext(ctx, `SELECT source_revision FROM projects WHERE name=?`, project).Scan(&prior.revision); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return api.ChangeSet{}, err
-		}
-	} else if !os.IsNotExist(err) {
+		prior.files[path] = digest
+	}
+	if err := rows.Close(); err != nil {
+		return api.ChangeSet{}, err
+	}
+	if err := store.db.QueryRowContext(ctx, `SELECT source_revision FROM projects WHERE name=?`, project).Scan(&prior.revision); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return api.ChangeSet{}, err
 	}
 	files, err := discoverTrackedFiles(ctx, root, excludes)
@@ -74,8 +74,8 @@ func PlanIncremental(ctx context.Context, repoRoot, project string, excludes []s
 		if err != nil {
 			return api.ChangeSet{}, err
 		}
-		digest := sha256.Sum256(body)
-		current[filepath.ToSlash(rel)] = hex.EncodeToString(digest[:])
+		digest := fileContentDigest(body)
+		current[filepath.ToSlash(rel)] = digest
 	}
 	return planIncrementalChanges(prior, current, gitRevision(ctx, root)), nil
 }

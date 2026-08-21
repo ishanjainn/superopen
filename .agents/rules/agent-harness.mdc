@@ -1,0 +1,9 @@
+---
+description: Agent hooks, steer text, and installed /so skill
+globs: internal/agent/**/*
+alwaysApply: false
+---
+
+Read @internal/agent/AGENTS.md — contributor docs vs installed user skill.
+
+Do not re-enable ExploreAugment on Grep/Read without explicit product approval.

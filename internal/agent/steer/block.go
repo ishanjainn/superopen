@@ -1,5 +1,5 @@
 // Package steer installs user-level graph-first durable context and
-// produces compact hook/MCP reminders for coding agents.
+// produces compact hook reminders for coding agents.
 package steer
 
 import (
@@ -17,35 +17,50 @@ const (
 // Block is the durable graph-first instruction merged into user-level agent files.
 func Block() string {
 	return strings.TrimSpace(`
-## Superopen code graph (automatic)
+If this workspace has no `+"`.so/`"+` directory (`+"`test -d .so`"+` is false), ignore Superopen entirely: do not run `+"`so`"+`, do not load `+"`/so`"+`, and do not run `+"`so init`"+` unless the user explicitly asks.
 
-For structural codebase questions (architecture, callers/callees, where X is defined,
-dependencies, impact, "how does Y work"), use the Superopen graph **before** broad
-Read/Grep/Glob of source:
+When `+"`.so/`"+` exists:
 
-1. Run `+"`so --json graph query|search|snippet|trace|architecture`"+` (binary from the /so skill). JSON is the agent contract. One query, then stop if NODE/EDGE/snippet answers it.
-2. Use MCP `+"`graph_query` / `graph_search` / `graph_snippet` / `graph_trace` / `graph_architecture`"+` only when those tools are actually listed. Skip MCP when it returns graph_not_indexed — do not loop GetMcpTools or mcp_auth.
-3. Use `+"`graph trace`"+` only with a qualified name when callers/callees are still needed. Read files only when graph/snippet context is insufficient.
+## Superopen code graph
 
-For multi-step graph work, delegate to the `+"`so-verify`"+` subagent (or `+"`so-scout`"+` for a quick
-lookup) so the exploration turns stay out of this conversation.
+This project has a code graph at `+"`.so/`"+` (query with `+"`so graph query`"+`).
 
-If this repository has no `+"`.so/`"+`, run `+"`so init`"+` once at the repository root.
-Graph builds are local (no LLM). Live refresh runs on session boundaries and while `+"`so dev`"+` / MCP is up (~60s poll).
+Rules:
+- For codebase questions, first run `+"`so graph query \"<question>\"`"+` when `+"`.so/db/so.db`"+` exists. Use `+"`so graph snippet \"<qn>\"`"+` for a known symbol and `+"`so graph trace \"<qn>\"`"+` for callers. These return a scoped subgraph, usually much smaller than raw grep output.
+- Do not spawn Explore/Agent for codebase questions; run `+"`so graph query`"+` in this session. If you do spawn a subagent, it must run `+"`so graph query`"+` first.
+- Only Grep/Read source after the graph has oriented you, or to modify/debug specific lines.
 
-## Superopen memory (prior work)
-
-For what you decided, tried, or taught in this repo, use Superopen memory **before** re-reading session transcripts:
-
-1. Run `+"`so --json memory search|get|capture`"+`. Fetch bodies by the `+"`id`"+` field; do not dump `+"`events.jsonl`"+`.
-2. Use MCP `+"`memory_search` / `memory_get`"+` only when listed. Distill at most once (`+"`memory_capture`"+`) when SessionStart asks. Skip if unrelated.
-3. Memory is hints, not authority. Graph answers “where is X”; memory answers “what did we decide.”
+Graph builds are local (no LLM). Live refresh runs on session boundaries and while `+"`so dev`"+` is up (~60s poll).
 `) + "\n"
 }
 
 // HookReminder is a short additionalContext string for session/start hooks.
 func HookReminder() string {
-	return "Superopen: CLI first with JSON (`so --json graph …`, `so --json memory search|get`; fetch the `id` field). Use MCP only if graph_query/memory_search are listed — skip graph_not_indexed, no GetMcpTools loops. `so init` only if `test -d .so` is false."
+	return "Superopen: this repo is indexed. Run `so graph query \"<question>\"` before Grep/Read."
+}
+
+// SearchNudge is injected on PreToolUse for Bash/Grep.
+func SearchNudge() string {
+	return "MANDATORY: .so/ exists. You MUST run `so graph query \"<question>\"` before grepping raw files. Only grep after Superopen has oriented you, or to modify/debug specific lines."
+}
+
+// ReadNudge is injected on PreToolUse for Read/Glob.
+func ReadNudge() string {
+	return "MANDATORY: .so/ exists. You MUST run `so graph query \"<question>\"` before reading source files. Use: `so graph query \"<question>\"` (scoped subgraph), `so graph snippet \"<qn>\"` for a known symbol, or `so graph trace \"<qn>\"` for a relationship. Only read raw files after Superopen has oriented you, or to modify/debug specific lines. This rule applies to subagents too — include it in every subagent prompt involving code exploration."
+}
+
+// ReadDenyReason is the permissionDecisionReason for strict-mode first Read deny.
+func ReadDenyReason() string {
+	return "Superopen strict mode: this project has an indexed code graph. Run `so graph query \"<your question>\"` FIRST to orient yourself, then re-issue this Read — it will be allowed. This block fires at most once per session; reading raw files to modify or debug specific lines is fine after one query."
+}
+
+// CursorRule is the short alwaysApply gate installed into ~/.cursor/rules.
+func CursorRule() string {
+	return strings.TrimSpace(`
+If this workspace has no `+"`.so/`"+` directory, ignore Superopen entirely: do not run `+"`so`"+`, do not load the `+"`/so`"+` skill, and do not run `+"`so init`"+` unless the user explicitly asks.
+
+If `+"`.so/`"+` exists, query the graph first (`+"`so graph query`"+`) before Grep/Read. This applies to you and to every subagent you spawn. Do not skip the graph by spawning Explore.
+`) + "\n"
 }
 
 // GraphHit is one indexed symbol rendered into an explore-tool augment.
@@ -68,11 +83,11 @@ func ExploreAugment(term string, total int, hits []GraphHit) string {
 		total = len(hits)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Superopen graph: %d indexed match(es) for %q — prefer graph_search/graph_snippet/graph_trace over filesystem search here.\n", total, term)
+	fmt.Fprintf(&b, "Superopen graph: %d hit(s) for %q — prefer `so graph search` / `so graph snippet` / `so graph trace` over filesystem search here.\n", len(hits), term)
 	for _, hit := range hits {
 		fmt.Fprintf(&b, "  %s %s %s %s\n", hit.QualifiedName, hit.Label, hit.File, hit.Lines)
 	}
-	b.WriteString("Call graph_snippet with a qualified name above to read a body without grepping.")
+	b.WriteString("Run `so graph snippet` with a qualified name above to read a body without grepping.")
 	return b.String()
 }
 

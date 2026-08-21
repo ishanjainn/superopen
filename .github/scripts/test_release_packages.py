@@ -437,11 +437,19 @@ class ReleaseTests(unittest.TestCase):
                 expected[(operating_system, architecture)] = checksum
 
             checksums = release.load_homebrew_checksums(checksum_dir)
+            web_checksum = "e" * 64
+            (checksum_dir / "so-web.tar.gz.sha256").write_text(
+                f"{web_checksum}  so-web.tar.gz\n", encoding="utf-8"
+            )
             self.assertEqual(checksums, expected)
-            formula = release.render_homebrew_formula("0.3.0", checksums)
+            formula = release.render_homebrew_formula("0.3.0", checksums, web_checksum)
             self.assertIn('version "0.3.0"', formula)
             self.assertIn("depends_on \"node\"", formula)
             self.assertIn('share/"superopen/web"', formula)
+            self.assertIn("so-web.tar.gz", formula)
+            self.assertIn('resource "web"', formula)
+            self.assertIn(f'sha256 "{web_checksum}"', formula)
+            self.assertNotIn("npm run build", formula.split("if build.head?")[0])
             for (operating_system, architecture), checksum in expected.items():
                 self.assertIn(f"so-{operating_system}-{architecture}.tar.gz", formula)
                 self.assertIn(f'sha256 "{checksum}"', formula)
@@ -462,6 +470,30 @@ class ReleaseTests(unittest.TestCase):
             first.write_text(f"{'a' * 64}  wrong.tar.gz\n", encoding="utf-8")
             with self.assertRaisesRegex(release.ReleaseError, "wrong asset"):
                 release.load_homebrew_checksums(checksum_dir)
+
+    def test_homebrew_formula_requires_web_checksum_sidecar(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checksum_dir = Path(directory)
+            for operating_system, architecture in release.HOMEBREW_ASSETS:
+                asset = f"so-{operating_system}-{architecture}.tar.gz"
+                (checksum_dir / f"{asset}.sha256").write_text(
+                    f"{'a' * 64}  {asset}\n", encoding="utf-8"
+                )
+            output = Path(directory) / "so.rb"
+            with self.assertRaisesRegex(release.ReleaseError, "so-web.tar.gz.sha256"):
+                release.homebrew_formula(
+                    Namespace(
+                        version="0.3.0",
+                        checksums_dir=str(checksum_dir),
+                        output=str(output),
+                    )
+                )
+            with self.assertRaisesRegex(release.ReleaseError, "invalid web UI SHA-256"):
+                release.render_homebrew_formula(
+                    "0.3.0",
+                    release.load_homebrew_checksums(checksum_dir),
+                    "not-a-sha",
+                )
 
     def test_bump_rejects_changes_outside_configured_version_files(self):
         with tempfile.TemporaryDirectory() as directory:

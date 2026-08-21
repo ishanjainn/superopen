@@ -70,3 +70,35 @@ func TestOpenCodeDoesNotEmitSessionOnNoise(t *testing.T) {
 		t.Fatalf("noise must not emit session spans, got %d", len(em.sessions))
 	}
 }
+
+func TestOpenCodeSessionPromptToolParity(t *testing.T) {
+	em := &rec{}
+	sid := "ses_parity"
+	start, _ := json.Marshal(map[string]any{"session_id": sid, "cwd": "/tmp/repo"})
+	if err := handle(normalize.Input{Vendor: "opencode", Event: "session.created", Payload: start, Emit: em}); err != nil {
+		t.Fatal(err)
+	}
+	prompt, _ := json.Marshal(map[string]any{"session_id": sid, "role": "user", "text": "where is graphGate"})
+	if err := handle(normalize.Input{Vendor: "opencode", Event: "message.updated", Payload: prompt, Emit: em, ContentCapture: "full"}); err != nil {
+		t.Fatal(err)
+	}
+	tool, _ := json.Marshal(map[string]any{
+		"session_id": sid, "tool_name": "bash", "tool_use_id": "t1", "tool_result": "ok",
+	})
+	if err := handle(normalize.Input{Vendor: "opencode", Event: "tool.execute.after", Payload: tool, Emit: em, ContentCapture: "full"}); err != nil {
+		t.Fatal(err)
+	}
+	stop, _ := json.Marshal(map[string]any{"session_id": sid})
+	if err := handle(normalize.Input{Vendor: "opencode", Event: "session.end", Payload: stop, Emit: em}); err != nil {
+		t.Fatal(err)
+	}
+	if len(em.sessions) < 1 {
+		t.Fatalf("want EmitSession, got %d", len(em.sessions))
+	}
+	if len(em.turns) < 1 {
+		t.Fatalf("want EmitLLMTurn for user prompt, got %d", len(em.turns))
+	}
+	if len(em.tools) < 1 {
+		t.Fatalf("want EmitToolCall, got %d", len(em.tools))
+	}
+}

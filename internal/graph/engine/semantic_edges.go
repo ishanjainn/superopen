@@ -8,43 +8,77 @@ import (
 )
 
 func emitSemanticEdges(builder *Builder, graph goGraph, ids map[string]int64, project string) error {
+	defer func() { semanticFeatureCache = nil }()
 	type scored struct {
 		indexA, indexB     int
 		sourceID, targetID int64
 		score              float64
 		sameFile           bool
 	}
-	candidates := make([]scored, 0)
 	nodes := make(map[string]api.Node, len(graph.nodes))
 	for _, node := range graph.nodes {
 		nodes[node.QualifiedName] = node
 	}
-	keys := make([]string, 0, len(ids))
-	for qn := range ids {
-		keys = append(keys, qn)
+	entries := make([]lshEntry, 0, len(ids))
+	for qn, id := range ids {
+		node := nodes[qn]
+		if !semanticNodeLabel(node.Label) || semanticPropertyBool(node.Properties, "external") {
+			continue
+		}
+		fingerprint, ok := semanticFingerprint(qn, node)
+		if !ok {
+			continue
+		}
+		entries = append(entries, lshEntry{
+			NodeID:        id,
+			Fingerprint:   fingerprint,
+			FilePath:      node.Location.File,
+			FileExtension: filepath.Ext(node.Location.File),
+			QualifiedName: qn,
+		})
 	}
-	sort.Strings(keys)
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			left, right := nodes[keys[i]], nodes[keys[j]]
-			if !semanticNodeLabel(left.Label) || !semanticNodeLabel(right.Label) {
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].QualifiedName != entries[j].QualifiedName {
+			return entries[i].QualifiedName < entries[j].QualifiedName
+		}
+		return entries[i].NodeID < entries[j].NodeID
+	})
+	keyIndex := map[string]int{}
+	for i, entry := range entries {
+		keyIndex[entry.QualifiedName] = i
+	}
+	if len(entries) < 2 {
+		return nil
+	}
+	index := newLSHIndex()
+	for _, entry := range entries {
+		index.Insert(entry)
+	}
+	candidates := make([]scored, 0)
+	seen := map[[2]int64]bool{}
+	for _, source := range entries {
+		left := nodes[source.QualifiedName]
+		for _, candidate := range index.Candidates(source.Fingerprint, 256) {
+			if candidate.NodeID == source.NodeID || source.FileExtension != candidate.FileExtension {
 				continue
 			}
-			if semanticPropertyBool(left.Properties, "external") || semanticPropertyBool(right.Properties, "external") {
+			if source.QualifiedName >= candidate.QualifiedName {
 				continue
 			}
-			// Superopen only pairs functions sharing a file extension.
-			if filepath.Ext(left.Location.File) != filepath.Ext(right.Location.File) {
+			pair := [2]int64{source.NodeID, candidate.NodeID}
+			if seen[pair] {
 				continue
 			}
-			score := semanticPairScore(keys[i], keys[j], left, right)
+			seen[pair] = true
+			right := nodes[candidate.QualifiedName]
+			score := semanticPairScore(source.QualifiedName, candidate.QualifiedName, left, right)
 			if score < float64(defaultSemanticScoreConfig.Threshold) {
 				continue
 			}
 			candidates = append(candidates, scored{
-				indexA: i, indexB: j,
-				sourceID: ids[keys[i]], targetID: ids[keys[j]],
-				score: score, sameFile: left.Location.File != "" && left.Location.File == right.Location.File,
+				indexA: keyIndex[source.QualifiedName], indexB: keyIndex[candidate.QualifiedName],
+				sourceID: source.NodeID, targetID: candidate.NodeID,
+				score: score, sameFile: source.FilePath != "" && source.FilePath == candidate.FilePath,
 			})
 		}
 	}
@@ -71,6 +105,21 @@ func emitSemanticEdges(builder *Builder, graph goGraph, ids map[string]int64, pr
 		budget[candidate.indexB]++
 	}
 	return nil
+}
+
+func semanticFingerprint(qn string, node api.Node) (minHashFingerprint, bool) {
+	if features, ok := semanticFeatureCache[qn]; ok && features.HasMinHash {
+		return features.MinHash, true
+	}
+	raw := semanticPropertyString(node.Properties, "fp")
+	if raw == "" {
+		return minHashFingerprint{}, false
+	}
+	fingerprint, err := parseMinHashHex(raw)
+	if err != nil {
+		return minHashFingerprint{}, false
+	}
+	return fingerprint, true
 }
 
 // semanticPairScore uses the corpus-derived feature vectors when the semantic

@@ -1,0 +1,9 @@
+---
+description: so CLI and AXI output helpers
+globs: cmd/so/**,internal/cli/**/*
+alwaysApply: false
+---
+
+Read @cmd/so/AGENTS.md before changing commands, flags, exit codes, or default output shape.
+
+Default graph output is **compact text**; `--json` is opt-in.

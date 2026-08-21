@@ -1,0 +1,10 @@
+---
+description: Superopen source repo — contributor context (not end-user so skill)
+alwaysApply: true
+---
+
+You are editing the **Superopen product repository**. Read @AGENTS.md first.
+
+- Nested docs: `internal/graph/AGENTS.md`, `cmd/so/AGENTS.md`, `internal/memory/AGENTS.md`, `internal/agent/AGENTS.md`, `web/AGENTS.md`, `scripts/AGENTS.md`
+- End-user skill source: `internal/agent/skills/so/SKILL.md` (for `so install` only)
+- Dogfood: `sh scripts/install.sh`, test `so init` in **another** repo

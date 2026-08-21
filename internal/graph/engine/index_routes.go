@@ -28,7 +28,7 @@ func indexHTTPRoutes(project string, files []ParsedSyntaxFile, graph *goGraph) {
 		if edge.kind != "CALLS" {
 			continue
 		}
-		callee, _ := edge.properties["callee"].(string)
+		callee := edge.Callee()
 		if callee != "" {
 			resolvedCalls[edge.source+"\x00"+callee] = edge.target
 		}
@@ -91,7 +91,7 @@ func indexHTTPRoutes(project string, files []ParsedSyntaxFile, graph *goGraph) {
 	if len(suppressResolved) > 0 {
 		filtered := graph.edges[:0]
 		for _, edge := range graph.edges {
-			callee, _ := edge.properties["callee"].(string)
+			callee := edge.Callee()
 			if edge.kind == "CALLS" && suppressResolved[edge.source+"\x00"+callee+"\x00"+edge.target] {
 				continue
 			}
@@ -100,7 +100,6 @@ func indexHTTPRoutes(project string, files []ParsedSyntaxFile, graph *goGraph) {
 		graph.edges = filtered
 	}
 	indexInfraURLRoutes(project, files, graph)
-	sortGraph(graph)
 }
 
 // indexInfraURLRoutes mirrors try_upsert_infra_route for YAML/config URL values.

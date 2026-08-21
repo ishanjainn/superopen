@@ -1,0 +1,9 @@
+---
+description: Tests and agent-graph eval harness
+globs: **/*_test.go,scripts/**/*
+alwaysApply: false
+---
+
+Read @scripts/AGENTS.md for package test commands and eval harness layout.
+
+Do not overwrite existing `scripts/agent-graph-eval/results/*` dirs.

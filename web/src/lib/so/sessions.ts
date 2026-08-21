@@ -140,7 +140,7 @@ function loadOpenCodeTitles(): Map<string, string> {
   if (!fileExists(db)) return new Map();
   let st;
   try {
-    st = statSync(db);
+    st = statSync(/* turbopackIgnore: true */db);
   } catch {
     return new Map();
   }
@@ -156,7 +156,7 @@ function loadOpenCodeTitles(): Map<string, string> {
     // Prefer CLI sqlite3 (no native dep); schema is `session` (fallback `sessions`).
     let raw = "";
     try {
-      raw = execFileSync(
+      raw = execFileSync(/* turbopackIgnore: true */
         "sqlite3",
         ["-json", db, "SELECT id, title FROM session;"],
         {
@@ -165,7 +165,7 @@ function loadOpenCodeTitles(): Map<string, string> {
         },
       );
     } catch {
-      raw = execFileSync(
+      raw = execFileSync(/* turbopackIgnore: true */
         "sqlite3",
         ["-json", db, "SELECT id, title FROM sessions;"],
         {
@@ -202,7 +202,7 @@ function resolveOpenCodeTitle(meta: SessionMeta, sessionPath: string): void {
     if (!onDisk) return;
     if (!isPlaceholderTitle(onDisk.title, onDisk.id || meta.id)) return;
     onDisk.title = got;
-    writeFileSync(path, JSON.stringify(onDisk, null, 2) + "\n");
+    writeFileSync(/* turbopackIgnore: true */path, JSON.stringify(onDisk, null, 2) + "\n");
   } catch {
     /* display-only is enough */
   }
@@ -230,10 +230,10 @@ function discoverCursorParent(childId: string): string {
   const projects = join(homedir(), ".cursor", "projects");
   if (!fileExists(projects)) return "";
   try {
-    for (const proj of readdirSync(projects)) {
+    for (const proj of readdirSync(/* turbopackIgnore: true */projects)) {
       const root = join(projects, proj, "agent-transcripts");
       if (!fileExists(root)) continue;
-      for (const parent of readdirSync(root)) {
+      for (const parent of readdirSync(/* turbopackIgnore: true */root)) {
         if (!UUID_RE.test(parent) || parent === childId) continue;
         const candidate = join(root, parent, "subagents", `${childId}.jsonl`);
         if (fileExists(candidate)) return parent;
@@ -253,7 +253,7 @@ function clearAgentLink(sessionsDir: string, childId: string) {
   if (!existing?.links?.[childId]) return;
   delete existing.links[childId];
   try {
-    writeFileSync(path, JSON.stringify(existing, null, 2), { mode: 0o600 });
+    writeFileSync(/* turbopackIgnore: true */path, JSON.stringify(existing, null, 2), { mode: 0o600 });
   } catch {
     /* best-effort */
   }
@@ -270,7 +270,7 @@ function clearFalseNesting(
   meta.parent_id = undefined;
   meta.is_subagent = false;
   try {
-    writeFileSync(
+    writeFileSync(/* turbopackIgnore: true */
       join(sessionPath, "session.json"),
       JSON.stringify(meta, null, 2),
     );
@@ -317,7 +317,7 @@ function persistAgentLink(
   if (doc.links[childId]?.parent_id === parentId) return;
   doc.links[childId] = { parent_id: parentId, source: "ui-repair" };
   try {
-    writeFileSync(path, JSON.stringify(doc, null, 2), { mode: 0o600 });
+    writeFileSync(/* turbopackIgnore: true */path, JSON.stringify(doc, null, 2), { mode: 0o600 });
   } catch {
     /* best-effort */
   }
@@ -332,7 +332,7 @@ function repairSubagentMeta(
   meta.parent_id = parentId;
   meta.is_subagent = true;
   try {
-    writeFileSync(
+    writeFileSync(/* turbopackIgnore: true */
       join(sessionPath, "session.json"),
       JSON.stringify(meta, null, 2),
     );
@@ -345,7 +345,7 @@ function repairOrphanSubagentFlag(sessionPath: string, meta: SessionMeta) {
   if (!meta.is_subagent || meta.parent_id) return;
   meta.is_subagent = false;
   try {
-    writeFileSync(
+    writeFileSync(/* turbopackIgnore: true */
       join(sessionPath, "session.json"),
       JSON.stringify(meta, null, 2),
     );
@@ -528,10 +528,10 @@ function codexRolloutUpdatedAt(sessionId: string): number {
     );
     if (!fileExists(dir)) continue;
     try {
-      const name = readdirSync(dir).find(
+      const name = readdirSync(/* turbopackIgnore: true */dir).find(
         (entry) => entry.includes(sessionId) && entry.endsWith(".jsonl"),
       );
-      if (name) return statSync(join(dir, name)).mtimeMs;
+      if (name) return statSync(/* turbopackIgnore: true */join(dir, name)).mtimeMs;
     } catch {
       // Best-effort diagnostic only.
     }
@@ -574,7 +574,7 @@ function loadUserMap(soDir: string): Map<string, string> {
   const out = new Map<string, string>();
   const sessionsDir = join(soDir, "sessions");
   if (!fileExists(sessionsDir)) return out;
-  for (const name of readdirSync(sessionsDir)) {
+  for (const name of readdirSync(/* turbopackIgnore: true */sessionsDir)) {
     const meta = readJSON<SessionMeta>(join(sessionsDir, name, "session.json"));
     if (meta?.id && meta.user) out.set(meta.id, String(meta.user));
   }
@@ -738,12 +738,12 @@ function listSessionsInSo(soDir: string, projectId: string): ListItem[] {
   const links = loadAgentLinks(dir);
   const users = loadUserMap(soDir);
   const items: ListItem[] = [];
-  for (const name of readdirSync(dir)) {
+  for (const name of readdirSync(/* turbopackIgnore: true */dir)) {
     if (name === "index.json" || name.startsWith(".") || name.endsWith(".json"))
       continue;
     const sessionPath = join(dir, name);
     try {
-      if (!statSync(sessionPath).isDirectory()) continue;
+      if (!statSync(/* turbopackIgnore: true */sessionPath).isDirectory()) continue;
     } catch {
       continue;
     }
@@ -946,7 +946,7 @@ export function getSessionDetail(id: string, projectFilter = "") {
       meta.status = "active";
       meta.ended_at = undefined;
       try {
-        writeFileSync(
+        writeFileSync(/* turbopackIgnore: true */
           join(sessionPath, "session.json"),
           JSON.stringify({ ...sessionDoc, ...meta }, null, 2),
         );
@@ -958,7 +958,7 @@ export function getSessionDetail(id: string, projectFilter = "") {
     const sessionsDir = join(so, "sessions");
     const links = loadAgentLinks(sessionsDir);
     if (fileExists(sessionsDir)) {
-      for (const name of readdirSync(sessionsDir)) {
+      for (const name of readdirSync(/* turbopackIgnore: true */sessionsDir)) {
         if (name === "index.json" || name.startsWith(".") || name === id)
           continue;
         const childMeta = readJSON<SessionMeta>(

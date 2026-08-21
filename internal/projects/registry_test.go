@@ -195,3 +195,43 @@ func TestRemovePurgeAndPruneMissing(t *testing.T) {
 		t.Fatalf("want empty registry, got %d", len(list))
 	}
 }
+
+func TestResolveDevRoot(t *testing.T) {
+	dir := t.TempDir()
+	projects.SetPathForTest(filepath.Join(dir, "projects.json"))
+	t.Cleanup(func() { projects.SetPathForTest("") })
+
+	unmanaged := filepath.Join(dir, "plain")
+	if err := os.MkdirAll(unmanaged, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projects.ResolveDevRoot(unmanaged, unmanaged); err == nil {
+		t.Fatal("explicit unmanaged root must fail")
+	}
+
+	managed := filepath.Join(dir, "managed")
+	if err := os.MkdirAll(filepath.Join(managed, ".so"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(managed, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projects.Register(managed, filepath.Join(managed, ".so"), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := projects.ResolveDevRoot("", unmanaged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != managed {
+		t.Fatalf("cwd unmanaged should fall back to registered project, got %s", got)
+	}
+	got, err = projects.ResolveDevRoot("", managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != managed {
+		t.Fatalf("cwd managed: %s", got)
+	}
+}
