@@ -121,16 +121,17 @@ jobs:
     name: Build web UI
     runs-on: ubuntu-latest
     steps:
+      # Default checkout is the calling workflow's github.sha (main at dispatch).
+      # Do not use inputs.release_sha here: that is a workflow_dispatch-derived
+      # ref, and npm / pack-web.sh after that checkout is the CodeQL
+      # cache-poisoning/poisonable-step pattern. The version bump only rewrites
+      # VERSION and internal/version/version.go, so the UI tree matches the tag.
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
-          ref: ${{ inputs.release_sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version: "20"
-          # No npm cache: this job checkouts inputs.release_sha in a privileged
-          # release workflow. Writing the Actions cache from that tree is the
-          # cache-poisoning pattern CodeQL flags.
       - name: Install and build
         working-directory: web
         run: |
