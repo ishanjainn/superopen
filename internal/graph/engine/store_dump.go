@@ -115,7 +115,7 @@ func execInsertBatch(tx *sql.Tx, prefix string, width int, rows [][]any) error {
 		return nil
 	}
 	var sql strings.Builder
-	args := make([]any, 0, len(rows)*width)
+	args := make([]any, 0, len(rows))
 	sql.WriteString(prefix)
 	for i, row := range rows {
 		if i > 0 {

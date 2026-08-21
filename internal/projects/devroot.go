@@ -2,6 +2,8 @@ package projects
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/paths"
@@ -20,7 +22,7 @@ func ResolveDevRoot(explicit, cwd string) (string, error) {
 	}
 	if cwd != "" {
 		found, err := paths.FindRoot(cwd)
-		if err == nil && paths.Managed(found) {
+		if err == nil && paths.Managed(found) && !sharedTempRoot(found) {
 			return found, nil
 		}
 		if paths.Managed(cwd) {
@@ -40,4 +42,28 @@ func ResolveDevRoot(explicit, cwd string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no Superopen-managed repos; run so init in a repository")
+}
+
+// sharedTempRoot reports whether path is the process temp directory itself
+// (for example /tmp). FindRoot walks through that directory, and a leftover
+// /tmp/.so on a CI runner must not become the so dev project.
+func sharedTempRoot(path string) bool {
+	clean := filepath.Clean(path)
+	temps := []string{filepath.Clean(os.TempDir())}
+	if resolved, err := filepath.EvalSymlinks(os.TempDir()); err == nil {
+		temps = append(temps, filepath.Clean(resolved))
+	}
+	resolvedPath := clean
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		resolvedPath = filepath.Clean(resolved)
+	}
+	for _, tmp := range temps {
+		if tmp == "" {
+			continue
+		}
+		if clean == tmp || resolvedPath == tmp {
+			return true
+		}
+	}
+	return false
 }

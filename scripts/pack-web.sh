@@ -54,6 +54,10 @@ if [ -d "$FROM/.next/static" ]; then
 	mkdir -p "$standalone/.next/static"
 	cp -R "$FROM/.next/static/." "$standalone/.next/static/"
 fi
+if [ -f "$FROM/.next/BUILD_ID" ]; then
+	mkdir -p "$standalone/.next"
+	cp "$FROM/.next/BUILD_ID" "$standalone/.next/BUILD_ID"
+fi
 if [ -d "$FROM/public" ]; then
 	mkdir -p "$standalone/public"
 	cp -R "$FROM/public/." "$standalone/public/"

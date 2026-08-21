@@ -205,6 +205,11 @@ func TestResolveDevRoot(t *testing.T) {
 	if err := os.MkdirAll(unmanaged, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Stop FindRoot at this workspace so a leftover /tmp/.git or /tmp/.so on
+	// CI runners cannot steal the fallback.
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := projects.ResolveDevRoot(unmanaged, unmanaged); err == nil {
 		t.Fatal("explicit unmanaged root must fail")
 	}

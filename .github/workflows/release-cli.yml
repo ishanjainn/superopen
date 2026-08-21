@@ -30,7 +30,7 @@ jobs:
         include:
           - { os: linux, arch: amd64, ext: "", runner: ubuntu-latest, cgo: "1", tags: "tsnative,sqlite_fts5" }
           - { os: linux, arch: arm64, ext: "", runner: ubuntu-24.04-arm, cgo: "1", tags: "tsnative,sqlite_fts5" }
-          - { os: darwin, arch: amd64, ext: "", runner: macos-13, cgo: "1", tags: "tsnative,sqlite_fts5" }
+          - { os: darwin, arch: amd64, ext: "", runner: macos-15-intel, cgo: "1", tags: "tsnative,sqlite_fts5" }
           - { os: darwin, arch: arm64, ext: "", runner: macos-latest, cgo: "1", tags: "tsnative,sqlite_fts5" }
           - { os: windows, arch: amd64, ext: ".exe", runner: windows-latest, cgo: "1", tags: "tsnative,sqlite_fts5" }
           - { os: windows, arch: arm64, ext: ".exe", runner: ubuntu-latest, cgo: "0", tags: "" }
@@ -128,8 +128,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          # No npm cache: this job checkouts inputs.release_sha in a privileged
+          # release workflow. Writing the Actions cache from that tree is the
+          # cache-poisoning pattern CodeQL flags.
       - name: Install and build
         working-directory: web
         run: |
@@ -144,7 +145,11 @@ jobs:
           mkdir -p dist
           sh scripts/pack-web.sh --from web --tar dist/so-web.tar.gz
           sha256sum dist/so-web.tar.gz > dist/so-web.tar.gz.sha256
-          tar -tzf dist/so-web.tar.gz | grep -q 'server.js'
+          list=$(tar -tzf dist/so-web.tar.gz)
+          case "$list" in
+            *server.js*) ;;
+            *) echo "::error::so-web.tar.gz is missing server.js"; exit 1 ;;
+          esac
       - uses: actions/upload-artifact@v7
         with:
           name: release-assets-so-web

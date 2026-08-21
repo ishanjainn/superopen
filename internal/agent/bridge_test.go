@@ -3,6 +3,7 @@ package agent
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -98,6 +99,18 @@ func TestInstallReturnsReport(t *testing.T) {
 	t.Setenv("APPDATA", filepath.Join(home, ".config"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
 	t.Setenv("COPILOT_HOME", filepath.Join(home, ".copilot"))
+	binDir := filepath.Join(home, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	soName := "so"
+	if runtime.GOOS == "windows" {
+		soName += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(binDir, soName), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
