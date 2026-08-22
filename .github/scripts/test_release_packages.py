@@ -449,6 +449,11 @@ class ReleaseTests(unittest.TestCase):
             self.assertIn("so-web.tar.gz", formula)
             self.assertIn('resource "web"', formula)
             self.assertIn(f'sha256 "{web_checksum}"', formula)
+            self.assertIn(
+                "https://github.com/ishanjainn/superopen/releases/download/cli-0.3.0/so-web.tar.gz",
+                formula,
+            )
+            self.assertNotIn("cli-#{version}", formula)
             self.assertNotIn("npm run build", formula.split("if build.head?")[0])
             for (operating_system, architecture), checksum in expected.items():
                 self.assertIn(f"so-{operating_system}-{architecture}.tar.gz", formula)
