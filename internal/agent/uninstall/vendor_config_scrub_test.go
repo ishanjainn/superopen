@@ -15,8 +15,8 @@ import (
 // the user-trust `[projects."..."]` entry pointing at the superopen
 // repo (which is NOT a Superopen artifact, just a path that happens
 // to contain the substring), unrelated marketplace + plugin
-// entries, an `[mcp_servers.*]` block and its env sub-table, and
-// `[hooks.state]` itself (the bare parent) which Codex regenerates
+// unrelated marketplace + plugin entries, a foreign `[remote_servers.*]`
+// block and its env sub-table, and `[hooks.state]` itself (the bare parent)
 // and we must NOT strip.
 const codexConfigSample = `model = "gpt-5.4"
 
@@ -44,10 +44,10 @@ enabled = true
 [desktop]
 ambient-suggestions-enabled = false
 
-[mcp_servers.node_repl]
+[remote_servers.node_repl]
 args = []
 
-[mcp_servers.node_repl.env]
+[remote_servers.node_repl.env]
 CODEX_HOME = "/Users/me/.codex"
 
 [hooks.state]
@@ -94,8 +94,8 @@ func TestStripCodexOwnedSectionsRemovesOnlyOwned(t *testing.T) {
 		`trust_level = "trusted"`,
 		`[marketplaces.openai-bundled]`,
 		`[plugins."documents@openai-primary-runtime"]`,
-		`[mcp_servers.node_repl]`,
-		`[mcp_servers.node_repl.env]`,
+		`[remote_servers.node_repl]`,
+		`[remote_servers.node_repl.env]`,
 		`CODEX_HOME = "/Users/me/.codex"`,
 		// `[hooks.state]` itself (the parent) is preserved; only
 		// the residual-keyed children are dropped.

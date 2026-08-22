@@ -85,18 +85,6 @@
         "timeout": 15000
       }
     ],
-    "beforeMCPExecution": [
-      {
-        "command": "so coding hook --vendor=cursor --event=beforeMCPExecution",
-        "timeout": 15000
-      }
-    ],
-    "afterMCPExecution": [
-      {
-        "command": "so coding hook --vendor=cursor --event=afterMCPExecution",
-        "timeout": 15000
-      }
-    ],
     "beforeReadFile": [
       {
         "command": "so coding hook --vendor=cursor --event=beforeReadFile --kind=read",

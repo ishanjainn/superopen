@@ -155,9 +155,11 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 		graph.files = append(graph.files, parsed.File)
 		rel := filepath.ToSlash(parsed.File.Path)
 		fileQN := fileQualifiedName(rel)
+		endLine := fileEndLine(parsed)
 		graph.nodes = append(graph.nodes, api.Node{
 			Project: project, Label: "File", Name: filepath.Base(rel), QualifiedName: fileQN,
-			Location: api.Location{File: rel}, Properties: api.Properties{"extension": filepath.Ext(filepath.Base(rel))},
+			Location: api.Location{File: rel, StartLine: 1, EndLine: endLine},
+			Properties: api.Properties{"extension": filepath.Ext(filepath.Base(rel))},
 		})
 		directory := filepath.ToSlash(filepath.Dir(rel))
 		if directory != "." && directory != "" {
@@ -207,7 +209,7 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 			moduleQN := syntaxModuleQN(rel)
 			graph.nodes = append(graph.nodes, api.Node{
 				Project: project, Label: "Module", Name: rel, QualifiedName: moduleQN,
-				Location: api.Location{File: rel, StartLine: 1}, Properties: syntaxModuleProperties(rel),
+				Location: api.Location{File: rel, StartLine: 1, EndLine: endLine}, Properties: syntaxModuleProperties(rel),
 			})
 			graph.edges = append(graph.edges, pendingEdge{source: fileQN, target: moduleQN, kind: "DEFINES",
 				evidence: layoutEvidence(rel)})
@@ -529,6 +531,9 @@ func resolveSyntaxFileRelationships(
 				}
 			}
 		}
+		if suppressWeakJSMethodCall(parsed.File.Language, fact.Name, resolution.strategy) {
+			resolution = symbolResolution{}
+		}
 		if resolution.qn != "" && resolution.qn != source {
 			edges = append(edges, pendingEdge{source: source, target: resolution.qn, kind: "CALLS",
 				properties: syntaxCallProperties(fact, resolution), evidence: syntaxEvidence(rel, fact, resolution.strategy, resolution.confidence)})
@@ -617,6 +622,21 @@ func syntaxOccurrenceSource(file, scope, defaultSource string, byFileScope map[s
 		scope = scope[:index]
 	}
 	return defaultSource
+}
+
+func suppressWeakJSMethodCall(language, callee, strategy string) bool {
+	if !isJSLanguage(language) && language != "jsx" {
+		return false
+	}
+	if !strings.Contains(callee, ".") {
+		return false
+	}
+	switch strategy {
+	case "unique_name", "suffix_match", "field_type_hint", "fuzzy":
+		return true
+	default:
+		return false
+	}
 }
 
 func isJSXComponentCall(fact SyntaxFact) bool {

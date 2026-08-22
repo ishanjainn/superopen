@@ -859,32 +859,51 @@ func (s *Store) MaterializeFromSpans(id string, spans []trace.Span, tokens int64
 	meta.Tokens = tokens
 	meta.CostUSD = cost
 
+	spans = trace.DedupSpans(spans)
+
 	// Authoritative normalized event stream.
 	eventsPath := filepath.Join(dir, "events.jsonl")
-	if err := os.Remove(eventsPath); err != nil && !os.IsNotExist(err) {
-		return Meta{}, err
-	}
-	if err := artifact.EnsureJSONL(eventsPath, artifact.About{
-		Purpose:   "Normalized prompts, responses, tool calls, file activity, usage, lifecycle, and audit events for this session.",
-		Authority: "authoritative session event stream", UpdatedBy: "vendor telemetry adapter",
-	}); err != nil {
-		return Meta{}, err
-	}
-	tf, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return Meta{}, err
-	}
-	enc := json.NewEncoder(tf)
-	foot := map[string]*FootprintFile{}
-	for _, sp := range spans {
-		safe := sp
-		if len(sp.Attributes) > 0 {
-			safe.Attributes = make(map[string]string, len(sp.Attributes))
-			for k, v := range sp.Attributes {
-				safe.Attributes[k] = redact.String(v)
-			}
+	existingN := countJSONLEvents(eventsPath)
+	rewriteEvents := existingN <= len(spans)
+	footSpans := spans
+	if rewriteEvents {
+		if err := os.Remove(eventsPath); err != nil && !os.IsNotExist(err) {
+			return Meta{}, err
 		}
-		_ = enc.Encode(safe)
+		if err := artifact.EnsureJSONL(eventsPath, artifact.About{
+			Purpose:   "Normalized prompts, responses, tool calls, file activity, usage, lifecycle, and audit events for this session.",
+			Authority: "authoritative session event stream", UpdatedBy: "vendor telemetry adapter",
+		}); err != nil {
+			return Meta{}, err
+		}
+		tf, err := os.OpenFile(eventsPath, os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return Meta{}, err
+		}
+		enc := json.NewEncoder(tf)
+		for _, sp := range spans {
+			safe := sp
+			if len(sp.Attributes) > 0 {
+				safe.Attributes = make(map[string]string, len(sp.Attributes))
+				for k, v := range sp.Attributes {
+					if keepUnredactedAttr(k) {
+						safe.Attributes[k] = v
+						continue
+					}
+					safe.Attributes[k] = redact.String(v)
+				}
+			}
+			_ = enc.Encode(safe)
+		}
+		tf.Close()
+	} else {
+		if loaded := loadJSONLSpans(eventsPath); len(loaded) > 0 {
+			footSpans = loaded
+		}
+	}
+
+	foot := map[string]*FootprintFile{}
+	for _, sp := range footSpans {
 		if meta.Vendor == "" || meta.Vendor == "unknown" {
 			if v := VendorFromAttrs(sp.Attributes); v != "" {
 				meta.Vendor = v
@@ -898,45 +917,21 @@ func (s *Store) MaterializeFromSpans(id string, spans []trace.Span, tokens int64
 			}
 		}
 		if meta.PromptPreview == "" {
-			if p := safe.Attributes["gen_ai.prompt"]; p != "" {
-				meta.PromptPreview = truncate(humanizePromptPreview(p), 120)
-			} else if p := safe.Attributes["gen_ai.content.prompt"]; p != "" {
-				meta.PromptPreview = truncate(humanizePromptPreview(p), 120)
-			} else if raw := safe.Attributes["gen_ai.input.messages"]; raw != "" {
-				meta.PromptPreview = truncate(humanizePromptPreview(raw), 120)
+			safePrompt := sp.Attributes["gen_ai.prompt"]
+			if safePrompt == "" {
+				safePrompt = sp.Attributes["gen_ai.content.prompt"]
+			}
+			if safePrompt == "" {
+				safePrompt = sp.Attributes["gen_ai.input.messages"]
+			}
+			if safePrompt != "" {
+				meta.PromptPreview = truncate(humanizePromptPreview(redact.String(safePrompt)), 120)
 			}
 		}
-		if path := sp.Attributes["coding_agent.file_path"]; path != "" {
-			state := "seen"
-			name := strings.ToLower(sp.Name)
-			switch {
-			case strings.Contains(name, "edit") || strings.Contains(name, "write"):
-				state = "edited"
-			case strings.Contains(name, "read"):
-				state = "read"
-			}
-			if existing, ok := foot[path]; ok {
-				existing.Count++
-				if rank(state) > rank(existing.State) {
-					existing.State = state
-				}
-			} else {
-				foot[path] = &FootprintFile{Path: path, State: state, Count: 1}
-			}
-		}
-		if path := sp.Attributes["code.file.path"]; path != "" {
-			state := "edited"
-			if existing, ok := foot[path]; ok {
-				existing.Count++
-				if rank(state) > rank(existing.State) {
-					existing.State = state
-				}
-			} else {
-				foot[path] = &FootprintFile{Path: path, State: state, Count: 1}
-			}
+		if path := FilePathFromAttrs(sp.Attributes); path != "" {
+			addFootprintFile(foot, path, footprintState(sp))
 		}
 	}
-	tf.Close()
 
 	fp := Footprint{}
 	for _, f := range foot {

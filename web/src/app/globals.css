@@ -111,6 +111,34 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+/*
+ * One paper for Graph / Memory / session map. Fill is chrome `bg-white`
+ * (`--color-white`: 255 255 255 light, 10 10 10 dark). Grid is ink so it
+ * inverts with the theme. WebGL clears with alpha 0 so this shows through.
+ */
+.stage-viewport {
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.stage-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: rgb(var(--color-white));
+  background-image:
+    linear-gradient(rgb(var(--color-neutral-900) / 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--color-neutral-900) / 0.1) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: -1px -1px;
+}
+
 .scrollbar-hidden {
   -ms-overflow-style: none;
   scrollbar-width: none;

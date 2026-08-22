@@ -21,7 +21,7 @@ Detailed instructions live in **nested `AGENTS.md`** next to the code (`internal
 
 ## Cursor
 
-`.cursor/rules` is a symlink to `.agents/rules` so Cursor and other tools share one source of truth.
+This checkout has no `.cursor/rules` directory. Scoped rules live only in `.agents/rules`. `so install` still writes the product gate into the user's `~/.cursor/rules`.
 
 ## Other agents
 

@@ -51,7 +51,7 @@ function additionalContext(stdout: string): string {
   }
 }
 
-// Graphify-style: no backticks / $(...) in echo (bash command substitution).
+// Shell-safe echo: no backticks / $(...) in echo (bash command substitution).
 function shellSafeNudge(text: string): string {
   return text.replace(/`/g, "").replace(/\$\(/g, "(").replace(/"/g, "'");
 }

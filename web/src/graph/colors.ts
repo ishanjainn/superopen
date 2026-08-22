@@ -11,13 +11,13 @@ export const LABEL_COLORS: Record<string, string> = {
   Method: "#06b6d4",
   Route: "#eab308",
   Variable: "#64748b",
-  Prompt: "#94a3b8",
-  Tool: "#64748b",
-  Session: "#e2e8f0",
-  Pin: "#a8a29e",
-  Teaching: "#d6d3d1",
-  Working: "#78716c",
-  Memory: "#737373",
+  Prompt: "#06b6d4",
+  Tool: "#3b82f6",
+  Session: "#eab308",
+  Pin: "#ec4899",
+  Teaching: "#22c55e",
+  Working: "#f97316",
+  Memory: "#a855f7",
 };
 
 export const DEFAULT_LABEL_COLOR = "#94a3b8";

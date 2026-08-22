@@ -1,8 +1,18 @@
-# Scripts, tests, eval
+# Scripts
 
-Parent index: [../AGENTS.md](../AGENTS.md).
+Installers and packaging helpers. Parent index: [../AGENTS.md](../AGENTS.md).
 
-## Go
+Benchmarks live in [../benchmarks/](../benchmarks/).
+
+| Script | Purpose |
+|--------|---------|
+| `install.sh` / `install.ps1` | User-global `so` install |
+| `uninstall.sh` / `uninstall.ps1` | Remove hooks and shared config |
+| `pack-web.sh` | Bundle UI for release |
+| `sync-plugins.sh` | Embed `.claude-plugin/` + `plugins/` into `internal/agent/install/marketplace/` |
+| `so.rb` | Homebrew formula helper |
+
+## Go tests
 
 ```bash
 make test              # go test -race ./...
@@ -22,16 +32,6 @@ make lint
 ```bash
 make test-web
 ```
-
-## Benchmarks
-
-Protocol: [agent-graph-eval/AGENTS.md](agent-graph-eval/AGENTS.md) (isolation, Claude Code host, natural product install — no trimmed skills/hooks/MCP). Invoke: [agent-graph-eval/README.md](agent-graph-eval/README.md).
-
-```bash
-python3 scripts/agent-graph-eval/test_harness.py
-```
-
-Do not overwrite `agent-graph-eval/results/*` — use new stamp dirs.
 
 ## Fixtures
 

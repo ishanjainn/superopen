@@ -112,6 +112,8 @@ func TestLookupXAIAndCursorAndMoonshot(t *testing.T) {
 	}{
 		// Cursor first-party + Grok ladder (cursor.com/docs/models-and-pricing).
 		{"grok-4.5", Rate{InputPer1M: 2.00, OutputPer1M: 6.00, CachedReadPer1M: 0.50}},
+		{"grok-4.6", Rate{InputPer1M: 2.00, OutputPer1M: 6.00, CachedReadPer1M: 0.50}},
+		{"cursor-grok-4.6-high", Rate{InputPer1M: 2.00, OutputPer1M: 6.00, CachedReadPer1M: 0.50}},
 		{"grok-4-5", Rate{InputPer1M: 2.00, OutputPer1M: 6.00, CachedReadPer1M: 0.50}},
 		{"grok-4-20", Rate{InputPer1M: 2.00, OutputPer1M: 6.00, CachedReadPer1M: 0.50}},
 		{"grok-4-3", Rate{InputPer1M: 1.25, OutputPer1M: 2.50, CachedReadPer1M: 0.20}},

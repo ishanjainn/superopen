@@ -653,7 +653,7 @@ func (e *Emitter) EmitSession(s normalize.Session) error {
 	// `sessionIDGenerator` produces the deterministic root TraceID +
 	// SpanID derived from `s.SessionID`. The CLI stamps `vcs.*`
 	// resource attributes on this span from local git context (see
-	// `cli/internal/agent/git/git.go`); no remote VCS integration is
+	// `internal/agent/git/git.go`); no remote VCS integration is
 	// required.
 	_, span := e.tracer.Start(
 		sessionRootContext(context.Background(), s.SessionID, e.vendor),

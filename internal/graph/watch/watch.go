@@ -17,7 +17,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/projects"
 )
 
-// DefaultPollInterval is the live git-poll cadence used by so dev and MCP serve.
+// DefaultPollInterval is the live git-poll cadence used by so dev.
 // Builds are local (Tree-sitter + SQLite); they do not call an LLM or the coding agent.
 const DefaultPollInterval = 60 * time.Second
 
@@ -136,7 +136,7 @@ func LoadSignature(root string) string {
 }
 
 // RecordSignature marks the graph as current for the working tree's present
-// state. Every completed build calls this, so a later `mcp serve` does not
+// state. Every completed build calls this, so a later `so dev` does not
 // spend a full build proving the graph it already has is up to date.
 func RecordSignature(root string) {
 	path := signaturePath(root)

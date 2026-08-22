@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Mountain, TreePine, Users } from "lucide-react";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 import {
   describeError,
   getAgentTrace,
@@ -13,6 +14,7 @@ import {
 import { PlaybackEngine } from "./playback/reducer";
 import { TreeScene } from "./scene/TreeScene";
 import { TerrainScene } from "./scene/TerrainScene";
+import { StageViewport } from "@/components/stage/StageViewport";
 import { type PanelDescriptor } from "./ui/Dock";
 import { AgentsPanel } from "./ui/AgentsPanel";
 import { Hud, type ChurnEntry, type HudSessionExtras, type HudTool } from "./ui/Hud";
@@ -76,6 +78,7 @@ export default function MapView({
     },
     [onSeqChange, trace],
   );
+  const pushSeqRef = useLatestRef(pushSeq);
   const [selectedPath, setSelectedPath] = useState<string | undefined>();
   const [view, setView] = useState<MapViewMode>("tree");
   const [loading, setLoading] = useState(true);
@@ -92,36 +95,40 @@ export default function MapView({
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(undefined);
-      setMainTrace(undefined);
-      setTrace(undefined);
-      setSessionMap(undefined);
-      pushSeq(0);
-      setSelectedPath(undefined);
-      setCurrentAgentID(null);
-      setAgentGraph(undefined);
-      setOpenSheet(null);
-      try {
-        const key = await resolveSessionKey(sessionId);
-        const snap = await getSessionSnapshot(key);
-        if (cancelled) return;
-        setSessionKey(key);
-        setMainTrace(snap.trace);
-        setTrace(snap.trace);
-        setSessionMap(snap.sessionMap);
-        pushSeq(0);
-      } catch (err) {
-        if (!cancelled) setError(describeError(err, "loading the map"));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const key = await resolveSessionKey(sessionId);
+          if (cancelled) return;
+          setLoading(true);
+          setError(undefined);
+          setMainTrace(undefined);
+          setTrace(undefined);
+          setSessionMap(undefined);
+          pushSeqRef.current(0);
+          setSelectedPath(undefined);
+          setCurrentAgentID(null);
+          setAgentGraph(undefined);
+          setOpenSheet(null);
+          const snap = await getSessionSnapshot(key);
+          if (cancelled) return;
+          setSessionKey(key);
+          setMainTrace(snap.trace);
+          setTrace(snap.trace);
+          setSessionMap(snap.sessionMap);
+          pushSeqRef.current(0);
+        } catch (err) {
+          if (!cancelled) setError(describeError(err, "loading the map"));
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+    }, 0);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [sessionId]);
+  }, [sessionId, pushSeqRef]);
 
   const loadAgents = useCallback(async () => {
     if (!sessionKey) return;
@@ -141,7 +148,10 @@ export default function MapView({
 
   useEffect(() => {
     if (!sessionKey) return;
-    void loadAgents();
+    const timer = window.setTimeout(() => {
+      void loadAgents();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [sessionKey, loadAgents]);
 
   const engine = useMemo(() => new PlaybackEngine(trace, sessionMap), [trace, sessionMap]);
@@ -166,7 +176,10 @@ export default function MapView({
         }
       }
     }
-    if (best !== currentSeq) pushSeq(best);
+    if (best !== currentSeq) {
+      const next = best;
+      window.setTimeout(() => pushSeq(next), 0);
+    }
     // currentSeq is read for inequality only; chat-origin seeks should not loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekAtNano, trace, pushSeq]);
@@ -259,18 +272,20 @@ export default function MapView({
   // Rebuild ring if layout or session map changes while a selection is active
   useEffect(() => {
     if (!selectedPath || !sessionMap) return;
-    setNeighborRing((prev) => {
-      if (prev.length === 0) return nearbyFiles(
-        sessionMap.files,
-        sessionMap.files.find((f) => f.path === selectedPath) ?? sessionMap.files[0],
-        treeLayout
-      );
-      // Keep order; refresh SessionFile object refs from the current session map
-      const byPath = new Map(sessionMap.files.map((f) => [f.path, f]));
-      const next = prev.map((f) => byPath.get(f.path)).filter(Boolean) as SessionFile[];
-      return next.length >= 2 ? next : prev;
-    });
-  }, [sessionMap, treeLayout]); // eslint-disable-line react-hooks/exhaustive-deps -- only refresh refs on layout/session map
+    const timer = window.setTimeout(() => {
+      setNeighborRing((prev) => {
+        if (prev.length === 0) return nearbyFiles(
+          sessionMap.files,
+          sessionMap.files.find((f) => f.path === selectedPath) ?? sessionMap.files[0],
+          treeLayout
+        );
+        const byPath = new Map(sessionMap.files.map((f) => [f.path, f]));
+        const next = prev.map((f) => byPath.get(f.path)).filter(Boolean) as SessionFile[];
+        return next.length >= 2 ? next : prev;
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [sessionMap, treeLayout, selectedPath]);
 
   // Keyboard Prev/Next while a file is selected
   useEffect(() => {
@@ -329,7 +344,7 @@ export default function MapView({
         setLoadingAgentID(undefined);
       }
     },
-    [sessionKey, mainTrace]
+    [sessionKey, mainTrace, pushSeq]
   );
 
   const agentLabel = useMemo(() => {
@@ -434,7 +449,7 @@ export default function MapView({
       {hudHost ? createPortal(hud, hudHost) : null}
       <main className="app-frame rail-collapsed">
         <section className="stage">
-          <div className="viewport">
+          <StageViewport className="viewport">
             {view === "tree" ? (
               <TreeScene
                 sessionMap={sessionMap}
@@ -450,8 +465,6 @@ export default function MapView({
                 onSelect={onSelect}
               />
             )}
-
-            <div className="graph-grid" aria-hidden />
 
             {hudHost ? null : hud}
 
@@ -494,7 +507,7 @@ export default function MapView({
             {error && !loading && (
               <div className="map-status map-status-error">{error}</div>
             )}
-          </div>
+          </StageViewport>
 
           <Timeline
             trace={trace}

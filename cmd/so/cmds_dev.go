@@ -125,7 +125,7 @@ func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen, hot b
 	if st, err := readDevStatus(layout, uiPort); err == nil && st.alive {
 		fmt.Printf("Already running (pid %d) at %s\n", st.pid, st.url)
 		fmt.Printf("Stop with: so dev stop\n")
-		maybeOpenUI(url+"/sessions", noOpen)
+		maybeOpenUI(url+"/graph", noOpen)
 		return nil
 	}
 
@@ -166,14 +166,14 @@ func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen, hot b
 		if !processAlive(cmd.Process.Pid) {
 			return fmt.Errorf("dev process exited early; see %s", logPath)
 		}
-		resp, err := http.Get(url + "/sessions")
+		resp, err := http.Get(url + "/graph")
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode < 500 {
 				fmt.Printf("Superopen UI %s (pid %d)\n", url, cmd.Process.Pid)
 				fmt.Printf("Logs: %s\n", logPath)
 				fmt.Printf("Stop: so dev stop\n")
-				maybeOpenUI(url+"/sessions", noOpen)
+				maybeOpenUI(url+"/graph", noOpen)
 				return nil
 			}
 		}
@@ -192,10 +192,12 @@ func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot b
 	}
 	fmt.Println("Live graph refresh active (local git poll ~60s; no LLM).")
 	go func() {
+		_ = runRetentionSweep(root)
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			_ = memory.SleepRoot(root)
+			_ = runRetentionSweep(root)
 		}
 	}()
 
@@ -208,7 +210,7 @@ func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot b
 		mode = "hot / Turbopack"
 	}
 	fmt.Printf("Superopen UI %s (%s)\n", nextURL, mode)
-	maybeOpenUI(nextURL+"/sessions", noOpen)
+	maybeOpenUI(nextURL+"/graph", noOpen)
 
 	// Track foreground runs too so `so dev stop` works from another shell.
 	if nextCmd.Process != nil {
@@ -291,7 +293,7 @@ func statusDev(uiPort int) error {
 
 	st, err := readDevStatus(layout, uiPort)
 	reachable := false
-	if resp, herr := http.Get(url + "/sessions"); herr == nil {
+	if resp, herr := http.Get(url + "/graph"); herr == nil {
 		_ = resp.Body.Close()
 		reachable = resp.StatusCode < 500
 	}

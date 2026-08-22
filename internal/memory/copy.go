@@ -17,6 +17,7 @@ var copyTables = []struct {
 		"id", "uid", "session_id", "span_id", "kind", "source", "title", "text", "files", "tool_name",
 		"tokens", "pinned", "faded", "embedding_pending", "created_at", "updated_at", "valid_from", "valid_to",
 		"faded_at", "last_accessed_at", "community_id", "centrality", "tier", "never_decay", "tags", "fading",
+		"topic", "facts", "narrative", "concepts", "content_hash",
 	}},
 	{name: "memory_vectors", cols: []string{"episode_id", "embedder_id", "dimensions", "quantization", "vector"}},
 	{name: "memory_edges", cols: []string{"id", "source_id", "target_id", "type", "weight", "updated_at"}},
@@ -178,6 +179,16 @@ func pragmaColumns(db *sql.DB, table string) (map[string]bool, error) {
 		out[name] = true
 	}
 	return out, rows.Err()
+}
+
+func copyColumnList(available map[string]bool, wanted ...string) string {
+	var cols []string
+	for _, c := range wanted {
+		if available[c] {
+			cols = append(cols, c)
+		}
+	}
+	return strings.Join(cols, ",")
 }
 
 func intersectCols(src, dst map[string]bool) map[string]bool {

@@ -33,6 +33,7 @@ type TeachReport struct {
 	Edges          int       `json:"edges"`
 	RecallTested   int       `json:"recall_tested"`
 	RecallVerified int       `json:"recall_verified"`
+	VerifiedDelta  int       `json:"verified_delta"`
 	Episodes       []Episode `json:"episodes,omitempty"`
 }
 
@@ -185,6 +186,7 @@ func (s *Store) studyText(title, text string, files []string) (TeachReport, erro
 			}
 		}
 	}
+	report.VerifiedDelta = report.RecallVerified
 	return report, nil
 }
 

@@ -129,7 +129,7 @@ type Session struct {
 	CommitCount int
 	PRCount     int
 
-	// VCS fields, populated by cli/internal/agent/git/.
+	// VCS fields, populated by internal/agent/git/.
 	RepoURL    string
 	HeadSHA    string
 	BranchName string
@@ -176,12 +176,6 @@ type ToolCall struct {
 	FailureType string // "error" | "timeout" | "permission_denied" (Cursor)
 	IsInterrupt bool
 
-	// MCP attribution (if this tool came from an MCP server).
-	MCPServerName string
-	MCPScope      string
-	MCPTransport  string
-	MCPSource     string
-
 	// Triggering LLM request.
 	TriggeringLLMRequestID string
 	Model                  string
@@ -192,6 +186,9 @@ type ToolCall struct {
 
 	WorkingDir string
 	Command    string
+	// FilePath is the repo-relative path for Read/Edit/Write. Stamped onto
+	// coding_agent.file_path at emit so session footprint and memory share one field.
+	FilePath string
 
 	Vendor string
 	// Argument body - only populated when ContentCapture == "full".

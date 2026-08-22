@@ -1,5 +1,10 @@
 package memory
 
+import (
+	"strconv"
+	"strings"
+)
+
 func (s *Store) ensureKnobs() error {
 	defaults := map[string]string{
 		"capture_floor":     "12",
@@ -9,8 +14,11 @@ func (s *Store) ensureKnobs() error {
 		"lex_fusion":        "0.35",
 		"cosine_weight":     "0.6",
 		"centrality_weight": "0.4",
+		"shape_fusion":      "0.25",
+		"pin_weight":        "0.35",
 		"recall_budget":     "1500",
 		"edge_half_life":    "90",
+		"recency_half_life": "21",
 		"english_only":      "1",
 	}
 	for k, v := range defaults {
@@ -19,6 +27,30 @@ func (s *Store) ensureKnobs() error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) knobFloat(key string, def float64) float64 {
+	raw, err := s.meta(key)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return def
+	}
+	n, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+func (s *Store) knobInt(key string, def int) int {
+	raw, err := s.meta(key)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return def
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 func (s *Store) Profile() map[string]string {

@@ -55,3 +55,35 @@ func TestHelpForQuery(t *testing.T) {
 		t.Fatalf("snippet hint: %q", hints[0])
 	}
 }
+
+func TestTraceCompactIncomingCallers(t *testing.T) {
+	caller := api.Node{Name: "useLeaf", QualifiedName: "b.useLeaf", Location: api.Location{File: "b.ts"}}
+	leaf := api.Node{Name: "leaf", QualifiedName: "a.leaf", Location: api.Location{File: "a.ts"}}
+	text := format.TraceCompact(api.TraceResult{
+		Direction: "incoming",
+		Paths: [][]api.TraceStep{{
+			{Node: leaf, Hop: 0},
+			{Node: caller, Via: &api.Edge{Type: "CALLS"}, Hop: 1},
+		}},
+	})
+	if !strings.Contains(text, "direction: incoming") || !strings.Contains(text, "callers:") {
+		t.Fatalf("%q", text)
+	}
+	if strings.Contains(text, "callees:") {
+		t.Fatalf("incoming labeled callees: %q", text)
+	}
+	if !strings.Contains(text, "useLeaf") {
+		t.Fatalf("missing caller: %q", text)
+	}
+}
+
+func TestHelpForSnippetDirections(t *testing.T) {
+	hints := format.HelpForSnippet(api.SnippetResult{QualifiedName: "a.leaf"})
+	joined := strings.Join(hints, "\n")
+	if strings.Contains(joined, "both") {
+		t.Fatalf("must not suggest both: %v", hints)
+	}
+	if len(hints) != 2 || !strings.Contains(hints[0], "incoming") || !strings.Contains(hints[1], "outgoing") {
+		t.Fatalf("hints=%v", hints)
+	}
+}

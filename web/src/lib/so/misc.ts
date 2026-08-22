@@ -127,7 +127,7 @@ function isEligibleProject(repoRoot: string): boolean {
   if (repoRoot === home) return false;
   const normalized = repoRoot.replaceAll("\\", "/");
   for (const marker of [
-    "/agent-graph-eval/work/",
+    "/benchmarks/agent-graph-eval/work/",
     "/.claude/plugins/cache/",
     "/.cursor/projects/",
   ]) {

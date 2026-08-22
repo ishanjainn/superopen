@@ -13,6 +13,17 @@ export type SoJSON<T> = {
   hint?: string;
 };
 
+/** AXI list commands put rows in `data`; Empty() uses `items`. */
+export function soJSONRows<T>(res: Pick<SoJSON<T>, "data" | "items">): T[] {
+  if (Array.isArray(res.data)) {
+    return res.data as T[];
+  }
+  if (Array.isArray(res.items)) {
+    return res.items as T[];
+  }
+  return [];
+}
+
 /**
  * Run `so <args> --json` and parse the envelope.
  * Native graph and session materialization algorithms live in Go.

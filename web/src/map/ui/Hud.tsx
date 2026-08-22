@@ -101,17 +101,18 @@ export const Hud = memo(function Hud({
 
   const [churnOpen, setChurnOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
+  const [traceSeen, setTraceSeen] = useState(trace);
+  if (trace !== traceSeen) {
+    setTraceSeen(trace);
+    setChurnOpen(false);
+  }
+  if (panelOpen && (churnOpen || agentsOpen)) {
+    setChurnOpen(false);
+    setAgentsOpen(false);
+  }
   const churnPanelRef = useRef<HTMLDivElement | null>(null);
   const churnToggleRef = useRef<HTMLButtonElement | null>(null);
   const agentsRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => setChurnOpen(false), [trace]);
-  useEffect(() => {
-    if (panelOpen) {
-      setChurnOpen(false);
-      setAgentsOpen(false);
-    }
-  }, [panelOpen]);
 
   useEffect(() => {
     if (!churnOpen) return;

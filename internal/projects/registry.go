@@ -134,7 +134,7 @@ func ephemeral(repoRoot string) bool {
 	}
 	normalized := filepath.ToSlash(filepath.Clean(repoRoot))
 	for _, marker := range []string{
-		"/agent-graph-eval/work/",
+		"/benchmarks/agent-graph-eval/work/",
 		"/.claude/plugins/cache/",
 		"/.cursor/projects/",
 	} {

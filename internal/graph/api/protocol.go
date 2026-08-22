@@ -340,14 +340,16 @@ type TraceStep struct {
 }
 
 type TraceResult struct {
-	Paths       [][]TraceStep            `json:"paths"`
-	Unresolved  []UnresolvedRelationship `json:"unresolved,omitempty"`
-	Visited     int                      `json:"visited"`
-	Truncated   bool                     `json:"truncated"`
-	Coverage    Coverage                 `json:"coverage,omitempty"`
-	Status      string                   `json:"status,omitempty"`
-	Message     string                   `json:"message,omitempty"`
-	Suggestions []Node                   `json:"suggestions,omitempty"`
+	Paths           [][]TraceStep            `json:"paths"`
+	Unresolved      []UnresolvedRelationship `json:"unresolved,omitempty"`
+	Visited         int                      `json:"visited"`
+	Truncated       bool                     `json:"truncated"`
+	Coverage        Coverage                 `json:"coverage,omitempty"`
+	Status          string                   `json:"status,omitempty"`
+	Message         string                   `json:"message,omitempty"`
+	Suggestions     []Node                   `json:"suggestions,omitempty"`
+	UnresolvedCalls int                      `json:"unresolved_calls,omitempty"`
+	Direction       string                   `json:"direction,omitempty"`
 }
 
 // UnresolvedRelationship preserves a source-grounded relationship attempt
@@ -381,6 +383,10 @@ type SnippetResult struct {
 	Callers       int      `json:"callers,omitempty"`
 	Callees       int      `json:"callees,omitempty"`
 	Coverage      Coverage `json:"coverage,omitempty"`
+	Status        string   `json:"status,omitempty"`
+	Message       string   `json:"message,omitempty"`
+	Suggestions   []Node   `json:"suggestions,omitempty"`
+	Clipped       bool     `json:"clipped,omitempty"`
 }
 
 type ArchitectureRequest struct {

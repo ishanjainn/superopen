@@ -126,4 +126,4 @@ Then remove the **binary** the same way you installed it:
 
 Restart the coding agent so it drops in-memory hooks.
 
-Building from source (developers only): [docs/local-build.md](docs/local-build.md).
+Building from source (developers only): [CONTRIBUTING.md](CONTRIBUTING.md).

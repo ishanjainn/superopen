@@ -15,17 +15,27 @@ import (
 )
 
 const (
-	KindPrompt   = "prompt"
-	KindTool     = "tool"
-	KindWorking  = "working"
-	KindSession  = "session"
-	KindPin      = "pin"
-	KindTeaching = "teaching"
+	KindPrompt      = "prompt"
+	KindTool        = "tool"
+	KindWorking     = "working"
+	KindSession     = "session"
+	KindPin         = "pin"
+	KindTeaching    = "teaching"
+	KindObservation = "observation"
 
 	SourceSpan     = "span"
 	SourceAgent    = "agent"
 	SourceTeach    = "teach"
 	SourceHeadless = "headless"
+	SourceObserver = "observer"
+
+	// ObservationType* taxonomy values stored on topic.
+	ObservationDecision  = "decision"
+	ObservationBugfix    = "bugfix"
+	ObservationFeature   = "feature"
+	ObservationRefactor  = "refactor"
+	ObservationDiscovery = "discovery"
+	ObservationChange    = "change"
 
 	EdgeContradicts  = "contradicts"
 	EdgeSameSession  = "same_session"
@@ -37,7 +47,7 @@ const (
 	metaPending         = "pending_distill"
 	metaDistillPaused   = "distill_paused"
 	quantizationInt8    = "int8-unit"
-	memorySchemaVersion = "2"
+	memorySchemaVersion = "1"
 )
 
 const memoryDDL = `
@@ -72,7 +82,12 @@ CREATE TABLE IF NOT EXISTS memory_episodes (
   tier TEXT NOT NULL DEFAULT '',
   never_decay INTEGER NOT NULL DEFAULT 0,
   tags TEXT NOT NULL DEFAULT '',
-  fading INTEGER NOT NULL DEFAULT 0
+  fading INTEGER NOT NULL DEFAULT 0,
+  topic TEXT NOT NULL DEFAULT '',
+  facts TEXT NOT NULL DEFAULT '',
+  narrative TEXT NOT NULL DEFAULT '',
+  concepts TEXT NOT NULL DEFAULT '',
+  content_hash TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS memory_vectors (
   episode_id INTEGER PRIMARY KEY REFERENCES memory_episodes(id) ON DELETE CASCADE,
@@ -128,6 +143,8 @@ CREATE TABLE IF NOT EXISTS memory_economy (
 );
 CREATE INDEX IF NOT EXISTS memory_episodes_session ON memory_episodes(session_id, created_at);
 CREATE INDEX IF NOT EXISTS memory_episodes_kind ON memory_episodes(kind, created_at);
+CREATE INDEX IF NOT EXISTS memory_episodes_topic ON memory_episodes(topic, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS memory_episodes_content_hash ON memory_episodes(content_hash) WHERE content_hash != '';
 CREATE TABLE IF NOT EXISTS memory_shapes (
   episode_id INTEGER PRIMARY KEY REFERENCES memory_episodes(id) ON DELETE CASCADE,
   blob BLOB NOT NULL
@@ -165,6 +182,11 @@ type Episode struct {
 	Tier             string   `json:"tier,omitempty"`
 	NeverDecay       bool     `json:"never_decay,omitempty"`
 	Tags             string   `json:"tags,omitempty"`
+	Topic            string   `json:"topic,omitempty"`
+	Facts            []string `json:"facts,omitempty"`
+	Narrative        string   `json:"narrative,omitempty"`
+	Concepts         []string `json:"concepts,omitempty"`
+	ContentHash      string   `json:"content_hash,omitempty"`
 	Score            float64  `json:"score,omitempty"`
 }
 
@@ -246,6 +268,10 @@ type CaptureInput struct {
 	ToolName     string
 	ContradictOf int64
 	Pin          bool
+	Topic        string
+	Facts        []string
+	Narrative    string
+	Concepts     []string
 }
 
 func OpenRoot(root string) (*Store, error) {
@@ -260,7 +286,7 @@ func OpenRoot(root string) (*Store, error) {
 }
 
 // HasEpisodes is true when this repository's store already has at least one
-// memory moment or rollup. Used to keep cold-clone MCP tools/list graph-only.
+// memory moment or rollup. Used to keep cold-clone tool lists graph-only.
 func HasEpisodes(root string) bool {
 	layout := paths.Resolve(root)
 	store, err := OpenQuick(layout.Database)
@@ -313,7 +339,7 @@ func open(path string, busyMs int) (*Store, error) {
 		s.Close()
 		return nil, fmt.Errorf("initialize memory schema: %w", err)
 	}
-	if err := s.migrate(); err != nil {
+	if err := s.ensureKnobs(); err != nil {
 		s.Close()
 		return nil, err
 	}
@@ -346,13 +372,7 @@ func (s *Store) ensureEmbedder() error {
 		return s.setMeta(metaEmbedder, CurrentEmbedder())
 	}
 	if existing != CurrentEmbedder() {
-		if _, err := s.db.Exec(`DELETE FROM memory_vectors`); err != nil {
-			return fmt.Errorf("refuse mixed embedder generations: %w", err)
-		}
-		if _, err := s.db.Exec(`UPDATE memory_episodes SET embedding_pending=1`); err != nil {
-			return err
-		}
-		return s.setMeta(metaEmbedder, CurrentEmbedder())
+		return fmt.Errorf("refuse mixed embedder generations: store %s process %s", existing, CurrentEmbedder())
 	}
 	return nil
 }
@@ -380,26 +400,40 @@ func (s *Store) upsertEpisode(ep Episode, vector Vector, embed bool) (int64, boo
 	if ep.ValidFrom == "" {
 		ep.ValidFrom = now
 	}
-	files := strings.Join(ep.Files, "\n")
+	files := strings.Join(normalizeFiles(ep.Files), "\n")
 	pending := 1
 	if embed && !isZero(vector) {
 		pending = 0
 	}
 	plain := ep.Text
 	stored := s.sealText(ep.UID, plain)
+	facts := marshalStringList(ep.Facts)
+	concepts := marshalStringList(ep.Concepts)
 	res, err := s.db.Exec(`
-INSERT INTO memory_episodes(uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,faded_at,last_accessed_at,community_id,centrality,tier,never_decay,tags,fading)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO memory_episodes(uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,faded_at,last_accessed_at,community_id,centrality,tier,never_decay,tags,fading,topic,facts,narrative,concepts,content_hash)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(uid) DO NOTHING`,
 		ep.UID, ep.SessionID, ep.SpanID, ep.Kind, ep.Source, ep.Title, stored, files, ep.ToolName,
 		ep.Tokens, boolInt(ep.Pinned), boolInt(ep.Faded), pending, ep.CreatedAt, ep.UpdatedAt, ep.ValidFrom, ep.ValidTo, "", "",
-		ep.CommunityID, ep.Centrality, ep.Tier, boolInt(ep.NeverDecay), ep.Tags, boolInt(ep.Fading))
+		ep.CommunityID, ep.Centrality, ep.Tier, boolInt(ep.NeverDecay), ep.Tags, boolInt(ep.Fading),
+		ep.Topic, facts, ep.Narrative, concepts, ep.ContentHash)
 	if err != nil {
+		if ep.ContentHash != "" {
+			var id int64
+			if err2 := s.db.QueryRow(`SELECT id FROM memory_episodes WHERE content_hash=?`, ep.ContentHash).Scan(&id); err2 == nil {
+				return id, false, nil
+			}
+		}
 		return 0, false, err
 	}
 	n, _ := res.RowsAffected()
 	var id int64
 	if err := s.db.QueryRow(`SELECT id FROM memory_episodes WHERE uid=?`, ep.UID).Scan(&id); err != nil {
+		if ep.ContentHash != "" {
+			if err2 := s.db.QueryRow(`SELECT id FROM memory_episodes WHERE content_hash=?`, ep.ContentHash).Scan(&id); err2 == nil {
+				return id, false, nil
+			}
+		}
 		return 0, false, err
 	}
 	inserted := n > 0
@@ -448,6 +482,21 @@ func (s *Store) Get(id int64) (Episode, error) {
 	now := nowRFC()
 	_, _ = s.db.Exec(`UPDATE memory_episodes SET last_accessed_at=? WHERE id=?`, now, id)
 	return ep, nil
+}
+
+func (s *Store) GetMany(ids []int64) ([]Episode, error) {
+	out := make([]Episode, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		ep, err := s.Get(id)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, ep)
+	}
+	return out, nil
 }
 
 func (s *Store) Pin(id int64) error {
@@ -509,6 +558,12 @@ func (s *Store) SetDistillPaused(paused bool) error {
 func (s *Store) HasSessionRollup(sessionID string) bool {
 	var n int
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE session_id=? AND kind=? AND faded=0`, sessionID, KindSession).Scan(&n)
+	return n > 0
+}
+
+func (s *Store) HasKindPrompt(sessionID string) bool {
+	var n int
+	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE session_id=? AND kind=? AND faded=0`, sessionID, KindPrompt).Scan(&n)
 	return n > 0
 }
 
@@ -651,7 +706,7 @@ func (s *Store) ListTopics() ([]Topic, error) {
 	return out, rows.Err()
 }
 
-const episodeCols = `id,uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,community_id,centrality,tier,never_decay,tags,fading`
+const episodeCols = `id,uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,community_id,centrality,tier,never_decay,tags,fading,topic,facts,narrative,concepts,content_hash`
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -693,12 +748,13 @@ func scanEpisodesKeyed(s *Store, rows *sql.Rows) ([]Episode, error) {
 
 func scanEpisodeWithKey(s *Store, row scanner) (Episode, error) {
 	var ep Episode
-	var files string
+	var files, facts, concepts string
 	var pinned, faded, pending, neverDecay, fading int
 	if err := row.Scan(
 		&ep.ID, &ep.UID, &ep.SessionID, &ep.SpanID, &ep.Kind, &ep.Source, &ep.Title, &ep.Text, &files, &ep.ToolName,
 		&ep.Tokens, &pinned, &faded, &pending, &ep.CreatedAt, &ep.UpdatedAt, &ep.ValidFrom, &ep.ValidTo,
 		&ep.CommunityID, &ep.Centrality, &ep.Tier, &neverDecay, &ep.Tags, &fading,
+		&ep.Topic, &facts, &ep.Narrative, &concepts, &ep.ContentHash,
 	); err != nil {
 		return ep, err
 	}
@@ -713,6 +769,8 @@ func scanEpisodeWithKey(s *Store, row scanner) (Episode, error) {
 	if files != "" {
 		ep.Files = splitFiles(files)
 	}
+	ep.Facts = unmarshalStringList(facts)
+	ep.Concepts = unmarshalStringList(concepts)
 	return ep, nil
 }
 
@@ -768,6 +826,63 @@ func setKeys(set map[string]struct{}) []string {
 	out := make([]string, 0, len(set))
 	for k := range set {
 		out = append(out, k)
+	}
+	return out
+}
+
+func (s *Store) backfillTags() error {
+	rows, err := s.db.Query(`SELECT id, uid, text, tags FROM memory_episodes WHERE tags='' LIMIT 400`)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		id   int64
+		uid  string
+		text string
+		tags string
+	}
+	var all []row
+	for rows.Next() {
+		var r row
+		if rows.Scan(&r.id, &r.uid, &r.text, &r.tags) == nil {
+			all = append(all, r)
+		}
+	}
+	_ = rows.Close()
+	for _, r := range all {
+		plain := s.openText(r.uid, r.text)
+		tags := entityTags(plain)
+		if tags == "" {
+			continue
+		}
+		_, _ = s.db.Exec(`UPDATE memory_episodes SET tags=? WHERE id=?`, tags, r.id)
+	}
+	return nil
+}
+
+func (s *Store) tableColumns(table string) (map[string]bool, error) {
+	return pragmaColumns(s.db, table)
+}
+
+func marshalStringList(in []string) string {
+	if len(in) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func unmarshalStringList(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	if json.Unmarshal([]byte(raw), &out) != nil {
+		return nil
 	}
 	return out
 }

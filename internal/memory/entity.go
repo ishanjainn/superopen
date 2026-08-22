@@ -53,7 +53,7 @@ func tierForKind(kind string) string {
 		return tierWorking
 	case KindTeaching, KindPin:
 		return tierProcedural
-	case KindSession:
+	case KindSession, KindObservation:
 		return tierSemantic
 	default:
 		return tierEpisodic

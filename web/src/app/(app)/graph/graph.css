@@ -1,5 +1,4 @@
-/* Native graph: session-map stage (paper grid + right rail) with the few
-   graph-only controls the map has no equivalent for. */
+/* Native graph: StageViewport paper + right rail, plus graph-only controls. */
 
 .graph-root {
   flex: 1;
@@ -7,12 +6,14 @@
 }
 
 /* The rail owns the right edge; the scene fills the whole viewport behind it. */
-.graph-root .session-map {
+.graph-root .session-map,
+.memory-stage .session-map {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  width: 100%;
   cursor: grab;
 }
-
-/* Overlay grid lives in map.css (.graph-grid) so Graph, session map, and
-   Memory share one screen-space square. */
 
 /* ---------- rail: shared row primitives ---------- */
 

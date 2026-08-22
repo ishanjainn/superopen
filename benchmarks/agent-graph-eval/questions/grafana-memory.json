@@ -1,0 +1,49 @@
+{
+  "corpus": "grafana/grafana",
+  "instruction": "question-only prompt, identical for every arm; no mention of Superopen, graph, or memory",
+  "kind": "memory",
+  "questions": [
+    {
+      "id": "provisioning-error-path",
+      "kind": "task",
+      "prompt": "Dashboard YAML provisioning fails to read its config with the wrap \"Failed to read dashboards config\". Include the config directory in that error. One small change, no refactor.",
+      "key_facts": [
+        {"id": "wrap", "aliases": ["Failed to read dashboards config"]},
+        {"id": "dir", "aliases": ["configDirectory", "config directory"]}
+      ],
+      "expect_path_contains": [
+        {
+          "path": "pkg/services/provisioning/dashboards/dashboard.go",
+          "needles": ["Failed to read dashboards config", "configDirectory"]
+        }
+      ]
+    },
+    {
+      "id": "provisioning-wrap-recall",
+      "kind": "memory",
+      "prompt": "Continue the dashboard YAML provisioning work from last session. What wrap string did we add when config read fails, and what extra value is included in that error? Do not revert that change.",
+      "key_facts": [
+        {"id": "wrap", "aliases": ["Failed to read dashboards config"]},
+        {"id": "dir", "aliases": ["configDirectory", "config directory"]}
+      ],
+      "expect_memory": true,
+      "expect_path_contains": [
+        {
+          "path": "pkg/services/provisioning/dashboards/dashboard.go",
+          "needles": ["Failed to read dashboards config", "configDirectory"]
+        }
+      ]
+    },
+    {
+      "id": "provisioning-load-path",
+      "kind": "architecture",
+      "prompt": "How does dashboard YAML provisioning load and apply dashboards?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["pkg/services/provisioning", "provisioning/dashboards"]},
+        {"id": "reader", "aliases": ["configReader", "file provisioner", "DashboardProvisioner", "provisioner"]},
+        {"id": "yaml", "aliases": ["yaml", "YAML"]},
+        {"id": "apply", "aliases": ["Provision", "provision dashboards", "apply dashboards", "CreateDashboard"]}
+      ]
+    }
+  ]
+}

@@ -28,4 +28,4 @@ fi
 
 info "Running: $bin uninstall $*"
 "$bin" uninstall "$@"
-info "Restart your coding agent so it drops in-memory hooks and MCP."
+info "Restart your coding agent so it drops in-memory hooks."

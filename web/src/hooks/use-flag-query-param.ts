@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 function formatSearch(params: URLSearchParams): string {
@@ -22,15 +22,10 @@ export function useFlagQueryParam(flag: string): [boolean, (on: boolean) => void
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [on, setOn] = useState(() => searchParams.has(flag));
-
-  useEffect(() => {
-    setOn(searchParams.has(flag));
-  }, [searchParams, flag]);
+  const on = searchParams.has(flag);
 
   const setFlag = useCallback(
     (next: boolean) => {
-      setOn(next);
       const params = new URLSearchParams(searchParams.toString());
       if (next) params.set(flag, "");
       else params.delete(flag);
@@ -53,24 +48,17 @@ export function useStringQueryParam(
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [value, setValue] = useState(
-    () => searchParams.get(key) ?? defaultValue
-  );
-
-  useEffect(() => {
-    setValue(searchParams.get(key) ?? defaultValue);
-  }, [searchParams, key, defaultValue]);
+  const value = searchParams.get(key) ?? defaultValue;
 
   const setParam = useCallback(
     (next: string | null) => {
       const trimmed = (next ?? "").trim();
-      setValue(trimmed || defaultValue);
       const params = new URLSearchParams(searchParams.toString());
       if (trimmed) params.set(key, trimmed);
       else params.delete(key);
       router.replace(hrefFor(pathname, params), { scroll: false });
     },
-    [key, defaultValue, pathname, router, searchParams]
+    [key, pathname, router, searchParams]
   );
 
   return [value, setParam];
@@ -88,22 +76,16 @@ export function useExclusiveFlagTab<T extends string>(
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const readTab = useCallback((): T => {
-    for (const alt of alternatives) {
-      if (searchParams.has(alt)) return alt;
+  let tab = defaultTab;
+  for (const alt of alternatives) {
+    if (searchParams.has(alt)) {
+      tab = alt;
+      break;
     }
-    return defaultTab;
-  }, [alternatives, defaultTab, searchParams]);
-
-  const [tab, setTabState] = useState<T>(readTab);
-
-  useEffect(() => {
-    setTabState(readTab());
-  }, [readTab]);
+  }
 
   const setTab = useCallback(
     (next: T) => {
-      setTabState(next);
       const params = new URLSearchParams(searchParams.toString());
       for (const alt of alternatives) params.delete(alt);
       if (next !== defaultTab) params.set(next, "");

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -68,6 +67,7 @@ func newRootCommand() *cobra.Command {
 		cmdDev(),
 		cmdOpen(),
 		cmdStatus(),
+		cmdGC(),
 		agent.NewCmd(),
 		version.NewCmd(),
 	)
@@ -226,7 +226,7 @@ Run from any directory (not tied to a repository). After install, open your
 agent and run /so init inside a repo to create .so/ and build the graph.
 
 Installs the /so skill, observability hooks, and durable graph-first guidance
-(no project files written). Superopen does not install MCP.
+(no project files written).
 
 --strict denies the first in-repo source Read once per session so the agent
 must query the graph first.`,
@@ -259,7 +259,7 @@ func cmdUninstall() *cobra.Command {
 macOS, Linux, and Windows. No source checkout is required.
 
 Removes:
-  - hooks, /so skill, MCP, and durable guidance for every
+  - hooks, /so skill, and durable guidance for every
     supported coding agent (Claude Code, Cursor, Codex, Gemini CLI,
     OpenCode, Copilot CLI, Pi)
   - project index (config dir)
@@ -322,7 +322,7 @@ Pass --cursor-rules to also write this repo's .cursor/rules/superopen.mdc.`,
 			}
 			ignorePath := filepath.Join(layout.Root, ".gitignore")
 			if _, err := os.Stat(ignorePath); os.IsNotExist(err) {
-				if err := os.WriteFile(ignorePath, soGitignoreContents(), 0o644); err != nil {
+				if err := os.WriteFile(ignorePath, soGitignoreContents, 0o644); err != nil {
 					return err
 				}
 			}
@@ -399,23 +399,5 @@ func cmdQuery() *cobra.Command {
 	return command
 }
 
-// soGitignoreContents prefers templates/so.gitignore when present in a source
-// checkout; installed binaries fall back to the same committed content.
-func soGitignoreContents() []byte {
-	candidates := []string{filepath.Join("templates", "so.gitignore")}
-	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(dir, "templates", "so.gitignore"),
-			filepath.Join(dir, "..", "templates", "so.gitignore"),
-			filepath.Join(dir, "..", "..", "templates", "so.gitignore"),
-		)
-	}
-	for _, candidate := range candidates {
-		data, err := os.ReadFile(candidate)
-		if err == nil && len(bytes.TrimSpace(data)) > 0 {
-			return data
-		}
-	}
-	return []byte("# Superopen machine-local data (do not commit).\nsessions/\ndb/\n")
-}
+// soGitignoreContents is written to .so/.gitignore on first `so init`.
+var soGitignoreContents = []byte("# Superopen machine-local data (do not commit).\nsessions/\ndb/\n")
