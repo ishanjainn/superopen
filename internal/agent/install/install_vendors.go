@@ -18,7 +18,7 @@ import (
 )
 
 // marketplaceFS holds the embedded Claude Code marketplace tree. The
-// contents are assembled by `cli/scripts/sync-plugins.sh` from the
+// contents are assembled by `scripts/sync-plugins.sh` from the
 // two repo-root sources (`.claude-plugin/marketplace.json` and
 // `plugins/<vendor>/`) into a single in-tree mirror so the CLI binary
 // is self-contained - users don't need to clone the repo to run

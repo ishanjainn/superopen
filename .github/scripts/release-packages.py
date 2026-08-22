@@ -1139,7 +1139,7 @@ class So < Formula
 
   def caveats
     <<~EOS
-      Run `so install` once to wire coding-agent hooks and MCP.
+      Run `so install` once to wire coding-agent hooks.
       Then in any repo: `so init` and `so dev`.
       `so dev` needs Node.js (already installed as a dependency).
     EOS

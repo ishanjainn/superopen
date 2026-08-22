@@ -13,7 +13,7 @@
 // `.cursor/rules/coding-agents-convention.mdc` §5). This adapter is
 // responsible for the hook path only; it stamps
 // `coding_agent.signal_source = "hook"` (via the resource attribute
-// set in `cli/internal/agent/export/exporter.go`) so the dual-path coalesce
+// set in `internal/agent/export/exporter.go`) so the dual-path coalesce
 // can tell them apart.
 package claudecode
 

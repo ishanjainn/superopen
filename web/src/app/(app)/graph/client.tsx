@@ -26,6 +26,7 @@ import {
   type SessionRailTool,
 } from "@/components/session-rail";
 import { StellarGraphScene } from "@/graph/StellarGraphScene";
+import { StageViewport } from "@/components/stage/StageViewport";
 import { DEFAULT_LABEL_COLOR, labelColor } from "@/graph/colors";
 import {
   DEFAULT_GRAPH_DISPLAY,
@@ -226,6 +227,9 @@ export default function GraphPage() {
   );
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
+  const [querySeeds, setQuerySeeds] = useState<{ qualified_name?: string }[]>(
+    [],
+  );
   const [querying, setQuerying] = useState(false);
   const [queryError, setQueryError] = useState("");
 
@@ -363,14 +367,29 @@ export default function GraphPage() {
   }, [data, enabledLabels, enabledEdges, enabledCommunities]);
 
   const highlightedIds = useMemo(() => {
-    if (!selected || !filteredData) return null;
+    if (!filteredData) return null;
+    if (querySeeds.length > 0) {
+      const qns = new Set(
+        querySeeds
+          .map((seed) => seed.qualified_name)
+          .filter((value): value is string => Boolean(value)),
+      );
+      if (qns.size > 0) {
+        const ids = new Set<number>();
+        for (const node of filteredData.nodes) {
+          if (qns.has(node.qualified_name)) ids.add(node.id);
+        }
+        if (ids.size > 0) return ids;
+      }
+    }
+    if (!selected) return null;
     const ids = new Set<number>([selected.id]);
     for (const edge of filteredData.edges) {
       if (edge.source === selected.id) ids.add(edge.target);
       if (edge.target === selected.id) ids.add(edge.source);
     }
     return ids;
-  }, [selected, filteredData]);
+  }, [selected, filteredData, querySeeds]);
 
   const connections = useMemo(() => {
     const empty = { outbound: [] as Connection[], inbound: [] as Connection[] };
@@ -443,14 +462,20 @@ export default function GraphPage() {
     if (!value) return;
     setQuerying(true);
     setQueryError("");
+    setQuerySeeds([]);
     try {
       const url = new URL("/api/graph/query", window.location.origin);
       url.searchParams.set("q", value);
       if (projectId) url.searchParams.set("project", projectId);
       const response = await fetch(url.toString());
-      const body = (await response.json()) as { answer?: string; error?: string };
+      const body = (await response.json()) as {
+        answer?: string;
+        error?: string;
+        seeds?: { qualified_name?: string }[];
+      };
       if (!response.ok) throw new Error(body.error || "Graph query failed");
       setAnswer(body.answer || "");
+      setQuerySeeds(Array.isArray(body.seeds) ? body.seeds : []);
     } catch (cause) {
       setQueryError(cause instanceof Error ? cause.message : "Graph query failed");
     } finally {
@@ -462,7 +487,19 @@ export default function GraphPage() {
   const shownEdges = filteredData?.edges.length ?? 0;
   const loaded = data?.nodes.length ?? 0;
   const total = data?.total_nodes ?? 0;
+  const clearAsk = useCallback(() => {
+    setQuestion("");
+    setAnswer("");
+    setQuerySeeds([]);
+    setQueryError("");
+  }, []);
+
   const closeTab = useCallback(() => setTab(null), []);
+
+  const dismissAsk = useCallback(() => {
+    clearAsk();
+    setTab(null);
+  }, [clearAsk]);
 
   const tools: SessionRailTool[] = [
     {
@@ -492,11 +529,14 @@ export default function GraphPage() {
     {
       id: "ask",
       label: "Ask",
-      hint: "Ask the graph a question in plain language",
+      hint: "Ask the native graph (so graph query — no LLM)",
       icon: Sparkles,
       active: tab === "ask",
       badge: answer ? "done" : null,
-      onClick: () => setTab((current) => (current === "ask" ? null : "ask")),
+      onClick: () => {
+        if (tab === "ask") dismissAsk();
+        else setTab("ask");
+      },
     },
     {
       id: "display",
@@ -609,7 +649,7 @@ export default function GraphPage() {
             className="rail-map-input"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search nodes…"
+            placeholder="Filter loaded nodes by name or path…"
             autoFocus
           />
         </div>
@@ -734,7 +774,7 @@ export default function GraphPage() {
     );
   } else if (tab === "ask") {
     panel = (
-      <SessionRailDrawer title="Ask the graph" onClose={closeTab}>
+      <SessionRailDrawer title="Ask the graph" onClose={dismissAsk}>
         <form className="graph-ask" onSubmit={queryGraph}>
           <div className="graph-ask-row">
             <input
@@ -757,7 +797,14 @@ export default function GraphPage() {
         {answer ? <pre className="graph-answer">{answer}</pre> : null}
         {!answer && !queryError ? (
           <p className="graph-note">
-            Answers come from the native graph - the same query the agents run.
+            Ask runs `so graph query` — the same native engine agents use. No
+            LLM. Empty means there were no seed nodes for that wording; try a
+            symbol or file path. Find only filters nodes already on the stage.
+          </p>
+        ) : null}
+        {answer && querySeeds.length === 0 ? (
+          <p className="graph-note">
+            No seed nodes. The engine does not stem or guess nearby names.
           </p>
         ) : null}
       </SessionRailDrawer>
@@ -823,22 +870,23 @@ export default function GraphPage() {
       <div className="map-root graph-root">
         <main className="app-frame">
           <section className="stage">
-            <div className="viewport">
+            <StageViewport className="viewport">
               {filteredData && filteredData.nodes.length > 0 ? (
                 <StellarGraphScene
-                  className="session-map session-map-night"
-                  stage="night"
+                  className="session-map"
                   data={filteredData}
                   highlightedIds={highlightedIds}
                   focusIds={highlightedIds}
                   showLabels={showLabels}
                   display={display}
                   onNodeClick={inspect}
-                  onBackgroundClick={() => setSelected(null)}
+                  onBackgroundClick={() => {
+                    setSelected(null);
+                    clearAsk();
+                    setTab((current) => (current === "ask" ? null : current));
+                  }}
                 />
               ) : null}
-
-              <div className="graph-grid" aria-hidden />
 
               <div className="hud">
                 <SessionRail
@@ -846,7 +894,7 @@ export default function GraphPage() {
                   aria-label="Graph rail"
                   tools={tools}
                   panel={panel}
-                  onClosePanel={closeTab}
+                  onClosePanel={tab === "ask" ? dismissAsk : closeTab}
                 >
                   <div className="tb-band">
                     <div className="tb-cell tb-shrink">
@@ -951,7 +999,7 @@ export default function GraphPage() {
               {!loading && !error && filteredData?.nodes.length === 0 ? (
                 <div className="map-status">Every node is filtered out.</div>
               ) : null}
-            </div>
+            </StageViewport>
           </section>
         </main>
       </div>

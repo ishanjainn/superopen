@@ -410,7 +410,7 @@ func TestCursorDurationAcceptsFractionalMillis(t *testing.T) {
 	payload := map[string]any{
 		"hook_event_name": "afterShellExecution",
 		"conversation_id": "cur-chat-float-duration",
-		"command":         "echo ok",
+		"command":         `so graph query "who wraps app"`,
 		"output":          "ok",
 		"duration":        863.843,
 	}
@@ -419,5 +419,8 @@ func TestCursorDurationAcceptsFractionalMillis(t *testing.T) {
 	}
 	if len(em.toolCalls) != 1 {
 		t.Fatalf("expected one tool call after float duration; got %d (parse used to drop the event)", len(em.toolCalls))
+	}
+	if em.toolCalls[0].FilePath != "" {
+		t.Fatalf("shell FilePath=%q, command must not be a path", em.toolCalls[0].FilePath)
 	}
 }

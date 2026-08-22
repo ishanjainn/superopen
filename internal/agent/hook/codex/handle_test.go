@@ -172,6 +172,18 @@ func TestCodexEndToEndOneTurn(t *testing.T) {
 	if llt.Response != lastMsg {
 		t.Errorf("llm.response: got %q want %q", llt.Response, lastMsg)
 	}
+	foundPrompt := false
+	for _, ev := range em.events {
+		if ev.Name != "coding_agent.user_prompt.submit" {
+			continue
+		}
+		if p, _ := ev.Attrs["gen_ai.prompt"].(string); p == "refactor sessionstate" {
+			foundPrompt = true
+		}
+	}
+	if !foundPrompt {
+		t.Fatal("UserPromptSubmit must stamp gen_ai.prompt for ingest")
+	}
 	// Tool calls + tool results are NOT folded onto the LLM-turn
 	// span - they live on the dedicated `coding_agent.tool.call`
 	// span (asserted above via em.toolCalls). Re-encoding them in
@@ -187,7 +199,7 @@ func TestEffectiveToolNameUnwrapsCodeMode(t *testing.T) {
 		{`const r = await tools.exec_command({cmd:"go test ./..."})`, "Bash"},
 		{`text(await tools.apply_patch(patch))`, "apply_patch"},
 		{`await tools.update_plan({plan: []})`, "Update plan"},
-		{`await tools.mcp__node_repl__js({code:"..."})`, "Browser"},
+		{`await tools.node_repl({code:"..."})`, "Browser"},
 	}
 	for _, tt := range tests {
 		raw, _ := json.Marshal(map[string]string{"code": tt.code})

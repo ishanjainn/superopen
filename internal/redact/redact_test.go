@@ -150,3 +150,15 @@ func TestJSONPrivateReplacementPreservesEnvelope(t *testing.T) {
 		}
 	}
 }
+
+func TestJSONKeepsVCSRevisionSHA(t *testing.T) {
+	sha := strings.Repeat("b", 40)
+	raw := []byte(`{"vcs.ref.head.revision":"` + sha + `","gen_ai.prompt":"rotate ` + ghPatFake + `"}`)
+	out := JSON(raw)
+	if !strings.Contains(string(out), sha) {
+		t.Fatalf("JSON scrubbed VCS SHA: %s", out)
+	}
+	if strings.Contains(string(out), ghPatFake) {
+		t.Fatalf("JSON left prompt secret: %s", out)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ishanjainn/superopen/internal/graph/engine"
+	"github.com/ishanjainn/superopen/internal/memory"
 )
 
 func TestIsExploreToolExcludesShellAndListing(t *testing.T) {
@@ -125,7 +126,85 @@ func TestSessionStartHasNoAdditionalContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	if text, _, ok := steerTextFor("claude-code", "SessionStart", payload); ok {
-		t.Fatalf("SessionStart must not inject always-on steer context, got %q", text)
+		t.Fatalf("empty store SessionStart must stay silent, got %q", text)
+	}
+}
+
+func TestMemoryPackNotOnSessionStart(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	id := "mem-pack-session"
+	writeHookSession(t, root, id)
+	payload, err := json.Marshal(map[string]any{"session_id": id, "cwd": root, "prompt": "login"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first, _, ok := steerTextFor("cursor", "sessionStart", payload); ok {
+		t.Fatalf("empty store sessionStart must stay silent, got %q", first)
+	}
+}
+
+func TestSessionStartIndexGraphFirstNoBodies(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	id := "mem-index-session"
+	writeHookSession(t, root, id)
+	body := "UNIQUE_BODY_PHRASE_DO_NOT_INJECT xyzzy-memory-body"
+	store, err := memory.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Capture(memory.CaptureInput{
+		Kind:  memory.KindSession,
+		Title: "JWT expiry is 15m",
+		Text:  body,
+		Topic: memory.ObservationDecision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	payload, err := json.Marshal(map[string]any{"session_id": id, "cwd": root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vendors := []struct {
+		vendor, event string
+	}{
+		{"claude-code", "SessionStart"},
+		{"cursor", "sessionStart"},
+		{"codex", "SessionStart"},
+		{"gemini", "sessionStart"},
+		{"copilot-cli", "sessionStart"},
+		{"opencode", "session.created"},
+		{"pi", "session_start"},
+	}
+	for _, tc := range vendors {
+		text, _, ok := steerTextFor(tc.vendor, tc.event, payload)
+		if !ok {
+			t.Fatalf("%s %s: expected SessionStart index", tc.vendor, tc.event)
+		}
+		if !strings.Contains(text, `so graph query "<question>"`) {
+			t.Fatalf("%s %s: first-line graph query missing: %q", tc.vendor, tc.event, text)
+		}
+		if !strings.HasPrefix(strings.TrimSpace(text), "Superopen: codebase questions") {
+			t.Fatalf("%s %s: must start graph-first, got %q", tc.vendor, tc.event, text)
+		}
+		if strings.Contains(text, body) {
+			t.Fatalf("%s %s: must not inject episode bodies: %q", tc.vendor, tc.event, text)
+		}
+		if memory.EstimateTokens(text) > 350 {
+			t.Fatalf("%s %s: index %d tokens over 350: %q", tc.vendor, tc.event, memory.EstimateTokens(text), text)
+		}
+		if strings.Contains(text, "so memory search") {
+			t.Fatalf("%s %s: index must not CTA search: %q", tc.vendor, tc.event, text)
+		}
+	}
+	if text, _, ok := steerTextFor("claude-code", "UserPromptSubmit", payload); ok {
+		t.Fatalf("UserPromptSubmit must stay silent even with memories, got %q", text)
+	}
+	if _, _, ok := steerTextFor("codex", "PreToolUse", []byte(`{"tool_name":"Grep","tool_input":{"pattern":"HandleRequest"},"cwd":"`+root+`","session_id":"`+id+`"}`)); ok {
+		t.Fatal("Codex PreToolUse must stay silent")
 	}
 }
 
@@ -171,20 +250,8 @@ func TestPreCompactInjectsWorkingSnapshotFailOpen(t *testing.T) {
 	if ev != "preCompact" && ok {
 		t.Fatalf("event=%s", ev)
 	}
-	_ = text
-}
-
-func TestMemoryPackNotOnSessionStart(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	root := t.TempDir()
-	id := "mem-pack-session"
-	writeHookSession(t, root, id)
-	payload, err := json.Marshal(map[string]any{"session_id": id, "cwd": root, "prompt": "login"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first, _, ok := steerTextFor("cursor", "sessionStart", payload); ok {
-		t.Fatalf("sessionStart must not inject Superopen context, got %q", first)
+	if ok && strings.Contains(text, "so memory search") {
+		t.Fatalf("preCompact must not CTA search: %q", text)
 	}
 }
 
@@ -328,6 +395,66 @@ func TestUserPromptSubmitHasNoAdditionalContext(t *testing.T) {
 	}
 	if text, _, ok := steerTextFor("codex", "UserPromptSubmit", payload); ok {
 		t.Fatalf("codex UserPromptSubmit must stay silent, got %q", text)
+	}
+}
+
+func TestPriorWorkCueInjectsIndex(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	id := "cue-session"
+	writeHookSession(t, root, id)
+	store, err := memory.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Capture(memory.CaptureInput{
+		Kind:  memory.KindSession,
+		Title: "JWT expiry is 15m",
+		Text:  "UNIQUE_CUE_BODY",
+		Topic: memory.ObservationDecision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	payload, err := json.Marshal(map[string]any{
+		"session_id": id,
+		"cwd":        root,
+		"prompt":     "what did we decide last time about JWT?",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("claude-code", "UserPromptSubmit", payload)
+	if !ok || !strings.Contains(text, "JWT expiry") {
+		t.Fatalf("cue should inject index lines, got ok=%v text=%q", ok, text)
+	}
+	if strings.Contains(text, "UNIQUE_CUE_BODY") {
+		t.Fatalf("cue must not inject bodies: %q", text)
+	}
+	cursorText, _, cursorOK := steerTextFor("cursor", "beforeSubmitPrompt", payload)
+	if !cursorOK || !strings.Contains(cursorText, "JWT expiry") {
+		t.Fatalf("cursor beforeSubmitPrompt cue failed: ok=%v text=%q", cursorOK, cursorText)
+	}
+}
+
+func TestSkillReadIsNotGraphGate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "skill-read")
+	payload, err := json.Marshal(map[string]any{
+		"tool_name":  "Read",
+		"tool_input": map[string]any{"file_path": root + "/.claude/skills/so/SKILL.md"},
+		"cwd":        root,
+		"session_id": "skill-read",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text, _, ok := steerTextFor("claude-code", "PreToolUse", payload); ok {
+		t.Fatalf("skill Read must not count as skipped graph, got %q", text)
+	}
+	if d, ok := steerDecisionFor("cursor", "beforeReadFile", "read", payload); ok && d.text != "" {
+		t.Fatalf("cursor skill beforeReadFile must stay silent, got %#v", d)
 	}
 }
 

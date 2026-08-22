@@ -33,8 +33,6 @@ type InstallReport struct {
 // Install installs coding-agent observability for the given vendors and the
 // user-global /so skill and durable graph-first guidance.
 // Hooks and skills are user-scoped (not cwd-dependent).
-// Superopen does not install MCP; leftover Superopen MCP entries are stripped
-// on uninstall.
 func Install(repoRoot string, vendors []string, opts Options) (InstallReport, error) {
 	_ = repoRoot
 	report := InstallReport{Hooks: map[string][]string{}}

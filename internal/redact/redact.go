@@ -61,6 +61,12 @@ func sanitizeJSONValue(value any) any {
 		return v
 	case map[string]any:
 		for key := range v {
+			if UnredactedAttr(key) {
+				if s, ok := v[key].(string); ok {
+					v[key] = s
+					continue
+				}
+			}
 			v[key] = sanitizeJSONValue(v[key])
 		}
 		return v
@@ -197,6 +203,18 @@ func StringFull(s string) string {
 		s = re.ReplaceAllString(s, Replacement)
 	}
 	return s
+}
+
+// UnredactedAttr is true for VCS revision/name keys. Git SHAs match the
+// tier-2 40-hex pattern; they must not become [REDACTED] at emit.
+func UnredactedAttr(key string) bool {
+	switch strings.TrimSpace(key) {
+	case "vcs.ref.head.revision", "vcs.ref.head.name", "vcs.ref.base.revision",
+		"coding_agent.git.commit.sha":
+		return true
+	default:
+		return false
+	}
 }
 
 // scrubExfilURLs redacts common paste/exfil hosts from captured telemetry.

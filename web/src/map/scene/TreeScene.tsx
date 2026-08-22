@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { touchWord, type SessionFile, type SessionMap, type Touch } from "../types";
+import { useThemeOptional } from "@/components/shell/theme-provider";
+import { useLatestRef } from "@/hooks/use-latest-ref";
+import { touchWord, type SessionFile, type SessionMap } from "../types";
 import type { FilePlayback } from "../playback/reducer";
 import { DirLabelSet } from "./dirLabels";
 import {
@@ -11,11 +13,11 @@ import {
   ensureVisible,
   fitDistance,
   focusOnPoint,
-  GROUND,
+  mapMarkColors,
   prefersReducedMotion,
+  preparePaperRenderer,
+  productStage,
   SceneTip,
-  SKY,
-  touchColors
 } from "./sceneUtils";
 import { computeTreeLayout, type TreeLayout } from "./treeLayout";
 import { fireflyTexture, haloTexture } from "./textures";
@@ -36,14 +38,14 @@ interface TreeSceneProps {
 // One variable, one channel: leaf color says WHAT happened (touch state),
 // halo radius says HOW MUCH (visits), branch brightness says WHERE the
 // light is, and the selection is a shape (ring + beam), never a recolor.
-const colors: Record<Touch | "unvisited" | "ghost" | "selected", THREE.Color> = {
-  unvisited: new THREE.Color("#5a6375"),
-  ghost: new THREE.Color("#4d5464"),
-  ...touchColors
-};
-// Dim skeleton against the night ground; lit paths brighten toward the leaf
-const EDGE_BASE = new THREE.Color("#3c424f");
-const EDGE_LIT = new THREE.Color("#7d8496");
+function branchPalette(dark: boolean) {
+  const pal = productStage(dark);
+  return {
+    base: pal.ink.clone().lerp(pal.surface, dark ? 0.55 : 0.4),
+    lit: pal.ink.clone(),
+  };
+}
+
 // White-hot walker: keeps the firefly apart from the warm touch colors
 const FIREFLY_HOT = new THREE.Color("#ffeeda");
 const LEAF_Y = 0.7;
@@ -65,6 +67,7 @@ const LABEL_Y = 1.8;
 const INSPECTOR_RESERVED_PX = 348;
 
 export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanvasReady }: TreeSceneProps) {
+  const dark = useThemeOptional()?.resolved !== "light";
   const hostRef = useRef<HTMLDivElement | null>(null);
   const leafMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const ghostMeshRef = useRef<THREE.InstancedMesh | null>(null);
@@ -88,8 +91,7 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
   const frameRef = useRef<number | null>(null);
   const reducedRef = useRef(false);
   // handlers live in the mount effect; they read playback through this ref
-  const playbackRef = useRef(playback);
-  playbackRef.current = playback;
+  const playbackRef = useLatestRef(playback);
   // camera fit deferred while the viewport reports no size (hidden pane,
   // background tab); resize retries it instead of leaving the camera at NaN
   const fitPendingRef = useRef<(() => boolean) | null>(null);
@@ -103,16 +105,18 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     reducedRef.current = reduced;
 
     const scene = new THREE.Scene();
-    scene.background = SKY;
+    scene.background = null;
+    scene.fog = null;
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(38, host.clientWidth / host.clientHeight || 1, 0.1, 2400);
     camera.position.set(60, 110, 90);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(host.clientWidth || 1, host.clientHeight || 1);
+    preparePaperRenderer(renderer);
     renderer.domElement.style.display = "block";
     renderer.domElement.style.width = "100%";
     renderer.domElement.style.height = "100%";
@@ -143,9 +147,9 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     host.addEventListener("wheel", onWheel, { passive: false });
     controlsRef.current = controls;
 
-    const sky = new THREE.HemisphereLight("#66779b", "#161922", 1.7);
+    const sky = new THREE.AmbientLight(0xffffff, dark ? 0.7 : 1);
     scene.add(sky);
-    const moon = new THREE.DirectionalLight("#b6c5de", 1.1);
+    const moon = new THREE.DirectionalLight(0xffffff, dark ? 0.55 : 0.35);
     moon.position.set(-60, 120, -40);
     scene.add(moon);
 
@@ -312,7 +316,7 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
       scene.clear();
       onCanvasReady?.(null);
     };
-  }, [onSelect, onCanvasReady]);
+  }, [onSelect, onCanvasReady, dark, playbackRef]);
 
   // grow the skeleton: ground, edges, leaves, labels
   useEffect(() => {
@@ -324,18 +328,9 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     radiiRef.current = new Map();
     if (!sessionMap || !layout) return;
 
+    const marks = mapMarkColors(dark);
     const group = new THREE.Group();
     const size = layout.radius * 2.3;
-
-    scene.fog = new THREE.Fog(SKY, size * 2.1, size * 4.2);
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(size * 6, size * 6),
-      new THREE.MeshStandardMaterial({ color: GROUND, roughness: 1 })
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.25;
-    group.add(ground);
 
     // branch skeleton, one segment soup with per-vertex colors
     const positions: number[] = [];
@@ -353,10 +348,11 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     edgeGeo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
     // seed dim skeleton so branches exist before the first playback tint
     const edgeColors = new Float32Array(positions.length);
+    const skeleton = branchPalette(dark).base;
     for (let i = 0; i < edgeColors.length; i += 3) {
-      edgeColors[i] = EDGE_BASE.r;
-      edgeColors[i + 1] = EDGE_BASE.g;
-      edgeColors[i + 2] = EDGE_BASE.b;
+      edgeColors[i] = skeleton.r;
+      edgeColors[i + 1] = skeleton.g;
+      edgeColors[i + 2] = skeleton.b;
     }
     edgeGeo.setAttribute("color", new THREE.BufferAttribute(edgeColors, 3));
     const edges = new THREE.LineSegments(
@@ -397,7 +393,7 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
       const scale = Math.min(0.24 + Math.sqrt(Math.max(file.lines, 1)) * 0.045, 1.05);
       matrix.compose(new THREE.Vector3(pos.x, LEAF_Y, pos.z), new THREE.Quaternion(), new THREE.Vector3(scale, scale, scale));
       leaves.setMatrixAt(file.id, matrix);
-      leaves.setColorAt(file.id, colors.unvisited);
+      leaves.setColorAt(file.id, marks.unvisited);
     }
     leaves.instanceMatrix.needsUpdate = true;
     if (leaves.instanceColor) leaves.instanceColor.needsUpdate = true;
@@ -422,7 +418,7 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
         const scale = Math.min(0.24 + Math.sqrt(Math.max(file.lines, 1)) * 0.045, 1.05) * 0.8;
         matrix.compose(new THREE.Vector3(pos.x, LEAF_Y, pos.z), new THREE.Quaternion(), new THREE.Vector3(scale, scale, scale));
         ghosts.setMatrixAt(i, matrix);
-        ghosts.setColorAt(i, colors.ghost);
+        ghosts.setColorAt(i, marks.ghost);
       }
       ghosts.instanceMatrix.needsUpdate = true;
       if (ghosts.instanceColor) ghosts.instanceColor.needsUpdate = true;
@@ -456,13 +452,13 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     // directory labels: screen-space LOD in the render loop decides which
     // of the biggest subtrees show their name. Drawn over the branches, or
     // pushing into the canopy hides the names behind the leaves in front.
-    labelSetRef.current = new DirLabelSet(layout.dirs, group, LABEL_Y, true);
+    labelSetRef.current = new DirLabelSet(layout.dirs, group, LABEL_Y, true, dark);
 
     const firefly = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: fireflyTexture(),
         color: FIREFLY_HOT,
-        blending: THREE.AdditiveBlending,
+        blending: THREE.NormalBlending,
         depthWrite: false,
         transparent: true,
         fog: false
@@ -476,7 +472,7 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     // selection is a shape, not a recolor: the ring + beam mark the leaf
     // while its touch color stays intact
     const selectionMat = new THREE.MeshBasicMaterial({
-      color: colors.selected,
+      color: marks.selected,
       transparent: true,
       opacity: 0.9,
       side: THREE.DoubleSide,
@@ -492,10 +488,10 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     const beam = new THREE.Mesh(
       new THREE.CylinderGeometry(0.05, 0.05, 6, 6, 1, true),
       new THREE.MeshBasicMaterial({
-        color: colors.selected,
+        color: marks.selected,
         transparent: true,
         opacity: 0.32,
-        blending: THREE.AdditiveBlending,
+        blending: THREE.NormalBlending,
         depthWrite: false,
         toneMapped: false,
         fog: false
@@ -507,6 +503,7 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     selectionRef.current = { ring, beam };
 
     const trail = new TrailRenderer(1.6);
+    trail.setDark(dark);
     trailRef.current = trail;
     group.add(trail.object);
 
@@ -549,7 +546,7 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
       fireflyRef.current = null;
       labelSetRef.current = null;
     };
-  }, [sessionMap, layout]);
+  }, [sessionMap, layout, dark]);
 
   // playback → leaf colors, halo targets, branch tinting
   useEffect(() => {
@@ -563,16 +560,17 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     const radii = radiiRef.current;
     const slots: HaloSlot[] = [];
     const present = new Set<number>();
+    const marks = mapMarkColors(dark);
     // directories on a path to a touched file - branches brighten as a
     // single neutral tone, classification stays on the leaves
     const litDirs = new Set<string>();
     for (const file of sessionMap.files) {
       const touch = playback.touchByFile.get(file.id);
-      let leafColor = file.ghost ? colors.ghost : colors.unvisited;
+      let leafColor = file.ghost ? marks.ghost : marks.unvisited;
       if (touch) {
-        leafColor = colors[touch];
+        leafColor = marks[touch];
         const visits = playback.visitsByFile.get(file.id) ?? 1;
-        slots.push({ fileId: file.id, target: haloRadius(visits), color: colors[touch] });
+        slots.push({ fileId: file.id, target: haloRadius(visits), color: marks[touch] });
         present.add(file.id);
         const parts = file.path.split("/");
         let path = "";
@@ -590,7 +588,7 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     }
     for (const [fileId, cur] of radii) {
       if (cur > 0.04 && !present.has(fileId)) {
-        slots.push({ fileId, target: 0, color: colors.unvisited });
+        slots.push({ fileId, target: 0, color: marks.unvisited });
       } else if (cur <= 0.04 && !present.has(fileId)) {
         radii.delete(fileId);
       }
@@ -603,6 +601,7 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     slotsRef.current = slots;
 
     // brighten branches that lead to light
+    const branches = branchPalette(dark);
     const colorAttr = edges.geometry.getAttribute("color") as THREE.BufferAttribute;
     let vertex = 0;
     for (const meta of edgeMetaRef.current) {
@@ -612,13 +611,13 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
       } else if (meta.childPath) {
         lit = litDirs.has(meta.childPath);
       }
-      const tinted = lit ? EDGE_LIT : EDGE_BASE;
+      const tinted = lit ? branches.lit : branches.base;
       for (let v = 0; v < meta.vertexCount; v++) {
         colorAttr.setXYZ(vertex++, tinted.r, tinted.g, tinted.b);
       }
     }
     colorAttr.needsUpdate = true;
-  }, [sessionMap, layout, playback]);
+  }, [sessionMap, layout, playback, dark]);
 
   // selection marker follows the selected leaf
   useEffect(() => {
@@ -688,5 +687,5 @@ export function TreeScene({ sessionMap, playback, selectedPath, onSelect, onCanv
     );
   }, [sessionMap, layout, playback]);
 
-  return <div className="session-map session-map-night" ref={hostRef} aria-label="Firefly tree" />;
+  return <div className="session-map" ref={hostRef} aria-label="Firefly tree" />;
 }

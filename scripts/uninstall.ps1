@@ -31,4 +31,4 @@ if (-not (Test-Path $bin)) {
 
 Write-So "Running: $bin uninstall $($args -join ' ')"
 & $bin uninstall @args
-Write-So "Restart your coding agent so it drops in-memory hooks and MCP."
+Write-So "Restart your coding agent so it drops in-memory hooks."

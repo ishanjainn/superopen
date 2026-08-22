@@ -14,7 +14,7 @@ import (
 //	-ldflags "-X github.com/ishanjainn/superopen/internal/version.Version=1.2.3"
 //
 // Keep the default in sync with /VERSION at the repo root.
-var Version = "0.4.0"
+var Version = "0.5.0"
 
 // Commit is the short commit SHA, set at build time via -ldflags.
 var Commit = ""

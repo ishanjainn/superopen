@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { useThemeOptional } from "@/components/shell/theme-provider";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 import { touchWord, type SessionFile, type SessionMap, type Touch } from "../types";
 import type { FilePlayback } from "../playback/reducer";
 import { DirLabelSet } from "./dirLabels";
@@ -12,11 +14,11 @@ import {
   ensureVisible,
   fitDistance,
   focusOnPoint,
-  GROUND,
+  mapMarkColors,
   prefersReducedMotion,
+  preparePaperRenderer,
+  productStage,
   SceneTip,
-  SKY,
-  touchColors
 } from "./sceneUtils";
 import { fireflyTexture } from "./textures";
 import { TrailRenderer } from "./trail";
@@ -32,15 +34,8 @@ interface TerrainSceneProps {
   locHeights?: boolean;
 }
 
-// Attention terrain: the map is a flat dark plain (fog of war); height is
-// earned by attention - touch depth × revisits - so mountains grow where the
-// walker lingered. Light is data: only touched terrain gets bright color.
-const colors: Record<Touch | "unvisited" | "ghost" | "selected", THREE.Color> = {
-  unvisited: new THREE.Color("#5b6372"),
-  ghost: new THREE.Color("#404551"),
-  ...touchColors
-};
-
+// Attention terrain: height is earned by attention. Unvisited tiles match
+// product ink on the shared paper, not a separate grey/blue floor.
 const TILE_H = 0.14;
 const LABEL_Y = 2.4;
 // the inspector docks on the right; selection pans the camera clear of it
@@ -69,23 +64,24 @@ function locHeight(t: number): number {
 
 // LOC tier ramp: yellow → orange → pink
 const LOC_RAMP: { at: number; color: THREE.Color }[] = [
-  { at: 0.0, color: new THREE.Color("#5b6372") },
+  { at: 0.35, color: new THREE.Color("#eab308") },
   { at: 0.35, color: new THREE.Color("#eab308") },
   { at: 0.7, color: new THREE.Color("#f97316") },
   { at: 1.0, color: new THREE.Color("#ec4899") }
 ];
 
-function locColor(t: number): THREE.Color {
-  for (let i = 1; i < LOC_RAMP.length; i++) {
-    if (t <= LOC_RAMP[i].at) {
-      const lo = LOC_RAMP[i - 1];
-      const hi = LOC_RAMP[i];
+function locColor(t: number, rest: THREE.Color): THREE.Color {
+  const ramp = [{ at: 0, color: rest }, ...LOC_RAMP];
+  for (let i = 1; i < ramp.length; i++) {
+    if (t <= ramp[i].at) {
+      const lo = ramp[i - 1];
+      const hi = ramp[i];
       const span = hi.at - lo.at;
       const k = span > 0 ? (t - lo.at) / span : 0;
       return lo.color.clone().lerp(hi.color, k);
     }
   }
-  return LOC_RAMP[LOC_RAMP.length - 1].color.clone();
+  return ramp[ramp.length - 1].color.clone();
 }
 
 interface TerrainSlot {
@@ -95,6 +91,7 @@ interface TerrainSlot {
 }
 
 export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onCanvasReady, locHeights }: TerrainSceneProps) {
+  const dark = useThemeOptional()?.resolved !== "light";
   const hostRef = useRef<HTMLDivElement | null>(null);
   const tileMeshRef = useRef<THREE.InstancedMesh | null>(null);
   const terrainMeshRef = useRef<THREE.InstancedMesh | null>(null);
@@ -113,8 +110,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
   const reducedRef = useRef(false);
   const boundsRef = useRef({ cx: 0, cz: 0, size: 120 });
   // handlers live in the mount effect; they read playback through this ref
-  const playbackRef = useRef(playback);
-  playbackRef.current = playback;
+  const playbackRef = useLatestRef(playback);
   // camera fit deferred while the viewport reports no size (hidden pane,
   // background tab); resize retries it instead of leaving the camera at NaN
   const fitPendingRef = useRef<(() => boolean) | null>(null);
@@ -147,16 +143,18 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     reducedRef.current = reduced;
 
     const scene = new THREE.Scene();
-    scene.background = SKY;
+    scene.background = null;
+    scene.fog = null;
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(38, host.clientWidth / host.clientHeight || 1, 0.1, 2400);
     camera.position.set(70, 130, 100);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(host.clientWidth || 1, host.clientHeight || 1);
+    preparePaperRenderer(renderer);
     renderer.domElement.style.display = "block";
     renderer.domElement.style.width = "100%";
     renderer.domElement.style.height = "100%";
@@ -186,9 +184,9 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     host.addEventListener("wheel", onWheel, { passive: false });
     controlsRef.current = controls;
 
-    const sky = new THREE.HemisphereLight("#66779b", "#161922", 1.7);
+    const sky = new THREE.AmbientLight(0xffffff, dark ? 0.7 : 1);
     scene.add(sky);
-    const moon = new THREE.DirectionalLight("#b6c5de", 1.1);
+    const moon = new THREE.DirectionalLight(0xffffff, dark ? 0.55 : 0.35);
     moon.position.set(-60, 120, -40);
     scene.add(moon);
 
@@ -340,7 +338,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
       scene.clear();
       onCanvasReady?.(null);
     };
-  }, [onSelect, onCanvasReady]);
+  }, [onSelect, onCanvasReady, dark, playbackRef]);
 
   // build the plain: ground, grid, district plates, flat file tiles
   useEffect(() => {
@@ -352,18 +350,9 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     boundsRef.current = bounds;
     if (!sessionMap || sessionMap.files.length === 0) return;
 
+    const pal = productStage(dark);
     const group = new THREE.Group();
     const size = bounds.size;
-
-    scene.fog = new THREE.Fog(SKY, size * 2.1, size * 4.2);
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(size * 6, size * 6),
-      new THREE.MeshStandardMaterial({ color: GROUND, roughness: 1 })
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.32;
-    group.add(ground);
 
     const plateDirs = sessionMap.dirs.filter((dir) => dir.depth <= 3 && dir.rect.w > 0 && dir.rect.d > 0);
     if (plateDirs.length > 0) {
@@ -385,7 +374,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
           new THREE.Vector3(dir.rect.w, height, dir.rect.d)
         );
         plates.setMatrixAt(i, matrix);
-        shade.set("#1a1f29").lerp(new THREE.Color("#252b37"), Math.min(dir.depth, 3) / 3);
+        shade.copy(pal.plateLo).lerp(pal.plateHi, Math.min(dir.depth, 3) / 3);
         plates.setColorAt(i, shade);
       });
       plates.instanceMatrix.needsUpdate = true;
@@ -405,10 +394,11 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
       const z = file.rect.z + file.rect.d / 2 - bounds.cz;
       matrix.compose(new THREE.Vector3(x, TILE_H / 2, z), new THREE.Quaternion(), new THREE.Vector3(sx, TILE_H, sz));
       tiles.setMatrixAt(file.id, matrix);
-      tiles.setColorAt(file.id, baseColor(file));
+      tiles.setColorAt(file.id, baseColor(file, dark));
     }
     tiles.instanceMatrix.needsUpdate = true;
     if (tiles.instanceColor) tiles.instanceColor.needsUpdate = true;
+    tiles.renderOrder = 1;
     tileMeshRef.current = tiles;
     group.add(tiles);
 
@@ -421,6 +411,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     terrain.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(sessionMap.files.length * 3), 3);
     terrain.count = 0;
     terrain.frustumCulled = false;
+    terrain.renderOrder = 2;
     terrainMeshRef.current = terrain;
     group.add(terrain);
 
@@ -439,14 +430,15 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
         })),
       group,
       LABEL_Y,
-      true
+      true,
+      dark,
     );
 
     const firefly = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: fireflyTexture(),
         color: EMBER,
-        blending: THREE.AdditiveBlending,
+        blending: THREE.NormalBlending,
         depthWrite: false,
         transparent: true,
       })
@@ -457,6 +449,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     group.add(firefly);
 
     const trail = new TrailRenderer(1.4);
+    trail.setDark(dark);
     trailRef.current = trail;
     group.add(trail.object);
 
@@ -501,7 +494,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
       fireflyRef.current = null;
       labelSetRef.current = null;
     };
-  }, [sessionMap, bounds]);
+  }, [sessionMap, bounds, dark]);
 
   // playback → terrain targets and colors
   useEffect(() => {
@@ -512,6 +505,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     const heights = heightsRef.current;
     const slots: TerrainSlot[] = [];
     const present = new Set<number>();
+    const marks = mapMarkColors(dark);
     // static map mode: no session drives attention, so raise every column by
     // its lines of code instead of leaving the terrain flat
     const maxLog = locHeights
@@ -520,19 +514,19 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     for (const file of sessionMap.files) {
       const touch = playback.touchByFile.get(file.id);
       const selected = file.path === selectedPath;
-      tiles.setColorAt(file.id, selected ? colors.selected : baseColor(file));
+      tiles.setColorAt(file.id, selected ? marks.selected : baseColor(file, dark));
       if (touch) {
         const visits = playback.visitsByFile.get(file.id) ?? 1;
-        let color = colors[touch];
-        if (file.ghost) color = color.clone().lerp(colors.ghost, 0.45);
-        if (selected) color = colors.selected;
+        let color = marks[touch];
+        if (file.ghost) color = color.clone().lerp(marks.ghost, 0.45);
+        if (selected) color = marks.selected;
         slots.push({ fileId: file.id, target: attentionHeight(touch, visits), color });
         present.add(file.id);
       } else if (locHeights) {
         const t = locFraction(file.lines, maxLog);
-        let color = locColor(t);
-        if (file.ghost) color = color.lerp(colors.ghost, 0.45);
-        if (selected) color = colors.selected;
+        let color = locColor(t, marks.unvisited);
+        if (file.ghost) color = color.lerp(marks.ghost, 0.45);
+        if (selected) color = marks.selected;
         slots.push({ fileId: file.id, target: locHeight(t), color });
         present.add(file.id);
       }
@@ -540,7 +534,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     // let columns that just went dark shrink back into the plain
     for (const [fileId, cur] of heights) {
       if (cur > 0.04 && !present.has(fileId)) {
-        slots.push({ fileId, target: 0, color: colors.unvisited });
+        slots.push({ fileId, target: 0, color: marks.unvisited });
       } else if (cur <= 0.04 && !present.has(fileId)) {
         heights.delete(fileId);
       }
@@ -551,7 +545,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     if (terrain.instanceColor) terrain.instanceColor.needsUpdate = true;
     if (tiles.instanceColor) tiles.instanceColor.needsUpdate = true;
     slotsRef.current = slots;
-  }, [sessionMap, playback, selectedPath, locHeights]);
+  }, [sessionMap, playback, selectedPath, locHeights, dark]);
 
   // the inspector opens over the right edge; pan the selected tile clear of it
   useEffect(() => {
@@ -612,7 +606,7 @@ export function TerrainScene({ sessionMap, playback, selectedPath, onSelect, onC
     );
   }, [sessionMap, playback, bounds]);
 
-  return <div className="session-map session-map-night" ref={hostRef} aria-label="Attention terrain" />;
+  return <div className="session-map" ref={hostRef} aria-label="Attention terrain" />;
 }
 
 // Columns must read as phosphorescence, not paint: glow pools at the crest and
@@ -632,14 +626,15 @@ function attentionColumnGeometry(): THREE.BoxGeometry {
   return geo;
 }
 
-function baseColor(file: SessionFile): THREE.Color {
-  if (file.ghost) return colors.ghost;
+function baseColor(file: SessionFile, dark: boolean): THREE.Color {
+  const marks = mapMarkColors(dark);
+  if (file.ghost) return marks.ghost;
   let h = 2166136261;
   for (let i = 0; i < file.path.length; i++) {
     h = Math.imul(h ^ file.path.charCodeAt(i), 16777619);
   }
   const jitter = ((h >>> 0) % 1000) / 1000 - 0.5;
-  return colors.unvisited.clone().offsetHSL(0, 0, jitter * 0.05);
+  return marks.unvisited.clone().offsetHSL(0, 0, jitter * 0.05);
 }
 
 function centerFor(file: SessionFile, bounds: { cx: number; cz: number }): THREE.Vector3 {

@@ -29,6 +29,7 @@ Rules:
 - For codebase questions, first run `+"`so graph query \"<question>\"`"+` when `+"`.so/db/so.db`"+` exists. Use `+"`so graph snippet \"<qn>\"`"+` for a known symbol and `+"`so graph trace \"<qn>\"`"+` for callers. These return a scoped subgraph, usually much smaller than raw grep output.
 - Do not spawn Explore/Agent for codebase questions; run `+"`so graph query`"+` in this session. If you do spawn a subagent, it must run `+"`so graph query`"+` first.
 - Only Grep/Read source after the graph has oriented you, or to modify/debug specific lines.
+- Prior-work questions use `+"`so memory search`"+` then `+"`so graph query`"+` / snippet of files named; do not grep transcripts or treat session `+"`learned:`"+` as authority.
 
 Graph builds are local (no LLM). Live refresh runs on session boundaries and while `+"`so dev`"+` is up (~60s poll).
 `) + "\n"
@@ -59,7 +60,7 @@ func CursorRule() string {
 	return strings.TrimSpace(`
 If this workspace has no `+"`.so/`"+` directory, ignore Superopen entirely: do not run `+"`so`"+`, do not load the `+"`/so`"+` skill, and do not run `+"`so init`"+` unless the user explicitly asks.
 
-If `+"`.so/`"+` exists, query the graph first (`+"`so graph query`"+`) before Grep/Read. This applies to you and to every subagent you spawn. Do not skip the graph by spawning Explore.
+If `+"`.so/`"+` exists, query the graph first (`+"`so graph query`"+`) before Grep/Read. This applies to you and to every subagent you spawn. Do not skip the graph by spawning Explore. Prior-work questions use `+"`so memory search`"+` then `+"`so graph query`"+`; memory is hints, not authority.
 `) + "\n"
 }
 

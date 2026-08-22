@@ -74,6 +74,9 @@ func (s *Store) queryExpandBFS(
 				return nil, err
 			}
 			for _, item := range neighbors {
+				if skipDataLanguageVariable(item.node) && !seedIDs[item.node.ID] {
+					continue
+				}
 				if item.edge.ID != 0 && !seenEdges[item.edge.ID] {
 					seenEdges[item.edge.ID] = true
 					if edges != nil {
@@ -145,8 +148,24 @@ func formatQueryNodeLine(hit queryNodeHit, communityByID map[int64]string) strin
 	if community == "" {
 		community = packagePrefix(hit.node.QualifiedName)
 	}
-	return fmt.Sprintf("NODE %s [src=%s loc=L%d community=%s]\n",
-		queryNodeDisplayName(hit.node), hit.node.Location.File, hit.node.Location.StartLine, community)
+	qnField := ""
+	if qn := strings.TrimSpace(hit.node.QualifiedName); qn != "" && hit.node.Label != "File" && hit.node.Label != "Folder" {
+		qnField = "qn=" + qn + " "
+	}
+	return fmt.Sprintf("NODE %s [%ssrc=%s loc=%s community=%s]\n",
+		queryNodeDisplayName(hit.node), qnField, hit.node.Location.File, queryNodeLoc(hit.node), community)
+}
+
+func queryNodeLoc(node api.Node) string {
+	start := node.Location.StartLine
+	end := node.Location.EndLine
+	if start <= 0 {
+		return "-"
+	}
+	if end > start {
+		return fmt.Sprintf("L%d-%d", start, end)
+	}
+	return fmt.Sprintf("L%d", start)
 }
 
 func applyQueryBudget(header, body string, seedCount int, ordered []queryNodeHit, communityByID map[int64]string, budget, maxChars int) (string, bool) {
@@ -180,12 +199,12 @@ func applyQueryBudget(header, body string, seedCount int, ordered []queryNodeHit
 		totalEdges := strings.Count(output, "EDGE ")
 		estTokens := len(output) / queryCharsPerToken
 		return fmt.Sprintf(
-			"[i] Complete answer over budget: all %d nodes and %d edges shown (~%d tokens vs the requested ~%d-token budget). Edges are never dropped once every node fits — this is already the full answer. Run `so graph snippet <qualified_name>` on a NODE below. Do not raise --budget and do not pipe through head/tail.\n\n%s",
+			"[i] Complete answer over budget: all %d nodes and %d edges shown (~%d tokens vs the requested ~%d-token budget). Edges are never dropped once every node fits — this is already the full answer. Run `so graph snippet <qn>` on a NODE below, or narrow the question. Do not pipe through head/tail.\n\n%s",
 			totalNodes, totalEdges, estTokens, budget, output,
 		), false
 	}
 	output = fmt.Sprintf(
-		"[!] TRUNCATED: showing %d of %d nodes (~%d-token budget). The answer may be among the %d cut nodes — raise the token budget (CLI: --budget) or narrow the question. Read a NODE src= path, or run `so graph snippet <qualified_name>` for a known symbol.\n\n%s\n... (%d more nodes omitted.)",
+		"[!] TRUNCATED: showing %d of %d nodes (~%d-token budget). The answer may be among the %d cut nodes — run `so graph snippet <qn>` from a NODE below, or narrow the question. Read a NODE src= path for the file.\n\n%s\n... (%d more nodes omitted.)",
 		shownNodes, totalNodes, budget, cutCount, output[:cutAt], cutCount,
 	)
 	return output, true

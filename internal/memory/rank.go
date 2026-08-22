@@ -16,6 +16,7 @@ const (
 	cosineWeight       = 0.6
 	centralityWeight   = 0.4
 	shapeFusionW       = 0.25
+	pinWeight          = 0.35
 	recallBudgetTok    = 1500
 )
 
@@ -24,23 +25,29 @@ type scoredHit struct {
 	stale bool
 }
 
-func applyStaleDownweight(hits []Hit, stale map[int64]bool, historical bool) []Hit {
+func applyStaleDownweight(hits []Hit, stale map[int64]bool, historical bool, weight float64) []Hit {
 	if historical {
 		return hits
+	}
+	if weight <= 0 {
+		weight = staleDownweight
 	}
 	now := time.Now().UTC()
 	for i := range hits {
 		if !stale[hits[i].ID] && !expired(hits[i].ValidTo, now) {
 			continue
 		}
-		hits[i].Score *= staleDownweight
+		hits[i].Score *= weight
 	}
 	return hits
 }
 
-func applySupersedeCap(hits []Hit, outgoing map[int64][]int64, stale map[int64]bool, historical bool) []Hit {
+func applySupersedeCap(hits []Hit, outgoing map[int64][]int64, stale map[int64]bool, historical bool, window int) []Hit {
 	if historical || len(outgoing) == 0 || len(hits) == 0 {
 		return hits
+	}
+	if window <= 0 {
+		window = supersedeCapWindow
 	}
 	now := time.Now().UTC()
 	byID := map[int64]*Hit{}
@@ -50,12 +57,12 @@ func applySupersedeCap(hits []Hit, outgoing map[int64][]int64, stale map[int64]b
 	for round := 0; round < len(hits); round++ {
 		ordered := append([]Hit(nil), hits...)
 		sortHits(ordered)
-		window := supersedeCapWindow
-		if window > len(ordered) {
-			window = len(ordered)
+		win := window
+		if win > len(ordered) {
+			win = len(ordered)
 		}
 		top := map[int64]struct{}{}
-		for _, h := range ordered[:window] {
+		for _, h := range ordered[:win] {
 			top[h.ID] = struct{}{}
 		}
 		changed := false

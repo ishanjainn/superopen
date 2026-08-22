@@ -178,7 +178,7 @@ func parseSyntaxFile(ctx context.Context, parser SyntaxParser, root, project, re
 	}
 	record := FileRecord{
 		Project: project, Path: filepath.ToSlash(rel), SHA256: fileContentDigest(body),
-		Size: int64(len(body)), Language: detection.Language,
+		Size: int64(len(body)), Language: detection.Language, LineCount: countBodyLines(body),
 	}
 	if info, statErr := os.Stat(abs); statErr == nil {
 		record.MTimeNS = info.ModTime().UnixNano()
@@ -205,7 +205,7 @@ func parseSyntaxFile(ctx context.Context, parser SyntaxParser, root, project, re
 			coverage: &api.CoverageRow{Path: record.Path, Kind: "parse", Detail: err.Error()},
 		}
 	}
-	parsed := &ParsedSyntaxFile{File: record, Detection: detection, Extraction: extraction}
+	parsed := &ParsedSyntaxFile{File: record, Detection: detection, Extraction: extraction, Body: body}
 	result := syntaxOutcome{file: parsed, generation: generation}
 	if extraction.Partial {
 		result.coverage = &api.CoverageRow{Path: record.Path, Kind: "parse_partial", Detail: "Tree-sitter recovered a partial syntax tree"}
@@ -257,7 +257,7 @@ func parseObjectScriptExport(ctx context.Context, parser SyntaxParser, record Fi
 		combined.Partial = combined.Partial || extraction.Partial
 	}
 	sortSyntaxFacts(&combined)
-	parsed := &ParsedSyntaxFile{File: record, Detection: detection, Extraction: combined}
+	parsed := &ParsedSyntaxFile{File: record, Detection: detection, Extraction: combined, Body: body}
 	result := syntaxOutcome{file: parsed, generation: generation}
 	if combined.Partial {
 		result.coverage = &api.CoverageRow{Path: record.Path, Kind: "parse_partial", Detail: "Tree-sitter recovered a partial transcoded syntax tree"}

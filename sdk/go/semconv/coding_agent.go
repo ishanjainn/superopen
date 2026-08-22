@@ -162,36 +162,9 @@ const (
 	CodingAgentToolGroupType = "coding_agent.tool.group.type"
 )
 
-// MCP server attribution.
-const (
-	// CodingAgentMCPServerName is the MCP server identifier.
-	CodingAgentMCPServerName = "coding_agent.mcp.server.name"
-	// CodingAgentMCPScope is one of: user | project | local | enterprise.
-	CodingAgentMCPScope = "coding_agent.mcp.scope"
-	// CodingAgentMCPTransport is one of: stdio | sse | streamable_http.
-	CodingAgentMCPTransport = "coding_agent.mcp.transport"
-	// CodingAgentMCPSource is one of: builtin | plugin | marketplace.
-	CodingAgentMCPSource = "coding_agent.mcp.source"
-)
-
-const (
-	CodingAgentMCPScopeUser       = "user"
-	CodingAgentMCPScopeProject    = "project"
-	CodingAgentMCPScopeLocal      = "local"
-	CodingAgentMCPScopeEnterprise = "enterprise"
-
-	CodingAgentMCPTransportStdio          = "stdio"
-	CodingAgentMCPTransportSSE            = "sse"
-	CodingAgentMCPTransportStreamableHTTP = "streamable_http"
-
-	CodingAgentMCPSourceBuiltin     = "builtin"
-	CodingAgentMCPSourcePlugin      = "plugin"
-	CodingAgentMCPSourceMarketplace = "marketplace"
-)
-
 // VCS bridging - repo / branch / commit live under OTel's standard
 // `vcs.*` attributes (see Reuse note at top of file), stamped on the
-// session root from local git context by `cli/internal/agent/git`.
+// session root from local git context by `internal/agent/git`.
 // The constants below cover what OTel doesn't define.
 const (
 	// CodingAgentVCSDirty indicates the working tree has uncommitted changes
@@ -286,7 +259,6 @@ const (
 	CodingAgentEventLoopDetected    = "coding_agent.loop.detected"
 	CodingAgentEventSubagentSpawned = "coding_agent.subagent.spawned"
 	CodingAgentEventSubagentDone    = "coding_agent.subagent.completed"
-	CodingAgentEventMCPInvoked      = "coding_agent.mcp.tool.invoked"
 )
 
 // Metric names - additions on top of gen_ai.* metrics.

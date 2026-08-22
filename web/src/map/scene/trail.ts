@@ -28,14 +28,11 @@ export class TrailRenderer {
     geometry.setAttribute("position", this.positions);
     geometry.setAttribute("color", this.colors);
     geometry.setDrawRange(0, 0);
-    // Additive over the opaque night stage: overlapping arcs pile up into
-    // brighter light instead of flat strokes. This requires the scene to
-    // clear opaque - on a transparent canvas additive writes ~0 alpha and
-    // the arcs disappear at composite time.
+    // Normal blending so strokes keep alpha on the shared transparent paper.
     const material = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending,
       depthWrite: false,
       fog: false,
       toneMapped: false,
@@ -43,6 +40,12 @@ export class TrailRenderer {
     this.object = new THREE.LineSegments(geometry, material);
     this.object.frustumCulled = false;
     this.object.renderOrder = 12;
+  }
+
+  setDark(_dark: boolean) {
+    const material = this.object.material as THREE.LineBasicMaterial;
+    material.blending = THREE.NormalBlending;
+    material.needsUpdate = true;
   }
 
   // points are the recent fixations, oldest first, y already at arc height

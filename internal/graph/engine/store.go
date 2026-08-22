@@ -187,12 +187,13 @@ type ProjectRecord struct {
 }
 
 type FileRecord struct {
-	Project  string
-	Path     string
-	SHA256   string
-	MTimeNS  int64
-	Size     int64
-	Language string
+	Project   string
+	Path      string
+	SHA256    string
+	MTimeNS   int64
+	Size      int64
+	Language  string
+	LineCount int
 }
 
 func OpenWritable(path string) (*Store, error) {
@@ -766,7 +767,13 @@ func (s *Store) searchFTS(ctx context.Context, req api.SearchRequest, limit int,
 		where = append(where, "n.file_path LIKE ? ESCAPE '\\'")
 		args = append(args, escapeLike(filepath.ToSlash(req.PathPrefix))+"%")
 	}
-	where = append(where, "n.label NOT IN ('File','Folder','Module','Section','Variable','Project')")
+	where = append(where, "n.label NOT IN ('File','Folder','Module','Section','Project')")
+	where = append(where, `NOT (n.label = 'Variable' AND (
+		lower(n.file_path) LIKE '%.json' OR lower(n.file_path) LIKE '%.json5' OR
+		lower(n.file_path) LIKE '%.yaml' OR lower(n.file_path) LIKE '%.yml' OR
+		lower(n.file_path) LIKE '%.toml' OR lower(n.file_path) LIKE '%.ini' OR
+		lower(n.file_path) LIKE '%.hcl' OR lower(n.file_path) LIKE '%.properties'
+	))`)
 	if req.FilePattern != "" {
 		fileLike := globToLike(req.FilePattern)
 		if !strings.ContainsAny(req.FilePattern, "*?") {

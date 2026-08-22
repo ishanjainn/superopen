@@ -207,3 +207,31 @@ func TestIsRealClaudeCodeInvocation(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldFinalizeOnlySessionEnd(t *testing.T) {
+	if !shouldFinalize("sessionEnd") || !shouldFinalize("SessionEnd") {
+		t.Fatal("sessionEnd/SessionEnd must finalize")
+	}
+	for _, ev := range []string{"stop", "Stop", "sessionStart", "SessionStart", "beforeSubmitPrompt", "UserPromptSubmit"} {
+		if shouldFinalize(ev) {
+			t.Fatalf("%s must not finalize", ev)
+		}
+	}
+}
+
+func TestShouldIngestPromptNotStop(t *testing.T) {
+	for _, ev := range []string{"beforeSubmitPrompt", "UserPromptSubmit", "userPromptSubmitted"} {
+		if !shouldIngestPrompt(ev) {
+			t.Fatalf("%s must ingest this session", ev)
+		}
+	}
+	if shouldIngestPrompt("stop") || shouldIngestPrompt("Stop") || shouldIngestPrompt("sessionEnd") {
+		t.Fatal("stop/sessionEnd must not per-prompt ingest")
+	}
+	if !shouldIngestBackfill("sessionStart") || !shouldIngestBackfill("SessionStart") {
+		t.Fatal("SessionStart must backfill")
+	}
+	if shouldIngestBackfill("stop") {
+		t.Fatal("stop must not backfill")
+	}
+}

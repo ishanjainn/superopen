@@ -50,6 +50,87 @@ func noisyCapture(text string) bool {
 			return true
 		}
 	}
+	return dumpCapture(s)
+}
+
+func dumpCapture(text string) bool {
+	s := strings.TrimSpace(text)
+	s = strings.TrimLeft(s, "\u200b\ufeff")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if strings.HasPrefix(s, "```") {
+		return true
+	}
+	body := "\n" + s
+	return strings.Count(body, "\nNODE ") >= 3 || strings.Count(body, "\nEDGE ") >= 3
+}
+
+func unwrapCapture(text string) string {
+	s := strings.TrimSpace(text)
+	for i := 0; i < 8; i++ {
+		next := stripCaptureEnvelope(s)
+		if next == s {
+			return strings.TrimSpace(s)
+		}
+		s = strings.TrimSpace(next)
+	}
+	return s
+}
+
+func stripCaptureEnvelope(s string) string {
+	s = strings.TrimSpace(s)
+	prefixes := []string{
+		"<system-reminder>",
+		"<command-message>",
+		"<command-name>",
+		"<task-notification>",
+		"Base directory for this skill:",
+	}
+	for _, p := range prefixes {
+		if !strings.HasPrefix(s, p) {
+			continue
+		}
+		if strings.HasPrefix(p, "<") && strings.HasSuffix(p, ">") {
+			name := strings.TrimSuffix(strings.TrimPrefix(p, "<"), ">")
+			close := "</" + name + ">"
+			if i := strings.Index(strings.ToLower(s), strings.ToLower(close)); i >= 0 {
+				return strings.TrimSpace(s[i+len(close):])
+			}
+			if j := strings.Index(s, "\n\n"); j >= 0 {
+				return strings.TrimSpace(s[j+2:])
+			}
+			return ""
+		}
+		if j := strings.Index(s, "\n\n"); j >= 0 {
+			return strings.TrimSpace(s[j+2:])
+		}
+		if j := strings.Index(s, "\n"); j >= 0 {
+			return strings.TrimSpace(s[j+1:])
+		}
+		return ""
+	}
+	return s
+}
+
+func packFingerprint(text string) bool {
+	s := strings.TrimSpace(text)
+	if s == "" {
+		return false
+	}
+	if strings.Contains(s, "Fetch: memory_get") || strings.Contains(s, "Fetch: so memory get") {
+		return true
+	}
+	if strings.HasPrefix(s, "Superopen: codebase questions") {
+		return true
+	}
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Working:") || strings.HasPrefix(line, "MEM #") {
+			return true
+		}
+	}
 	return false
 }
 

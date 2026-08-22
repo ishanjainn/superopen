@@ -45,10 +45,9 @@ const LABEL_BOX_PX = 44;
 const LABEL_PAD_X = 14;
 
 /**
- * Directory names for the night stage: light type over a dark halo, so a name
- * holds up against the black sky and against a lit column underneath it.
+ * Directory names: light type on a dark halo (night) or ink on a light halo (paper).
  */
-export function labelTexture(text: string): { texture: THREE.Texture; aspect: number } {
+export function labelTexture(text: string, dark = true): { texture: THREE.Texture; aspect: number } {
   const font = `650 ${LABEL_FONT_PX}px "Inter var", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif`;
   const measure = document.createElement("canvas").getContext("2d")!;
   measure.font = font;
@@ -68,9 +67,9 @@ export function labelTexture(text: string): { texture: THREE.Texture; aspect: nu
   ctx.lineJoin = "round";
   ctx.miterLimit = 2;
   ctx.lineWidth = 5;
-  ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+  ctx.strokeStyle = dark ? "rgba(0, 0, 0, 0.85)" : "rgba(255, 255, 255, 0.92)";
   ctx.strokeText(text, width / 2, height / 2);
-  ctx.fillStyle = "rgba(250, 250, 250, 0.97)";
+  ctx.fillStyle = dark ? "rgba(250, 250, 250, 0.97)" : "rgba(23, 23, 23, 0.96)";
   ctx.fillText(text, width / 2, height / 2);
   const texture = new THREE.CanvasTexture(canvas);
   // Labels are always minified toward their screen-size target, so trilinear

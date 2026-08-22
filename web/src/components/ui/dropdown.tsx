@@ -77,12 +77,8 @@ export function Dropdown({
   }, [options.length]);
 
   useLayoutEffect(() => {
-    if (!open) {
-      setPos(null);
-      return;
-    }
+    if (!open) return;
     updatePos();
-    // Re-measure once after paint so real menu height is known.
     const id = requestAnimationFrame(() => updatePos());
     return () => cancelAnimationFrame(id);
   }, [open, updatePos, options.length]);

@@ -39,6 +39,8 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/identity"
 	"github.com/ishanjainn/superopen/internal/agent/normalize"
 	"github.com/ishanjainn/superopen/internal/agent/sessionstate"
+	"github.com/ishanjainn/superopen/internal/cli"
+	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/redact"
 	"github.com/ishanjainn/superopen/internal/session/agentlinks"
 	"github.com/spf13/cobra"
@@ -473,9 +475,95 @@ func run(cmd *cobra.Command, vendor, event, kind string) (rerr error) {
 	// Graph-first nudge on supported control-plane events. Fail-open: never
 	// block the host if stdout JSON cannot be written.
 	emitSteerContext(vendor, event, kind, capturedPayload)
+	maybeFinalizeSession(event, capturedPayload)
+	maybeIngestMemory(event, capturedPayload)
 
 	// Always succeed back to the agent.
 	return nil
+}
+
+func shouldFinalize(event string) bool {
+	switch strings.TrimSpace(event) {
+	case "sessionEnd", "SessionEnd":
+		return true
+	default:
+		return false
+	}
+}
+
+func maybeFinalizeSession(event string, payload []byte) {
+	if !shouldFinalize(event) {
+		return
+	}
+	sid := strings.TrimSpace(steerSessionID(payload))
+	if sid == "" {
+		return
+	}
+	root := hookRepoRoot(payload)
+	if root == "" {
+		return
+	}
+	cli.SpawnSO(root, "--root", root, "sessions", "finalize", sid)
+}
+
+func maybeIngestMemory(event string, payload []byte) {
+	root := hookRepoRoot(payload)
+	if root == "" {
+		return
+	}
+	sid := strings.TrimSpace(steerSessionID(payload))
+	switch {
+	case shouldIngestPrompt(event):
+		if sid == "" {
+			return
+		}
+		cli.SpawnSO(root, "--root", root, "memory", "ingest", sid)
+	case shouldIngestBackfill(event):
+		args := []string{"--root", root, "memory", "ingest", "--backfill"}
+		if sid != "" {
+			args = append(args, "--current", sid)
+		}
+		cli.SpawnSO(root, args...)
+	}
+}
+
+func shouldIngestPrompt(event string) bool {
+	switch strings.TrimSpace(event) {
+	case "beforeSubmitPrompt", "UserPromptSubmit", "userPromptSubmitted",
+		"user_prompt_submit", "beforeAgent", "before_agent_start", "BeforeAgent":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldIngestBackfill(event string) bool {
+	switch strings.TrimSpace(event) {
+	case "sessionStart", "SessionStart":
+		return true
+	default:
+		return false
+	}
+}
+
+func hookRepoRoot(payload []byte) string {
+	root := graphRoot(payload)
+	if root != "" {
+		return root
+	}
+	start := strings.TrimSpace(peekContext(payload).CWD)
+	if start == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+		start = wd
+	}
+	found, err := paths.FindRoot(start)
+	if err != nil || found == "" {
+		return ""
+	}
+	return found
 }
 
 // canonicalVendor folds the various vendor aliases the plugin manifests

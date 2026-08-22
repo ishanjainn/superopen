@@ -146,6 +146,10 @@ var table = []entry{
 		rate:  Rate{InputPer1M: 1.25, OutputPer1M: 10.00, CachedReadPer1M: 0.125},
 	},
 	{
+		match: []string{"grok-4.6", "grok-4-6"},
+		rate:  Rate{InputPer1M: 2.00, OutputPer1M: 6.00, CachedReadPer1M: 0.50},
+	},
+	{
 		match: []string{"grok-4.5", "grok-4-5"},
 		rate:  Rate{InputPer1M: 2.00, OutputPer1M: 6.00, CachedReadPer1M: 0.50},
 	},

@@ -279,7 +279,7 @@ func vendorDestRoot(vendor string) (string, error) {
 }
 
 // stripGeminiHooks removes only Superopen-owned commands from the shared
-// Gemini settings file. User themes, models, MCP servers, and foreign hooks
+// Gemini settings file. User themes, models, and foreign hooks
 // must survive uninstall.
 func stripGeminiHooks(path string, dryRun bool) (string, error) {
 	body, err := os.ReadFile(path)

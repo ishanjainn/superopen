@@ -5,15 +5,15 @@
 .map-root {
   color-scheme: light;
 
-  --sky: #ffffff;
-  --panel: #ffffff;
-  --panel-raised: #fafafa;
-  --hairline: #e5e5e5;
-  --hairline-strong: #d4d4d4;
+  --sky: rgb(var(--color-white));
+  --panel: rgb(var(--color-white));
+  --panel-raised: rgb(var(--color-neutral-50));
+  --hairline: rgb(var(--color-neutral-200));
+  --hairline-strong: rgb(var(--color-neutral-300));
 
-  --ink: #171717;
-  --muted: #525252;
-  --faint: #737373;
+  --ink: rgb(var(--color-neutral-900));
+  --muted: rgb(var(--color-neutral-600));
+  --faint: rgb(var(--color-neutral-500));
 
   --text-xs: 0.75rem;
   --text-sm: 0.9rem;
@@ -38,21 +38,12 @@
     sans-serif;
   --font-body: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 
-  --grid-line: rgb(0 0 0 / 0.04);
-
-  /* 3D stage only - theme-independent, see .session-map-night. Black is the
-     dark theme's --sky, so the stage matches the graph surface. */
-  --stage: #000000;
-  --stage-ink: #a3a3a3;
+  --grid-line: rgb(var(--color-neutral-900) / 0.08);
+  --stage: rgb(var(--color-white));
+  --stage-ink: rgb(var(--color-neutral-600));
 
   color: var(--ink);
-  /* Square paper grid shared with the graph surface. */
-  background-color: var(--sky);
-  background-image:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 28px 28px;
-  background-position: -1px -1px;
+  background-color: rgb(var(--color-white));
   font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.45;
@@ -65,18 +56,10 @@
 html.dark .map-root {
   color-scheme: dark;
 
-  --sky: #000000;
-  --panel: #0a0a0a;
-  --panel-raised: #111111;
-  --hairline: #262626;
-  --hairline-strong: #404040;
-
-  --ink: #fafafa;
-  --muted: #a3a3a3;
-  --faint: #737373;
-
-  --act-exec: #737373;
-  --grid-line: rgb(255 255 255 / 0.06);
+  --panel-raised: rgb(var(--color-neutral-100));
+  --hairline: rgb(var(--color-neutral-200));
+  --hairline-strong: rgb(var(--color-neutral-300));
+  --act-exec: rgb(var(--color-neutral-500));
 }
 
 .map-root *,
@@ -139,6 +122,7 @@ html.dark .map-root {
   position: relative;
   flex: 1;
   min-height: 0;
+  background: transparent;
 }
 
 .session-map {
@@ -148,25 +132,7 @@ html.dark .map-root {
   touch-action: none;
   cursor: grab;
   outline: none;
-  /* Graph keeps a transparent canvas so the paper grid reads through. */
   background: transparent;
-}
-
-/* The session stage is an opaque night map in both app themes: additive
-   light (jump arcs, walker) only accumulates on a dark buffer, and touched
-   files only read as lit against unlit surroundings. Painting the host too
-   keeps resizes and the first frame from flashing the page through. */
-.session-map-night {
-  background: #000;
-}
-
-.viewport:has(.session-map-night) {
-  background: #000;
-}
-
-.viewport:has(.session-map-night) .map-status {
-  background: color-mix(in oklab, var(--stage) 78%, transparent);
-  color: var(--stage-ink);
 }
 
 .session-map:active {
@@ -178,20 +144,6 @@ html.dark .map-root {
   width: 100% !important;
   height: 100% !important;
   touch-action: none;
-}
-
-/* Screen-space square grid on the black stage. No mix-blend: screen
-   washed the 3D scene (terrain looked translucent, black went grey). */
-.graph-grid {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  background-image:
-    linear-gradient(rgb(255 255 255 / 0.07) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(255 255 255 / 0.07) 1px, transparent 1px);
-  background-size: 28px 28px;
-  background-position: -1px -1px;
 }
 
 /* ---------- session rail ---------- */

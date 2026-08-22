@@ -36,10 +36,14 @@ func (s *Store) Capture(in CaptureInput) (Episode, error) {
 		Source:    in.Source,
 		Title:     title,
 		Text:      text,
-		Files:     in.Files,
+		Files:     normalizeFiles(in.Files),
 		ToolName:  in.ToolName,
 		Pinned:    in.Pin,
 		Tokens:    EstimateTokens(title + " " + text),
+		Topic:     strings.TrimSpace(in.Topic),
+		Facts:     in.Facts,
+		Narrative: strings.TrimSpace(in.Narrative),
+		Concepts:  in.Concepts,
 	}
 	id, _, err := s.storeEpisode(ep)
 	if err != nil {

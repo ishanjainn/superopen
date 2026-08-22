@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, FolderGit2, TriangleAlert } from "lucide-react";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
 import { useProject } from "@/components/shell/project-context";
@@ -28,11 +28,79 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [busyId, setBusyId] = useState("");
+  const [sessionHours, setSessionHours] = useState("168");
+  const [memoryHours, setMemoryHours] = useState("168");
+  const [retentionLoaded, setRetentionLoaded] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<{
     id: string;
     label: string;
   } | null>(null);
   const [confirmName, setConfirmName] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const r = await fetch("/api/settings/retention");
+          const body = (await r.json()) as {
+            session_hours?: number;
+            memory_hours?: number;
+          };
+          if (!r.ok) return;
+          setSessionHours(String(body.session_hours ?? 168));
+          setMemoryHours(String(body.memory_hours ?? 168));
+          setRetentionLoaded(true);
+        } catch {
+          setRetentionLoaded(true);
+        }
+      })();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const saveRetention = useCallback(async (apply: boolean) => {
+    setBusyId("retention");
+    setError("");
+    setStatus("");
+    try {
+      const r = await fetch("/api/settings/retention", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          session_hours: Number(sessionHours),
+          memory_hours: Number(memoryHours),
+          apply,
+        }),
+      });
+      const body = (await r.json().catch(() => ({}))) as {
+        error?: string;
+        session_hours?: number;
+        memory_hours?: number;
+        sessions_deleted?: string[];
+        memories_deleted?: number;
+      };
+      if (!r.ok) throw new Error(body.error || "save failed");
+      setSessionHours(String(body.session_hours ?? sessionHours));
+      setMemoryHours(String(body.memory_hours ?? memoryHours));
+      if (apply) {
+        const sessions = Array.isArray(body.sessions_deleted)
+          ? body.sessions_deleted.length
+          : 0;
+        const memories = Number(body.memories_deleted ?? 0);
+        setStatus(
+          sessions === 0 && memories === 0
+            ? "Saved. Nothing was old enough to delete."
+            : `Saved. Deleted ${sessions} session(s) and ${memories} memor${memories === 1 ? "y" : "ies"}.`,
+        );
+      } else {
+        setStatus("Saved. New sessions and memories will follow these hours.");
+      }
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusyId("");
+    }
+  }, [sessionHours, memoryHours]);
 
   const removeProject = useCallback(async () => {
     if (!removeTarget || confirmName.trim() !== removeTarget.label) return;
@@ -132,6 +200,60 @@ export default function SettingsPage() {
                   {option.label}
                 </button>
               ))}
+            </div>
+          </section>
+
+          <section className="rounded border border-neutral-200 p-4">
+            <h2 className="font-medium text-neutral-900">Retention</h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              Auto-delete old session transcripts and unpinned memories.
+              Hours, default 168 (7 days). 0 keeps that store forever.
+              Teachings, pins, and the code graph are never deleted by age.
+              Checkpoints live inside session folders.
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className="block text-xs text-neutral-600">
+                Sessions (hours)
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  disabled={!retentionLoaded || busyId === "retention"}
+                  value={sessionHours}
+                  onChange={(event) => setSessionHours(event.target.value)}
+                  className="mt-1.5 w-full rounded border border-neutral-300 px-2 py-1.5 font-mono text-xs outline-none focus:border-neutral-500"
+                />
+              </label>
+              <label className="block text-xs text-neutral-600">
+                Memories (hours)
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  disabled={!retentionLoaded || busyId === "retention"}
+                  value={memoryHours}
+                  onChange={(event) => setMemoryHours(event.target.value)}
+                  className="mt-1.5 w-full rounded border border-neutral-300 px-2 py-1.5 font-mono text-xs outline-none focus:border-neutral-500"
+                />
+              </label>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busyId === "retention"}
+                onClick={() => void saveRetention(false)}
+                className="rounded border border-neutral-200 px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                disabled={busyId === "retention"}
+                onClick={() => void saveRetention(true)}
+                className="rounded border border-neutral-200 px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+              >
+                Save and delete now
+              </button>
             </div>
           </section>
 

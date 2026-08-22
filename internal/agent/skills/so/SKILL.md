@@ -27,7 +27,7 @@ __SO_BIN__ graph query "<question>"
 
 Answer from NODE/EDGE lines and their `src=` paths. Read those files to edit or debug specific lines. Grep only after query has oriented you, or for a literal string the graph does not index.
 
-If a NODE line already names the symbol, use `so graph snippet "<qualified_name>"` for the body or `so graph trace "<qn>"` for callers/callees. Do not start a `so graph search` spray after a truncated query — raise `--budget` or narrow the question instead.
+If a NODE line already names the symbol, use `so graph snippet "<qualified_name>"` for the body or `so graph trace "<qn>"` for callers/callees. After a truncated query, run `so graph snippet "<qn>"` from a NODE above or narrow the question — do not start a `so graph search` spray.
 
 Do not initialize a repository because `.so/` is missing.
 

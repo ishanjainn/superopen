@@ -20,7 +20,7 @@ func cmdOpen() *cobra.Command {
 		Short: "Open the local Superopen UI",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			path := "/sessions"
+			path := "/graph"
 			if len(args) == 1 {
 				selected := strings.Trim(strings.TrimSpace(args[0]), "/")
 				if selected != "sessions" && selected != "graph" {
@@ -212,7 +212,7 @@ func startNextUI(repoRoot string, port int, hot bool) (*exec.Cmd, string, error)
 	url := fmt.Sprintf("http://127.0.0.1:%d", port)
 	deadline := time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
-		if response, err := http.Get(url + "/sessions"); err == nil {
+		if response, err := http.Get(url + "/graph"); err == nil {
 			_ = response.Body.Close()
 			if response.StatusCode < 500 {
 				return command, url, nil

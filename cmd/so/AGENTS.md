@@ -20,14 +20,13 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). Graph output: [../graph/AGENTS
 |-------|-----------|
 | Default output | **Compact text**; `--json` opt-in |
 | Primary discovery | **`graph query`** first; search secondary |
-| MCP | Not in default install |
 
 Do not revert to JSON-first without explicit product decision.
 
 ## Commands
 
 ```text
-so init | install | uninstall | dev | projects
+so init | install | uninstall | dev | projects | gc
 so graph build | refresh | query | search | snippet | trace | …
 so memory search | get | capture | …
 so sessions list | show | finalize | …
@@ -42,7 +41,7 @@ Wiring: `graph_cmd.go`, `graph_native_cli.go` → `internal/graph/client`.
 2. Update `internal/cli` and `format/*` if output shape changes.
 3. `go test ./internal/cli/ ./cmd/so/...`
 
-Dogfood: `sh scripts/install.sh`, then `so init` in **another** repo — [docs/local-build.md](../../docs/local-build.md).
+Dogfood: `sh scripts/install.sh`, then `so init` in **another** repo — [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ## Change checklist
 

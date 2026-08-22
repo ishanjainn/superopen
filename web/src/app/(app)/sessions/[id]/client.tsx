@@ -8,7 +8,7 @@ import SessionTimeline, { type SessionMeta, type Span } from "@/components/sessi
 import FeaturePageHeader, { FeatureBackLink } from "@/components/shell/feature-page-header";
 import { useBreadcrumbCrumb } from "@/components/shell/breadcrumb-context";
 import { useProject } from "@/components/shell/project-context";
-import "./session-split.css";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 
 const MapView = dynamic(() => import("@/map"), {
   ssr: false,
@@ -113,7 +113,10 @@ function SessionDetail() {
   );
 
   useEffect(() => {
-    void load();
+    const timer = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [load]);
 
   const onVisibleAt = useCallback((at: number) => {
@@ -143,8 +146,7 @@ function SessionDetail() {
     }, 80);
   }, []);
 
-  const chatPctRef = useRef(50);
-  chatPctRef.current = chatPct;
+  const chatPctRef = useLatestRef(chatPct);
 
   const onSplitPointer = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const gutter = event.currentTarget;
@@ -173,7 +175,7 @@ function SessionDetail() {
     };
     gutter.addEventListener("pointermove", onMove);
     gutter.addEventListener("pointerup", onUp);
-  }, []);
+  }, [chatPctRef]);
 
   if (loading) {
     return (

@@ -1,5 +1,6 @@
 import { Ellipsis, Loader, Pause, Play, RotateCcw, StepBack, StepForward, Video } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 import type { Action, Mark, Trace, TraceEvent } from "../types";
 
 interface TimelineProps {
@@ -58,23 +59,18 @@ export function Timeline({
   const seq = Math.min(currentSeq, max);
   const event = trace?.events[seq];
 
-  useEffect(() => {
+  const [traceSeen, setTraceSeen] = useState(trace);
+  if (trace !== traceSeen) {
+    setTraceSeen(trace);
     setPlaying(false);
-  }, [trace]);
+  }
+  if (exporting && playing) {
+    setPlaying(false);
+  }
 
-  // while a video export is recording, the recorder owns the playhead - force
-  // playback off so the Timeline timer can't fight it for currentSeq
-  useEffect(() => {
-    if (exporting) setPlaying(false);
-  }, [exporting]);
-
-  // the timer and shortcuts read position via refs so ticking doesn't tear them down
-  const seqRef = useRef(seq);
-  const maxRef = useRef(max);
-  const playingRef = useRef(playing);
-  seqRef.current = seq;
-  maxRef.current = max;
-  playingRef.current = playing;
+  const seqRef = useLatestRef(seq);
+  const maxRef = useLatestRef(max);
+  const playingRef = useLatestRef(playing);
 
   useEffect(() => {
     if (!playing || total === 0 || exporting) return;
@@ -89,12 +85,12 @@ export function Timeline({
       onChange(Math.min(seqRef.current + step, maxRef.current));
     }, interval);
     return () => window.clearInterval(timer);
-  }, [playing, speed, total, onChange, exporting]);
+  }, [playing, speed, total, onChange, exporting, seqRef, maxRef]);
 
   const togglePlay = useCallback(() => {
     if (!playingRef.current && seqRef.current >= maxRef.current) onChange(0);
     setPlaying((v) => !v);
-  }, [onChange]);
+  }, [onChange, playingRef, seqRef, maxRef]);
 
   const cycleSpeed = useCallback(() => {
     setSpeed((s) => SPEEDS[(SPEEDS.indexOf(s) + 1) % SPEEDS.length]);
@@ -104,7 +100,7 @@ export function Timeline({
     (delta: number) => {
       onChange(Math.min(maxRef.current, Math.max(0, seqRef.current + delta)));
     },
-    [onChange]
+    [onChange, maxRef, seqRef]
   );
 
   const jumpEvent = useCallback(
@@ -117,7 +113,7 @@ export function Timeline({
         }
       }
     },
-    [trace, onChange]
+    [trace, onChange, seqRef]
   );
 
   const markSeqs = useMemo(() => {
@@ -131,7 +127,7 @@ export function Timeline({
       const next = dir === 1 ? markSeqs.find((s) => s > cur) : [...markSeqs].reverse().find((s) => s < cur);
       if (next !== undefined) onChange(next);
     },
-    [markSeqs, onChange]
+    [markSeqs, onChange, seqRef]
   );
 
   // playback shortcuts; scene and rail keep their own (⌘B lives in App).
@@ -181,14 +177,13 @@ export function Timeline({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [trace, exporting, togglePlay, step, onChange, cycleSpeed, jumpEvent, jumpMark]);
+  }, [trace, exporting, togglePlay, step, onChange, cycleSpeed, jumpEvent, jumpMark, maxRef]);
 
   // transport + scrubber are inert with no trace, or while an export owns the playhead
   const locked = total === 0 || exporting;
-
-  useEffect(() => {
-    if (locked) setMenuOpen(false);
-  }, [locked]);
+  if (locked && menuOpen) {
+    setMenuOpen(false);
+  }
 
   useEffect(() => {
     if (!menuOpen) return;

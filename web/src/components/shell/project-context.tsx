@@ -7,11 +7,11 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { getUIPref, setUIPref } from "@/lib/ui-prefs";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 
 export type Project = {
   id: string;
@@ -52,8 +52,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [projectId, setProjectIdState] = useState("");
   const [currentSlug, setCurrentSlug] = useState("");
   const [ready, setReady] = useState(false);
-  const projectIdRef = useRef(projectId);
-  projectIdRef.current = projectId;
+  const projectIdRef = useLatestRef(projectId);
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -140,7 +139,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     return () => {
       window.fetch = original;
     };
-  }, []);
+  }, [projectIdRef]);
 
   const setProjectId = useCallback((id: string) => {
     const selected = id === "all" ? "" : id;

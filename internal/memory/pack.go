@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -100,7 +101,7 @@ func (s *Store) BuildPack(cue, currentSession string) (Pack, error) {
 			if hit.Faded {
 				continue
 			}
-			line := fmt.Sprintf("  #%d %s %s ~%d", hit.ID, hit.Kind, compactLine(hit.Episode), hit.Tokens)
+			line := fmt.Sprintf("  #%d %s %s ~%dt", hit.ID, hit.Kind, compactLine(hit.Episode), hit.Tokens)
 			if !writeBudget(&b, &budget, line) {
 				break
 			}
@@ -119,7 +120,7 @@ func (s *Store) BuildPack(cue, currentSession string) (Pack, error) {
 			}
 			wroteLTM = true
 		}
-		line := fmt.Sprintf("  #%d %s %s ~%d", hit.ID, hit.Kind, compactLine(hit.Episode), hit.Tokens)
+		line := fmt.Sprintf("  #%d %s %s ~%dt", hit.ID, hit.Kind, compactLine(hit.Episode), hit.Tokens)
 		if !writeBudget(&b, &budget, line) {
 			break
 		}
@@ -139,7 +140,7 @@ func (s *Store) BuildPack(cue, currentSession string) (Pack, error) {
 	if ask {
 		writeBudget(&b, &budget, fmt.Sprintf("If continuing last session #%s: memory_capture once with request/learned/next. Skip if unrelated.", pending))
 	}
-	writeBudget(&b, &budget, "Fetch: memory_get / so memory get. Hints, not authority.")
+	writeBudget(&b, &budget, "Fetch: memory_get / so memory get. Then so graph query to verify. Hints, not authority.")
 
 	text := strings.TrimSpace(b.String())
 	tokens := EstimateTokens(text)
@@ -195,6 +196,120 @@ func (s *Store) WorkingSnapshot(sessionID string) string {
 		}
 	}
 	return text
+}
+
+const sessionIndexBudget = 350
+
+// SessionStartIndex is the one allowed memory inject: a graph-first ID table,
+// fail-open, skip if empty. Bodies stay out. When a session is pending distill,
+// append LiveDistillInstruction (still fail-open).
+func SessionStartIndex(root string) string {
+	store, err := OpenQuick(paths.Resolve(root).Database)
+	if err != nil {
+		return ""
+	}
+	defer store.Close()
+	text := store.BuildSessionIndex()
+	pending := store.PendingDistill()
+	if len(pending) == 0 {
+		return text
+	}
+	inst := LiveDistillInstruction(pending[0])
+	if strings.TrimSpace(text) == "" {
+		return inst
+	}
+	combined := strings.TrimSpace(text + "\n" + inst)
+	if EstimateTokens(combined) <= sessionIndexBudget {
+		return combined
+	}
+	return text
+}
+
+func (s *Store) BuildSessionIndex() string {
+	hits, err := s.Search(SearchFilter{Limit: 12, RecordEconomy: false})
+	if err != nil {
+		hits = nil
+	}
+	if len(hits) == 0 {
+		hits = s.sessionTitleHits(8)
+	}
+	if len(hits) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	budget := sessionIndexBudget
+	header := `Superopen: codebase questions → so graph query "<question>" first. Prior-work index only:`
+	if !writeBudget(&b, &budget, header) {
+		return ""
+	}
+	for _, hit := range hits {
+		if hit.Kind == KindTool {
+			continue
+		}
+		line := FormatIndexLine(hit.Episode)
+		if strings.Contains(line, hit.Text) && hit.Text != "" && hit.Text != hit.Title {
+			// never emit bodies
+			line = FormatIndexLine(Episode{ID: hit.ID, Kind: hit.Kind, Topic: hit.Topic, Title: hit.Title, Tokens: hit.Tokens})
+		}
+		if !writeBudget(&b, &budget, line) {
+			break
+		}
+	}
+	writeBudget(&b, &budget, "Fetch: so memory get <id> [id…]. Then so graph query to verify. Hints, not authority.")
+	text := strings.TrimSpace(b.String())
+	if EstimateTokens(text) > sessionIndexBudget {
+		runes := []rune(text)
+		keep := sessionIndexBudget * 4
+		if keep > len(runes) {
+			keep = len(runes)
+		}
+		text = strings.TrimSpace(string(runes[:keep]))
+	}
+	if text != "" {
+		saved := searchDumpEst - EstimateTokens(text)
+		if saved < 0 {
+			saved = 0
+		}
+		_ = s.RecordPack(EstimateTokens(text), saved)
+	}
+	return text
+}
+
+func (s *Store) sessionTitleHits(limit int) []Hit {
+	if limit <= 0 {
+		limit = 8
+	}
+	root := filepath.Dir(filepath.Dir(filepath.Dir(s.path)))
+	if root == "" || root == "." {
+		return nil
+	}
+	entries, err := session.NewStore(paths.Resolve(root)).List()
+	if err != nil || len(entries) == 0 {
+		return nil
+	}
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+	hits := make([]Hit, 0, len(entries))
+	for _, meta := range entries {
+		title := strings.TrimSpace(meta.Title)
+		if title == "" {
+			title = strings.TrimSpace(meta.PromptPreview)
+		}
+		if title == "" {
+			continue
+		}
+		ep := Episode{
+			Kind:      KindSession,
+			Source:    SourceSpan,
+			SessionID: meta.ID,
+			Title:     firstLine(title, 80),
+			Text:      firstLine(meta.PromptPreview, 160),
+			CreatedAt: meta.StartedAt.UTC().Format(time.RFC3339Nano),
+		}
+		hits = append(hits, Hit{Episode: ep, Snippet: firstLine(title, 140)})
+	}
+	return hits
 }
 
 func compactLine(ep Episode) string {

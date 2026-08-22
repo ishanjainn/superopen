@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect } from "react";
+import { useLatestRef } from "./use-latest-ref";
 
 /**
  * Soft-poll while the tab is visible so session views
@@ -11,15 +12,14 @@ export function useSoftPoll(
   intervalMs = 8000,
   enabled = true
 ) {
-  const fn = useRef(refresh);
-  fn.current = refresh;
+  const fn = useLatestRef(refresh);
 
   const tick = useCallback(() => {
     if (typeof document !== "undefined" && document.visibilityState === "hidden") {
       return;
     }
     void fn.current();
-  }, []);
+  }, [fn]);
 
   useEffect(() => {
     if (!enabled) return;

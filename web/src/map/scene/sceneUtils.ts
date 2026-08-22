@@ -1,13 +1,53 @@
 import * as THREE from "three";
 import type { Touch } from "../types";
 
-// Shared scene vocabulary. The stage is a night map in both app themes:
-// additive light (arcs, firefly) only survives compositing on an opaque dark
-// buffer, and touched files only read as "lit" against unlit surroundings.
-// Black matches --sky in the dark theme, so the stage reads the same as the
-// graph surface whichever view you are on.
-export const SKY = new THREE.Color("#000000");
-export const GROUND = new THREE.Color("#0a0a0a");
+export type StagePalette = {
+  surface: THREE.Color;
+  ink: THREE.Color;
+  plateLo: THREE.Color;
+  plateHi: THREE.Color;
+};
+
+/** Same RGB as `globals.css` `--color-white` / `--color-neutral-900`. */
+export function productStage(dark: boolean): StagePalette {
+  const surface = dark ? new THREE.Color(0x0a0a0a) : new THREE.Color(0xffffff);
+  const ink = dark ? new THREE.Color(0xfafafa) : new THREE.Color(0x171717);
+  return {
+    surface,
+    ink,
+    plateLo: surface.clone(),
+    plateHi: surface.clone().lerp(ink, dark ? 0.08 : 0.05),
+  };
+}
+
+/** Resting map marks: product ink on the paper, not a separate grey/blue floor. */
+export function mapRestingColors(dark: boolean): {
+  unvisited: THREE.Color;
+  ghost: THREE.Color;
+  selected: THREE.Color;
+} {
+  const pal = productStage(dark);
+  return {
+    unvisited: pal.ink.clone().lerp(pal.surface, dark ? 0.55 : 0.42),
+    ghost: pal.ink.clone().lerp(pal.surface, dark ? 0.7 : 0.58),
+    selected: pal.ink.clone(),
+  };
+}
+
+export function mapMarkColors(dark: boolean): Record<
+  Touch | "unvisited" | "ghost" | "selected",
+  THREE.Color
+> {
+  return { ...touchColors, ...mapRestingColors(dark) };
+}
+
+/** Transparent WebGL so `.stage-backdrop` (fill + grid) shows through empty pixels. */
+export function preparePaperRenderer(renderer: THREE.WebGLRenderer) {
+  renderer.setClearColor(0x000000, 0);
+  renderer.setClearAlpha(0);
+  renderer.autoClear = true;
+  renderer.domElement.style.background = "transparent";
+}
 
 /** Jump arcs + walker glow - warm orange (middle of yellow→pink ramp). */
 export const EMBER = new THREE.Color("#f97316");
