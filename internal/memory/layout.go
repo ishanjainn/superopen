@@ -49,17 +49,20 @@ func (s *Store) Layout(maxNodes int) (api.LayoutResult, error) {
 			topicIndex[comm] = ti
 			nextTopic++
 		}
-		angle := hash01(ep.UID+"a") * 2 * math.Pi
-		radius := 40 + float64(ti)*28 + hash01(ep.UID+"r")*18
-		z := (hash01(ep.UID+"z") - 0.5) * 40
+		// 3D galaxy cluster (same camera as the code graph): topic as a
+		// longitude slice, hash for latitude and radius jitter.
+		theta := hash01(ep.UID+"t")*2*math.Pi + float64(ti)*0.85
+		phi := (hash01(ep.UID+"p") - 0.5) * math.Pi * 0.78
+		radius := 70 + float64(ti)*10 + hash01(ep.UID+"r")*42
 		if ep.Kind == KindSession {
-			radius *= 0.7
+			radius *= 0.55
 		}
+		cp := math.Cos(phi)
 		node := api.LayoutNode{
 			ID:            ep.ID,
-			X:             math.Cos(angle) * radius,
-			Y:             math.Sin(angle) * radius,
-			Z:             z,
+			X:             cp * math.Cos(theta) * radius,
+			Y:             cp * math.Sin(theta) * radius,
+			Z:             math.Sin(phi) * radius * 0.88,
 			Label:         layoutLabel(ep.Kind),
 			Name:          firstLine(ep.Title, 48),
 			QualifiedName: ep.Kind + ":" + ep.UID[:min(8, len(ep.UID))],
@@ -115,14 +118,14 @@ func layoutLabel(kind string) string {
 }
 
 func sizeForKind(kind string, pinned bool) float64 {
-	size := 4.0
+	size := 6.5
 	switch kind {
 	case KindSession:
-		size = 8
+		size = 11
 	case KindPin, KindTeaching:
-		size = 6.5
+		size = 8.5
 	case KindWorking:
-		size = 5.5
+		size = 7.5
 	}
 	if pinned {
 		size += 2
@@ -133,19 +136,19 @@ func sizeForKind(kind string, pinned bool) float64 {
 func colorForKind(kind string) string {
 	switch kind {
 	case KindPrompt:
-		return "#94a3b8"
+		return "#06b6d4"
 	case KindTool:
-		return "#64748b"
+		return "#3b82f6"
 	case KindSession:
-		return "#e2e8f0"
+		return "#eab308"
 	case KindPin:
-		return "#a8a29e"
+		return "#ec4899"
 	case KindTeaching:
-		return "#d6d3d1"
+		return "#22c55e"
 	case KindWorking:
-		return "#78716c"
+		return "#f97316"
 	default:
-		return "#737373"
+		return "#a855f7"
 	}
 }
 

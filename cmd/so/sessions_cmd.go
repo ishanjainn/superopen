@@ -259,11 +259,15 @@ func finalizeSession(root, requestedID string) error {
 		fmt.Fprintf(os.Stderr, "so memory ingest: %v\n", err)
 	} else {
 		_ = ing
+		if _, err := memory.ObserveSession(root, id); err != nil {
+			fmt.Fprintf(os.Stderr, "so memory observe: %v\n", err)
+		}
 		if err := memory.SleepRoot(root); err != nil {
 			fmt.Fprintf(os.Stderr, "so memory sleep: %v\n", err)
 		}
 		_ = memory.MaybeDistill(root, id, true)
 	}
+	_ = runRetentionSweep(root)
 	return nil
 }
 
@@ -293,7 +297,13 @@ func refreshSession(root, requestedID string) error {
 	}
 	_ = session.NewStateStore(paths).Save(session.State{SessionID: id, Vendor: meta.Vendor, Phase: session.PhaseActive, RepoRoot: root})
 	_, err = replay.BuildReplayFromSpans(paths, id, spans)
-	return err
+	if err != nil {
+		return err
+	}
+	if _, ingErr := memory.IngestSession(root, id); ingErr != nil {
+		fmt.Fprintf(os.Stderr, "so memory ingest: %v\n", ingErr)
+	}
+	return nil
 }
 
 func loadSessionSpans(store *trace.LocalJSONL, requestedID string) (string, []trace.Span, error) {

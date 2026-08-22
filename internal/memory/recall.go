@@ -17,7 +17,7 @@ func (s *Store) Recall(query string, budget int) (RecallResult, error) {
 
 func (s *Store) RecallFilter(filter SearchFilter, budget int) (RecallResult, error) {
 	if budget <= 0 {
-		budget = recallBudgetTok
+		budget = s.knobInt("recall_budget", recallBudgetTok)
 	}
 	if filter.Limit <= 0 {
 		filter.Limit = 40

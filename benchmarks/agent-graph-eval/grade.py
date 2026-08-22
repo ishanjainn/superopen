@@ -20,13 +20,32 @@ GRAPH_MARKERS = (
     "get_code_snippet",
     "get_architecture",
     "so graph",
-    "codebase-memory",
-    "graphify query",
-    "graphify",
     "knowledge graph",
     "code graph",
     "memory_recall",
-    "mcp",
+)
+
+MEMORY_MARKERS = (
+    "so memory",
+    "memory search",
+    "memory get",
+    "memory recall",
+    "memory timeline",
+    "memory_search",
+    "memory_recall",
+    "memory_get",
+    "get_observations",
+    "get_session",
+    "mem-search",
+)
+
+MEMORY_INJECT_MARKERS = (
+    "mem #",
+    "so memory get",
+    "prior work",
+    "mem-search",
+    "memory_recall",
+    "failed to read dashboards config",
 )
 
 SHARED_INSTRUCTION = """{question}"""
@@ -46,7 +65,6 @@ def fact_hit(answer: str, aliases: list[str]) -> bool:
 
 
 def grade_answer(answer: str, key_facts: list[dict[str, Any]]) -> dict[str, Any]:
-    """Coverage = covered / total. A fact is covered if any alias is a substring."""
     total = len(key_facts)
     covered = 0
     details = []
@@ -85,7 +103,6 @@ def worktree_diff(worktree: Path) -> str:
 
 
 def grade_worktree(worktree: Path, spec: dict[str, Any]) -> dict[str, Any]:
-    """Did the agent actually change the repo? Independent of the writeup."""
     details = []
     ok = True
     for item in spec.get("expect_path_contains") or []:
@@ -108,6 +125,16 @@ def grade_worktree(worktree: Path, spec: dict[str, Any]) -> dict[str, Any]:
 def graph_used(text: str) -> bool:
     blob = _haystack(text)
     return any(marker in blob for marker in GRAPH_MARKERS)
+
+
+def memory_used(text: str, transcript: dict[str, Any] | None = None) -> bool:
+    if transcript:
+        if int(transcript.get("memory_tools") or 0) > 0:
+            return True
+        if int(transcript.get("memory_injected") or 0) > 0:
+            return True
+    blob = _haystack(text)
+    return any(marker in blob for marker in MEMORY_MARKERS)
 
 
 def parse_usage(path: Path) -> dict[str, Any]:

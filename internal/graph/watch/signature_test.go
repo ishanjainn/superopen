@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// A recorded signature is what lets a freshly spawned MCP server skip a full
+// A recorded signature is what lets a freshly spawned watch skip a full
 // rebuild of a graph that is already current.
 func TestSignatureRoundTrip(t *testing.T) {
 	root := initGitRepo(t)

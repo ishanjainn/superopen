@@ -11,7 +11,11 @@ import {
   RenderPass,
 } from "postprocessing";
 import { useThemeOptional } from "@/components/shell/theme-provider";
-import { configureMapControls, fitDistance, GROUND, SKY } from "@/map/scene/sceneUtils";
+import {
+  configureMapControls,
+  fitDistance,
+  preparePaperRenderer,
+} from "@/map/scene/sceneUtils";
 import { DEFAULT_EDGE_COLOR, EDGE_COLORS, labelColor } from "./colors";
 import {
   bloomIntensityScale,
@@ -29,7 +33,7 @@ import {
 const POINT_MODE_THRESHOLD = 75_000;
 const IDLE_ROTATE_MS = 60_000;
 const BLOOM_BASE = 1.45;
-/** Light stage: colors fade toward paper instead of toward black. */
+/** Light stage: edge hues fade toward paper instead of collapsing to ink. */
 const PAPER = new THREE.Color("#ffffff");
 
 const LABEL_FONT_PX = 64;
@@ -45,8 +49,6 @@ export interface StellarGraphSceneProps {
   focusIds?: Set<number> | null;
   showLabels?: boolean;
   display?: GraphDisplaySettings;
-  /** Paper is unused on product stages. Night is the black map/graph surface. */
-  stage?: "paper" | "night";
   /** Lay the constellation on the XZ ground (Memory). Graph stays in 3D. */
   flat?: boolean;
   className?: string;
@@ -107,7 +109,7 @@ function cameraTarget(nodes: GraphNode[], ids: Set<number>, flat: boolean) {
   };
 }
 
-/** Memory polar layout lives in XY; night stage maps that ring onto the XZ ground. */
+/** Memory polar layout lives in XY; map that ring onto the XZ plane. */
 function layOnNightGround(nodes: GraphNode[]): GraphNode[] {
   return nodes.map((node) => ({
     ...node,
@@ -115,35 +117,6 @@ function layOnNightGround(nodes: GraphNode[]): GraphNode[] {
     y: 6 + node.size * 0.8 + node.z * 0.15,
     z: node.y,
   }));
-}
-
-function addNightGround(scene: THREE.Scene, nodes: GraphNode[]) {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (const node of nodes) {
-    minX = Math.min(minX, node.x);
-    maxX = Math.max(maxX, node.x);
-    minZ = Math.min(minZ, node.z);
-    maxZ = Math.max(maxZ, node.z);
-  }
-  if (!Number.isFinite(minX)) {
-    minX = maxX = minZ = maxZ = 0;
-  }
-  const span = Math.max(120, maxX - minX, maxZ - minZ);
-  const size = span * 2.8;
-  const cx = (minX + maxX) / 2;
-  const cz = (minZ + maxZ) / 2;
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(size * 2.5, size * 2.5),
-    new THREE.MeshBasicMaterial({ color: GROUND }),
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.set(cx, -0.26, cz);
-  scene.add(ground);
-  scene.fog = new THREE.Fog(SKY, size * 1.6, size * 3.6);
-  return { size, cx, cz };
 }
 
 function frameNodes(
@@ -169,7 +142,7 @@ function frameNodes(
   controls.target.copy(center);
 }
 
-/** Dark stage glows above white; light stage fades toward paper instead. */
+/** Dark stage glows; light stage keeps kind hues on paper, never ink. */
 function paintNode(
   color: THREE.Color,
   lit: boolean,
@@ -190,8 +163,12 @@ function paintNode(
 }
 
 function paintEdge(color: THREE.Color, intensity: number, dark: boolean) {
-  if (dark) color.multiplyScalar(intensity);
-  else color.lerp(PAPER, 1 - Math.min(1, intensity * 1.6));
+  if (dark) {
+    color.multiplyScalar(intensity);
+    return;
+  }
+  // Floor so sparse edges stay cyan/green/purple pastels, not hairline black.
+  color.lerp(PAPER, 1 - Math.min(1, Math.max(intensity, 0.32) * 1.6));
 }
 
 let pointTexture: THREE.CanvasTexture | null = null;
@@ -285,7 +262,7 @@ function createLabel(node: GraphNode, dark: boolean): THREE.Sprite | null {
 }
 
 /** Anchored hover card. Built with textContent only - never markup. */
-function createTooltip(): {
+function createTooltip(dark: boolean): {
   el: HTMLDivElement;
   set: (node: GraphNode | null) => void;
 } {
@@ -300,8 +277,8 @@ function createTooltip(): {
     "max-width:350px",
     "padding:8px 12px",
     "border-radius:8px",
-    "border:1px solid rgba(255,255,255,.1)",
-    "background:rgba(26,26,46,.95)",
+    `border:1px solid ${dark ? "rgba(255,255,255,.1)" : "rgba(0,0,0,.08)"}`,
+    `background:rgb(${dark ? "10 10 10" : "255 255 255"} / .96)`,
     "backdrop-filter:blur(8px)",
     "box-shadow:0 20px 25px -5px rgb(0 0 0 / .4)",
     "font-size:12px",
@@ -314,16 +291,15 @@ function createTooltip(): {
   const dot = document.createElement("span");
   dot.style.cssText = "width:8px;height:8px;border-radius:9999px;flex:none";
   const name = document.createElement("span");
-  name.style.cssText =
-    "color:#fff;font-weight:500;overflow:hidden;text-overflow:ellipsis";
+  name.style.cssText = `color:${dark ? "#fff" : "#171717"};font-weight:500;overflow:hidden;text-overflow:ellipsis`;
   const kind = document.createElement("span");
-  kind.style.cssText = "color:rgba(255,255,255,.3);margin-left:4px;flex:none";
+  kind.style.cssText = `color:${dark ? "rgba(255,255,255,.3)" : "rgba(0,0,0,.4)"};margin-left:4px;flex:none`;
   head.append(dot, name, kind);
 
   const path = document.createElement("p");
   path.style.cssText = [
     "margin:0",
-    "color:rgba(255,255,255,.3)",
+    "color:" + (dark ? "rgba(255,255,255,.3)" : "rgba(0,0,0,.45)"),
     "font-family:ui-monospace,SFMono-Regular,Menlo,monospace",
     "font-size:11px",
     "overflow:hidden",
@@ -331,7 +307,7 @@ function createTooltip(): {
   ].join(";");
 
   const hint = document.createElement("p");
-  hint.style.cssText = "margin:4px 0 0;color:rgba(255,255,255,.2);font-size:10px";
+  hint.style.cssText = `margin:4px 0 0;color:${dark ? "rgba(255,255,255,.2)" : "rgba(0,0,0,.4)"};font-size:10px`;
   hint.textContent = "click to inspect";
 
   el.append(head, path, hint);
@@ -377,7 +353,6 @@ export function StellarGraphScene({
   focusIds = null,
   showLabels = true,
   display = DEFAULT_GRAPH_DISPLAY,
-  stage = "paper",
   flat = false,
   className,
   onHover,
@@ -393,9 +368,8 @@ export function StellarGraphScene({
   const viewRef = useRef<{ position: THREE.Vector3; target: THREE.Vector3 } | null>(
     null,
   );
-  const themeDark = useThemeOptional()?.resolved === "dark";
-  const night = stage === "night";
-  const dark = night || themeDark;
+  const themeDark = useThemeOptional()?.resolved !== "light";
+  const dark = themeDark;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -406,12 +380,8 @@ export function StellarGraphScene({
 
     const nodes = flat ? layOnNightGround(data.nodes) : data.nodes;
     const scene = new THREE.Scene();
-    if (night) {
-      scene.background = SKY;
-    } else {
-      // Transparent canvas: the paper grid behind the stage stays visible.
-      scene.background = null;
-    }
+    scene.background = null;
+    scene.fog = null;
     const camera = new THREE.PerspectiveCamera(
       50,
       host.clientWidth / Math.max(host.clientHeight, 1),
@@ -422,12 +392,12 @@ export function StellarGraphScene({
 
     const renderer = new THREE.WebGLRenderer({
       antialias: false,
-      alpha: !night,
+      alpha: true,
       powerPreference: "high-performance",
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.setSize(host.clientWidth || 1, host.clientHeight || 1);
-    renderer.setClearColor(0x000000, night ? 1 : 0);
+    preparePaperRenderer(renderer);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.domElement.style.display = "block";
@@ -436,30 +406,36 @@ export function StellarGraphScene({
     renderer.domElement.style.touchAction = "none";
     host.appendChild(renderer.domElement);
 
-    if (flat) addNightGround(scene, nodes);
-
-    // Bloom only reads as light on the dark stage; skip it on paper.
     let composer: EffectComposer | null = null;
     if (dark && display.bloom > 0) {
-      composer = new EffectComposer(renderer, {
-        frameBufferType: THREE.HalfFloatType,
-        multisampling: 0,
-      });
-      composer.addPass(new RenderPass(scene, camera));
-      composer.addPass(
-        new EffectPass(
-          camera,
-          new BloomEffect({
-            blendFunction: BlendFunction.ADD,
-            luminanceThreshold: 0.3,
-            luminanceSmoothing: 0.7,
-            intensity: BLOOM_BASE * bloomIntensityScale(data.nodes.length) * display.bloom,
-            mipmapBlur: true,
-            radius: 0.6,
-          }),
-        ),
-      );
-      composer.setSize(host.clientWidth || 1, host.clientHeight || 1);
+      try {
+        composer = new EffectComposer(renderer, {
+          frameBufferType: THREE.HalfFloatType,
+          multisampling: 0,
+        });
+        composer.addPass(new RenderPass(scene, camera));
+        composer.addPass(
+          new EffectPass(
+            camera,
+            new BloomEffect({
+              blendFunction: BlendFunction.ADD,
+              luminanceThreshold: 0.3,
+              luminanceSmoothing: 0.7,
+              intensity:
+                BLOOM_BASE * bloomIntensityScale(nodes.length) * display.bloom,
+              mipmapBlur: true,
+              radius: 0.6,
+            }),
+          ),
+        );
+        composer.setSize(
+          Math.max(1, host.clientWidth),
+          Math.max(1, host.clientHeight),
+        );
+      } catch {
+        composer?.dispose();
+        composer = null;
+      }
     }
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -636,7 +612,7 @@ export function StellarGraphScene({
       animationProgress = 0;
     }
 
-    const tooltip = createTooltip();
+    const tooltip = createTooltip(dark);
     host.appendChild(tooltip.el);
     const tooltipVec = new THREE.Vector3();
     let tooltipNode: GraphNode | null = null;
@@ -736,8 +712,14 @@ export function StellarGraphScene({
         controls.target.lerp(animationTarget.lookAt, easing * 0.08);
       }
       controls.update();
-      if (composer) composer.render();
-      else renderer.render(scene, camera);
+      try {
+        if (composer) composer.render();
+        else renderer.render(scene, camera);
+      } catch {
+        composer?.dispose();
+        composer = null;
+        renderer.render(scene, camera);
+      }
       placeTooltip();
       frame = requestAnimationFrame(render);
     };
@@ -764,7 +746,7 @@ export function StellarGraphScene({
       scene.clear();
       if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement);
     };
-  }, [data, highlightedIds, focusIds, showLabels, display, dark, night, flat]);
+  }, [data, highlightedIds, focusIds, showLabels, display, dark, flat]);
 
   return <div ref={hostRef} className={className || "h-full w-full"} />;
 }

@@ -48,10 +48,9 @@ export function AgentsPanel({
   const graphError = error && retryAgentID === null ? error : undefined;
   const [detail, setDetail] = useState<AgentDetailState>(null);
   const detailAgent = graph?.agents.find((agent) => agent.id === detail?.agentID);
-
-  useEffect(() => {
-    if (detail && graph && !detailAgent) setDetail(null);
-  }, [detail, detailAgent, graph]);
+  if (detail && graph && !detailAgent) {
+    setDetail(null);
+  }
 
   const closePanel = () => {
     setDetail(null);

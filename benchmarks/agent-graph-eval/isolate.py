@@ -28,9 +28,6 @@ KNOWN_REPOS = {
 ARM_LABELS = {
     "vanilla": "grep-read baseline",
     "superopen": "code graph",
-    "graphify": "code graph",
-    "cbm": "code graph",
-    "iai": "memory-not-graph",
 }
 
 
@@ -40,7 +37,6 @@ def run(
     env: dict[str, str] | None = None,
     timeout: int = 600,
 ) -> subprocess.CompletedProcess[str]:
-    # Use the caller env as-is so popped keys (e.g. CLAUDE_MCP_CONFIG) stay gone.
     merged = env if env is not None else os.environ.copy()
     return subprocess.run(
         cmd,
@@ -113,7 +109,6 @@ def arm_paths(work: Path, arm: str) -> dict[str, Path]:
         "xdg_cache": home / ".cache",
         "xdg_data": home / ".local" / "share",
         "worktree": work / "worktrees" / arm / "repo",
-        "mcp_config": root / "mcp.json",
     }
 
 
@@ -125,10 +120,7 @@ def arm_env(paths: dict[str, Path], extra: dict[str, str] | None = None) -> dict
     env["XDG_CONFIG_HOME"] = str(paths["xdg_config"])
     env["XDG_CACHE_HOME"] = str(paths["xdg_cache"])
     env["XDG_DATA_HOME"] = str(paths["xdg_data"])
-    env["CBM_CACHE_DIR"] = str(paths["xdg_cache"] / "codebase-memory-mcp")
-    env["IAI_MCP_STORE"] = str(paths["home"] / ".iai-mcp")
     env["SUPEROPEN_INSTALL_DIR"] = str(paths["home"] / ".superopen" / "bin")
-    env.pop("CLAUDE_MCP_CONFIG", None)
     env.pop("SUPEROPEN_ROOT", None)
     env.pop("SUPEROPEN_HOOK_STRICT", None)
     if extra:
@@ -139,10 +131,7 @@ def arm_env(paths: dict[str, Path], extra: dict[str, str] | None = None) -> dict
 def ensure_dirs(paths: dict[str, Path]) -> None:
     for key in ("home", "claude", "xdg_config", "xdg_cache", "xdg_data"):
         paths[key].mkdir(parents=True, exist_ok=True)
-    (paths["xdg_cache"] / "codebase-memory-mcp").mkdir(parents=True, exist_ok=True)
-    (paths["home"] / ".iai-mcp").mkdir(parents=True, exist_ok=True)
     (paths["home"] / ".superopen" / "bin").mkdir(parents=True, exist_ok=True)
-    # Darwin UserCacheDir is $HOME/Library/Caches (ignores XDG_CACHE_HOME).
     (paths["home"] / "Library" / "Caches").mkdir(parents=True, exist_ok=True)
     settings = paths["claude"] / "settings.json"
     if not settings.exists():
@@ -150,7 +139,7 @@ def ensure_dirs(paths: dict[str, Path]) -> None:
 
 
 def copy_claude_auth(dest_claude: Path, src_claude: Path | None = None) -> list[str]:
-    """Copy credential files only (never mcpServers, skills, or hooks)."""
+    """Copy credential files only (never skills or hooks)."""
     src = src_claude if src_claude is not None else Path.home() / ".claude"
     dest_claude.mkdir(parents=True, exist_ok=True)
     copied: list[str] = []
@@ -222,48 +211,8 @@ def ensure_worktree_sha(dest: Path, mirror: Path, sha: str, timeout: int = 1800)
         raise RuntimeError(f"checkout {sha} in {dest} failed: {(checkout.stderr or checkout.stdout)[-2000:]}")
 
 
-def write_mcp_config(path: Path, name: str, command: str, args: list[str], env: dict[str, str] | None = None) -> Path:
-    entry: dict[str, Any] = {"command": command, "args": args}
-    if env:
-        entry["env"] = env
-    path.write_text(json.dumps({"mcpServers": {name: entry}}, indent=2) + "\n")
-    return path
-
-
-def mcp_child_env(env: dict[str, str], extra: dict[str, str] | None = None) -> dict[str, str]:
-    """Env fragment for an MCP server launched under an isolated arm HOME."""
-    keys = (
-        "HOME",
-        "CLAUDE_CONFIG_DIR",
-        "XDG_CONFIG_HOME",
-        "XDG_CACHE_HOME",
-        "XDG_DATA_HOME",
-        "CBM_CACHE_DIR",
-        "IAI_MCP_STORE",
-        "PYTHONPATH",
-        "SUPEROPEN_INSTALL_DIR",
-        "SUPEROPEN_ROOT",
-        "SUPEROPEN_SO_BIN",
-    )
-    out = {k: env[k] for k in keys if k in env and env[k]}
-    if extra:
-        out.update(extra)
-    return out
-
-
 def prepend_path(env: dict[str, str], directory: Path) -> None:
     env["PATH"] = str(directory) + os.pathsep + env.get("PATH", "")
-
-
-def cbm_daemon_cache() -> Path:
-    """Cache the live CBM daemon will accept. Isolated dirs are rejected while it is up."""
-    configured = os.environ.get("CBM_CACHE_DIR", "").strip()
-    if configured:
-        return Path(configured)
-    xdg = os.environ.get("XDG_CACHE_HOME", "").strip()
-    if xdg:
-        return Path(xdg) / "codebase-memory-mcp"
-    return Path.home() / ".cache" / "codebase-memory-mcp"
 
 
 def parse_rss_bytes(text: str) -> int | None:
@@ -287,12 +236,6 @@ def parse_nodes_edges(text: str) -> tuple[int | None, int | None]:
         if tl in {"edges", "edge"} and i > 0 and parts[i - 1].isdigit():
             edges = int(parts[i - 1])
     return nodes, edges
-
-
-def mcp_launch(bin_path: Path) -> tuple[str, list[str]]:
-    if bin_path.suffix.lower() in {".js", ".mjs", ".cjs"}:
-        return "node", [str(bin_path)]
-    return str(bin_path), []
 
 
 def sync_isolated_claude(home: Path, claude_dir: Path) -> None:
@@ -328,7 +271,6 @@ def _host_path_aliases(path: Path) -> list[str]:
 
 
 def _rewrite_text(text: str, replacements: list[tuple[str, str]]) -> str:
-    """Replace host paths. Require a boundary so /tmp/so does not eat /tmp/so-eval."""
     out = text
     for src, dest in replacements:
         if src and src != dest:
@@ -340,15 +282,8 @@ def rewrite_docker_agent_paths(
     paths: dict[str, Path],
     *,
     so_bin: Path | None = None,
-    graphify_bin: Path | None = None,
-    cbm_bin: Path | None = None,
 ) -> int:
-    """Rewrite host-absolute install paths in isolated copies for Docker.
-
-    Product install correctly bakes laptop paths. Claude in the eval container
-    sees HOME=/eval/home and CLIs at /usr/local/bin. This does not change
-    product install; it only translates the isolated eval tree.
-    """
+    """Rewrite host-absolute install paths in isolated copies for Docker."""
     replacements: list[tuple[str, str]] = []
 
     def add(src: Path | None, dest: str) -> None:
@@ -361,8 +296,6 @@ def rewrite_docker_agent_paths(
     add(paths.get("claude"), "/eval/claude")
     add(so_bin, "/usr/local/bin/so")
     add(Path("/tmp/so"), "/usr/local/bin/so")
-    add(graphify_bin, "/usr/local/bin/graphify")
-    add(cbm_bin, "/usr/local/bin/codebase-memory-mcp")
     replacements.sort(key=lambda pair: len(pair[0]), reverse=True)
 
     roots = [paths["claude"], paths["home"], paths["worktree"] / ".claude"]

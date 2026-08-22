@@ -4,7 +4,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type DragEvent,
   type PointerEvent as ReactPointerEvent,
@@ -14,6 +13,8 @@ import { ChevronsLeftRight, Sparkles } from "lucide-react";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
 import { useProject } from "@/components/shell/project-context";
 import { StellarGraphScene } from "@/graph/StellarGraphScene";
+import { StageViewport } from "@/components/stage/StageViewport";
+import { useLatestRef } from "@/hooks/use-latest-ref";
 import { DEFAULT_GRAPH_DISPLAY, type GraphData, type GraphNode } from "@/graph/types";
 import "@/map/map.css";
 import "@/app/(app)/graph/graph.css";
@@ -102,11 +103,12 @@ export default function MemoryPage() {
   const [selected, setSelected] = useState<Episode | null>(null);
   const [searchResults, setSearchResults] = useState<Episode[]>([]);
   const [query, setQuery] = useState("");
+  const [searched, setSearched] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [hot, setHot] = useState(false);
   const [busy, setBusy] = useState("");
   const [listPct, setListPct] = useState(28);
-  const listPctRef = useRef(28);
-  listPctRef.current = listPct;
+  const listPctRef = useLatestRef(listPct);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setListPct(loadSplit()), 0);
@@ -137,7 +139,10 @@ export default function MemoryPage() {
   const inspect = useCallback(async (id: number) => {
     const res = await fetch(`/api/memory/${id}`);
     if (!res.ok) return;
-    setSelected((await res.json()) as Episode);
+    const body = (await res.json()) as Episode | Episode[];
+    const episode = Array.isArray(body) ? body[0] : body;
+    if (!episode || typeof episode !== "object" || !episode.id) return;
+    setSelected(episode);
   }, []);
 
   const act = useCallback(
@@ -169,11 +174,23 @@ export default function MemoryPage() {
   };
 
   const search = async () => {
-    const url = new URL("/api/memory/search", window.location.origin);
-    if (query.trim()) url.searchParams.set("q", query.trim());
-    const res = await fetch(url.toString());
-    const body = (await res.json()) as { items?: Episode[] };
-    setSearchResults(body.items ?? []);
+    const q = query.trim();
+    if (!q) {
+      setSearchResults([]);
+      setSearched(false);
+      return;
+    }
+    setSearching(true);
+    setSearched(true);
+    try {
+      const url = new URL("/api/memory/search", window.location.origin);
+      url.searchParams.set("q", q);
+      const res = await fetch(url.toString());
+      const body = (await res.json()) as { items?: Episode[] };
+      setSearchResults(body.items ?? []);
+    } finally {
+      setSearching(false);
+    }
   };
 
   const onSplitPointer = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -203,12 +220,15 @@ export default function MemoryPage() {
     };
     gutter.addEventListener("pointermove", onMove);
     gutter.addEventListener("pointerup", onUp);
-  }, []);
+  }, [listPctRef]);
 
   const highlighted = useMemo(() => {
+    if (searched && searchResults.length > 0) {
+      return new Set(searchResults.map((item) => item.id));
+    }
     if (!selected?.id) return null;
     return new Set([selected.id]);
-  }, [selected]);
+  }, [searched, searchResults, selected]);
 
   const allEpisodes = useMemo(
     () => timeline.flatMap((bucket) => bucket.items),
@@ -253,29 +273,38 @@ export default function MemoryPage() {
                 value={query}
                 onChange={(event) => {
                   setQuery(event.target.value);
-                  if (!event.target.value.trim()) setSearchResults([]);
+                  if (!event.target.value.trim()) {
+                    setSearchResults([]);
+                    setSearched(false);
+                  }
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") void search();
                 }}
               />
-              <button type="button" onClick={() => void search()}>Search</button>
+              <button type="button" disabled={searching} onClick={() => void search()}>
+                {searching ? "…" : "Search"}
+              </button>
             </div>
             <div className="memory-scroll">
-              {query.trim() && searchResults.length > 0 ? (
+              {searched ? (
                 <section>
-                  <h2 className="memory-h">Results</h2>
-                  {searchResults.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={selected?.id === item.id ? "memory-item active" : "memory-item"}
-                      onClick={() => void inspect(item.id)}
-                    >
-                      {item.title}
-                      <span className="memory-meta">#{item.id} {item.kind}</span>
-                    </button>
-                  ))}
+                  <h2 className="memory-h">Results · {searchResults.length}</h2>
+                  {searchResults.length === 0 ? (
+                    <p className="memory-group">0 memories</p>
+                  ) : (
+                    searchResults.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={selected?.id === item.id ? "memory-item active" : "memory-item"}
+                        onClick={() => void inspect(item.id)}
+                      >
+                        {item.title}
+                        <span className="memory-meta">#{item.id} {item.kind}</span>
+                      </button>
+                    ))
+                  )}
                 </section>
               ) : (
                 <section>
@@ -374,7 +403,7 @@ export default function MemoryPage() {
             </span>
           </div>
 
-          <div className="memory-stage" style={{ flexGrow: 100 - listPct, flexShrink: 1, flexBasis: 0 }}>
+          <StageViewport className="memory-stage" style={{ flexGrow: 100 - listPct, flexShrink: 1, flexBasis: 0 }}>
             {empty ? (
               <div className="memory-empty">
                 <div>
@@ -384,9 +413,7 @@ export default function MemoryPage() {
               </div>
             ) : (
               <StellarGraphScene
-                className="session-map session-map-night"
-                stage="night"
-                flat
+                className="session-map"
                 data={data!}
                 highlightedIds={highlighted}
                 focusIds={highlighted}
@@ -396,7 +423,6 @@ export default function MemoryPage() {
                 onBackgroundClick={() => setSelected(null)}
               />
             )}
-            <div className="graph-grid" aria-hidden />
             {selected ? (
               <aside className="memory-inspector" aria-label="Selected memory">
                 <div className="memory-inspector-head">
@@ -447,7 +473,7 @@ export default function MemoryPage() {
                 </div>
               </aside>
             ) : null}
-          </div>
+          </StageViewport>
         </div>
 
         <aside className="memory-rail">

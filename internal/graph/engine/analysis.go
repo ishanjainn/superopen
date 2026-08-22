@@ -40,14 +40,48 @@ func (s *Store) findNodes(ctx context.Context, project, identity string, limit i
 	if limit <= 0 {
 		limit = 20
 	}
-	query := `SELECT ` + nodeColumns + ` FROM nodes WHERE (qualified_name=? OR name=?)`
-	args := []any{identity, identity}
-	if project != "" {
-		query += ` AND project=?`
-		args = append(args, project)
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		return nil, nil
 	}
-	query += ` ORDER BY CASE WHEN qualified_name=? THEN 0 ELSE 1 END,qualified_name LIMIT ?`
-	args = append(args, identity, limit)
+	queryExact := `SELECT ` + nodeColumns + ` FROM nodes WHERE qualified_name=?`
+	argsExact := []any{identity}
+	if project != "" {
+		queryExact += ` AND project=?`
+		argsExact = append(argsExact, project)
+	}
+	queryExact += ` ORDER BY qualified_name LIMIT ?`
+	argsExact = append(argsExact, limit)
+	nodes, err := s.scanFindNodes(ctx, queryExact, argsExact...)
+	if err != nil || len(nodes) > 0 {
+		return nodes, err
+	}
+	if !snippetLooksLikePath(identity) {
+		querySuffix := `SELECT ` + nodeColumns + ` FROM nodes WHERE qualified_name LIKE ? ESCAPE '\'`
+		argsSuffix := []any{"%." + escapeLike(identity)}
+		if project != "" {
+			querySuffix += ` AND project=?`
+			argsSuffix = append(argsSuffix, project)
+		}
+		querySuffix += ` ORDER BY qualified_name LIMIT ?`
+		argsSuffix = append(argsSuffix, limit)
+		nodes, err = s.scanFindNodes(ctx, querySuffix, argsSuffix...)
+		if err != nil || len(nodes) > 0 {
+			return nodes, err
+		}
+	}
+	queryName := `SELECT ` + nodeColumns + ` FROM nodes WHERE name=?`
+	argsName := []any{identity}
+	if project != "" {
+		queryName += ` AND project=?`
+		argsName = append(argsName, project)
+	}
+	queryName += ` ORDER BY qualified_name LIMIT ?`
+	argsName = append(argsName, limit)
+	return s.scanFindNodes(ctx, queryName, argsName...)
+}
+
+func (s *Store) scanFindNodes(ctx context.Context, query string, args ...any) ([]api.Node, error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -62,6 +96,19 @@ func (s *Store) findNodes(ctx context.Context, project, identity string, limit i
 		result = append(result, node)
 	}
 	return result, rows.Err()
+}
+
+func snippetLooksLikePath(identity string) bool {
+	if strings.ContainsAny(identity, `/\`) {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(identity)) {
+	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go", ".py", ".rs", ".java",
+		".json", ".yaml", ".yml", ".toml", ".md", ".css", ".html":
+		return true
+	default:
+		return false
+	}
 }
 
 type neighbor struct {
@@ -80,7 +127,7 @@ func (s *Store) neighbors(ctx context.Context, node api.Node, direction string, 
 	var result []neighbor
 	for _, current := range directions {
 		joinID, matchID := "e.target_id", "e.source_id"
-		if current == "incoming" {
+		if current == "incoming" || current == "inbound" {
 			joinID, matchID = "e.source_id", "e.target_id"
 		}
 		query := `SELECT n.` + strings.ReplaceAll(nodeColumns, ",", ",n.") +
@@ -137,7 +184,8 @@ func (s *Store) Trace(ctx context.Context, req api.TraceRequest) (api.TraceResul
 	if len(starts) == 0 {
 		return api.TraceResult{}, fmt.Errorf("start node not found: %s", req.Start)
 	}
-	if ambiguousTraceStart(req.Start, starts) {
+	picked, leftovers, amb := resolveGraphIdentity(req.Start, starts)
+	if amb || picked == nil {
 		suggestions := make([]api.Node, 0, len(starts))
 		for _, node := range starts {
 			slim := node
@@ -150,11 +198,7 @@ func (s *Store) Trace(ctx context.Context, req api.TraceRequest) (api.TraceResul
 			Suggestions: suggestions,
 		}, nil
 	}
-	if exact := exactQualifiedMatch(req.Start, starts); exact != nil {
-		starts = []api.Node{*exact}
-	} else {
-		starts = starts[:1]
-	}
+	starts = []api.Node{*picked}
 	depth := req.Depth
 	if depth <= 0 {
 		depth = 3
@@ -186,7 +230,24 @@ func (s *Store) Trace(ctx context.Context, req api.TraceRequest) (api.TraceResul
 		queue = append(queue, state{node: start, path: []api.TraceStep{{Node: start, Hop: 0}}})
 		visited[start.ID] = true
 	}
-	result := api.TraceResult{}
+	direction := strings.ToLower(strings.TrimSpace(req.Direction))
+	switch direction {
+	case "incoming", "inbound":
+		direction = "incoming"
+	case "both":
+		direction = "both"
+	default:
+		direction = "outgoing"
+	}
+	if len(req.EdgeTypes) == 0 && (direction == "both" || direction == "incoming") {
+		req.EdgeTypes = []string{"CALLS", "USAGE", "CONFIGURES"}
+	}
+	req.Direction = direction
+	result := api.TraceResult{Direction: direction}
+	startIDs := map[int64]bool{}
+	for _, start := range starts {
+		startIDs[start.ID] = true
+	}
 	for len(queue) > 0 && result.Visited < limit {
 		current := queue[0]
 		queue = queue[1:]
@@ -201,6 +262,9 @@ func (s *Store) Trace(ctx context.Context, req api.TraceRequest) (api.TraceResul
 		}
 		for _, next := range neighbors {
 			if visited[next.node.ID] {
+				continue
+			}
+			if skipDataLanguageVariable(next.node) && !startIDs[next.node.ID] {
 				continue
 			}
 			visited[next.node.ID] = true
@@ -246,25 +310,121 @@ func (s *Store) Trace(ctx context.Context, req api.TraceRequest) (api.TraceResul
 	}
 	coverage, _ := s.Coverage(ctx, api.CoverageRequest{Project: req.Project})
 	result.Coverage = coverage
+	if result.UnresolvedCalls == 0 {
+		result.UnresolvedCalls = len(result.Unresolved)
+	}
+	if (req.Direction == "incoming" || req.Direction == "inbound") && len(result.Paths) == 0 {
+		qn := starts[0].QualifiedName
+		name := starts[0].Name
+		var n int
+		_ = s.db.QueryRowContext(ctx, `SELECT count(*) FROM unresolved_relationships WHERE project=? AND (source_qn=? OR target_text=? OR target_text LIKE ? ESCAPE '\')`,
+			req.Project, qn, name, "%."+escapeLike(name)).Scan(&n)
+		if n > result.UnresolvedCalls {
+			result.UnresolvedCalls = n
+		}
+	}
+	if len(leftovers) > 0 {
+		result.Suggestions = slimIdentityNodes(leftovers)
+	}
 	return result, nil
 }
 
-func ambiguousTraceStart(identity string, nodes []api.Node) bool {
-	if len(nodes) <= 1 {
-		return false
-	}
-	if exactQualifiedMatch(identity, nodes) != nil {
-		return false
-	}
-	// Short / non-qualified names with multiple hits need disambiguation.
-	if !strings.Contains(identity, ".") {
+func callableLabel(label string) bool {
+	switch label {
+	case "Function", "Method", "Class", "Constructor":
 		return true
+	default:
+		return false
 	}
-	distinct := map[string]struct{}{}
+}
+
+func firstNodeWithLabel(nodes []api.Node, labels ...string) *api.Node {
+	want := map[string]bool{}
+	for _, label := range labels {
+		want[label] = true
+	}
+	for i := range nodes {
+		if want[nodes[i].Label] {
+			return &nodes[i]
+		}
+	}
+	return nil
+}
+
+func slimIdentityNodes(nodes []api.Node) []api.Node {
+	out := make([]api.Node, 0, len(nodes))
 	for _, node := range nodes {
-		distinct[node.QualifiedName] = struct{}{}
+		slim := node
+		slim.Properties = nil
+		out = append(out, slim)
 	}
-	return len(distinct) > 1
+	return out
+}
+
+func othersExcept(nodes []api.Node, picked *api.Node) []api.Node {
+	if picked == nil {
+		return slimIdentityNodes(nodes)
+	}
+	out := make([]api.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node.ID != 0 && picked.ID != 0 && node.ID == picked.ID {
+			continue
+		}
+		if node.QualifiedName == picked.QualifiedName && node.Label == picked.Label {
+			continue
+		}
+		slim := node
+		slim.Properties = nil
+		out = append(out, slim)
+	}
+	return out
+}
+
+// resolveGraphIdentity picks one node from findNodes hits.
+// Path-shaped identities prefer File then Module. Symbol-shaped identities
+// prefer a single Function/Method/Class. Two callables of equal rank stay ambiguous.
+func resolveGraphIdentity(identity string, nodes []api.Node) (picked *api.Node, leftovers []api.Node, ambiguous bool) {
+	if len(nodes) == 0 {
+		return nil, nil, false
+	}
+	if exact := exactQualifiedMatch(identity, nodes); exact != nil {
+		return exact, othersExcept(nodes, exact), false
+	}
+	if len(nodes) == 1 {
+		return &nodes[0], nil, false
+	}
+	if snippetLooksLikePath(identity) {
+		if n := firstNodeWithLabel(nodes, "File"); n != nil {
+			return n, othersExcept(nodes, n), false
+		}
+		if n := firstNodeWithLabel(nodes, "Module"); n != nil {
+			return n, othersExcept(nodes, n), false
+		}
+	}
+	var callables []api.Node
+	for _, node := range nodes {
+		if callableLabel(node.Label) {
+			callables = append(callables, node)
+		}
+	}
+	if len(callables) == 1 {
+		return &callables[0], othersExcept(nodes, &callables[0]), false
+	}
+	if len(callables) > 1 {
+		return nil, slimIdentityNodes(callables), true
+	}
+	if n := firstNodeWithLabel(nodes, "File"); n != nil {
+		return n, othersExcept(nodes, n), false
+	}
+	if n := firstNodeWithLabel(nodes, "Module"); n != nil {
+		return n, othersExcept(nodes, n), false
+	}
+	return nil, slimIdentityNodes(nodes), true
+}
+
+func ambiguousTraceStart(identity string, nodes []api.Node) bool {
+	_, _, amb := resolveGraphIdentity(identity, nodes)
+	return amb
 }
 
 func exactQualifiedMatch(identity string, nodes []api.Node) *api.Node {
@@ -313,12 +473,11 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 	maxChars := budget * queryCharsPerToken
 
 	terms := queryTerms(req.Question, req.Terms)
-	candidates, files, err := s.querySeedCandidates(ctx, req.Project, req.Question, terms)
+	candidates, err := s.querySeedCandidates(ctx, req.Project, req.Question, terms)
 	if err != nil {
 		return api.QueryResult{}, err
 	}
 	seeded := scoreQuerySeeds(candidates, terms)
-	seeded = prependFileSeeds(seeded, files)
 	if len(seeded.seeds) == 0 {
 		return api.QueryResult{
 			Text:   "No matching nodes found.",
@@ -595,17 +754,50 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 	file := filepath.ToSlash(req.File)
 	start, end := req.StartLine, req.EndLine
 	var matched *api.Node
-	if req.QualifiedName != "" {
-		nodes, err := s.findNodes(ctx, req.Project, req.QualifiedName, 2)
+	var snippetLeftovers []api.Node
+	identity := strings.TrimSpace(req.QualifiedName)
+	if snippetLooksLikePath(identity) && file == "" {
+		file = filepath.ToSlash(identity)
+		identity = ""
+	}
+	if identity != "" {
+		nodes, err := s.findNodes(ctx, req.Project, identity, 20)
 		if err != nil {
 			return api.SnippetResult{}, err
 		}
 		if len(nodes) == 0 {
-			return api.SnippetResult{}, fmt.Errorf("symbol not found: %s", req.QualifiedName)
+			return api.SnippetResult{}, fmt.Errorf("symbol not found: %s", identity)
 		}
-		matched = &nodes[0]
-		file = nodes[0].Location.File
-		start, end = nodes[0].Location.StartLine, nodes[0].Location.EndLine
+		picked, leftovers, amb := resolveGraphIdentity(identity, nodes)
+		if amb || picked == nil {
+			return api.SnippetResult{
+				Status:      "ambiguous",
+				Message:     fmt.Sprintf("%q matches %d nodes; retry with a qualified_name", identity, len(nodes)),
+				Suggestions: leftovers,
+			}, nil
+		}
+		matched = picked
+		file = matched.Location.File
+		start, end = matched.Location.StartLine, matched.Location.EndLine
+		snippetLeftovers = leftovers
+	} else if file != "" {
+		node, err := s.findFileOrCallable(ctx, req.Project, file)
+		if err != nil {
+			return api.SnippetResult{}, err
+		}
+		if node != nil {
+			matched = node
+			file = node.Location.File
+			if start <= 0 {
+				start = node.Location.StartLine
+			}
+			if end <= 0 {
+				end = node.Location.EndLine
+			}
+		}
+	}
+	if strings.TrimSpace(file) == "" {
+		return api.SnippetResult{}, fmt.Errorf("symbol not found: %s", strings.TrimSpace(req.QualifiedName+" "+req.File))
 	}
 	var root string
 	if err := s.db.QueryRowContext(ctx, `SELECT root_path FROM projects WHERE name=?`, req.Project).Scan(&root); err != nil {
@@ -620,10 +812,14 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return api.SnippetResult{}, errors.New("snippet path escapes repository")
 	}
+	fileOrModule := matched != nil && (matched.Label == "File" || matched.Label == "Module")
+	missingFileSpan := fileOrModule && matched.Location.EndLine <= matched.Location.StartLine
 	if start <= 0 {
 		start = 1
 	}
-	if end < start {
+	if missingFileSpan {
+		end = start + 500
+	} else if end < start {
 		end = start
 	}
 	contextLines := req.ContextLines
@@ -635,8 +831,10 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 		start = 1
 	}
 	end += contextLines
-	if end-start > 500 {
+	clipped := false
+	if !missingFileSpan && end-start > 500 {
 		end = start + 500
+		clipped = true
 	}
 	handle, err := os.Open(abs)
 	if err != nil {
@@ -653,6 +851,9 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 			lines = append(lines, scanner.Text())
 		}
 		if line > end {
+			if missingFileSpan {
+				clipped = true
+			}
 			break
 		}
 	}
@@ -662,16 +863,38 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 	coverage, _ := s.Coverage(ctx, api.CoverageRequest{Project: req.Project, Paths: []string{file}})
 	result := api.SnippetResult{
 		Location: api.Location{File: file, StartLine: start, EndLine: start + len(lines) - 1},
-		Language: "go", Code: strings.Join(lines, "\n"), Coverage: coverage,
+		Language: "go", Code: strings.Join(lines, "\n"), Coverage: coverage, Clipped: clipped,
 	}
 	if matched != nil {
 		result.QualifiedName = matched.QualifiedName
 		result.Name = matched.Name
 		result.Label = matched.Label
+		result.Suggestions = snippetLeftovers
 		_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM edges WHERE project=? AND target_id=? AND type='CALLS'`, req.Project, matched.ID).Scan(&result.Callers)
 		_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM edges WHERE project=? AND source_id=? AND type='CALLS'`, req.Project, matched.ID).Scan(&result.Callees)
 	}
 	return result, nil
+}
+
+func (s *Store) findFileOrCallable(ctx context.Context, project, file string) (*api.Node, error) {
+	file = filepath.ToSlash(strings.TrimSpace(file))
+	if file == "" {
+		return nil, nil
+	}
+	query := `SELECT ` + nodeColumns + ` FROM nodes WHERE project=? AND (file_path=? OR file_path LIKE ? ESCAPE '\') AND label='File' ORDER BY length(file_path) LIMIT 1`
+	nodes, err := s.scanFindNodes(ctx, query, project, file, "%/"+escapeLike(file))
+	if err != nil {
+		return nil, err
+	}
+	if len(nodes) > 0 {
+		return &nodes[0], nil
+	}
+	query = `SELECT ` + nodeColumns + ` FROM nodes WHERE project=? AND (file_path=? OR file_path LIKE ? ESCAPE '\') AND label IN ('Function','Method','Class','Constructor') ORDER BY start_line LIMIT 1`
+	nodes, err = s.scanFindNodes(ctx, query, project, file, "%/"+escapeLike(file))
+	if err != nil || len(nodes) == 0 {
+		return nil, err
+	}
+	return &nodes[0], nil
 }
 
 func (s *Store) Architecture(ctx context.Context, req api.ArchitectureRequest) (api.ArchitectureResult, error) {

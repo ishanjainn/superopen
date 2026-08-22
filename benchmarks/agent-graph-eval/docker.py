@@ -78,10 +78,6 @@ def run_argv(
     home: Path,
     so_bin: Path | None = None,
     out_dir: Path | None = None,
-    mcp_config: Path | None = None,
-    extra_env: dict[str, str] | None = None,
-    extra_bins: list[tuple[Path, str]] | None = None,
-    extra_volumes: list[tuple[Path, str]] | None = None,
 ) -> list[str]:
     argv = [
         "docker",
@@ -107,19 +103,8 @@ def run_argv(
     if so_bin is not None:
         argv.extend(["-e", "SUPEROPEN_SO_BIN=/usr/local/bin/so"])
         argv.extend(["-v", f"{so_bin.resolve()}:/usr/local/bin/so:ro"])
-    if extra_bins:
-        for src, dest in extra_bins:
-            argv.extend(["-v", f"{src.resolve()}:{dest}:ro"])
-    if extra_volumes:
-        for src, dest in extra_volumes:
-            argv.extend(["-v", f"{src.resolve()}:{dest}"])
     if os.environ.get("ANTHROPIC_API_KEY"):
         argv.extend(["-e", "ANTHROPIC_API_KEY"])
-    if extra_env:
-        for key, val in extra_env.items():
-            argv.extend(["-e", f"{key}={val}"])
-    if mcp_config is not None:
-        argv.extend(["-v", f"{mcp_config.resolve()}:/eval/mcp.json:ro"])
     if out_dir is not None:
         argv.extend(["-v", f"{out_dir.resolve()}:/out"])
     argv.append(IMAGE)

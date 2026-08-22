@@ -15,7 +15,17 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
+)
+
+// DefaultRetentionHours is 7 days, expressed in hours as the settings unit.
+const DefaultRetentionHours = 168
+
+const (
+	EnvSessionRetentionHours = "SUPEROPEN_SESSION_RETENTION_HOURS"
+	EnvMemoryRetentionHours  = "SUPEROPEN_MEMORY_RETENTION_HOURS"
 )
 
 // Resolved holds the effective configuration after all sources are merged.
@@ -23,6 +33,12 @@ type Resolved struct {
 	// Environment / ApplicationName flow into the OTel resource attrs.
 	Environment     string
 	ApplicationName string
+
+	// SessionRetentionHours deletes .so/sessions older than this. 0 keeps forever.
+	SessionRetentionHours int
+	// MemoryRetentionHours deletes unpinned moments older than this. 0 keeps forever.
+	// Teachings, pins, and never_decay rows are never deleted by age.
+	MemoryRetentionHours int
 
 	// Source records where each value came from for `so configure
 	// --show` and debugging.
@@ -56,6 +72,8 @@ var allowedFileKeys = map[string]struct{}{
 	"SUPEROPEN_CODING_REPO_ALLOWLIST": {},
 	"SUPEROPEN_HOOK_STRICT":           {},
 	"SUPEROPEN_BUILD_SLOTS":           {},
+	EnvSessionRetentionHours:          {},
+	EnvMemoryRetentionHours:           {},
 }
 
 // PromoteFileToEnv re-exports the config-file values that downstream
@@ -104,6 +122,16 @@ func Load(flags *Flags) (*Resolved, error) {
 		case "SUPEROPEN_APPLICATION_NAME":
 			res.ApplicationName = val
 			res.Source["application_name"] = src
+		case EnvSessionRetentionHours:
+			if hours, ok := parseRetentionHours(val); ok {
+				res.SessionRetentionHours = hours
+				res.Source["session_retention_hours"] = src
+			}
+		case EnvMemoryRetentionHours:
+			if hours, ok := parseRetentionHours(val); ok {
+				res.MemoryRetentionHours = hours
+				res.Source["memory_retention_hours"] = src
+			}
 		}
 	}
 
@@ -115,6 +143,8 @@ func Load(flags *Flags) (*Resolved, error) {
 	for _, k := range []string{
 		"SUPEROPEN_ENVIRONMENT",
 		"SUPEROPEN_APPLICATION_NAME",
+		EnvSessionRetentionHours,
+		EnvMemoryRetentionHours,
 	} {
 		if v := os.Getenv(k); v != "" {
 			apply("env_superopen", k, v)
@@ -132,7 +162,31 @@ func Load(flags *Flags) (*Resolved, error) {
 		res.ApplicationName = defaults.ApplicationName
 		res.Source["application_name"] = "default"
 	}
+	if _, ok := res.Source["session_retention_hours"]; !ok {
+		res.SessionRetentionHours = DefaultRetentionHours
+		res.Source["session_retention_hours"] = "default"
+	}
+	if _, ok := res.Source["memory_retention_hours"]; !ok {
+		res.MemoryRetentionHours = DefaultRetentionHours
+		res.Source["memory_retention_hours"] = "default"
+	}
 	return res, nil
+}
+
+func parseRetentionHours(val string) (int, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(val))
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// HoursDuration is 0 when hours is 0 (keep forever).
+func HoursDuration(hours int) time.Duration {
+	if hours <= 0 {
+		return 0
+	}
+	return time.Duration(hours) * time.Hour
 }
 
 // Path returns the absolute path to the config file, even if it doesn't

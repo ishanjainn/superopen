@@ -43,6 +43,8 @@ import (
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/agent/normalize"
+	"github.com/ishanjainn/superopen/internal/redact"
+	"github.com/ishanjainn/superopen/internal/repofile"
 	"github.com/ishanjainn/superopen/sdk/go/semconv"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -240,6 +242,9 @@ func setToolCallAttrs(span trace.Span, t normalize.ToolCall, scrub scrubFn, capt
 	if t.WorkingDir != "" {
 		setStr(span, "code.cwd", t.WorkingDir, scrub)
 	}
+	if path := toolCallFilePath(t); path != "" {
+		setStr(span, "coding_agent.file_path", path, scrub)
+	}
 	if t.Command != "" {
 		// In metadata / minimal modes the adapter has already
 		// trimmed `Command` to the binary head via
@@ -252,10 +257,6 @@ func setToolCallAttrs(span trace.Span, t normalize.ToolCall, scrub scrubFn, capt
 		}
 	}
 
-	setStr(span, semconv.CodingAgentMCPServerName, t.MCPServerName, scrub)
-	setStr(span, semconv.CodingAgentMCPScope, t.MCPScope, scrub)
-	setStr(span, semconv.CodingAgentMCPTransport, t.MCPTransport, scrub)
-	setStr(span, semconv.CodingAgentMCPSource, t.MCPSource, scrub)
 	setStr(span, semconv.CodingAgentClient, t.Vendor, scrub)
 
 	if t.Errored {
@@ -601,7 +602,7 @@ func setStr(span trace.Span, key, val string, scrub scrubFn) {
 	if val == "" {
 		return
 	}
-	if scrub != nil {
+	if scrub != nil && !redact.UnredactedAttr(key) {
 		val = scrub(val)
 	}
 	span.SetAttributes(attribute.String(key, val))
@@ -618,7 +619,7 @@ func setStrSlice(span trace.Span, key string, vals []string, scrub scrubFn) {
 	if len(vals) == 0 {
 		return
 	}
-	if scrub != nil {
+	if scrub != nil && !redact.UnredactedAttr(key) {
 		scrubbed := make([]string, len(vals))
 		for i, v := range vals {
 			scrubbed[i] = scrub(v)
@@ -665,4 +666,12 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "...(truncated)"
+}
+
+func toolCallFilePath(t normalize.ToolCall) string {
+	path := strings.TrimSpace(t.FilePath)
+	if path == "" {
+		path = repofile.PathFromJSON(t.Args)
+	}
+	return repofile.Accept(path, t.ToolName, t.WorkingDir)
 }

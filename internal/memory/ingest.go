@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/repofile"
 	"github.com/ishanjainn/superopen/internal/session"
 	"github.com/ishanjainn/superopen/internal/session/trace"
 )
@@ -63,6 +65,66 @@ func IngestAll(root string) ([]IngestResult, error) {
 	return out, nil
 }
 
+const ingestBackfillLimit = 8
+
+// IngestBackfill ingests at most `limit` recent other sessions that have
+// spans but no KindPrompt. Fail-open. Bound for SessionStart (5s hook).
+func IngestBackfill(root, currentSession string, limit int) []IngestResult {
+	if limit <= 0 {
+		limit = ingestBackfillLimit
+	}
+	layout := paths.Resolve(root)
+	entries, err := os.ReadDir(layout.SessionsDir)
+	if err != nil {
+		return nil
+	}
+	type row struct {
+		id    string
+		mtime int64
+	}
+	var sessions []row
+	currentSession = strings.TrimSpace(currentSession)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		id := e.Name()
+		if id == currentSession {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(layout.SessionDir(id), "events.jsonl"))
+		if err != nil {
+			continue
+		}
+		sessions = append(sessions, row{id: id, mtime: info.ModTime().UnixNano()})
+	}
+	sort.Slice(sessions, func(i, j int) bool { return sessions[i].mtime > sessions[j].mtime })
+	store, err := OpenRoot(root)
+	if err != nil {
+		return nil
+	}
+	var missing []string
+	for _, sess := range sessions {
+		if store.HasKindPrompt(sess.id) {
+			continue
+		}
+		missing = append(missing, sess.id)
+		if len(missing) >= limit {
+			break
+		}
+	}
+	store.Close()
+	var out []IngestResult
+	for _, id := range missing {
+		res, err := IngestSession(root, id)
+		if err != nil {
+			continue
+		}
+		out = append(out, res)
+	}
+	return out
+}
+
 func (s *Store) ingest(sessionID string, spans []trace.Span, sessions *session.Store) (IngestResult, error) {
 	res := IngestResult{SessionID: sessionID}
 	var promptIDs []int64
@@ -73,7 +135,24 @@ func (s *Store) ingest(sessionID string, spans []trace.Span, sessions *session.S
 	for _, sp := range spans {
 		if tool := toolNameFromSpan(sp); tool != "" && isToolSpan(sp) {
 			pendingTools = append(pendingTools, tool)
-			res.Skipped++
+			if obs, ok := toolObservation(sessionID, sp); ok {
+				id, inserted, err := s.storeEpisode(obs)
+				if err != nil {
+					return res, err
+				}
+				if id == 0 {
+					res.Skipped++
+				} else if inserted {
+					res.Inserted++
+				} else {
+					res.Existing++
+				}
+				for _, f := range obs.Files {
+					fileSet[f] = struct{}{}
+				}
+			} else {
+				res.Skipped++
+			}
 			if len(promptIDs) > 0 {
 				_ = s.appendToolsTrailer(promptIDs[len(promptIDs)-1], []string{tool})
 			}
@@ -179,7 +258,9 @@ func (s *Store) storeEpisode(ep Episode) (int64, bool, error) {
 		return 0, false, nil
 	}
 	if ep.Kind == KindPrompt {
-		if noisyCapture(ep.Text) || noisyCapture(ep.Title) || blockedCapture(ep.Text) || tooShort(ep.Text+ep.Title) || undeclaredNonEnglish(ep.Text) {
+		ep.Text = unwrapCapture(ep.Text)
+		ep.Title = unwrapCapture(ep.Title)
+		if packFingerprint(ep.Text) || packFingerprint(ep.Title) || noisyCapture(ep.Text) || noisyCapture(ep.Title) || blockedCapture(ep.Text) || tooShort(ep.Text+ep.Title) || undeclaredNonEnglish(ep.Text) {
 			return 0, false, nil
 		}
 		ep.Text = clipCapture(ep.Text)
@@ -222,54 +303,99 @@ func projectSpan(sessionID string, sp trace.Span) (Episode, bool) {
 		created = nowRFC()
 	}
 	files := filesFromAttrs(attrs)
-	if strings.Contains(name, "llm.turn") || strings.Contains(name, "completion") {
-		thought := strings.TrimSpace(attrs["coding_agent.llm.thought.text"])
-		prompt := firstAttr(attrs, "gen_ai.prompt", "gen_ai.content.prompt")
-		completion := firstAttr(attrs, "gen_ai.completion", "gen_ai.content.completion")
-		if prompt == "" && thought != "" && completion == "" {
-			return Episode{}, false
-		}
-		text := strings.TrimSpace(prompt)
-		if completion != "" {
-			if text != "" {
-				text += "\n\n" + completion
-			} else {
-				text = completion
-			}
-		}
-		if strings.Contains(strings.ToLower(text), "<private>") || skipPrivate(text) || noisyCapture(text) || blockedCapture(text) {
-			return Episode{}, false
-		}
-		text = clipCapture(text)
-		if tooShort(text) {
-			return Episode{}, false
-		}
-		title := firstLine(prompt, 80)
-		if title == "" {
-			title = firstLine(text, 80)
-		}
-		if title == "" {
-			return Episode{}, false
-		}
-		return Episode{
-			UID:       episodeUID(sessionID, sp.SpanID, KindPrompt, text),
-			SessionID: sessionID,
-			SpanID:    sp.SpanID,
-			Kind:      KindPrompt,
-			Source:    SourceSpan,
-			Title:     title,
-			Text:      text,
-			Files:     files,
-			CreatedAt: created,
-			Tier:      tierEpisodic,
-		}, true
+	promptEvent := strings.Contains(name, "llm.turn") || strings.Contains(name, "completion") || strings.Contains(name, "user_prompt.submit")
+	if !promptEvent {
+		return Episode{}, false
 	}
-	return Episode{}, false
+	thought := strings.TrimSpace(attrs["coding_agent.llm.thought.text"])
+	prompt := firstAttr(attrs, "gen_ai.prompt", "gen_ai.content.prompt")
+	if prompt == "" {
+		prompt = messagesRoleText(attrs["gen_ai.input.messages"], true)
+	}
+	prompt = unwrapCapture(prompt)
+	if prompt == "" && thought != "" {
+		return Episode{}, false
+	}
+	text := strings.TrimSpace(prompt)
+	if text == "" {
+		return Episode{}, false
+	}
+	if packFingerprint(text) || strings.Contains(strings.ToLower(text), "<private>") || skipPrivate(text) || noisyCapture(text) || blockedCapture(text) {
+		return Episode{}, false
+	}
+	text = clipCapture(text)
+	if tooShort(text) {
+		return Episode{}, false
+	}
+	title := firstLine(text, 80)
+	if title == "" {
+		return Episode{}, false
+	}
+	return Episode{
+		UID:         contentHashUID(sessionID, KindPrompt, title, text),
+		ContentHash: contentHashUID(sessionID, KindPrompt, title, text),
+		SessionID:   sessionID,
+		SpanID:      sp.SpanID,
+		Kind:        KindPrompt,
+		Source:      SourceSpan,
+		Title:       title,
+		Text:        text,
+		Files:       files,
+		CreatedAt:   created,
+		Tier:        tierEpisodic,
+		Topic:       heuristicTopic(title + " " + text),
+		Tags:        entityTags(text),
+	}, true
 }
 
 func isToolSpan(sp trace.Span) bool {
 	name := strings.ToLower(sp.Name)
-	return strings.Contains(name, "tool") || strings.Contains(name, "shell") || strings.Contains(name, "edit")
+	if strings.Contains(name, "llm.turn") || strings.Contains(name, "completion") {
+		return false
+	}
+	return strings.Contains(name, "tool") || strings.Contains(name, "shell") || strings.Contains(name, "edit") || strings.Contains(name, "read")
+}
+
+func toolObservation(sessionID string, sp trace.Span) (Episode, bool) {
+	files := filesFromAttrs(sp.Attributes)
+	if len(files) == 0 {
+		return Episode{}, false
+	}
+	tool := toolNameFromSpan(sp)
+	if tool == "" {
+		tool = strings.TrimSpace(sp.Name)
+	}
+	path := files[0]
+	state := repofile.State(tool, sp.Name)
+	title := strings.TrimSpace(tool + " " + path)
+	if title == "" {
+		return Episode{}, false
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "tool: %s\n", tool)
+	if path != "" {
+		fmt.Fprintf(&b, "path: %s\n", path)
+	}
+	fmt.Fprintf(&b, "state: %s\n", state)
+	text := strings.TrimSpace(b.String())
+	created := time.Unix(0, sp.StartTimeUnixN).UTC().Format(time.RFC3339Nano)
+	if sp.StartTimeUnixN == 0 {
+		created = nowRFC()
+	}
+	return Episode{
+		UID:         contentHashUID(sessionID, KindObservation, tool, path, state),
+		ContentHash: contentHashUID(sessionID, KindObservation, tool, path, state),
+		SessionID:   sessionID,
+		SpanID:      sp.SpanID,
+		Kind:        KindObservation,
+		Source:      SourceSpan,
+		Title:       firstLine(title, 80),
+		Text:        text,
+		Files:       files,
+		CreatedAt:   created,
+		Tier:        tierEpisodic,
+		Topic:       ObservationChange,
+	}, true
 }
 
 func toolNameFromSpan(sp trace.Span) string {
@@ -352,7 +478,7 @@ func filesFromAttrs(attrs map[string]string) []string {
 	seen := map[string]struct{}{}
 	var out []string
 	add := func(p string) {
-		p = strings.TrimSpace(p)
+		p = NormalizePath(p)
 		if p == "" {
 			return
 		}
@@ -362,20 +488,18 @@ func filesFromAttrs(attrs map[string]string) []string {
 		seen[p] = struct{}{}
 		out = append(out, p)
 	}
-	add(firstAttr(attrs, "coding_agent.file_path", "code.file.path"))
-	for _, key := range []string{"gen_ai.tool.arguments", "coding_agent.tool.arguments", "gen_ai.input.messages"} {
+	if attrs == nil {
+		return nil
+	}
+	tool := firstAttr(attrs, "gen_ai.tool.name")
+	cwd := firstAttr(attrs, "code.cwd")
+	add(repofile.Accept(firstAttr(attrs, "coding_agent.file_path", "code.file.path"), tool, cwd))
+	for _, key := range []string{"gen_ai.tool.call.arguments", "gen_ai.tool.arguments", "coding_agent.tool.arguments"} {
 		raw := attrs[key]
 		if raw == "" {
 			continue
 		}
-		var m map[string]any
-		if json.Unmarshal([]byte(raw), &m) == nil {
-			for _, k := range []string{"file_path", "filePath", "path", "notebook_path"} {
-				if v, ok := m[k].(string); ok {
-					add(v)
-				}
-			}
-		}
+		add(repofile.Accept(repofile.PathFromJSON(raw), tool, cwd))
 	}
 	return out
 }
@@ -389,8 +513,125 @@ func firstAttr(attrs map[string]string, keys ...string) string {
 	return ""
 }
 
+func messagesRoleText(raw string, userOnly bool) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var payload any
+	if json.Unmarshal([]byte(raw), &payload) != nil {
+		return ""
+	}
+	items := messageObjects(payload)
+	var parts []string
+	for _, item := range items {
+		role := strings.ToLower(strings.TrimSpace(asString(item["role"])))
+		if userOnly {
+			if role != "" && role != "user" {
+				continue
+			}
+		} else if role == "user" || role == "system" {
+			continue
+		}
+		text := strings.TrimSpace(messageContent(item))
+		if text == "" || isThoughtOnly(text, item) {
+			continue
+		}
+		parts = append(parts, text)
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+func messageObjects(payload any) []map[string]any {
+	switch v := payload.(type) {
+	case []any:
+		out := make([]map[string]any, 0, len(v))
+		for _, item := range v {
+			if m, ok := item.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	case map[string]any:
+		if nested, ok := v["messages"]; ok {
+			return messageObjects(nested)
+		}
+		return []map[string]any{v}
+	default:
+		return nil
+	}
+}
+
+func messageContent(item map[string]any) string {
+	if s := asString(item["content"]); s != "" {
+		return s
+	}
+	if s := asString(item["text"]); s != "" {
+		return s
+	}
+	return joinParts(item["parts"])
+}
+
+func joinParts(raw any) string {
+	switch v := raw.(type) {
+	case string:
+		return v
+	case []any:
+		var parts []string
+		for _, item := range v {
+			switch p := item.(type) {
+			case string:
+				if strings.TrimSpace(p) != "" {
+					parts = append(parts, p)
+				}
+			case map[string]any:
+				kind := strings.ToLower(asString(p["type"]) + " " + asString(p["kind"]))
+				if strings.Contains(kind, "thought") || strings.Contains(kind, "reasoning") {
+					continue
+				}
+				if s := firstNonEmpty(asString(p["content"]), asString(p["text"]), asString(p["value"])); s != "" {
+					parts = append(parts, s)
+				}
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		return ""
+	}
+}
+
+func isThoughtOnly(text string, item map[string]any) bool {
+	if strings.TrimSpace(text) == "" {
+		return true
+	}
+	kind := strings.ToLower(asString(item["type"]) + " " + asString(item["kind"]))
+	return strings.Contains(kind, "thought") || strings.Contains(kind, "reasoning")
+}
+
+func asString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	default:
+		return ""
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func episodeUID(sessionID, spanID, kind, text string) string {
-	sum := sha256.Sum256([]byte("v1|" + sessionID + "|" + spanID + "|" + kind + "|" + clip(text, 200)))
+	return contentHashUID(sessionID, spanID, kind, text)
+}
+
+func contentHashUID(parts ...string) string {
+	sum := sha256.Sum256([]byte("idem:sha256|" + strings.Join(parts, "|")))
 	return hex.EncodeToString(sum[:])
 }
 

@@ -22,20 +22,16 @@ plugins:
     - 'plugins/**'
     - '.claude-plugin/**'
 
-templates:
-- changed-files:
-  - any-glob-to-any-file: 'templates/**'
-
 ci:
 - changed-files:
   - any-glob-to-any-file:
     - '.github/**'
     - 'scripts/**'
+    - 'benchmarks/**'
 
 Documentation:
 - changed-files:
   - any-glob-to-any-file:
-    - 'docs/**'
     - 'README.md'
     - 'CONTRIBUTING.md'
     - 'CODE_OF_CONDUCT.md'

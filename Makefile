@@ -1,4 +1,4 @@
-.PHONY: build test test-web test-native install uninstall smoke lint
+.PHONY: build test test-web test-native install uninstall smoke lint sync-plugins
 
 VERSION ?= $(shell tr -d '[:space:]' < VERSION 2>/dev/null || echo 0.1.0)
 PKG_VERSION := github.com/ishanjainn/superopen/internal/version
@@ -34,3 +34,6 @@ uninstall:
 smoke: build
 	./bin/so --help
 	./bin/so graph status --json >/dev/null
+
+sync-plugins:
+	bash scripts/sync-plugins.sh

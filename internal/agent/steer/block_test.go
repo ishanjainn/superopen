@@ -14,8 +14,8 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if contains(first, "so-verify") || contains(first, "so-scout") || contains(first, "so-auditor") {
 		t.Fatalf("always-on block must not name subagents: %s", first)
 	}
-	if contains(first, "MCP") || contains(first, "--json") {
-		t.Fatalf("always-on block must not mention MCP or --json: %s", first)
+	if contains(first, "--json") {
+		t.Fatalf("always-on block must not mention --json: %s", first)
 	}
 	if contains(first, "run `so init` once") {
 		t.Fatalf("block must not auto-init unmanaged repos: %s", first)
@@ -28,6 +28,12 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	}
 	if contains(first, "so graph search") {
 		t.Fatalf("always-on block must not list so graph search as the default: %s", first)
+	}
+	if !contains(first, "so memory search") {
+		t.Fatalf("block must point prior-work at so memory search: %s", first)
+	}
+	if !contains(first, "learned:") {
+		t.Fatalf("block must say learned: is not authority: %s", first)
 	}
 }
 
@@ -50,6 +56,9 @@ func TestCursorRuleIsShortGate(t *testing.T) {
 	}
 	if contains(rule, "memory_search") {
 		t.Fatalf("alwaysApply rule must not dump the memory playbook: %s", rule)
+	}
+	if !contains(rule, "so memory search") {
+		t.Fatalf("alwaysApply rule should point prior-work at so memory search: %s", rule)
 	}
 	if !contains(rule, "query") {
 		t.Fatalf("alwaysApply rule should mention query-first: %s", rule)

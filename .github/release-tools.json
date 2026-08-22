@@ -9,7 +9,6 @@
       "internal/**",
       "sdk/**",
       "plugins/**",
-      "templates/**",
       "scripts/**",
       "web/**",
       ".claude-plugin/**",

@@ -27,7 +27,7 @@ type ReplayEvent struct {
 func BuildReplayFromSpans(paths paths.Paths, sessionID string, spans []trace.Span) (Replay, error) {
 	r := Replay{SessionID: sessionID}
 	for _, sp := range spans {
-		path := sp.Attributes["coding_agent.file_path"]
+		path := session.FilePathFromAttrs(sp.Attributes)
 		if path == "" {
 			continue
 		}

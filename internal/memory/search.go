@@ -10,6 +10,7 @@ import (
 type SearchFilter struct {
 	Query         string
 	Kind          string
+	Type          string
 	SessionID     string
 	File          string
 	Limit         int
@@ -27,25 +28,16 @@ func (s *Store) Search(filter SearchFilter) ([]Hit, error) {
 		_ = s.RecordSearch()
 	}
 	query := strings.TrimSpace(filter.Query)
-	ftsIDs := map[int64]float64{}
-	if query != "" {
-		rows, err := s.db.Query(`
-SELECT rowid, bm25(memory_episodes_fts) FROM memory_episodes_fts
-WHERE memory_episodes_fts MATCH ?
-ORDER BY bm25(memory_episodes_fts)
-LIMIT 200`, ftsQuery(query))
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var id int64
-				var rank float64
-				if rows.Scan(&id, &rank) == nil {
-					// bm25 is lower-better (negative); invert to a positive contribution.
-					ftsIDs[id] = 1 / (1 + math.Abs(rank))
-				}
-			}
-		}
-	}
+	lexW := s.knobFloat("lex_fusion", lexFusionW)
+	cosW := s.knobFloat("cosine_weight", cosineWeight)
+	centW := s.knobFloat("centrality_weight", centralityWeight)
+	shapeW := s.knobFloat("shape_fusion", shapeFusionW)
+	pinW := s.knobFloat("pin_weight", pinWeight)
+	staleW := s.knobFloat("stale_weight", staleDownweight)
+	recencyHL := s.knobFloat("recency_half_life", 21)
+	window := s.knobInt("supersede_window", supersedeCapWindow)
+
+	ftsIDs := s.ftsCandidates(query)
 
 	where := []string{"1=1"}
 	args := []any{}
@@ -56,13 +48,18 @@ LIMIT 200`, ftsQuery(query))
 		where = append(where, "kind=?")
 		args = append(args, filter.Kind)
 	}
+	if typ := strings.TrimSpace(filter.Type); typ != "" {
+		where = append(where, "(topic=? OR kind=?)")
+		args = append(args, typ, typ)
+	}
 	if filter.SessionID != "" {
 		where = append(where, "session_id=?")
 		args = append(args, filter.SessionID)
 	}
 	if filter.File != "" {
-		where = append(where, "files LIKE ?")
-		args = append(args, "%"+filter.File+"%")
+		norm := NormalizePath(filter.File)
+		where = append(where, "(files LIKE ? OR files LIKE ?)")
+		args = append(args, "%"+filter.File+"%", "%"+norm+"%")
 	}
 	if t := parseTimeArg(filter.AsOf); t != "" {
 		where = append(where, "(valid_from='' OR valid_from<=?) AND (valid_to='' OR valid_to>=?)")
@@ -105,8 +102,8 @@ LIMIT 200`, ftsQuery(query))
 		}
 		score := 0.0
 		if fts, ok := ftsIDs[ep.ID]; ok {
-			score += lexFusionW * fts
-		} else if query != "" && !strings.Contains(strings.ToLower(ep.Title+" "+ep.Text), strings.ToLower(query)) {
+			score += lexW * fts
+		} else if query != "" && !strings.Contains(strings.ToLower(ep.Title+" "+ep.Text+" "+ep.Topic), strings.ToLower(query)) {
 			if !useVec {
 				continue
 			}
@@ -123,19 +120,22 @@ LIMIT 200`, ftsQuery(query))
 		if maxC > 0 {
 			cent = ep.Centrality / maxC
 		}
-		score += cosineWeight*cos + centralityWeight*cent
+		score += cosW*cos + centW*cent
 		if useVec {
 			var blob []byte
 			if err := s.db.QueryRow(`SELECT blob FROM memory_shapes WHERE episode_id=?`, ep.ID).Scan(&blob); err == nil {
-				score += shapeFusionW * shapeScore(bindShape(qvec), blob)
+				score += shapeW * shapeScore(bindShape(qvec), blob)
 			}
 		}
 		if ep.Pinned {
-			score += 0.35
+			score += pinW
 		}
 		if created, err := time.Parse(time.RFC3339Nano, ep.CreatedAt); err == nil {
 			days := now.Sub(created).Hours() / 24
-			score += math.Exp(-days / 21)
+			if recencyHL <= 0 {
+				recencyHL = 21
+			}
+			score += math.Exp(-days / recencyHL)
 		}
 		if ep.Faded {
 			score -= 0.8
@@ -143,15 +143,21 @@ LIMIT 200`, ftsQuery(query))
 		if query == "" {
 			score += 0.01 * float64(ep.ID)
 		}
+		if inventedLearnedFiction(ep) {
+			score *= 0.2
+		}
 		ep.Score = score
 		hits = append(hits, Hit{Episode: ep, Snippet: firstLine(ep.Text, 140)})
 	}
 	hist := historicalCue(query)
-	hits = applyStaleDownweight(hits, stale, hist)
-	hits = applySupersedeCap(hits, outgoing, stale, hist)
+	hits = applyStaleDownweight(hits, stale, hist, staleW)
+	hits = applySupersedeCap(hits, outgoing, stale, hist, window)
 	sortHits(hits)
 	if len(hits) > filter.Limit {
 		hits = hits[:filter.Limit]
+	}
+	if len(hits) == 0 && filter.Kind == "" && filter.Type == "" && filter.SessionID == "" && filter.File == "" {
+		return s.sessionTitleHits(8), nil
 	}
 	return hits, nil
 }
@@ -193,6 +199,91 @@ func (s *Store) Timeline(limit int) ([]TimelineBucket, error) {
 	return out, nil
 }
 
+func (s *Store) TimelineAround(id int64, before, after int) ([]Episode, error) {
+	if before <= 0 {
+		before = 5
+	}
+	if after <= 0 {
+		after = 5
+	}
+	anchor, err := s.scanOne(`SELECT `+episodeCols+` FROM memory_episodes WHERE id=?`, id)
+	if err != nil {
+		return nil, err
+	}
+	prev, err := s.db.Query(`SELECT `+episodeCols+` FROM memory_episodes WHERE faded=0 AND kind != 'tool' AND (created_at < ? OR (created_at=? AND id<?)) ORDER BY created_at DESC, id DESC LIMIT ?`,
+		anchor.CreatedAt, anchor.CreatedAt, anchor.ID, before)
+	if err != nil {
+		return nil, err
+	}
+	older, err := s.scanEpisodes(prev)
+	if err != nil {
+		return nil, err
+	}
+	next, err := s.db.Query(`SELECT `+episodeCols+` FROM memory_episodes WHERE faded=0 AND kind != 'tool' AND (created_at > ? OR (created_at=? AND id>?)) ORDER BY created_at ASC, id ASC LIMIT ?`,
+		anchor.CreatedAt, anchor.CreatedAt, anchor.ID, after)
+	if err != nil {
+		return nil, err
+	}
+	newer, err := s.scanEpisodes(next)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Episode, 0, len(older)+1+len(newer))
+	for i := len(older) - 1; i >= 0; i-- {
+		out = append(out, older[i])
+	}
+	out = append(out, anchor)
+	out = append(out, newer...)
+	return out, nil
+}
+
+// ftsCandidates runs multi-seed FTS as a candidate bonus, not as the
+// only retrieval path. Cosine/corrector hits still rank from the SQL window.
+func (s *Store) ftsCandidates(query string) map[int64]float64 {
+	out := map[int64]float64{}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return out
+	}
+	seeds := []string{query}
+	for _, tok := range strings.Fields(query) {
+		tok = strings.Trim(tok, `"*.,:;!?`)
+		if len(tok) < 3 {
+			continue
+		}
+		if strings.EqualFold(tok, query) {
+			continue
+		}
+		seeds = append(seeds, tok)
+		if len(seeds) >= 8 {
+			break
+		}
+	}
+	for _, seed := range seeds {
+		rows, err := s.db.Query(`
+SELECT rowid, bm25(memory_episodes_fts) FROM memory_episodes_fts
+WHERE memory_episodes_fts MATCH ?
+ORDER BY bm25(memory_episodes_fts)
+LIMIT 80`, ftsQuery(seed))
+		if err != nil {
+			continue
+		}
+		for rows.Next() {
+			var id int64
+			var rank float64
+			if rows.Scan(&id, &rank) != nil {
+				continue
+			}
+			score := 1 / (1 + math.Abs(rank))
+			if prev, ok := out[id]; !ok || score > prev {
+				out[id] = score
+			}
+		}
+		_ = rows.Close()
+	}
+	return out
+}
+
 func (s *Store) contradictMaps() (map[int64]bool, map[int64][]int64, map[int64][]int64) {
 	stale := map[int64]bool{}
 	outgoing := map[int64][]int64{}
@@ -219,6 +310,19 @@ func (s *Store) contradictMaps() (map[int64]bool, map[int64][]int64, map[int64][
 func (s *Store) staleIDs() map[int64]bool {
 	stale, _, _ := s.contradictMaps()
 	return stale
+}
+
+func inventedLearnedFiction(ep Episode) bool {
+	if ep.Source == SourceAgent || ep.Source == SourceTeach {
+		return false
+	}
+	blob := ep.Title + "\n" + ep.Text
+	for _, line := range strings.Split(blob, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(line)), "learned:") {
+			return true
+		}
+	}
+	return false
 }
 
 func ftsQuery(q string) string {
@@ -276,7 +380,7 @@ func parseTimeArg(raw string) string {
 func sortHits(hits []Hit) {
 	for i := 0; i < len(hits); i++ {
 		for j := i + 1; j < len(hits); j++ {
-			if hits[j].Score > hits[i].Score {
+			if hits[j].Score > hits[i].Score || (hits[j].Score == hits[i].Score && hits[j].ID < hits[i].ID) {
 				hits[i], hits[j] = hits[j], hits[i]
 			}
 		}

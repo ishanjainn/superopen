@@ -75,7 +75,7 @@ func (paths Paths) Exists() bool {
 	return err == nil && info.IsDir()
 }
 
-// UnmanagedMessage is the CLI/MCP skip text when a tree has not been inited.
+// UnmanagedMessage is the CLI skip text when a tree has not been inited.
 const UnmanagedMessage = "not a Superopen repo; run so init"
 
 // Managed reports whether repoRoot has a .so/ directory (so init opt-in).

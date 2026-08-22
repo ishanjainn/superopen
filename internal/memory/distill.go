@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/agent/headless"
-	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/session"
 )
@@ -23,10 +22,10 @@ type DistillResult struct {
 	EpisodeID int64  `json:"episode_id,omitempty"`
 }
 
-// MaybeDistill runs after local ingest. Headless distill detaches when a CLI
-// is authenticated; otherwise the session is marked pending for a one-shot
-// live-agent capture at the next SessionStart. Fail-open.
+// MaybeDistill writes a local rollup after ingest. Headless distill is
+// opt-in via `so memory distill` — never auto-run from finalize.
 func MaybeDistill(root, sessionID string, detach bool) DistillResult {
+	_ = detach
 	res := DistillResult{SessionID: sessionID}
 	store, err := OpenRoot(root)
 	if err != nil {
@@ -45,23 +44,11 @@ func MaybeDistill(root, sessionID string, detach bool) DistillResult {
 		_ = store.ClearPending(sessionID)
 		return res
 	}
-	if _, ok := headless.Available(); ok {
-		if detach {
-			cli.SpawnSO(root, "memory", "distill", sessionID)
-			res.Provider = "detach"
-			return res
-		}
-		got, err := DistillSession(root, sessionID)
-		if err != nil {
-			_ = store.MarkPending(sessionID)
-			res.Pending = true
-			res.Skipped = err.Error()
-			return res
-		}
-		return got
+	if err := store.writeLocalRollup(sessionID); err != nil {
+		res.Skipped = err.Error()
+		return res
 	}
-	_ = store.MarkPending(sessionID)
-	res.Pending = true
+	res.Provider = "local"
 	return res
 }
 
@@ -74,9 +61,10 @@ func DistillSession(root, sessionID string) (DistillResult, error) {
 			return res, err
 		}
 		defer store.Close()
-		_ = store.MarkPending(sessionID)
-		res.Pending = true
-		res.Skipped = "no_headless_cli"
+		if err := store.writeLocalRollup(sessionID); err != nil {
+			return res, err
+		}
+		res.Provider = "local"
 		return res, nil
 	}
 	prompt, err := distillPrompt(root, sessionID)
@@ -176,6 +164,54 @@ func parseDistillJSON(raw string) string {
 		fmt.Fprintf(&b, "next: %s\n", Sanitize(payload.Next))
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func (s *Store) writeLocalRollup(sessionID string) error {
+	if s.HasSessionRollup(sessionID) {
+		_ = s.ClearPending(sessionID)
+		return nil
+	}
+	prompts, _ := s.Search(SearchFilter{SessionID: sessionID, Kind: KindPrompt, Limit: 8})
+	request := ""
+	if len(prompts) > 0 {
+		last := prompts[len(prompts)-1]
+		request = firstLine(last.Text, 240)
+		if request == "" {
+			request = firstLine(last.Title, 80)
+		}
+	}
+	obs, _ := s.Search(SearchFilter{SessionID: sessionID, Kind: KindObservation, Limit: 16})
+	learned := ""
+	for _, h := range obs {
+		switch h.Topic {
+		case ObservationDecision, ObservationBugfix, ObservationFeature, ObservationRefactor, ObservationDiscovery:
+			learned = firstLine(strings.TrimSpace(h.Title+" "+h.Text), 200)
+		}
+		if learned != "" {
+			break
+		}
+	}
+	var b strings.Builder
+	if request != "" {
+		fmt.Fprintf(&b, "request: %s\n", Sanitize(request))
+	}
+	if learned != "" {
+		fmt.Fprintf(&b, "learned: %s\n", Sanitize(learned))
+	}
+	text := strings.TrimSpace(b.String())
+	if text == "" {
+		text = "request:"
+	}
+	if _, err := s.Capture(CaptureInput{
+		SessionID: sessionID,
+		Kind:      KindSession,
+		Source:    SourceSpan,
+		Title:     "session rollup",
+		Text:      text,
+	}); err != nil {
+		return err
+	}
+	return s.ClearPending(sessionID)
 }
 
 func LiveDistillInstruction(pendingSession string) string {

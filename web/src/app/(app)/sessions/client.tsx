@@ -164,7 +164,10 @@ export default function SessionsPage() {
   }, []);
 
   useEffect(() => {
-    void load(debounced, projectId);
+    const timer = window.setTimeout(() => {
+      void load(debounced, projectId);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [debounced, projectId, load]);
 
   useSoftPoll(

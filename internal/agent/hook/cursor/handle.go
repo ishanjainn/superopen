@@ -15,6 +15,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/normalize"
 	"github.com/ishanjainn/superopen/internal/agent/pricing"
 	"github.com/ishanjainn/superopen/internal/agent/sessionstate"
+	"github.com/ishanjainn/superopen/internal/repofile"
 	"github.com/ishanjainn/superopen/internal/session/agentlinks"
 	"github.com/ishanjainn/superopen/sdk/go/semconv"
 )
@@ -211,7 +212,7 @@ func handle(ctx context.Context, in normalize.Input) error {
 	}
 
 	// Mode + model transition events are now emitted centrally in
-	// cli/internal/agent/hook/hook.go for ALL three coding agents
+	// internal/agent/hook/hook.go for ALL three coding agents
 	// (Cursor / Claude Code / Codex), so we don't duplicate that
 	// logic here. The cache update for the latest value still
 	// happens via peekContext + sessionstate.Save in hook.go.
@@ -426,37 +427,13 @@ func handle(ctx context.Context, in normalize.Input) error {
 			Result:     captureIfFull(in.ContentCapture, p.Output),
 		})
 
-	case "beforeMCPExecution":
-		return in.Emit.EmitEvent(normalize.EventEmission{
-			SessionID: sessionID,
-			Name:      "coding_agent.mcp.tool.requested",
-			At:        time.Now(),
-			Attrs: map[string]any{
-				"coding_agent.client":          in.Vendor,
-				"gen_ai.tool.name":             p.ToolName,
-				"coding_agent.mcp.server.name": serverNameFromMCPInput(p.ToolInput),
-			},
-		})
-
-	case "afterMCPExecution":
-		return in.Emit.EmitToolCall(normalize.ToolCall{
-			SessionID:     sessionID,
-			ToolName:      p.ToolName,
-			Vendor:        in.Vendor,
-			MCPServerName: serverNameFromMCPInput(p.ToolInput),
-			MCPSource:     semconv.CodingAgentMCPSourceMarketplace,
-			StartedAt:     time.Now().Add(-time.Duration(p.Duration) * time.Millisecond),
-			EndedAt:       time.Now(),
-			Args:          captureIfFull(in.ContentCapture, string(p.ToolInput)),
-			Result:        captureIfFull(in.ContentCapture, p.ResultJSON),
-		})
-
 	case "beforeReadFile":
 		return in.Emit.EmitToolCall(normalize.ToolCall{
 			SessionID:  sessionID,
 			ToolName:   "read_file",
 			Vendor:     in.Vendor,
 			WorkingDir: p.CWD,
+			FilePath:   filePathFromCursorTool(p),
 			StartedAt:  time.Now(),
 			EndedAt:    time.Now(),
 			Args:       captureIfFull(in.ContentCapture, p.FilePath),
@@ -694,15 +671,13 @@ func buildToolCallSuccess(in normalize.Input, p cursorPayload, sessionID string)
 		Vendor:                 in.Vendor,
 		Model:                  p.Model,
 		WorkingDir:             p.CWD,
+		FilePath:               filePathFromCursorTool(p),
 		StartedAt:              startedAt,
 		EndedAt:                time.Now(),
 		Args:                   captureIfFull(in.ContentCapture, string(p.ToolInput)),
 		Result:                 captureIfFull(in.ContentCapture, p.ToolOutput),
 		AgentMessage:           captureIfFull(in.ContentCapture, p.AgentMessage),
 		TriggeringLLMRequestID: p.GenerationID,
-		MCPServerName:          serverNameFromMCPInput(p.ToolInput),
-		MCPScope:               mcpScopeFromTool(p.ToolName, p.ToolInput),
-		MCPTransport:           mcpTransportFromTool(p.ToolName, p.ToolInput),
 	}
 }
 
@@ -718,6 +693,7 @@ func buildToolCallFailure(in normalize.Input, p cursorPayload, sessionID string)
 		FailureType:            p.FailureType,
 		IsInterrupt:            p.IsInterrupt,
 		WorkingDir:             p.CWD,
+		FilePath:               filePathFromCursorTool(p),
 		StartedAt:              startedAt,
 		EndedAt:                time.Now(),
 		Args:                   captureIfFull(in.ContentCapture, string(p.ToolInput)),
@@ -768,11 +744,12 @@ func linkCursorTaskAgent(cwd, parentSessionID, vendor string, p cursorPayload) {
 }
 
 func isTaskToolName(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "task", "agent", "mcp_task":
+	n := strings.ToLower(strings.TrimSpace(name))
+	switch n {
+	case "task", "agent":
 		return true
 	default:
-		return false
+		return strings.HasSuffix(n, "_task")
 	}
 }
 
@@ -789,6 +766,21 @@ func agentIDFromPath(path string) string {
 	return ""
 }
 
+func filePathFromCursorTool(p cursorPayload) string {
+	if repofile.IsShell(p.ToolName) {
+		return ""
+	}
+	path := strings.TrimSpace(p.FilePath)
+	if path == "" && len(p.ToolInput) > 0 {
+		path = repofile.PathFromJSON(string(p.ToolInput))
+	}
+	cwd := strings.TrimSpace(p.CWD)
+	if cwd == "" && len(p.WorkspaceRoots) > 0 {
+		cwd = strings.TrimSpace(p.WorkspaceRoots[0])
+	}
+	return repofile.Accept(path, p.ToolName, cwd)
+}
+
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		if strings.TrimSpace(v) != "" {
@@ -796,37 +788,6 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
-}
-
-// mcpScopeFromTool / mcpTransportFromTool tease the MCP metadata out
-// of a tool-input JSON blob. Cursor packs both fields into tool_input
-// for MCP tools (`scope`: user|workspace, `transport`: stdio|sse). We
-// surface them as separate attributes so dashboards can group by
-// trust boundary without parsing JSON at query time.
-func mcpScopeFromTool(toolName string, raw json.RawMessage) string {
-	if !strings.HasPrefix(toolName, "mcp_") || len(raw) == 0 {
-		return ""
-	}
-	var m struct {
-		Scope string `json:"scope"`
-	}
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return ""
-	}
-	return m.Scope
-}
-
-func mcpTransportFromTool(toolName string, raw json.RawMessage) string {
-	if !strings.HasPrefix(toolName, "mcp_") || len(raw) == 0 {
-		return ""
-	}
-	var m struct {
-		Transport string `json:"transport"`
-	}
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return ""
-	}
-	return m.Transport
 }
 
 // outcomeFromReason maps Cursor's sessionEnd `reason` + `final_status`
@@ -856,33 +817,6 @@ func outcomeFromReason(reason, final string) string {
 		return semconv.CodingAgentSessionOutcomeCompleted
 	case "aborted":
 		return semconv.CodingAgentSessionOutcomeCancelled
-	}
-	return ""
-}
-
-func serverNameFromMCPInput(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var m struct {
-		URL     string `json:"url"`
-		Command string `json:"command"`
-		Server  string `json:"server"`
-	}
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return ""
-	}
-	if m.Server != "" {
-		return m.Server
-	}
-	if m.URL != "" {
-		return m.URL
-	}
-	if m.Command != "" {
-		fields := strings.Fields(m.Command)
-		if len(fields) > 0 {
-			return fields[0]
-		}
 	}
 	return ""
 }

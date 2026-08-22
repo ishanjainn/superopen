@@ -3,8 +3,8 @@
 # Does not run the Linux kernel corpus; pass a repo root explicitly.
 #
 # Usage:
-#   scripts/bench-init.sh [repo-root]
-#   SO_BIN=./bin/so scripts/bench-init.sh /path/to/grafana
+#   benchmarks/bench-init.sh [repo-root]
+#   SO_BIN=./bin/so benchmarks/bench-init.sh /path/to/grafana
 set -euo pipefail
 
 ROOT="${1:-.}"

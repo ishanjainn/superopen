@@ -1,11 +1,9 @@
 package memory
 
 import (
+	"math"
 	"time"
 )
-
-const edgeHalfLifeDays = 90.0
-const edgeDecay = 0.9
 
 func (s *Store) Sleep() error {
 	if err := s.decayEdges(); err != nil {
@@ -99,6 +97,10 @@ JOIN memory_episodes dst ON dst.id=e.target_id`)
 	}
 	_ = rows.Close()
 	now := time.Now().UTC()
+	halfLife := s.knobFloat("edge_half_life", 90)
+	if halfLife <= 0 {
+		halfLife = 90
+	}
 	for _, r := range all {
 		if r.srcHold != 0 || r.dstHold != 0 {
 			continue
@@ -111,15 +113,19 @@ JOIN memory_episodes dst ON dst.id=e.target_id`)
 			}
 		}
 		days := now.Sub(t).Hours() / 24
-		if days < edgeHalfLifeDays {
+		if days <= 0 {
 			continue
 		}
-		w := r.w * edgeDecay
+		// Uses a 90-day grace then weight *= 0.9^(days-90).
+		// Superopen uses the planned half-life: weight *= 0.5^(days/halfLife)
+		// from last update, so a nightly sleep decays continuously instead of
+		// a one-shot 0.9 after the grace window.
+		w := r.w * math.Pow(0.5, days/halfLife)
 		if w < 0.05 {
 			_, _ = s.db.Exec(`DELETE FROM memory_edges WHERE source_id=? AND target_id=? AND type=?`, r.src, r.dst, r.typ)
 			continue
 		}
-		_, _ = s.db.Exec(`UPDATE memory_edges SET weight=? WHERE source_id=? AND target_id=? AND type=?`, w, r.src, r.dst, r.typ)
+		_, _ = s.db.Exec(`UPDATE memory_edges SET weight=?, updated_at=? WHERE source_id=? AND target_id=? AND type=?`, w, nowRFC(), r.src, r.dst, r.typ)
 	}
 	return nil
 }

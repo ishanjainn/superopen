@@ -58,9 +58,21 @@ func HelpForTrace(result api.TraceResult) []string {
 
 // HelpForSnippet returns AXI next-step commands after a graph snippet.
 func HelpForSnippet(result api.SnippetResult) []string {
+	if result.Status == "ambiguous" && len(result.Suggestions) > 0 {
+		qn := result.Suggestions[0].QualifiedName
+		if qn != "" {
+			return []string{fmt.Sprintf("so graph snippet %s", qn)}
+		}
+	}
 	qn := result.QualifiedName
 	if qn == "" {
-		return []string{"so graph trace <qualified_name> --direction both"}
+		return []string{
+			"so graph trace <qualified_name> --direction incoming",
+			"so graph trace <qualified_name> --direction outgoing",
+		}
 	}
-	return []string{fmt.Sprintf("so graph trace %s --direction both", qn)}
+	return []string{
+		fmt.Sprintf("so graph trace %s --direction incoming", qn),
+		fmt.Sprintf("so graph trace %s --direction outgoing", qn),
+	}
 }

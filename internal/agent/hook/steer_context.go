@@ -33,6 +33,8 @@ const (
 	augmentMinTermLen = 3
 )
 
+var priorWorkCue = regexp.MustCompile(`(?i)last time|we decided|remember|what did we`)
+
 // emitSteerContext writes vendor-specific additionalContext when the event
 // supports it. Unknown protocols get no stdout (fail-open).
 func emitSteerContext(vendor, event, kind string, payload []byte) {
@@ -153,9 +155,22 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 			// Explore subagents never see SessionStart; inject a one-line reminder.
 			return steerDecision{text: steer.HookReminder(), hookEvent: ev}, true
 		}
-		// SessionStart, UserPromptSubmit, Stop, SessionEnd, and other
-		// lifecycle events are observability-only. Do not inject memory
-		// packs or steer text — PreToolUse is the Graphify-shaped nudge.
+		if isSessionStartEvent(vendor, ev) {
+			if text := memorySessionIndexText(payload); text != "" {
+				return steerDecision{text: text, hookEvent: ev}, true
+			}
+			return steerDecision{}, false
+		}
+		if isPromptSubmitEvent(vendor, ev) {
+			prompt := peekContext(payload).Prompt
+			if priorWorkCue.MatchString(prompt) {
+				if text := memorySessionIndexText(payload); text != "" {
+					return steerDecision{text: text, hookEvent: ev}, true
+				}
+			}
+			return steerDecision{}, false
+		}
+		// Stop, SessionEnd, and other lifecycle events are observability-only.
 		return steerDecision{}, false
 	case toolEvent:
 		if vendor == "codex" {
@@ -192,6 +207,9 @@ func graphGate(payload []byte, vendor, kind, hookEvent string) (steerDecision, b
 		// Static MANDATORY one-liner only. Do not append ExploreAugment hit lists.
 		return steerDecision{text: steer.SearchNudge(), hookEvent: hookEvent}, true
 	case "read":
+		if isSkillDocRead(peekContext(payload).ToolPath) {
+			return steerDecision{}, false
+		}
 		if hookStrictEnabled() && claimStrictReadDeny(payload, vendor) && isSourceRead(payload, tool, hookEvent) {
 			return steerDecision{text: steer.ReadDenyReason(), hookEvent: hookEvent, deny: true}, true
 		}
@@ -231,13 +249,16 @@ func claimStrictReadDeny(payload []byte, vendor string) bool {
 }
 
 func isSourceRead(payload []byte, tool, hookEvent string) bool {
+	path := peekContext(payload).ToolPath
+	if isSkillDocRead(path) {
+		return false
+	}
 	if hookEvent == "beforeReadFile" {
 		return true
 	}
 	if !isReadTool(tool) {
 		return false
 	}
-	path := peekContext(payload).ToolPath
 	if path == "" {
 		return true
 	}
@@ -254,12 +275,70 @@ func isSourceRead(payload []byte, tool, hookEvent string) bool {
 	}
 }
 
+func isSkillDocRead(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	lower := strings.ToLower(strings.ReplaceAll(path, "\\", "/"))
+	base := filepath.Base(lower)
+	if base == "agents.md" || base == "skill.md" {
+		return true
+	}
+	return strings.Contains(lower, "/skills/so/") || strings.Contains(lower, "/skills/superopen/")
+}
+
+func isPromptSubmitEvent(vendor, ev string) bool {
+	switch vendor {
+	case "claude-code", "codex":
+		return ev == "UserPromptSubmit"
+	case "cursor":
+		return ev == "beforeSubmitPrompt"
+	case "copilot-cli":
+		return ev == "userPromptSubmitted"
+	default:
+		return strings.EqualFold(ev, "UserPromptSubmit") || strings.EqualFold(ev, "beforeSubmitPrompt")
+	}
+}
+
 func memoryCompactText(payload []byte) string {
 	root := graphRoot(payload)
 	if root == "" {
 		return ""
 	}
 	return memory.CompactSnapshot(root, steerSessionID(payload))
+}
+
+func memorySessionIndexText(payload []byte) string {
+	root := graphRoot(payload)
+	if root == "" {
+		return ""
+	}
+	text := memory.SessionStartIndex(root)
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	return text
+}
+
+func isSessionStartEvent(vendor, ev string) bool {
+	switch vendor {
+	case "claude-code", "codex":
+		return ev == "SessionStart"
+	case "cursor":
+		return ev == "sessionStart"
+	case "gemini":
+		return strings.ToLower(ev) == "sessionstart"
+	case "copilot-cli":
+		return ev == "sessionStart"
+	case "opencode":
+		lower := strings.ToLower(ev)
+		return strings.Contains(lower, "session.created") || lower == "sessionstart" || lower == "session_start"
+	case "pi":
+		lower := strings.ToLower(ev)
+		return lower == "session_start" || lower == "sessionstart"
+	default:
+		return false
+	}
 }
 
 // claimSessionReminder reports whether this session still owes the durable

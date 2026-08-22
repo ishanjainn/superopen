@@ -43,7 +43,6 @@ func defaultSampler() sdktrace.Sampler {
 			drop: map[string]struct{}{
 				"coding_agent.tool.requested":     {},
 				"coding_agent.shell.requested":    {},
-				"coding_agent.mcp.tool.requested": {},
 				"coding_agent.user_prompt.submit": {},
 			},
 		}

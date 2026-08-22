@@ -52,6 +52,7 @@ func NewLocalJSONL(dir string) *LocalJSONL {
 }
 
 func (s *LocalJSONL) Write(spans []Span) error {
+	spans = DedupSpans(spans)
 	if len(spans) == 0 {
 		return nil
 	}
@@ -296,24 +297,44 @@ func (s *LocalJSONL) SessionCost(sessionID string) (int64, float64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	var tokens int64
-	var cost float64
-	for _, sp := range spans {
-		if v := sp.Attributes["gen_ai.usage.total_tokens"]; v != "" {
-			var n int64
-			fmt.Sscanf(v, "%d", &n)
-			tokens += n
+	var root, stop *Span
+	for i := range spans {
+		sp := &spans[i]
+		if !hasUsageTokens(sp) {
+			continue
 		}
-		// Prefer gen_ai.usage.cost (semconv); accept alternate aliases.
-		for _, key := range []string{"gen_ai.usage.cost", "gen_ai.usage.cost_usd", "coding_agent.session.cost_usd"} {
-			if v := sp.Attributes[key]; v != "" {
-				var c float64
-				if _, err := fmt.Sscanf(v, "%f", &c); err == nil {
-					cost += c
-					break
-				}
+		switch sp.Name {
+		case "coding_agent.session":
+			root = sp
+		case "coding_agent.session.loop.stop":
+			if stop == nil || sp.StartTimeUnixN >= stop.StartTimeUnixN {
+				stop = sp
+			}
+		}
+	}
+	chosen := root
+	if chosen == nil {
+		chosen = stop
+	}
+	if chosen == nil {
+		return 0, 0, nil
+	}
+	var tokens int64
+	fmt.Sscanf(chosen.Attributes["gen_ai.usage.total_tokens"], "%d", &tokens)
+	var cost float64
+	for _, key := range []string{"gen_ai.usage.cost", "gen_ai.usage.cost_usd", "coding_agent.session.cost_usd"} {
+		if v := chosen.Attributes[key]; v != "" {
+			if _, err := fmt.Sscanf(v, "%f", &cost); err == nil {
+				break
 			}
 		}
 	}
 	return tokens, cost, nil
+}
+
+func hasUsageTokens(sp *Span) bool {
+	if sp == nil || sp.Attributes == nil {
+		return false
+	}
+	return strings.TrimSpace(sp.Attributes["gen_ai.usage.total_tokens"]) != ""
 }

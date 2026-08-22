@@ -38,5 +38,5 @@ export interface GraphDisplaySettings {
 export const DEFAULT_GRAPH_DISPLAY: GraphDisplaySettings = {
   edgeBrightness: 1,
   nodeGlow: 1,
-  bloom: 1,
+  bloom: 0,
 };

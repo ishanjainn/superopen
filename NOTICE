@@ -1,0 +1,11 @@
+Superopen
+Copyright 2026 Superopen contributors
+
+This product includes original work and algorithms derived from publicly
+available open-source code-intelligence engines (indexing, retrieval, and
+session-memory techniques). Those upstream projects remain under their own
+licenses. Superopen is distributed under the Apache License, Version 2.0.
+See LICENSE for the full terms.
+
+This NOTICE is attribution only. Product surfaces (CLI, skill, hooks, README)
+do not incorporate third-party product names.

@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Isolated agent-graph eval: vanilla / Superopen / Graphify / CBM / iai.
+"""Isolated agent-graph eval: vanilla vs Superopen.
 
-Default corpus is torvalds/linux (CBM's published kernel index). Each arm gets
-its own git worktree, HOME, CLAUDE_CONFIG_DIR, and XDG dirs. MCP is passed only
-for the arm that owns that server. This process never writes the developer's
-~/.claude.json. Superopen never passes `--mcp-config`. CBM may still use MCP.
+Each arm gets its own git worktree, HOME, CLAUDE_CONFIG_DIR, and XDG dirs.
+This process never writes the developer's ~/.claude.json.
 """
 
 from __future__ import annotations
@@ -16,7 +14,9 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parent.parent
 sys.path.insert(0, str(ROOT))
 
-from grade import filter_questions, grade_answer, grade_worktree, load_questions, parse_usage, wrap_prompt  # noqa: E402
+from grade import filter_questions, grade_answer, grade_worktree, load_questions, memory_used, parse_usage, wrap_prompt  # noqa: E402
 from isolate import (  # noqa: E402
     ARM_LABELS,
     KNOWN_REPOS,
@@ -36,15 +36,12 @@ from isolate import (  # noqa: E402
     ensure_dirs,
     ensure_git_mirror,
     sync_isolated_claude,
-    mcp_child_env,
-    mcp_launch,
     rewrite_docker_agent_paths,
     parse_nodes_edges,
     parse_rss_bytes,
     prepend_path,
     run,
     run_streaming,
-    write_mcp_config,
 )
 import docker as eval_docker  # noqa: E402
 import transcripts  # noqa: E402
@@ -52,48 +49,29 @@ import transcripts  # noqa: E402
 INDEX_TIMEOUT = 3600
 AGENT_TIMEOUT = 900
 CLONE_TIMEOUT = 1800
+MEMORY_ARMS = frozenset({"superopen"})
+INDEX_HEAVY_ARMS = frozenset({"superopen"})
+SIDE_WHILE_INDEX_ARMS = frozenset({"vanilla"})
+_PRINT_LOCK = threading.Lock()
 INIT_PROMPT = """Run `so init` in this repository (the same command as /so init).
 If the graph already exists, `so init` prints "Already initialized" — that is success. Do not pass --force and do not rebuild.
 Then run `so graph status` so node and edge counts are visible, and stop.
 Do not answer architecture questions."""
 USE_DOCKER = False
 LINUX_SO_BIN: Path | None = None
-
-ARM_BIN_FLAGS = {
-    "superopen": ("so", "--so-bin"),
-    "graphify": ("graphify", "--graphify-bin"),
-    "cbm": ("cbm", "--cbm-bin"),
-    "iai": ("iai", "--iai-mcp"),
-}
+SKIP_INDEX = False
 
 
 def claude_json(
     prompt: str,
     cwd: Path,
     out_path: Path,
-    mcp_config: Path | None,
     model: str,
     env: dict[str, str],
     timeout: int,
     docker_spec: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    mcp_arg = str(mcp_config) if mcp_config is not None else None
-    if docker_spec is not None and mcp_config is not None:
-        mcp_arg = "/eval/mcp.json"
     cmd = ["claude", "-p", "--model", model, "--dangerously-skip-permissions", "--output-format", "json", prompt]
-    if mcp_arg is not None:
-        cmd = [
-            "claude",
-            "--mcp-config",
-            mcp_arg,
-            "-p",
-            "--model",
-            model,
-            "--dangerously-skip-permissions",
-            "--output-format",
-            "json",
-            prompt,
-        ]
     run_env = env
     if docker_spec is not None:
         cmd = eval_docker.run_argv(cmd, **docker_spec)
@@ -170,13 +148,9 @@ def prepare_vanilla(_paths: dict[str, Path], _env: dict[str, str], _bins: dict[s
         "index_s": 0.0,
         "ingest_usd": 0.0,
         "peak_rss_mb": None,
-        "mcp_config": None,
         "harness": "product",
         "label": ARM_LABELS["vanilla"],
     }
-
-
-SKIP_INDEX = False
 
 
 def prepare_superopen(paths: dict[str, Path], env: dict[str, str], bins: dict[str, Path | None]) -> dict[str, Any]:
@@ -243,8 +217,6 @@ def prepare_superopen(paths: dict[str, Path], env: dict[str, str], bins: dict[st
         "index_s": index_s,
         "ingest_usd": 0.0,
         "peak_rss_mb": _rss_mb(rss),
-        "mcp_config": None,
-        "docker_mcp_config": None,
         "so_in_container": True,
         "so_install_ok": install_proc.returncode == 0,
         "harness": "product",
@@ -255,261 +227,9 @@ def prepare_superopen(paths: dict[str, Path], env: dict[str, str], bins: dict[st
     }
 
 
-def prepare_graphify(paths: dict[str, Path], env: dict[str, str], bins: dict[str, Path | None]) -> dict[str, Any]:
-    binary = bins["graphify"]
-    if binary is None:
-        return {"ok": False, "error": "--graphify-bin is required", "label": ARM_LABELS["graphify"]}
-    prepend_path(env, binary.parent)
-    graph_json = paths["worktree"] / "graphify-out" / "graph.json"
-    cache = os.environ.get("GRAPHIFY_OUT_CACHE", "").strip()
-    if cache and not graph_json.is_file():
-        src = Path(cache) / "graph.json"
-        if src.is_file():
-            shutil.copytree(cache, paths["worktree"] / "graphify-out", dirs_exist_ok=True)
-    if graph_json.is_file():
-        nodes = edges = None
-        try:
-            if graph_json.stat().st_size < 80_000_000:
-                doc = json.loads(graph_json.read_text())
-                nodes = len(doc.get("nodes") or [])
-                edges = len(doc.get("edges") or [])
-        except Exception:  # noqa: BLE001
-            pass
-        index_s = 0.0
-        rss = None
-        proc_ok = True
-        returncode = 0
-        err = None
-        proc = None
-    else:
-        proc, index_s, err, rss = _timed_run(
-            [str(binary), "extract", ".", "--code-only", "--force"],
-            paths["worktree"],
-            env,
-            INDEX_TIMEOUT,
-            paths["root"] / "graphify-extract.out",
-        )
-        if err or proc is None:
-            return {"ok": False, "error": err or "extract_failed", "index_s": index_s, "ingest_usd": 0.0, "peak_rss_mb": _rss_mb(rss), "label": ARM_LABELS["graphify"]}
-        nodes, edges = parse_nodes_edges((proc.stdout or "") + "\n" + (proc.stderr or ""))
-        if graph_json.is_file() and (nodes is None or edges is None):
-            try:
-                doc = json.loads(graph_json.read_text())
-                nodes = nodes if nodes is not None else len(doc.get("nodes") or [])
-                edges = edges if edges is not None else len(doc.get("edges") or [])
-            except Exception:  # noqa: BLE001
-                pass
-        proc_ok = proc.returncode == 0
-        returncode = proc.returncode
-        err = None if proc.returncode == 0 else "graphify extract failed"
-    install_proc = run([str(binary), "install"], cwd=paths["worktree"], env=env, timeout=180)
-    claude_install = run([str(binary), "claude", "install"], cwd=paths["worktree"], env=env, timeout=180)
-    sync_isolated_claude(paths["home"], paths["claude"])
-    if USE_DOCKER:
-        rewrite_docker_agent_paths(paths, graphify_bin=binary)
-    return {
-        "ok": proc_ok,
-        "nodes": nodes,
-        "edges": edges,
-        "index_s": index_s,
-        "ingest_usd": 0.0,
-        "peak_rss_mb": _rss_mb(rss),
-        "mcp_config": None,
-        "harness": "product",
-        "label": ARM_LABELS["graphify"],
-        "returncode": returncode,
-        "error": err,
-        "graphify_install_ok": install_proc.returncode == 0 and claude_install.returncode == 0,
-        "skip_index": SKIP_INDEX,
-    }
-
-
-def _linux_cbm_bin() -> Path | None:
-    for candidate in (
-        Path("/tmp/cbm-linux/portable/codebase-memory-mcp"),
-        Path("/tmp/cbm-linux/codebase-memory-mcp"),
-    ):
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def prepare_cbm(paths: dict[str, Path], env: dict[str, str], bins: dict[str, Path | None]) -> dict[str, Any]:
-    binary = bins["cbm"]
-    if binary is None:
-        return {"ok": False, "error": "--cbm-bin is required", "label": ARM_LABELS["cbm"]}
-    prepend_path(env, binary.parent)
-    cache = Path(env["CBM_CACHE_DIR"])
-    cache.mkdir(parents=True, exist_ok=True)
-    print(f"  CBM_CACHE_DIR={cache} (arm-isolated; not the host daemon cache)", flush=True)
-    linux_cbm = _linux_cbm_bin()
-    extra_bins = extra_volumes = docker_extra_env = None
-    if USE_DOCKER:
-        if linux_cbm is None:
-            return {
-                "ok": False,
-                "error": "docker CBM requires /tmp/cbm-linux/portable/codebase-memory-mcp",
-                "index_s": 0.0,
-                "ingest_usd": 0.0,
-                "label": ARM_LABELS["cbm"],
-            }
-        extra_bins = [(str(linux_cbm), "/usr/local/bin/codebase-memory-mcp")]
-        extra_volumes = [(str(cache), "/eval/cbm-cache")]
-        docker_extra_env = {"CBM_CACHE_DIR": "/eval/cbm-cache"}
-        argv = eval_docker.run_argv(
-            ["/usr/local/bin/codebase-memory-mcp", "cli", "--json", "index_repository", "--repo-path", "/work"],
-            worktree=paths["worktree"],
-            claude_dir=paths["claude"],
-            home=paths["home"],
-            extra_bins=[(linux_cbm, "/usr/local/bin/codebase-memory-mcp")],
-            extra_volumes=[(cache, "/eval/cbm-cache")],
-            extra_env={"CBM_CACHE_DIR": "/eval/cbm-cache"},
-        )
-        eval_docker.assert_isolated(argv)
-        proc, index_s, err, rss = _timed_run(
-            argv, Path("/"), os.environ.copy(), INDEX_TIMEOUT, paths["root"] / "cbm-index.out"
-        )
-    else:
-        proc, index_s, err, rss = _timed_run(
-            [str(binary), "cli", "--json", "index_repository", "--repo-path", str(paths["worktree"])],
-            paths["worktree"],
-            env,
-            INDEX_TIMEOUT,
-            paths["root"] / "cbm-index.out",
-        )
-    if err or proc is None:
-        return {"ok": False, "error": err or "index_failed", "index_s": index_s, "ingest_usd": 0.0, "peak_rss_mb": _rss_mb(rss), "label": ARM_LABELS["cbm"]}
-    nodes = edges = project = None
-    try:
-        outer = json.loads(proc.stdout or "{}")
-        inner = json.loads(outer["content"][0]["text"]) if isinstance(outer, dict) and "content" in outer else outer
-        nodes, edges, project = inner.get("nodes"), inner.get("edges"), inner.get("project")
-    except Exception:  # noqa: BLE001
-        nodes, edges = parse_nodes_edges((proc.stdout or "") + "\n" + (proc.stderr or ""))
-    command, args = mcp_launch(binary)
-    mcp = write_mcp_config(
-        paths["mcp_config"],
-        "codebase-memory",
-        command,
-        args,
-        mcp_child_env(env, {"CBM_CACHE_DIR": env["CBM_CACHE_DIR"]}),
-    )
-    docker_mcp = write_mcp_config(
-        paths["root"] / "mcp.docker.json",
-        "codebase-memory",
-        "/usr/local/bin/codebase-memory-mcp",
-        [],
-        {
-            "HOME": "/eval/home",
-            "CLAUDE_CONFIG_DIR": "/eval/claude",
-            "CBM_CACHE_DIR": "/eval/cbm-cache",
-        },
-    )
-    cbm_install = run(
-        [str(binary), "install", "--yes", "--skip-binary", "--clients=claude"],
-        cwd=paths["worktree"],
-        env=env,
-        timeout=180,
-    )
-    sync_isolated_claude(paths["home"], paths["claude"])
-    if USE_DOCKER:
-        rewrite_docker_agent_paths(paths, cbm_bin=binary)
-    return {
-        "ok": proc.returncode == 0,
-        "nodes": nodes,
-        "edges": edges,
-        "project": project,
-        "index_s": index_s,
-        "ingest_usd": 0.0,
-        "peak_rss_mb": _rss_mb(rss),
-        "mcp_config": str(mcp),
-        "docker_mcp_config": str(docker_mcp) if USE_DOCKER else None,
-        "extra_bins": extra_bins,
-        "extra_volumes": extra_volumes,
-        "docker_extra_env": docker_extra_env,
-        "harness": "product",
-        "cbm_install_ok": cbm_install.returncode == 0,
-        "label": ARM_LABELS["cbm"],
-        "returncode": proc.returncode,
-        "error": None if proc.returncode == 0 else "cbm index_repository failed",
-    }
-
-
-def iai_src_root(wrapper: Path) -> Path | None:
-    cur = wrapper.resolve()
-    for _ in range(8):
-        if (cur / "src" / "iai_mcp").is_dir():
-            return cur
-        if cur.parent == cur:
-            break
-        cur = cur.parent
-    env_root = os.environ.get("IAI_ROOT", "").strip()
-    if env_root:
-        candidate = Path(env_root)
-        if (candidate / "src" / "iai_mcp").is_dir():
-            return candidate
-    return None
-
-
-def prepare_iai(paths: dict[str, Path], env: dict[str, str], bins: dict[str, Path | None]) -> dict[str, Any]:
-    wrapper = bins["iai"]
-    if wrapper is None:
-        return {"ok": False, "error": "--iai-mcp is required", "label": ARM_LABELS["iai"]}
-    src_root = iai_src_root(wrapper)
-    pythonpath = str((src_root / "src").resolve()) if src_root is not None else ""
-    if pythonpath:
-        env["PYTHONPATH"] = pythonpath + os.pathsep + env.get("PYTHONPATH", "")
-    command, args = mcp_launch(wrapper)
-    host_cmd, host_args = command, args
-    if src_root is not None:
-        host_cmd, host_args = "python3", ["-m", "iai_mcp.cli"]
-    mcp = write_mcp_config(
-        paths["mcp_config"],
-        "iai-pme",
-        host_cmd,
-        host_args,
-        mcp_child_env(env, {"IAI_MCP_STORE": env["IAI_MCP_STORE"], "PYTHONPATH": pythonpath}),
-    )
-    docker_mcp = extra_volumes = docker_extra_env = None
-    if USE_DOCKER and src_root is not None:
-        docker_mcp = write_mcp_config(
-            paths["root"] / "mcp.docker.json",
-            "iai-pme",
-            "python3",
-            ["-m", "iai_mcp.cli"],
-            {
-                "HOME": "/eval/home",
-                "CLAUDE_CONFIG_DIR": "/eval/claude",
-                "IAI_MCP_STORE": "/eval/home/.iai-mcp",
-                "PYTHONPATH": "/eval/iai/src",
-            },
-        )
-        extra_volumes = [(str(src_root), "/eval/iai")]
-        docker_extra_env = {"IAI_MCP_STORE": "/eval/home/.iai-mcp", "PYTHONPATH": "/eval/iai/src"}
-    return {
-        "ok": True,
-        "nodes": 0,
-        "edges": 0,
-        "index_s": 0.0,
-        "ingest_usd": 0.0,
-        "peak_rss_mb": None,
-        "mcp_config": str(mcp),
-        "docker_mcp_config": str(docker_mcp) if docker_mcp else None,
-        "extra_volumes": extra_volumes,
-        "docker_extra_env": docker_extra_env,
-        "iai_src": str(src_root) if src_root else None,
-        "harness": "product",
-        "label": ARM_LABELS["iai"],
-        "warning": None if src_root else "iai checkout src/iai_mcp not found; MCP may fail to start",
-    }
-
-
 PREPARE = {
     "vanilla": prepare_vanilla,
     "superopen": prepare_superopen,
-    "graphify": prepare_graphify,
-    "cbm": prepare_cbm,
-    "iai": prepare_iai,
 }
 
 
@@ -517,22 +237,11 @@ def docker_spec_for(paths: dict[str, Path], info: dict[str, Any]) -> dict[str, A
     if not USE_DOCKER:
         return None
     so_bin = LINUX_SO_BIN if info.get("so_in_container") else None
-    mcp = None
-    if info.get("docker_mcp_config"):
-        mcp = Path(info["docker_mcp_config"])
-    elif info.get("mcp_config"):
-        mcp = Path(info["mcp_config"])
-    extra_bins = [(Path(src), dest) for src, dest in (info.get("extra_bins") or [])]
-    extra_volumes = [(Path(src), dest) for src, dest in (info.get("extra_volumes") or [])]
     return {
         "worktree": paths["worktree"],
         "so_bin": so_bin,
         "claude_dir": paths["claude"],
         "home": paths["home"],
-        "mcp_config": mcp,
-        "extra_bins": extra_bins or None,
-        "extra_volumes": extra_volumes or None,
-        "extra_env": info.get("docker_extra_env"),
     }
 
 
@@ -551,7 +260,6 @@ def record_session(metrics: dict[str, Any], paths: dict[str, Path], out_dir: Pat
 
 
 def _used_graph(metrics: dict[str, Any]) -> bool:
-    """Transcript graph use — not whether the final answer mentioned the graph."""
     t = metrics.get("transcript") or {}
     if int(t.get("graph_tools") or 0) > 0:
         return True
@@ -562,20 +270,278 @@ def _used_graph(metrics: dict[str, Any]) -> bool:
 
 def _used_memory(metrics: dict[str, Any]) -> bool:
     t = metrics.get("transcript") or {}
-    if int(t.get("memory_tools") or 0) > 0:
+    if memory_used(str(metrics.get("result") or ""), t):
         return True
     return bool(metrics.get("memory_used"))
 
 
 def normalize_arm(name: str) -> str:
-    aliases = {"so": "superopen", "peer_cli": "graphify", "peer_mcp": "cbm"}
-    return aliases.get(name, name)
+    return {"so": "superopen"}.get(name, name)
+
+
+def flush_memory_after_question(
+    arm: str,
+    paths: dict[str, Path],
+    env: dict[str, str],
+    bins: dict[str, Path | None],
+    metrics: dict[str, Any],
+) -> None:
+    if arm not in MEMORY_ARMS:
+        return
+    session_id = str(metrics.get("session_id") or "").strip()
+    if arm == "superopen" and session_id:
+        so_bin = bins.get("so")
+        if so_bin is not None and so_bin.exists():
+            proc = run(
+                [str(so_bin), "sessions", "finalize", session_id],
+                cwd=paths["worktree"],
+                env=env,
+                timeout=300,
+            )
+            if proc.returncode != 0:
+                print(f"   warn: so sessions finalize {session_id} rc={proc.returncode}", flush=True)
+
+
+def default_index_timeout(repo_arg: str, questions_path: Path | None) -> int:
+    if questions_path is not None and questions_path.name == "grafana-memory.json":
+        return 10800
+    spec = KNOWN_REPOS.get(repo_arg)
+    if spec is not None and spec[2] == "grafana":
+        return 7200
+    return 3600
+
+
+def _log(msg: str) -> None:
+    with _PRINT_LOCK:
+        print(msg, flush=True)
+
+
+def should_parallel_index(arms: list[str]) -> bool:
+    return "superopen" in arms and any(a in SIDE_WHILE_INDEX_ARMS for a in arms)
+
+
+def load_completed_prep(work: Path, arm: str) -> dict[str, Any] | None:
+    path = work / "arms" / arm / "prepare.json"
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None
+
+
+def load_completed_arm(out_dir: Path, arm: str, questions: list[dict[str, Any]]) -> dict[str, dict[str, Any]] | None:
+    totals = out_dir / f"{arm}.totals.json"
+    if not totals.is_file():
+        return None
+    per_q: dict[str, dict[str, Any]] = {}
+    for q in questions:
+        metrics_path = out_dir / f"{arm}.{q['id']}.metrics.json"
+        if not metrics_path.is_file():
+            return None
+        per_q[q["id"]] = json.loads(metrics_path.read_text())
+    return per_q
+
+
+def arm_setup(
+    arm: str,
+    work: Path,
+    mirror: Path,
+    sha: str,
+    *,
+    index_only: bool,
+) -> tuple[dict[str, Path], dict[str, str]]:
+    paths = arm_paths(work, arm)
+    ensure_dirs(paths)
+    env = arm_env(paths)
+    if not index_only:
+        copy_claude_auth(paths["claude"])
+    add_worktree(mirror, paths["worktree"], timeout=1800, sha=sha)
+    return paths, env
+
+
+def arm_prepare(arm: str, paths: dict[str, Path], env: dict[str, str], bins: dict[str, Path | None]) -> dict[str, Any]:
+    _log(f"prepare {arm} ({ARM_LABELS.get(arm)})")
+    info = PREPARE[arm](paths, env, bins)
+    slim = {k: v for k, v in info.items() if k != "error"}
+    (paths["root"] / "prepare.json").write_text(json.dumps(slim, indent=2) + "\n")
+    _log(f"  {arm} { {k: info.get(k) for k in ('ok', 'index_s', 'nodes', 'edges', 'error')} }")
+    return info
+
+
+def arm_run_questions(
+    arm: str,
+    paths: dict[str, Path],
+    env: dict[str, str],
+    info: dict[str, Any],
+    questions: list[dict[str, Any]],
+    *,
+    model: str,
+    out_dir: Path,
+    bins: dict[str, Path | None],
+    agent_init: bool,
+    prep: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    if not info.get("ok"):
+        return {q["id"]: {"error": info.get("error") or "prepare_failed"} for q in questions}
+
+    spec = docker_spec_for(paths, info)
+    if arm == "superopen" and agent_init:
+        _log(f"  run {arm}/init-session")
+        t0 = time.time()
+        init_out = out_dir / f"{arm}.init.json"
+        init_metrics = claude_json(
+            INIT_PROMPT,
+            paths["worktree"],
+            init_out,
+            model,
+            env,
+            AGENT_TIMEOUT,
+            docker_spec=spec,
+        )
+        init_metrics["wall_s"] = round(time.time() - t0, 1)
+        record_session(init_metrics, paths, out_dir, arm, "init")
+        slim_init = {k: v for k, v in init_metrics.items() if k != "result"}
+        slim_init["result_excerpt"] = (init_metrics.get("result") or init_metrics.get("error") or "")[:1200]
+        (out_dir / f"{arm}.init.metrics.json").write_text(json.dumps(slim_init, indent=2) + "\n")
+        prep[arm]["agent_init_usd"] = init_metrics.get("cost_usd")
+        prep[arm]["agent_init_wall_s"] = init_metrics.get("wall_s")
+        _log(f"   {arm}/init { {k: slim_init.get(k) for k in ('turns', 'cost_usd', 'input_side_total', 'error')} }")
+
+    per_q: dict[str, dict[str, Any]] = {}
+    for q in questions:
+        _log(f"  run {arm}/{q['id']}")
+        t0 = time.time()
+        out = out_dir / f"{arm}.{q['id']}.json"
+        metrics = claude_json(
+            wrap_prompt(q["prompt"]),
+            paths["worktree"],
+            out,
+            model,
+            env,
+            AGENT_TIMEOUT,
+            docker_spec=spec,
+        )
+        metrics["wall_s"] = round(time.time() - t0, 1)
+        record_session(metrics, paths, out_dir, arm, q["id"])
+        if not metrics.get("error"):
+            metrics["coverage"] = grade_answer(metrics.get("result") or "", q.get("key_facts") or [])
+            if q.get("expect_path_contains") or q.get("expect_diff_files"):
+                metrics["task"] = grade_worktree(paths["worktree"], q)
+            metrics["memory_used"] = _used_memory(metrics)
+            if q.get("expect_memory"):
+                metrics["memory_expected"] = True
+        per_q[q["id"]] = metrics
+        slim = {k: v for k, v in metrics.items() if k != "result"}
+        slim["result_excerpt"] = (metrics.get("result") or metrics.get("error") or "")[:1200]
+        (out_dir / f"{arm}.{q['id']}.metrics.json").write_text(json.dumps(slim, indent=2) + "\n")
+        _log(f"   {arm}/{q['id']} { {k: slim.get(k) for k in ('turns', 'cost_usd', 'input_side_total', 'error')} }")
+        if not metrics.get("error"):
+            flush_memory_after_question(arm, paths, env, bins, metrics)
+    return per_q
+
+
+def run_arm_full(
+    arm: str,
+    paths: dict[str, Path],
+    env: dict[str, str],
+    questions: list[dict[str, Any]],
+    *,
+    model: str,
+    out_dir: Path,
+    bins: dict[str, Path | None],
+    agent_init: bool,
+    prep: dict[str, dict[str, Any]],
+    index_only: bool,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    info = arm_prepare(arm, paths, env, bins)
+    if index_only:
+        return info, {}
+    per_q = arm_run_questions(
+        arm,
+        paths,
+        env,
+        info,
+        questions,
+        model=model,
+        out_dir=out_dir,
+        bins=bins,
+        agent_init=agent_init,
+        prep=prep,
+    )
+    return info, per_q
+
+
+def run_arms_parallel_index(
+    arms_to_run: list[str],
+    contexts: dict[str, tuple[dict[str, Path], dict[str, str]]],
+    questions: list[dict[str, Any]],
+    *,
+    model: str,
+    out_dir: Path,
+    bins: dict[str, Path | None],
+    agent_init: bool,
+    prep: dict[str, dict[str, Any]],
+    results: dict[str, dict[str, dict[str, Any]]],
+    index_only: bool,
+) -> None:
+    index_arm = next((a for a in arms_to_run if a in INDEX_HEAVY_ARMS), None)
+    if index_arm is None:
+        raise RuntimeError("parallel index mode requires an index-heavy arm")
+    side_arms = [a for a in arms_to_run if a != index_arm]
+    _log(f"parallel: {index_arm} index + side arms {side_arms}")
+
+    def run_side(arm: str) -> tuple[str, dict[str, Any], dict[str, dict[str, Any]]]:
+        paths, env = contexts[arm]
+        info, per_q = run_arm_full(
+            arm,
+            paths,
+            env,
+            questions,
+            model=model,
+            out_dir=out_dir,
+            bins=bins,
+            agent_init=agent_init,
+            prep=prep,
+            index_only=index_only,
+        )
+        return arm, info, per_q
+
+    max_workers = max(len(side_arms) + 1, 2)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        index_paths, index_env = contexts[index_arm]
+        index_future = ex.submit(arm_prepare, index_arm, index_paths, index_env, bins)
+        side_futures = {ex.submit(run_side, arm): arm for arm in side_arms}
+        prep[index_arm] = index_future.result()
+        if not index_only:
+            if prep[index_arm].get("ok"):
+                results[index_arm] = arm_run_questions(
+                    index_arm,
+                    index_paths,
+                    index_env,
+                    prep[index_arm],
+                    questions,
+                    model=model,
+                    out_dir=out_dir,
+                    bins=bins,
+                    agent_init=agent_init,
+                    prep=prep,
+                )
+            else:
+                results[index_arm] = {
+                    q["id"]: {"error": prep[index_arm].get("error") or "prepare_failed"} for q in questions
+                }
+        for fut in as_completed(side_futures):
+            arm, info, per_q = fut.result()
+            prep[arm] = info
+            results[arm] = per_q
 
 
 def aggregate_arm(questions: list[dict[str, Any]], per_q: dict[str, dict[str, Any]]) -> dict[str, Any]:
     costs, sides, turns, covs, durs = [], [], [], [], []
     errors = 0
     graph_y = 0
+    mem_y = 0
     for q in questions:
         r = per_q.get(q["id"]) or {}
         if r.get("error"):
@@ -590,6 +556,8 @@ def aggregate_arm(questions: list[dict[str, Any]], per_q: dict[str, dict[str, An
         covs.append(float((r.get("coverage") or {}).get("coverage") or 0))
         if _used_graph(r):
             graph_y += 1
+        if _used_memory(r):
+            mem_y += 1
     n = max(len(questions) - errors, 0)
     return {
         "questions": len(questions),
@@ -600,6 +568,7 @@ def aggregate_arm(questions: list[dict[str, Any]], per_q: dict[str, dict[str, An
         "mean_duration_ms": round(sum(durs) / len(durs), 1) if durs else None,
         "mean_coverage": round(sum(covs) / len(covs), 4) if covs else None,
         "graph_used": graph_y,
+        "memory_used": mem_y,
         "n_ok": n,
     }
 
@@ -622,9 +591,7 @@ def write_summary(
         f"Model: {model}",
         "Harness: product (each arm's real install command)",
         "",
-        "CBM publishes a Linux kernel full index of ~3 minutes (28M LOC, 75k files). That figure is index wall time, not agent Q&A.",
         "Superopen prepare is `so init` (same argv as `/so init` on a fresh tree), timed separately from agent USD.",
-        "iai is a personal-memory engine (not a code graph). On a fresh clone it is expected to track vanilla plus empty memory tool calls.",
         "",
         "## Index",
         "",
@@ -640,13 +607,13 @@ def write_summary(
         "",
         "## Agent totals (sum over questions)",
         "",
-            "| Arm | Cost USD | Input-side tokens | Mean turns | Mean duration ms | Mean coverage | Graph-used questions | Errors |",
-        "|-----|---------:|------------------:|-----------:|-----------------:|--------------:|---------------------:|-------:|",
+        "| Arm | Cost USD | Input-side tokens | Mean turns | Mean duration ms | Mean coverage | Graph-used questions | Memory-used questions | Errors |",
+        "|-----|---------:|------------------:|-----------:|-----------------:|--------------:|---------------------:|----------------------:|-------:|",
     ]
     for arm in arms:
         a = aggregate_arm(questions, results.get(arm) or {})
         lines.append(
-            f"| {arm} | {a['cost_usd']:.6f} | {a['input_side_total']} | {a['mean_turns']} | {a['mean_duration_ms']} | {a['mean_coverage']} | {a['graph_used']}/{a['questions']} | {a['errors']} |"
+            f"| {arm} | {a['cost_usd']:.6f} | {a['input_side_total']} | {a['mean_turns']} | {a['mean_duration_ms']} | {a['mean_coverage']} | {a['graph_used']}/{a['questions']} | {a['memory_used']}/{a['questions']} | {a['errors']} |"
         )
     lines += ["", "## Per question", ""]
     for q in questions:
@@ -704,7 +671,6 @@ def default_questions(repo_arg: str) -> Path:
 
 
 def load_dotenv(path: Path) -> None:
-    """Load KEY=VALUE from path without overriding existing environment."""
     if not path.is_file():
         return
     for line in path.read_text().splitlines():
@@ -719,14 +685,10 @@ def load_dotenv(path: Path) -> None:
 
 
 def require_bins(arms: list[str], bins: dict[str, Path | None]) -> str | None:
-    for arm in arms:
-        spec = ARM_BIN_FLAGS.get(arm)
-        if not spec:
-            continue
-        key, flag = spec
-        path = bins.get(key)
+    if "superopen" in arms:
+        path = bins.get("so")
         if path is None or not path.exists():
-            return f"{arm} arm requires {flag} (got {path})"
+            return f"superopen arm requires --so-bin (got {path})"
     return None
 
 
@@ -741,11 +703,11 @@ def main() -> int:
     parser.add_argument("--out", default="")
     parser.add_argument("--model", default="haiku")
     parser.add_argument("--so-bin", default="/tmp/so")
-    parser.add_argument("--graphify-bin", default="", help="graphify CLI (code-only extract arm)")
-    parser.add_argument("--cbm-bin", default="", help="codebase-memory-mcp binary")
-    parser.add_argument("--iai-mcp", default="", help="iai MCP wrapper (node .js or executable)")
-    parser.add_argument("--arms", default="vanilla,superopen,graphify,cbm,iai")
-    parser.add_argument("--index-timeout", type=int, default=3600)
+    parser.add_argument("--arms", default="vanilla,superopen")
+    parser.add_argument("--skip-arms", default="", help="Comma-separated arms to skip (reuse results from --out)")
+    parser.add_argument("--parallel-index", action="store_true", help="Run vanilla while superopen indexes")
+    parser.add_argument("--no-parallel-index", action="store_true", help="Force sequential arm execution")
+    parser.add_argument("--index-timeout", type=int, default=0, help="Override index timeout (default: repo/question aware)")
     parser.add_argument("--agent-timeout", type=int, default=900)
     parser.add_argument("--index-only", action="store_true", help="Time graph prepare only; skip Claude questions")
     parser.add_argument("--skip-index", action="store_true", help="Reuse an existing .so graph in --work; skip harness so init")
@@ -755,7 +717,6 @@ def main() -> int:
     parser.add_argument("--no-agent-init", action="store_false", dest="agent_init")
     args = parser.parse_args()
 
-    INDEX_TIMEOUT = args.index_timeout
     AGENT_TIMEOUT = args.agent_timeout
     SKIP_INDEX = args.skip_index
     USE_DOCKER = args.docker
@@ -766,20 +727,20 @@ def main() -> int:
     work.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    questions = load_questions(Path(args.questions) if args.questions else default_questions(args.repo))
+    questions_path = Path(args.questions) if args.questions else default_questions(args.repo)
+    questions = load_questions(questions_path)
     questions = filter_questions(questions, args.question_ids)
     arms = [normalize_arm(a.strip()) for a in args.arms.split(",") if a.strip()]
+    skip_arms = {normalize_arm(a.strip()) for a in args.skip_arms.split(",") if a.strip()}
+    global INDEX_TIMEOUT
+    INDEX_TIMEOUT = args.index_timeout or default_index_timeout(args.repo, questions_path)
+    print(f"index timeout {INDEX_TIMEOUT}s", flush=True)
     unknown = [a for a in arms if a not in PREPARE]
     if unknown:
         print(f"unknown arms: {unknown}", file=sys.stderr)
         return 2
 
-    bins = {
-        "so": Path(args.so_bin) if args.so_bin else None,
-        "graphify": Path(args.graphify_bin) if args.graphify_bin else None,
-        "cbm": Path(args.cbm_bin) if args.cbm_bin else None,
-        "iai": Path(args.iai_mcp) if args.iai_mcp else None,
-    }
+    bins = {"so": Path(args.so_bin) if args.so_bin else None}
     missing = require_bins(arms, bins)
     if missing:
         print(missing, file=sys.stderr)
@@ -815,78 +776,65 @@ def main() -> int:
     results: dict[str, dict[str, dict[str, Any]]] = {}
 
     for arm in arms:
-        print(f"prepare {arm} ({ARM_LABELS.get(arm)})")
-        paths = arm_paths(work, arm)
-        ensure_dirs(paths)
-        env = arm_env(paths)
-        if not args.index_only:
-            copy_claude_auth(paths["claude"])
-        add_worktree(mirror, paths["worktree"], timeout=1800, sha=args.sha)
-        info = PREPARE[arm](paths, env, bins)
-        prep[arm] = info
-        (paths["root"] / "prepare.json").write_text(json.dumps({k: v for k, v in info.items() if k != "error"}, indent=2) + "\n")
-        print("  ", {k: info.get(k) for k in ("ok", "index_s", "nodes", "edges", "error")})
-        if args.index_only:
-            results[arm] = {}
+        if arm not in skip_arms:
             continue
-        if not info.get("ok"):
-            results[arm] = {q["id"]: {"error": info.get("error") or "prepare_failed"} for q in questions}
-            continue
+        loaded = load_completed_arm(out_dir, arm, questions)
+        if loaded is None:
+            print(f"--skip-arms {arm}: no complete results in {out_dir}", file=sys.stderr)
+            return 2
+        results[arm] = loaded
+        prep[arm] = load_completed_prep(work, arm) or {}
+        print(f"skip {arm} (loaded {len(loaded)} questions from {out_dir})", flush=True)
 
-        mcp = Path(info["mcp_config"]) if info.get("mcp_config") else None
-        spec = docker_spec_for(paths, info)
-        if arm == "superopen" and args.agent_init and not args.index_only:
-            print(f"  run {arm}/init-session")
-            t0 = time.time()
-            init_out = out_dir / f"{arm}.init.json"
-            init_metrics = claude_json(
-                INIT_PROMPT,
-                paths["worktree"],
-                init_out,
-                mcp,
-                args.model,
+    arms_to_run = [a for a in arms if a not in skip_arms]
+    parallel = (args.parallel_index or should_parallel_index(arms_to_run)) and not args.no_parallel_index
+    if parallel and not should_parallel_index(arms_to_run):
+        parallel = False
+    if parallel:
+        print("parallel index mode enabled", flush=True)
+
+    contexts: dict[str, tuple[dict[str, Path], dict[str, str]]] = {}
+    for arm in arms_to_run:
+        contexts[arm] = arm_setup(arm, work, mirror, sha, index_only=args.index_only)
+
+    if parallel and should_parallel_index(arms_to_run):
+        run_arms_parallel_index(
+            arms_to_run,
+            contexts,
+            questions,
+            model=args.model,
+            out_dir=out_dir,
+            bins=bins,
+            agent_init=args.agent_init,
+            prep=prep,
+            results=results,
+            index_only=args.index_only,
+        )
+    else:
+        for arm in arms_to_run:
+            paths, env = contexts[arm]
+            info, per_q = run_arm_full(
+                arm,
+                paths,
                 env,
-                AGENT_TIMEOUT,
-                docker_spec=spec,
+                questions,
+                model=args.model,
+                out_dir=out_dir,
+                bins=bins,
+                agent_init=args.agent_init,
+                prep=prep,
+                index_only=args.index_only,
             )
-            init_metrics["wall_s"] = round(time.time() - t0, 1)
-            record_session(init_metrics, paths, out_dir, arm, "init")
-            slim_init = {k: v for k, v in init_metrics.items() if k != "result"}
-            slim_init["result_excerpt"] = (init_metrics.get("result") or init_metrics.get("error") or "")[:1200]
-            (out_dir / f"{arm}.init.metrics.json").write_text(json.dumps(slim_init, indent=2) + "\n")
-            prep[arm]["agent_init_usd"] = init_metrics.get("cost_usd")
-            prep[arm]["agent_init_wall_s"] = init_metrics.get("wall_s")
-            print("   ", {k: slim_init.get(k) for k in ("turns", "cost_usd", "input_side_total", "error")})
-        per_q: dict[str, dict[str, Any]] = {}
-        for q in questions:
-            print(f"  run {arm}/{q['id']}")
-            t0 = time.time()
-            out = out_dir / f"{arm}.{q['id']}.json"
-            metrics = claude_json(
-                wrap_prompt(q["prompt"]),
-                paths["worktree"],
-                out,
-                mcp,
-                args.model,
-                env,
-                AGENT_TIMEOUT,
-                docker_spec=spec,
-            )
-            metrics["wall_s"] = round(time.time() - t0, 1)
-            record_session(metrics, paths, out_dir, arm, q["id"])
-            if not metrics.get("error"):
-                metrics["coverage"] = grade_answer(metrics.get("result") or "", q.get("key_facts") or [])
-                if q.get("expect_path_contains") or q.get("expect_diff_files"):
-                    metrics["task"] = grade_worktree(paths["worktree"], q)
-                metrics["memory_used"] = _used_memory(metrics)
-                if q.get("expect_memory"):
-                    metrics["memory_expected"] = True
-            per_q[q["id"]] = metrics
-            slim = {k: v for k, v in metrics.items() if k != "result"}
-            slim["result_excerpt"] = (metrics.get("result") or metrics.get("error") or "")[:1200]
-            (out_dir / f"{arm}.{q['id']}.metrics.json").write_text(json.dumps(slim, indent=2) + "\n")
-            print("   ", {k: slim.get(k) for k in ("turns", "cost_usd", "input_side_total", "error")})
-        results[arm] = per_q
+            prep[arm] = info
+            if args.index_only:
+                results[arm] = {}
+            else:
+                results[arm] = per_q
+
+    for arm in arms:
+        if arm in skip_arms or args.index_only:
+            continue
+        per_q = results.get(arm) or {}
         agg = aggregate_arm(questions, per_q)
         (out_dir / f"{arm}.totals.json").write_text(json.dumps(agg, indent=2) + "\n")
 

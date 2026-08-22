@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -198,7 +199,7 @@ function basename(path: string) {
 
 function classifyTool(name: string): ToolEntry["kind"] {
   const n = name.toLowerCase();
-  if (n === "task" || n === "agent" || n === "mcp_task") return "subagent";
+  if (n === "task" || n === "agent" || n.endsWith("_task")) return "subagent";
   if (n.includes("bash") || n.includes("shell") || n === "shell") return "bash";
   if (n.includes("write") || n.includes("edit") || n.includes("apply")) return "edit";
   return "other";
@@ -206,7 +207,7 @@ function classifyTool(name: string): ToolEntry["kind"] {
 
 function isTaskToolName(name: string): boolean {
   const n = name.toLowerCase().trim();
-  return n === "task" || n === "agent" || n === "mcp_task";
+  return n === "task" || n === "agent" || n.endsWith("_task");
 }
 
 function extractAgentID(...blobs: (string | undefined)[]): string {
@@ -578,6 +579,7 @@ export default function SessionTimeline({
   );
   const vendor = useMemo(() => vendorFromMeta(meta, spans), [meta, spans]);
   const feedRef = useRef<HTMLDivElement>(null);
+  const feedId = useId();
   const skipScrollReport = useRef(false);
   const router = useRouter();
   const pathname = usePathname();
@@ -766,6 +768,7 @@ export default function SessionTimeline({
         <div className="relative min-h-0 min-w-0 flex-1">
           <div
             ref={feedRef}
+            id={feedId}
             className="h-full overflow-y-auto px-6 py-6 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
           >
             <div className="mx-auto max-w-2xl">
@@ -958,6 +961,7 @@ export default function SessionTimeline({
           </div>
           <ChatMinimap
             scrollRef={feedRef}
+            controlsId={feedId}
             marks={minimapMarks}
             revision={toolsOpen}
           />
@@ -1166,10 +1170,12 @@ const MINIMAP_TONE: Record<MinimapTone, string> = {
 
 function ChatMinimap({
   scrollRef,
+  controlsId,
   marks,
   revision,
 }: {
   scrollRef: RefObject<HTMLDivElement | null>;
+  controlsId: string;
   marks: MinimapMark[];
   revision?: unknown;
 }) {
@@ -1269,6 +1275,7 @@ function ChatMinimap({
       <div
         ref={trackRef}
         role="scrollbar"
+        aria-controls={controlsId}
         aria-valuenow={Math.round(thumbTop * 100)}
         aria-valuemin={0}
         aria-valuemax={100}
@@ -1514,17 +1521,15 @@ function SubagentCard({
   project: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [nestedSpans, setNestedSpans] = useState<Span[] | null>(null);
   const [nestedMeta, setNestedMeta] = useState<SessionMeta | null>(null);
   const childId = item.child?.id || item.agentId;
+  const loading = open && Boolean(childId) && nestedSpans === null && !error;
 
   useEffect(() => {
     if (!open || !childId || nestedSpans) return;
     let cancelled = false;
-    setLoading(true);
-    setError("");
     const qs = project ? `?project=${encodeURIComponent(project)}` : "";
     fetch(`/api/sessions/${encodeURIComponent(childId)}${qs}`)
       .then(async (r) => {
@@ -1535,12 +1540,10 @@ function SubagentCard({
         if (cancelled) return;
         setNestedMeta(data.meta || { id: childId });
         setNestedSpans(Array.isArray(data.transcript) ? data.transcript : []);
+        setError("");
       })
       .catch((e) => {
         if (!cancelled) setError(String(e.message || e));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;

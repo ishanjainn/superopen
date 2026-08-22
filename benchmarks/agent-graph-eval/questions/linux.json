@@ -1,7 +1,6 @@
 {
   "corpus": "torvalds/linux",
   "instruction": "identical wrap_prompt for every arm",
-  "cbm_published": "Linux kernel full index ~3 min (28M LOC, 75k files)",
   "questions": [
     {
       "id": "cfs-pick-next",

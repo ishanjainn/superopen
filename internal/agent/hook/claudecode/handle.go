@@ -263,7 +263,7 @@ func drainAssistantTurns(in normalize.Input, p claudePayload) {
 	// promote the transcript's `entrypoint` to a sessionstate-cached
 	// `terminal.type`. This is the only signal that survives
 	// Anthropic's env-scrubbed hook subprocess - the env / process-
-	// tree detection in cli/internal/agent/export/exporter.go runs without
+	// tree detection in internal/agent/export/exporter.go runs without
 	// it. Pick the first line that carries the field and persist;
 	// re-reads on later events are cheap because the offset means
 	// we touch at most the new tail.
@@ -404,7 +404,7 @@ func emitOneAssistantTurn(in normalize.Input, p claudePayload, t coalescedTurn) 
 
 	if in.ContentCapture == semconv.CodingAgentContentCaptureFull {
 		// Adapter pre-flattens the assistant turn into the fields
-		// LLMTurn declares. The emitter (cli/internal/agent/export/attrs.go)
+		// LLMTurn declares. The emitter (internal/agent/export/attrs.go)
 		// builds the OTel-canonical `gen_ai.{input,output}.messages`
 		// envelopes from these - adapters never construct that JSON
 		// themselves, so the shape is guaranteed identical across
@@ -874,7 +874,7 @@ func bashStdout(raw json.RawMessage) string {
 // hostFromEntrypoint maps Anthropic's per-line `entrypoint` value to
 // our `terminal.type` enum. `claude-vscode` → vscode, `claude-cursor`
 // → cursor, anything else stays empty (the env / process-tree fallback
-// in cli/internal/agent/export/exporter.go can still rescue the stamp).
+// in internal/agent/export/exporter.go can still rescue the stamp).
 func hostFromEntrypoint(ep string) string {
 	e := strings.ToLower(strings.TrimSpace(ep))
 	switch {
@@ -926,7 +926,7 @@ func stringFieldFromInput(raw json.RawMessage, field string) string {
 // for the final usage line. The transcript format is one JSON object
 // per line, with assistant turns carrying a `usage` object that totals
 // input/output/cache tokens for that turn. We sum the assistant turns
-// and use the per-model pricing table (cli/internal/agent/pricing) to
+// and use the per-model pricing table (internal/agent/pricing) to
 // realize a USD cost.
 //
 // Returns zero values when the path is missing or unreadable; the hook

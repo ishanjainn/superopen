@@ -104,16 +104,20 @@ func handle(ctx context.Context, in normalize.Input) error {
 		// Cheap event so the chat timeline can show "user submitted
 		// a prompt" even before Stop fires. The full LLM-turn span
 		// is emitted at Stop.
+		attrs := map[string]any{
+			"coding_agent.client":  in.Vendor,
+			"coding_agent.turn.id": p.TurnID,
+			"code.cwd":             cwd,
+			"gen_ai.request.model": p.Model,
+		}
+		if in.ContentCapture == semconv.CodingAgentContentCaptureFull && strings.TrimSpace(p.Prompt) != "" {
+			attrs["gen_ai.prompt"] = p.Prompt
+		}
 		return in.Emit.EmitEvent(normalize.EventEmission{
 			SessionID: p.SessionID,
 			Name:      "coding_agent.user_prompt.submit",
 			At:        parseEventTime(p.Timestamp),
-			Attrs: map[string]any{
-				"coding_agent.client":  in.Vendor,
-				"coding_agent.turn.id": p.TurnID,
-				"code.cwd":             cwd,
-				"gen_ai.request.model": p.Model,
-			},
+			Attrs:     attrs,
 		})
 
 	case "PreToolUse":
@@ -409,7 +413,7 @@ func effectiveToolName(p codexPayload) string {
 		return "Image generation"
 	case strings.Contains(code, "collaboration.spawn_agent"):
 		return "Subagent"
-	case strings.Contains(code, "mcp__node_repl__js") || strings.Contains(code, "browser."):
+	case strings.Contains(code, "node_repl") || strings.Contains(code, "browser."):
 		return "Browser"
 	case strings.Contains(code, "tools.exec_command"), strings.Contains(code, "tools.write_stdin"):
 		return "Bash"
@@ -423,7 +427,7 @@ func effectiveToolName(p codexPayload) string {
 // with input messages, output messages, tokens, and cost.
 //
 // The shape of `gen_ai.input.messages` and `gen_ai.output.messages` is
-// produced centrally in `cli/internal/agent/export/attrs.go` from the typed
+// produced centrally in `internal/agent/export/attrs.go` from the typed
 // fields we set here (Prompt, Response). Adapters never serialise
 // that JSON themselves - keeping the OTel GenAI spec-compliance check
 // in one place. Tool calls + tool results that bracket this turn are

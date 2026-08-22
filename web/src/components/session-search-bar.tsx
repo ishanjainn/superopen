@@ -154,9 +154,12 @@ export default function SessionSearchBar({
   const openSuggest = focused && incomplete !== null && suggestions.length > 0;
   const openHints = focused && !value.trim();
 
-  useEffect(() => {
+  const suggestKey = `${incomplete?.key ?? ""}:${incomplete?.prefix ?? ""}:${suggestions.length}`;
+  const [highlightKey, setHighlightKey] = useState(suggestKey);
+  if (suggestKey !== highlightKey) {
+    setHighlightKey(suggestKey);
     setHighlight(0);
-  }, [incomplete?.key, incomplete?.prefix, suggestions.length]);
+  }
 
   useEffect(() => {
     if (!openSuggest && !openHints) return;

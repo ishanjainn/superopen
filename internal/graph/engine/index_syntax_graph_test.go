@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
@@ -298,5 +299,132 @@ func TestAssembleCompactUsagesPreserveEdgeHistogram(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("USAGE missing callee/evidence: %#v", graph.edges)
+	}
+}
+
+func TestAssembleSyntaxGraphSuppressesWeakJSDottedCalls(t *testing.T) {
+	repository := SyntaxRepository{Files: []ParsedSyntaxFile{
+		{
+			File: FileRecord{Project: "fixture", Path: "src/unrelated.ts", Language: "typescript"},
+			Extraction: SyntaxExtraction{Definitions: []SyntaxFact{
+				{Kind: "class", Name: "Unrelated", StartLine: 1},
+				{Kind: "function", Name: "test", Scope: "Unrelated", StartLine: 2},
+			}},
+		},
+		{
+			File: FileRecord{Project: "fixture", Path: "src/caller.ts", Language: "typescript"},
+			Extraction: SyntaxExtraction{
+				Definitions: []SyntaxFact{{Kind: "function", Name: "run", StartLine: 1}},
+				Calls:       []SyntaxFact{{Kind: "call", Name: "re.test", Scope: "run", StartLine: 2}},
+			},
+		},
+		{
+			File: FileRecord{Project: "fixture", Path: "src/lib.ts", Language: "typescript"},
+			Extraction: SyntaxExtraction{
+				RootModule:  true,
+				Definitions: []SyntaxFact{{Kind: "function", Name: "helper", StartLine: 1}},
+			},
+		},
+		{
+			File: FileRecord{Project: "fixture", Path: "src/mapped.ts", Language: "typescript"},
+			Extraction: SyntaxExtraction{
+				Definitions: []SyntaxFact{{Kind: "function", Name: "useLib", StartLine: 1}},
+				Imports:     []SyntaxFact{{Kind: "import", Name: "./lib", LocalName: "lib", StartLine: 1}},
+				Calls:       []SyntaxFact{{Kind: "call", Name: "lib.helper", Scope: "useLib", StartLine: 2}},
+			},
+		},
+	}}
+	graph, _ := AssembleSyntaxGraph(repository, "fixture")
+	for _, edge := range graph.edges {
+		if edge.kind == "CALLS" && strings.Contains(edge.target, "test") && strings.Contains(edge.source, "caller") {
+			t.Fatalf("weak JS dotted call must not CALLS: %#v", edge)
+		}
+	}
+	unresolved := false
+	for _, edge := range graph.unresolved {
+		if edge.kind == "CALL_REFERENCE" && edge.target == "re.test" {
+			unresolved = true
+		}
+	}
+	if !unresolved {
+		t.Fatalf("expected unresolved CALL_REFERENCE for re.test: %#v", graph.unresolved)
+	}
+	mapped := false
+	for _, edge := range graph.edges {
+		if edge.kind == "CALLS" && strings.Contains(edge.source, "useLib") && strings.Contains(edge.target, "helper") {
+			if edge.evidence != nil && (edge.evidence.Strategy == "import_map" || edge.evidence.Strategy == "import_map_suffix") {
+				mapped = true
+			}
+		}
+	}
+	if !mapped {
+		t.Fatalf("import_map CALLS missing: %#v", graph.edges)
+	}
+}
+
+func TestSuppressWeakJSMethodCall(t *testing.T) {
+	if !suppressWeakJSMethodCall("typescript", "re.test", "unique_name") {
+		t.Fatal("unique_name dotted JS call should be suppressed")
+	}
+	if suppressWeakJSMethodCall("typescript", "re.test", "import_map") {
+		t.Fatal("import_map must still CALLS")
+	}
+	if suppressWeakJSMethodCall("go", "re.test", "unique_name") {
+		t.Fatal("non-JS must not use this suppress")
+	}
+	if suppressWeakJSMethodCall("typescript", "helper", "unique_name") {
+		t.Fatal("undotted callee is not a weak method bind")
+	}
+}
+
+func TestAssembleSyntaxGraphFileEndLine(t *testing.T) {
+	body := strings.Repeat("line\n", 80)
+	repository := SyntaxRepository{
+		Files: []ParsedSyntaxFile{{
+			File: FileRecord{Project: "fixture", Path: "big.ts", Language: "typescript"},
+			Body: []byte(body),
+			Extraction: SyntaxExtraction{
+				RootModule:  true,
+				Definitions: []SyntaxFact{{Kind: "function", Name: "leaf", StartLine: 20, EndLine: 22}},
+			},
+		}},
+	}
+	graph, _ := AssembleSyntaxGraph(repository, "fixture")
+	var fileEnd, moduleEnd int
+	for _, node := range graph.nodes {
+		if node.Label == "File" && node.Location.File == "big.ts" {
+			fileEnd = node.Location.EndLine
+		}
+		if node.Label == "Module" && node.Location.File == "big.ts" {
+			moduleEnd = node.Location.EndLine
+		}
+	}
+	if fileEnd != 80 {
+		t.Fatalf("File end_line=%d want 80", fileEnd)
+	}
+	if moduleEnd != 80 {
+		t.Fatalf("Module end_line=%d want 80", moduleEnd)
+	}
+}
+
+func TestAssembleSyntaxGraphFileEndLineWithoutBody(t *testing.T) {
+	repository := SyntaxRepository{
+		Files: []ParsedSyntaxFile{{
+			File: FileRecord{Project: "fixture", Path: "src/app.ts", Language: "typescript", LineCount: 75},
+			Extraction: SyntaxExtraction{
+				RootModule:  true,
+				Definitions: []SyntaxFact{{Kind: "function", Name: "main", StartLine: 20, EndLine: 22}},
+			},
+		}},
+	}
+	graph, _ := AssembleSyntaxGraph(repository, "fixture")
+	var fileEnd int
+	for _, node := range graph.nodes {
+		if node.Label == "File" && node.Location.File == "src/app.ts" {
+			fileEnd = node.Location.EndLine
+		}
+	}
+	if fileEnd != 75 {
+		t.Fatalf("File end_line=%d want 75 from LineCount when Body is empty", fileEnd)
 	}
 }

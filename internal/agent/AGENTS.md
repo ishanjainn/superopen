@@ -25,7 +25,7 @@ When `.so/` exists in a **customer repo**, every supported coding vendor gets th
 |---------|----------------|
 | **Graph** | Agent is told to run `so graph query` before grep/read |
 | **Observability** | `so coding hook` records session start/end, user prompts, tool calls, assistant turns into `.so/sessions` |
-| **Silent lifecycle** | SessionStart / prompt-submit / PostToolUse / Stop / SessionEnd do **not** inject model text. Only explore-tool nudges (and SubagentStart where the host has subagents) |
+| **Silent lifecycle** | SessionEnd / sessionEnd detach `so sessions finalize` (no extra model text). Prompt-submit is silent unless a prior-work cue injects index lines. PostToolUse / Stop stay silent. Only explore-tool nudges (and SubagentStart where the host has subagents). Skill / `AGENTS.md` / `SKILL.md` Reads are not “skipped graph”. |
 
 | Vendor | Graph-first channel | Notes |
 |--------|---------------------|-------|
@@ -50,6 +50,15 @@ When `.so/` exists:
 
 Optional: `so install --strict` / `SUPEROPEN_HOOK_STRICT`
 
+## Session contracts (S)
+
+| ID | Contract |
+|----|----------|
+| **S1** | Read/Edit/Write emit `coding_agent.file_path` (repo-relative). Shell commands are never stamped. Materialize and ingest share that field and re-validate it. Tool-arg JSON is a fallback. |
+| **S2** | `SessionCost` counts usage once (session-root, else latest `loop.stop`). No usage spans → tokens=0. Never invent tokens from character counts. Model family prefix-matching prices `grok-4.6*`. |
+| **S3** | VCS revision attrs are not redacted. Prompts and tool args still are. |
+| **S4** | Finalize must not replace a longer `events.jsonl` with a shorter Query. `sessionEnd` is Cursor close; `loop.stop` is not end-of-chat. Duplicate thoughts / extra `read_file`+Read are storage-only dedup. |
+
 ## Repo vs installed skill
 
 | | Contributor `AGENTS.md` here | Installed `/so` skill |
@@ -63,7 +72,7 @@ Optional: `so install --strict` / `SUPEROPEN_HOOK_STRICT`
 go test ./internal/agent/hook/ ./internal/agent/steer/ ./internal/agent/skills/ ./internal/agent/install/ -count=1
 ```
 
-Benchmarks: [../../scripts/agent-graph-eval/AGENTS.md](../../scripts/agent-graph-eval/AGENTS.md)
+Benchmarks: [../../benchmarks/agent-graph-eval/AGENTS.md](../../benchmarks/agent-graph-eval/AGENTS.md)
 
 ## Change checklist
 
@@ -71,7 +80,7 @@ Benchmarks: [../../scripts/agent-graph-eval/AGENTS.md](../../scripts/agent-graph
 - [ ] Memory only in `references/memory.md`.
 - [ ] Nudges: MANDATORY; no `so graph search` in default hook text.
 - [ ] No ExploreAugment on live Grep/Read path.
-- [ ] `Block()` / `CursorRule()`: no MCP/--json in always-on block.
+- [ ] `Block()` / `CursorRule()`: no `--json` in always-on block.
 - [ ] `plugins/*/hooks/hooks.json` synced with install tests.
 
 Rules: [.agents/rules/agent-harness.mdc](../../.agents/rules/agent-harness.mdc)

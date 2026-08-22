@@ -9,12 +9,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-HOST_HOOK_MARKERS = (
-    "/.claude/hooks/cbm-code-discovery-gate",
-    "/.claude/hooks/cbm-session-reminder",
-    "/.claude/hooks/cbm-subagent-reminder",
-)
-
 GRAPH_TOOLS = (
     "graph_query",
     "graph_search",
@@ -24,6 +18,14 @@ GRAPH_TOOLS = (
     "graph_impact",
     "graph_schema",
     "code_search",
+)
+
+MEMORY_INJECT_MARKERS = (
+    "mem #",
+    "so memory get",
+    "prior work",
+    "mem-search",
+    "memory_recall",
 )
 
 BASH_GREP_RE = re.compile(r"\b(grep|ripgrep|rg|find|fd|ack)\b", re.I)
@@ -47,6 +49,7 @@ def count_jsonl_tools(path: Path) -> dict[str, Any]:
     host_hooks = 0
     graph_cli = 0
     memory_cli = 0
+    memory_injected = 0
     hook_binary_missing = 0
     if not path.is_file():
         return {
@@ -60,8 +63,6 @@ def count_jsonl_tools(path: Path) -> dict[str, Any]:
             "missing": True,
         }
     text = path.read_text(errors="replace")
-    for marker in HOST_HOOK_MARKERS:
-        host_hooks += text.count(marker)
     for line in text.splitlines():
         try:
             obj = json.loads(line)
@@ -69,12 +70,20 @@ def count_jsonl_tools(path: Path) -> dict[str, Any]:
             continue
 
         def visit(o: dict[str, Any]) -> None:
-            nonlocal bash_grep, truncated, max_query_bytes, graph_cli, memory_cli, hook_binary_missing
+            nonlocal bash_grep, truncated, max_query_bytes, graph_cli, memory_cli, memory_injected, hook_binary_missing
             if o.get("type") == "hook_non_blocking_error":
                 code = o.get("exitCode")
                 err = str(o.get("stderr") or "")
                 if code == 127 or "not found" in err.lower():
                     hook_binary_missing += 1
+            att = o.get("attachment") if o.get("type") == "attachment" else None
+            if isinstance(att, dict) and att.get("type") == "hook_success":
+                blob = json.dumps(att)
+                ev = str(att.get("hookEvent") or "")
+                if ev == "SessionStart" and any(m in blob.lower() for m in MEMORY_INJECT_MARKERS):
+                    memory_injected += 1
+                if "so memory" in blob.lower():
+                    memory_injected += 1
             if o.get("type") != "tool_use":
                 return
             name = str(o.get("name") or "")
@@ -83,13 +92,18 @@ def count_jsonl_tools(path: Path) -> dict[str, Any]:
             cmd = str(inp.get("command") or "")
             if name == "Bash" and BASH_GREP_RE.search(cmd):
                 bash_grep += 1
-            graph_cmd = (
-                "so graph" in cmd
-                or "graphify query" in cmd
-                or "graphify path" in cmd
-                or "graphify explain" in cmd
+            graph_cmd = "so graph" in cmd
+            mem_cmd = (
+                "so memory" in cmd
+                or "memory search" in cmd
+                or "memory get" in cmd
+                or "memory recall" in cmd
+                or "memory timeline" in cmd
+                or "memory_search" in name
+                or "memory_recall" in name
+                or "memory_get" in name
+                or "get_observations" in name
             )
-            mem_cmd = "so memory" in cmd or "memory search" in cmd or "memory_search" in name or "memory_recall" in name
             if "graph_query" in name or "graph query" in cmd or graph_cmd:
                 blob = json.dumps(o)
                 max_query_bytes = max(max_query_bytes, len(blob))
@@ -109,6 +123,7 @@ def count_jsonl_tools(path: Path) -> dict[str, Any]:
         "tools": dict(counts),
         "graph_tools": graph,
         "memory_tools": memory_cli,
+        "memory_injected": memory_injected,
         "grep": counts.get("Grep", 0),
         "read": counts.get("Read", 0),
         "bash": counts.get("Bash", 0),

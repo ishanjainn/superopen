@@ -58,13 +58,14 @@ func TraceCompact(result api.TraceResult) string {
 	}
 
 	start := ""
-	direction := "outgoing"
+	direction := normalizeTraceDirection(result.Direction)
 	type hopHit struct {
 		name string
 		qn   string
 		hop  int
+		rel  string
 	}
-	callees := map[string]hopHit{}
+	neighbors := map[string]hopHit{}
 	for _, path := range result.Paths {
 		if len(path) == 0 {
 			continue
@@ -76,20 +77,31 @@ func TraceCompact(result api.TraceResult) string {
 			if step.Hop == 0 {
 				continue
 			}
-			if step.Via != nil && step.Via.Type != "" && step.Via.Type != "CALLS" && step.Via.Type != "USAGE" && step.Via.Type != "CONFIGURES" {
+			via := ""
+			if step.Via != nil {
+				via = step.Via.Type
+			}
+			if via != "" && via != "CALLS" && via != "USAGE" && via != "CONFIGURES" {
+				continue
+			}
+			if skipCompactVariable(step.Node) {
 				continue
 			}
 			qn := step.Node.QualifiedName
-			prev, ok := callees[qn]
+			prev, ok := neighbors[qn]
 			if !ok || step.Hop < prev.hop {
-				callees[qn] = hopHit{name: step.Node.Name, qn: qn, hop: step.Hop}
+				rel := via
+				if rel == "" {
+					rel = "CALLS"
+				}
+				neighbors[qn] = hopHit{name: step.Node.Name, qn: qn, hop: step.Hop, rel: rel}
 			}
 		}
 	}
 
 	groups := map[string][]hopHit{}
 	var groupOrder []string
-	for _, hit := range callees {
+	for _, hit := range neighbors {
 		prefix := PackagePrefix(hit.qn)
 		if _, ok := groups[prefix]; !ok {
 			groupOrder = append(groupOrder, prefix)
@@ -106,24 +118,83 @@ func TraceCompact(result api.TraceResult) string {
 		})
 	}
 
+	group, total := traceNeighborLabels(direction)
 	var b strings.Builder
 	fmt.Fprintf(&b, "function: %s\n", start)
 	fmt.Fprintf(&b, "direction: %s\n", direction)
-	fmt.Fprintf(&b, "callees_total: %d\n", len(callees))
+	fmt.Fprintf(&b, "%s: %d\n", total, len(neighbors))
+	fmt.Fprintf(&b, "unresolved_calls: %d\n", result.UnresolvedCalls)
 	if result.Truncated {
 		b.WriteString("truncated: true\n")
 	}
-	fmt.Fprintf(&b, "callees: %d  (rows: name hop; qn = group prefix + \".\" + name)\n", len(callees))
+	fmt.Fprintf(&b, "%s: %d  (rows: name rel hop; qn = group prefix + \".\" + name)\n", group, len(neighbors))
 	for _, prefix := range groupOrder {
 		fmt.Fprintf(&b, "%s:\n", prefix)
 		for _, hit := range groups[prefix] {
-			fmt.Fprintf(&b, "  %s %d\n", hit.name, hit.hop)
+			fmt.Fprintf(&b, "  %s %s %d\n", hit.name, strings.ToLower(hit.rel), hit.hop)
 		}
 	}
 	return b.String()
 }
 
+func normalizeTraceDirection(direction string) string {
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "incoming", "inbound":
+		return "incoming"
+	case "both":
+		return "both"
+	default:
+		return "outgoing"
+	}
+}
+
+func traceNeighborLabels(direction string) (group, total string) {
+	switch direction {
+	case "incoming":
+		return "callers", "callers_total"
+	case "both":
+		return "neighbors", "neighbors_total"
+	default:
+		return "callees", "callees_total"
+	}
+}
+
+func skipCompactVariable(node api.Node) bool {
+	if node.Label != "Variable" {
+		return false
+	}
+	switch strings.ToLower(filepathExt(node.Location.File)) {
+	case ".json", ".json5", ".yaml", ".yml", ".toml", ".ini", ".hcl", ".properties":
+		return true
+	default:
+		return false
+	}
+}
+
+func filepathExt(path string) string {
+	path = strings.TrimSpace(path)
+	i := strings.LastIndex(path, ".")
+	if i < 0 {
+		return ""
+	}
+	return path[i:]
+}
+
 func SnippetCompact(result api.SnippetResult) string {
+	if result.Status == "ambiguous" {
+		var b strings.Builder
+		b.WriteString("status: ambiguous\n")
+		if result.Message != "" {
+			fmt.Fprintf(&b, "message: %s\n", result.Message)
+		}
+		fmt.Fprintf(&b, "suggestions: %d  (cols: qn label file lines)\n", len(result.Suggestions))
+		for _, node := range result.Suggestions {
+			fmt.Fprintf(&b, "  %s %s %s %s\n",
+				node.QualifiedName, node.Label, node.Location.File,
+				lineRange(node.Location.StartLine, node.Location.EndLine))
+		}
+		return b.String()
+	}
 	var b strings.Builder
 	if result.QualifiedName != "" {
 		fmt.Fprintf(&b, "qualified_name: %s\n", result.QualifiedName)
@@ -138,6 +209,15 @@ func SnippetCompact(result api.SnippetResult) string {
 	fmt.Fprintf(&b, "lines: %s\n", lineRange(result.Location.StartLine, result.Location.EndLine))
 	fmt.Fprintf(&b, "callers: %d\n", result.Callers)
 	fmt.Fprintf(&b, "callees: %d\n", result.Callees)
+	if result.Clipped {
+		b.WriteString("clipped: true\n")
+	}
+	if len(result.Suggestions) > 0 && result.Status != "ambiguous" {
+		fmt.Fprintf(&b, "also: %d  (cols: qn label file)\n", len(result.Suggestions))
+		for _, node := range result.Suggestions {
+			fmt.Fprintf(&b, "  %s %s %s\n", node.QualifiedName, node.Label, node.Location.File)
+		}
+	}
 	b.WriteString("source:\n")
 	b.WriteString(result.Code)
 	if !strings.HasSuffix(result.Code, "\n") {

@@ -32,17 +32,12 @@ class ArmEnvTest(unittest.TestCase):
             "XDG_CONFIG_HOME",
             "XDG_CACHE_HOME",
             "XDG_DATA_HOME",
-            "CBM_CACHE_DIR",
-            "IAI_MCP_STORE",
             "SUPEROPEN_INSTALL_DIR",
         ):
             self.assertIn(key, env)
             self.assertTrue(env[key], msg=key)
         self.assertEqual(env["HOME"], str(self.paths["home"]))
         self.assertEqual(env["CLAUDE_CONFIG_DIR"], str(self.paths["claude"]))
-        self.assertTrue(env["CBM_CACHE_DIR"].startswith(env["XDG_CACHE_HOME"]))
-        self.assertTrue(env["IAI_MCP_STORE"].startswith(env["HOME"]))
-        self.assertNotIn("CLAUDE_MCP_CONFIG", env)
         self.assertNotIn("SUPEROPEN_HOOK_STRICT", env)
 
     def test_home_is_not_developer_home(self) -> None:
@@ -50,7 +45,7 @@ class ArmEnvTest(unittest.TestCase):
         self.assertNotEqual(env["HOME"], str(Path.home()))
         self.assertNotEqual(env["CLAUDE_CONFIG_DIR"], str(Path.home() / ".claude"))
 
-    def test_empty_settings_not_user_mcp(self) -> None:
+    def test_empty_settings(self) -> None:
         settings = json.loads((self.paths["claude"] / "settings.json").read_text())
         self.assertEqual(settings, {})
 
@@ -62,7 +57,7 @@ class AuthCopyTest(unittest.TestCase):
             dest = Path(raw) / "dest"
             src.mkdir()
             (src / ".credentials.json").write_text('{"ok": true}\n')
-            (src / "settings.json").write_text('{"mcpServers": {"leak": {}}}\n')
+            (src / "settings.json").write_text('{"servers": {"leak": {}}}\n')
             (src / "hooks.json").write_text("{}\n")
             copied = isolate.copy_claude_auth(dest, src_claude=src)
             self.assertEqual(copied, [".credentials.json"])
@@ -129,17 +124,7 @@ class GraderTest(unittest.TestCase):
             self.assertTrue(u["purity"]["mentions_graph"])
 
 
-class McpAndCountsTest(unittest.TestCase):
-    def test_write_mcp_config(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            path = Path(raw) / "mcp.json"
-            isolate.write_mcp_config(path, "superopen", "/tmp/so", ["graph", "mcp", "serve"], {"HOME": "/arm/home"})
-            doc = json.loads(path.read_text())
-            server = doc["mcpServers"]["superopen"]
-            self.assertEqual(server["command"], "/tmp/so")
-            self.assertEqual(server["args"], ["graph", "mcp", "serve"])
-            self.assertEqual(server["env"]["HOME"], "/arm/home")
-
+class HarnessHelpersTest(unittest.TestCase):
     def test_parse_nodes_edges(self) -> None:
         self.assertEqual(
             isolate.parse_nodes_edges("Initialized native graph: 12 nodes, 34 edges"),
@@ -154,15 +139,13 @@ class McpAndCountsTest(unittest.TestCase):
 
     def test_normalize_arm_aliases(self) -> None:
         self.assertEqual(run_eval.normalize_arm("so"), "superopen")
-        self.assertEqual(run_eval.normalize_arm("peer_cli"), "graphify")
-        self.assertEqual(run_eval.normalize_arm("peer_mcp"), "cbm")
         self.assertEqual(run_eval.normalize_arm("vanilla"), "vanilla")
 
     def test_require_bins(self) -> None:
-        msg = run_eval.require_bins(["graphify"], {"graphify": None, "so": None, "cbm": None, "iai": None})
+        msg = run_eval.require_bins(["superopen"], {"so": None})
         self.assertIsNotNone(msg)
-        self.assertIn("--graphify-bin", msg or "")
-        self.assertIsNone(run_eval.require_bins(["vanilla"], {"so": None, "graphify": None, "cbm": None, "iai": None}))
+        self.assertIn("--so-bin", msg or "")
+        self.assertIsNone(run_eval.require_bins(["vanilla"], {"so": None}))
 
     def test_questions_load(self) -> None:
         qs = grade.load_questions(Path(__file__).resolve().parent / "questions" / "grafana.json")
@@ -193,14 +176,6 @@ class McpAndCountsTest(unittest.TestCase):
         matchers = {entry.get("matcher") for entry in hooks["PreToolUse"]}
         self.assertIn("Bash|Grep", matchers)
         self.assertIn("Read|Glob", matchers)
-        self.assertFalse(hasattr(isolate, "install_so_always_on"))
-        self.assertFalse(hasattr(isolate, "install_graphify_always_on"))
-        self.assertFalse(hasattr(isolate, "install_cbm_always_on"))
-
-    def test_always_on_helpers_removed(self) -> None:
-        self.assertFalse(hasattr(isolate, "SO_CLAUDE_BLOCK"))
-        self.assertFalse(hasattr(isolate, "GRAPHIFY_CLAUDE_BLOCK"))
-        self.assertFalse(hasattr(isolate, "install_so_skill"))
 
 
 class AggregateTest(unittest.TestCase):
@@ -261,6 +236,79 @@ class GradeWorktreeTest(unittest.TestCase):
             self.assertNotIn("use memory", wrapped)
             self.assertEqual(wrapped.strip(), q["prompt"].strip().lower())
 
+    def test_grafana_memory_ids_are_question_only(self) -> None:
+        qs = grade.load_questions(Path(__file__).resolve().parent / "questions" / "grafana-memory.json")
+        self.assertEqual(
+            [q["id"] for q in qs],
+            ["provisioning-error-path", "provisioning-wrap-recall", "provisioning-load-path"],
+        )
+        self.assertTrue(qs[1].get("expect_memory"))
+        self.assertFalse(qs[2].get("expect_memory"))
+        self.assertGreaterEqual(len(qs[2]["key_facts"]), 3)
+        for q in qs:
+            prompt = q["prompt"].lower()
+            wrapped = grade.wrap_prompt(q["prompt"]).lower()
+            self.assertNotIn("superopen", prompt)
+            self.assertNotIn("so graph", prompt)
+            self.assertNotIn("so memory", prompt)
+            self.assertNotIn("use the graph", prompt)
+            self.assertNotIn("use memory", wrapped)
+            self.assertEqual(wrapped.strip(), q["prompt"].strip().lower())
+
+    def test_memory_used_transcript_and_markers(self) -> None:
+        self.assertTrue(grade.memory_used("", {"memory_tools": 1}))
+        self.assertTrue(grade.memory_used("", {"memory_injected": 1}))
+        self.assertTrue(grade.memory_used("ran so memory get 12", None))
+        self.assertFalse(grade.memory_used("fixed the wrap string", {"memory_tools": 0, "memory_injected": 0}))
+
+    def test_default_index_timeout_grafana_memory(self) -> None:
+        qs = Path(__file__).resolve().parent / "questions" / "grafana-memory.json"
+        self.assertEqual(run_eval.default_index_timeout("grafana", qs), 10800)
+        self.assertEqual(run_eval.default_index_timeout("grafana", Path("grafana.json")), 7200)
+        self.assertEqual(run_eval.default_index_timeout("linux", None), 3600)
+
+    def test_prepare_arms(self) -> None:
+        self.assertEqual(set(run_eval.PREPARE.keys()), {"vanilla", "superopen"})
+
+    def test_should_parallel_index(self) -> None:
+        self.assertTrue(run_eval.should_parallel_index(["vanilla", "superopen"]))
+        self.assertFalse(run_eval.should_parallel_index(["superopen"]))
+        self.assertFalse(run_eval.should_parallel_index(["vanilla"]))
+
+    def test_load_completed_arm(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            out = Path(raw)
+            questions = [{"id": "q1"}, {"id": "q2"}]
+            (out / "vanilla.totals.json").write_text("{}\n")
+            (out / "vanilla.q1.metrics.json").write_text('{"turns": 1}\n')
+            self.assertIsNone(run_eval.load_completed_arm(out, "vanilla", questions))
+            (out / "vanilla.q2.metrics.json").write_text('{"turns": 2}\n')
+            loaded = run_eval.load_completed_arm(out, "vanilla", questions)
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded["q1"]["turns"], 1)
+
+    def test_transcript_memory_injection(self) -> None:
+        import transcripts
+
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "s.jsonl"
+            path.write_text(
+                json.dumps(
+                    {
+                        "type": "attachment",
+                        "attachment": {
+                            "type": "hook_success",
+                            "hookEvent": "SessionStart",
+                            "stdout": '{"hookSpecificOutput":{"additionalContext":"MEM #12 decision \\"JWT expiry\\""}}',
+                        },
+                    }
+                )
+                + "\n"
+            )
+            got = transcripts.count_jsonl_tools(path)
+            self.assertGreaterEqual(got["memory_injected"], 1)
+            self.assertTrue(grade.memory_used("", got))
+
     def test_grafana_2q_ids(self) -> None:
         qs = grade.load_questions(Path(__file__).resolve().parent / "questions" / "grafana-2q.json")
         self.assertEqual([q["id"] for q in qs], ["provisioning-dashboards", "grafana-live"])
@@ -311,7 +359,7 @@ class GradeWorktreeTest(unittest.TestCase):
                         "type": "assistant",
                         "message": {
                             "content": [
-                                {"type": "tool_use", "name": "mcp__superopen__graph_query", "input": {}},
+                                {"type": "tool_use", "name": "graph_query", "input": {}},
                                 {"type": "tool_use", "name": "Grep", "input": {"pattern": "x"}},
                                 {"type": "tool_use", "name": "Bash", "input": {"command": "rg Foo pkg"}},
                                 {
@@ -346,14 +394,6 @@ class GradeWorktreeTest(unittest.TestCase):
             self.assertGreaterEqual(got["graph_tools"], 2)
             self.assertGreaterEqual(got["memory_tools"], 1)
 
-    def test_iai_src_root_from_plugin_wrapper(self) -> None:
-        wrapper = Path("/Users/ishanjain/work/iai-personal-memory-engine/plugin/bin/iai-pme-mcp")
-        if not wrapper.is_file():
-            self.skipTest("iai checkout missing")
-        root = run_eval.iai_src_root(wrapper)
-        self.assertIsNotNone(root)
-        self.assertTrue((root / "src" / "iai_mcp").is_dir())
-
 
 class DockerPathRewriteTest(unittest.TestCase):
     def test_rewrites_host_bins_home_and_claude(self) -> None:
@@ -361,26 +401,6 @@ class DockerPathRewriteTest(unittest.TestCase):
             work = Path(raw)
             paths = isolate.arm_paths(work, "superopen")
             isolate.ensure_dirs(paths)
-            wt_claude = paths["worktree"] / ".claude"
-            wt_claude.mkdir(parents=True)
-            (wt_claude / "settings.json").write_text(
-                json.dumps(
-                    {
-                        "hooks": {
-                            "PreToolUse": [
-                                {
-                                    "hooks": [
-                                        {
-                                            "type": "command",
-                                            "command": "/Users/ishanjain/.local/bin/graphify hook-guard search",
-                                        }
-                                    ]
-                                }
-                            ]
-                        }
-                    }
-                )
-            )
             plugin_hooks = paths["claude"] / "plugins" / "superopen-cc" / "hooks"
             plugin_hooks.mkdir(parents=True)
             (plugin_hooks / "hooks.json").write_text(
@@ -424,16 +444,8 @@ class DockerPathRewriteTest(unittest.TestCase):
                     }
                 )
             )
-            n = isolate.rewrite_docker_agent_paths(
-                paths,
-                so_bin=Path("/tmp/so"),
-                graphify_bin=Path("/Users/ishanjain/.local/bin/graphify"),
-            )
+            n = isolate.rewrite_docker_agent_paths(paths, so_bin=Path("/tmp/so"))
             self.assertGreater(n, 0)
-            gf = json.loads((wt_claude / "settings.json").read_text())
-            gf_cmd = gf["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-            self.assertTrue(gf_cmd.startswith("/usr/local/bin/graphify hook-guard"))
-            self.assertNotIn("/Users/ishanjain/.local/bin/graphify", gf_cmd)
             so_cmd = json.loads((plugin_hooks / "hooks.json").read_text())["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
             self.assertTrue(so_cmd.startswith("/usr/local/bin/so coding hook"))
             self.assertNotIn("/tmp/so ", so_cmd)
@@ -452,7 +464,7 @@ class DockerPathRewriteTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as raw:
             work = Path(raw)
-            paths = isolate.arm_paths(work, "graphify")
+            paths = isolate.arm_paths(work, "superopen")
             isolate.ensure_dirs(paths)
             projects = paths["claude"] / "projects" / "-work"
             projects.mkdir(parents=True)
@@ -464,9 +476,9 @@ class DockerPathRewriteTest(unittest.TestCase):
                         "attachment": {
                             "type": "hook_non_blocking_error",
                             "hookName": "PreToolUse:Bash",
-                            "stderr": "Failed with non-blocking status code: /bin/sh: 1: /Users/ishanjain/.local/bin/graphify: not found",
+                            "stderr": "Failed with non-blocking status code: /bin/sh: 1: /tmp/so: not found",
                             "exitCode": 127,
-                            "command": "/Users/ishanjain/.local/bin/graphify hook-guard search",
+                            "command": "/tmp/so coding hook --vendor=cc --event=PreToolUse",
                         },
                     }
                 )
@@ -475,7 +487,7 @@ class DockerPathRewriteTest(unittest.TestCase):
             got = transcripts.count_jsonl_tools(projects / f"{session_id}.jsonl")
             self.assertGreater(got["hook_binary_missing"], 0)
             metrics = {"session_id": session_id}
-            run_eval.record_session(metrics, paths, work / "out", "graphify", "q1")
+            run_eval.record_session(metrics, paths, work / "out", "superopen", "q1")
             self.assertEqual(metrics["error"], "hook_binary_missing")
             self.assertGreater(metrics["transcript"]["hook_binary_missing"], 0)
 
