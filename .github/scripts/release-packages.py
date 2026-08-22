@@ -1054,6 +1054,10 @@ def render_homebrew_formula(version: str, checksums: dict[tuple[str, str], str],
         raise ReleaseError("Homebrew formula contains an invalid SHA-256")
     if not SHA256_RE.fullmatch(web_checksum):
         raise ReleaseError("Homebrew formula contains an invalid web UI SHA-256")
+    # Bake cli-X.Y.Z into every download URL. Inside a `resource` block,
+    # Ruby #{version} is Resource#version (unset → empty), so Homebrew
+    # requested .../download/cli-/so-web.tar.gz and 404'd.
+    release = f"https://github.com/ishanjainn/superopen/releases/download/cli-{version}"
     return f'''# typed: strict
 # frozen_string_literal: true
 
@@ -1074,28 +1078,28 @@ class So < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/ishanjainn/superopen/releases/download/cli-#{{version}}/so-darwin-arm64.tar.gz"
+      url "{release}/so-darwin-arm64.tar.gz"
       sha256 "{checksums[("darwin", "arm64")]}"
     end
     on_intel do
-      url "https://github.com/ishanjainn/superopen/releases/download/cli-#{{version}}/so-darwin-amd64.tar.gz"
+      url "{release}/so-darwin-amd64.tar.gz"
       sha256 "{checksums[("darwin", "amd64")]}"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/ishanjainn/superopen/releases/download/cli-#{{version}}/so-linux-arm64.tar.gz"
+      url "{release}/so-linux-arm64.tar.gz"
       sha256 "{checksums[("linux", "arm64")]}"
     end
     on_intel do
-      url "https://github.com/ishanjainn/superopen/releases/download/cli-#{{version}}/so-linux-amd64.tar.gz"
+      url "{release}/so-linux-amd64.tar.gz"
       sha256 "{checksums[("linux", "amd64")]}"
     end
   end
 
   resource "web" do
-    url "https://github.com/ishanjainn/superopen/releases/download/cli-#{{version}}/so-web.tar.gz"
+    url "{release}/so-web.tar.gz"
     sha256 "{web_checksum}"
   end
 
