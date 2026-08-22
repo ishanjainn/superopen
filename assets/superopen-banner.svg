@@ -1,0 +1,210 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1220 660" width="1220" height="660"
+font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#070707"/>
+    <stop offset="1" stop-color="#0B0B0C"/>
+  </linearGradient>
+  <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+    <feGaussianBlur stdDeviation="7" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <symbol id="claude" viewBox="0 0 99.9 100">
+    <path d="M19.6,66.5l19.7-11,.3-1-.3-.5h-1l-3.3-.2-11.2-.3-9.8-.5-9.5-.5-2.4-.5-2.1-3,.2-1.5,2-1.3,2.9.2,6.3.5,9.5.6,6.9.4,10.2,1.2h1.6l.2-.7-.5-.4-.4-.4-9.9-6.6-10.6-7-5.6-4.1-3-2-1.5-2-.6-4.2,2.7-3,3.7.3.9.2,3.7,2.9,8,6.1,10.3,7.8,1.5,1.2.6-.4v-.3c0,0-.6-1.1-.6-1.1l-5.5-10.4-6-10.4-2.7-4.3-.7-2.6c-.3-1-.4-2-.4-3l3-4.2,1.8-.5,4.2.6,1.6,1.4,2.6,6,4.1,9.3,6.5,12.6,2,3.8,1,3.4.3,1h.7v-.5l.5-7.2,1-8.7,1-11.2.3-3.2,1.6-3.8,3-2,2.6,1.1,2,2.9-.3,1.8-1.1,7.7-2.6,12.1-1.5,8.2h.9l1-1.1,4.1-5.4,6.9-8.6,3-3.5,3.6-3.7,2.3-1.8h4.3l3.1,4.7-1.4,4.9-4.4,5.6-3.7,4.7-5.3,7.1-3.2,5.7.3.4h.7l12-2.6,6.4-1.1,7.6-1.3,3.5,1.6.4,1.6-1.4,3.4-8.2,2-9.6,2-14.3,3.3h-.2c0,0,.2.4.2.4l6.4.6,2.8.2h6.8l12.6,1,3.3,2,1.9,2.7-.3,2-5.1,2.6-6.8-1.6-16-3.8-5.4-1.3h-.8v.4l4.6,4.5,8.3,7.5,10.6,9.7.5,2.4-1.3,2-1.4-.2-9.2-7-3.6-3-8-6.8h-.5v.7l1.8,2.7,9.8,14.7.5,4.5-.7,1.4-2.6,1-2.7-.6-5.8-8-6-9-4.7-8.2-.5.4-2.9,30.2-1.3,1.5-3,1.2-2.5-2-1.4-3,1.4-6.2,1.6-8,1.3-6.4,1.2-7.9.7-2.6v-.2h-.7l-6,8.3-9,12.3-7.2,7.6-1.7.7-3-1.5.3-2.8,1.6-2.3,10-12.8,6-7.9,4-4.6v-.5h-.4l-26.4,17.2-4.7.6-2-2,.2-3,1-1,8-5.5h-.1Z" fill="#d97757"/>
+  </symbol>
+</defs>
+
+<rect width="1220" height="660" rx="20" fill="url(#bg)"/>
+<rect x=".75" y=".75" width="1218.5" height="658.5" rx="20" fill="none" stroke="#2B2B2E" stroke-width="1.5"/>
+
+<!-- Page title -->
+<text x="26" y="38" font-size="18" fill="#F4F4F5" font-weight="760">Build a Grafana Dashboard for Claude</text>
+<text x="348" y="37" font-size="10.5" fill="#646469">536ed0c2…</text>
+
+<!-- Metadata strip -->
+<line x1="18" y1="58" x2="1202" y2="58" stroke="#242427"/>
+<line x1="18" y1="111" x2="1202" y2="111" stroke="#242427"/>
+
+<g font-size="8.5">
+  <text x="28" y="77" fill="#67676C">REPO</text>
+  <text x="28" y="97" fill="#D8D8DB" font-size="10.5">superopen</text>
+
+  <text x="162" y="77" fill="#67676C">MODEL</text>
+  <use href="#claude" x="160" y="84" width="17" height="17"/>
+  <text x="183" y="97" fill="#D8D8DB" font-size="10.5">claude-sonnet-5</text>
+
+  <text x="344" y="77" fill="#67676C">TOKENS</text>
+  <text x="344" y="97" fill="#F4F4F5" font-size="11.5" font-weight="700">318.4k</text>
+
+  <text x="440" y="77" fill="#67676C">CONTEXT</text>
+  <text x="440" y="97" fill="#D8D8DB" font-size="10.5">92%</text>
+
+  <text x="534" y="77" fill="#67676C">COVERAGE</text>
+  <circle cx="538" cy="94" r="3" fill="#FF4D00"/>
+  <text x="546" y="97" fill="#D8D8DB" font-size="9.5">EDITED 18 · READ 47 · SEEN 131</text>
+
+  <text x="792" y="77" fill="#67676C">ACTIVITY</text>
+  <text x="792" y="97" fill="#D8D8DB" font-size="9.5">31 calls · 9 turns</text>
+
+  <text x="1000" y="77" fill="#67676C">FILES</text>
+  <text x="1000" y="97" fill="#D8D8DB" font-size="10.5">1,284</text>
+</g>
+
+<!-- Split -->
+<line x1="548" y1="111" x2="548" y2="568" stroke="#2A2A2C" stroke-width="2"/>
+
+<!-- Conversation timeline -->
+<line x1="54" y1="137" x2="54" y2="526" stroke="#343437"/>
+
+<!-- Assistant 1 -->
+<g opacity="0">
+  <circle cx="54" cy="166" r="15" fill="#F7F7F7"/>
+  <use href="#claude" x="44" y="156" width="20" height="20"/>
+  <rect x="82" y="140" width="438" height="54" rx="15" fill="#151516"/>
+  <text x="100" y="172" font-size="13" fill="#F2F2F3">I remember the dashboard conventions from our last session.</text>
+  <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;.12;.14;.94;1" dur="13s" repeatCount="indefinite"/>
+</g>
+
+<!-- User -->
+<g opacity="0">
+  <circle cx="54" cy="242" r="14" fill="#252527"/>
+  <circle cx="54" cy="238" r="4" fill="none" stroke="#9B9B9F"/>
+  <path d="M48 249 Q54 243 60 249" fill="none" stroke="#9B9B9F"/>
+  <rect x="82" y="216" width="438" height="54" rx="15" fill="#1A1A1B"/>
+  <text x="100" y="248" font-size="13" fill="#F2F2F3">Build a Grafana dashboard for Claude usage and cost.</text>
+  <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;.24;.26;.94;1" dur="13s" repeatCount="indefinite"/>
+</g>
+
+<!-- Assistant 2 -->
+<g opacity="0">
+  <circle cx="54" cy="318" r="15" fill="#F7F7F7"/>
+  <use href="#claude" x="44" y="308" width="20" height="20"/>
+  <rect x="82" y="292" width="438" height="54" rx="15" fill="#151516"/>
+  <text x="100" y="324" font-size="13" fill="#F2F2F3">Tracing metrics, dashboards, datasources, and prior decisions…</text>
+  <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;.36;.38;.94;1" dur="13s" repeatCount="indefinite"/>
+</g>
+
+<!-- Assistant 3 -->
+<g opacity="0">
+  <circle cx="54" cy="394" r="15" fill="#F7F7F7"/>
+  <use href="#claude" x="44" y="384" width="20" height="20"/>
+  <rect x="82" y="368" width="438" height="54" rx="15" fill="#151516"/>
+  <text x="100" y="400" font-size="13" fill="#F2F2F3">Found 42 relationships across 18 touched files.</text>
+  <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;.49;.51;.94;1" dur="13s" repeatCount="indefinite"/>
+</g>
+
+<!-- Assistant 4 -->
+<g opacity="0">
+  <circle cx="54" cy="470" r="15" fill="#F7F7F7"/>
+  <use href="#claude" x="44" y="460" width="20" height="20"/>
+  <rect x="82" y="444" width="438" height="54" rx="15" fill="#151516"/>
+  <text x="100" y="476" font-size="13" fill="#F2F2F3">Dashboard context saved to memory for the next session.</text>
+  <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;.62;.64;.94;1" dur="13s" repeatCount="indefinite"/>
+</g>
+
+<!-- Graph pane label -->
+<text x="574" y="135" font-size="10" fill="#6E6E73" letter-spacing=".08em">LIVE CONTEXT GRAPH</text>
+
+<!-- Grid -->
+<g stroke="#242426" stroke-width=".8">
+  <path d="M548 152H1202M548 180H1202M548 208H1202M548 236H1202M548 264H1202M548 292H1202M548 320H1202M548 348H1202M548 376H1202M548 404H1202M548 432H1202M548 460H1202M548 488H1202M548 516H1202M548 544H1202"/>
+  <path d="M576 111V568M604 111V568M632 111V568M660 111V568M688 111V568M716 111V568M744 111V568M772 111V568M800 111V568M828 111V568M856 111V568M884 111V568M912 111V568M940 111V568M968 111V568M996 111V568M1024 111V568M1052 111V568M1080 111V568M1108 111V568M1136 111V568M1164 111V568M1192 111V568"/>
+</g>
+
+<!-- Ambient graph -->
+<g stroke="#66666A" stroke-width=".8" opacity=".58" fill="none">
+  <path d="M664 446L760 402L842 340L838 286L930 324L988 326L1050 348"/>
+  <path d="M724 462L760 402L806 400L842 340L938 356"/>
+  <path d="M746 298L838 286L812 258L914 250"/>
+  <path d="M746 298L842 340L806 400"/>
+  <path d="M838 286L930 324L938 356"/>
+  <path d="M812 258L914 250L988 326"/>
+  <path d="M724 462L664 446L618 498"/>
+  <path d="M1050 348L1110 382L1172 338"/>
+  <path d="M930 324L996 278L1092 292"/>
+  <path d="M842 340L876 452L946 512"/>
+  <path d="M760 402L698 360L626 374"/>
+</g>
+
+<g fill="#EAEAEC" font-size="11" font-weight="700">
+  <circle cx="664" cy="446" r="5" fill="#D7D7DA"/><text x="672" y="436">session</text>
+  <circle cx="760" cy="402" r="5" fill="#D7D7DA"/><text x="768" y="392">memory</text>
+  <circle cx="842" cy="340" r="5" fill="#D7D7DA"/><text x="850" y="330">claude</text>
+  <circle cx="838" cy="286" r="4" fill="#D7D7DA"/><text x="846" y="276">grafana</text>
+  <circle cx="930" cy="324" r="4" fill="#D7D7DA"/><text x="938" y="314">dashboards</text>
+  <circle cx="988" cy="326" r="4" fill="#D7D7DA"/><text x="996" y="316">panels</text>
+  <circle cx="806" cy="400" r="4" fill="#D7D7DA"/><text x="814" y="420">prometheus</text>
+  <circle cx="938" cy="356" r="4" fill="#D7D7DA"/><text x="946" y="376">cost</text>
+  <circle cx="812" cy="258" r="4" fill="#D7D7DA"/><text x="820" y="248">usage</text>
+  <circle cx="914" cy="250" r="4" fill="#D7D7DA"/><text x="922" y="240">tokens</text>
+  <circle cx="746" cy="298" r="4" fill="#D7D7DA"/><text x="754" y="288">datasource</text>
+  <circle cx="1050" cy="348" r="4" fill="#D7D7DA"/><text x="1058" y="338">alerts</text>
+  <circle cx="724" cy="462" r="5" fill="#D7D7DA"/><text x="732" y="482">superopen</text>
+</g>
+
+<!-- Animated path -->
+<path d="M664 446 C702 439 728 416 760 402" fill="none" stroke="#FF5A12" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="130" stroke-dashoffset="130" filter="url(#glow)">
+  <animate attributeName="stroke-dashoffset" values="130;130;0;0;130" keyTimes="0;.31;.38;.94;1" dur="13s" repeatCount="indefinite"/>
+</path>
+<path d="M760 402 C792 386 820 358 842 340" fill="none" stroke="#FF5A12" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="125" stroke-dashoffset="125" filter="url(#glow)">
+  <animate attributeName="stroke-dashoffset" values="125;125;0;0;125" keyTimes="0;.40;.47;.94;1" dur="13s" repeatCount="indefinite"/>
+</path>
+<path d="M842 340 C840 322 839 302 838 286" fill="none" stroke="#FF5A12" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="80" stroke-dashoffset="80" filter="url(#glow)">
+  <animate attributeName="stroke-dashoffset" values="80;80;0;0;80" keyTimes="0;.49;.56;.94;1" dur="13s" repeatCount="indefinite"/>
+</path>
+<path d="M838 286 C868 286 896 304 930 324" fill="none" stroke="#FF5A12" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="120" stroke-dashoffset="120" filter="url(#glow)">
+  <animate attributeName="stroke-dashoffset" values="120;120;0;0;120" keyTimes="0;.58;.65;.94;1" dur="13s" repeatCount="indefinite"/>
+</path>
+<path d="M930 324 C949 323 968 325 988 326" fill="none" stroke="#FF5A12" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="80" stroke-dashoffset="80" filter="url(#glow)">
+  <animate attributeName="stroke-dashoffset" values="80;80;0;0;80" keyTimes="0;.67;.74;.94;1" dur="13s" repeatCount="indefinite"/>
+</path>
+
+
+<!-- Playback footer: right pane only -->
+<rect x="548" y="568" width="654" height="74" fill="#09090A"/>
+<line x1="548" y1="568" x2="1202" y2="568" stroke="#2B2B2E"/>
+
+<!-- Chevron -->
+<path d="M570 582 l5 5 -5 5" fill="none" stroke="#9B9B9F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+
+<!-- Segmented activity timeline -->
+<g>
+  <rect x="570" y="594" width="52" height="18" fill="#3E3E40"/>
+  <rect x="624" y="594" width="52" height="18" fill="#3E3E40"/>
+  <rect x="678" y="594" width="52" height="18" fill="#3E3E40"/>
+  <rect x="732" y="594" width="52" height="18" fill="#3E3E40"/>
+  <rect x="786" y="594" width="52" height="18" fill="#3E3E40"/>
+  <rect x="840" y="594" width="52" height="18" fill="#3E3E40"/>
+  <rect x="894" y="594" width="52" height="18" fill="#3E3E40"/>
+  <rect x="948" y="594" width="52" height="18" fill="#3E3E40"/>
+  <rect x="1002" y="594" width="52" height="18" fill="#3E3E40"/>
+</g>
+
+<!-- Orange progress -->
+<g fill="#FF5A12">
+  <rect x="570" y="594" width="52" height="18"/>
+  <rect x="624" y="594" width="52" height="18"/>
+  <rect x="678" y="594" width="52" height="18"/>
+  <rect x="732" y="594" width="52" height="18"/>
+  <rect x="786" y="594" width="52" height="18"/>
+  <rect x="840" y="594" width="52" height="18"/>
+</g>
+<rect x="894" y="594" width="31" height="18" fill="#FF5A12"/>
+
+<!-- Scrubber -->
+<line x1="925" y1="589" x2="925" y2="618" stroke="#F5F5F5" stroke-width="2.5"/>
+<rect x="921" y="616" width="8" height="8" transform="rotate(45 925 620)" fill="#F5F5F5"/>
+
+<!-- Playback controls -->
+<text x="1068" y="609" font-size="16" fill="#F4F4F5">9 / 9</text>
+
+<path d="M1126 599 L1115 606 L1126 613 Z M1129 598 V614" fill="none" stroke="#DCDCE0" stroke-width="2"/>
+<path d="M1160 597 L1175 606 L1160 615 Z" fill="none" stroke="#F4F4F5" stroke-width="2.2"/>
+<circle cx="1191" cy="606" r="2.2" fill="#F4F4F5"/>
+<circle cx="1198" cy="606" r="2.2" fill="#F4F4F5"/>
+
+<!-- Command row under player -->
+<circle cx="570" cy="633" r="5" fill="#FF5A12"/>
+<text x="587" y="638" font-size="12.3" fill="#F4F4F5" font-weight="700">bash</text>
+<text x="628" y="638" font-size="12.3" fill="#C8C8CC">so graph query "Build a Grafana dashboard for Claude usage and cost"</text>
+</svg>
