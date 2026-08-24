@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ishanjainn/superopen/internal/graph/engine"
+	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
 )
 
@@ -127,6 +128,56 @@ func TestSessionStartHasNoAdditionalContext(t *testing.T) {
 	}
 	if text, _, ok := steerTextFor("claude-code", "SessionStart", payload); ok {
 		t.Fatalf("empty store SessionStart must stay silent, got %q", text)
+	}
+}
+
+func TestSessionStartHarvestOneLiner(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "harvest-session")
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# Agents\n\nFollow graph-first search.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	diff := `--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -1,3 +1,4 @@
+ # Agents
+ 
+ Follow graph-first search.
++Prefer so harvest review for playbook patches.
+`
+	if _, err := harvest.Propose(root, harvest.ProposeInput{
+		Title: "add harvest line", Target: "AGENTS.md", Reason: "missing pointer",
+		Kind: harvest.KindImprove, Diff: diff,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"session_id": "harvest-session",
+		"cwd":        root,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("claude-code", "SessionStart", payload)
+	if !ok {
+		t.Fatal("expected SessionStart harvest line")
+	}
+	if !strings.HasPrefix(strings.TrimSpace(text), "Superopen: codebase questions") {
+		t.Fatalf("must stay graph-first: %q", text)
+	}
+	if !strings.Contains(text, "HARVEST") {
+		t.Fatalf("missing harvest: %q", text)
+	}
+	low := strings.ToLower(text)
+	if strings.Contains(low, "prefer simplify") || strings.Contains(low, "task-observer") {
+		t.Fatalf("must not dump harvest methodology: %q", text)
+	}
+	if memory.EstimateTokens(text) > 350 {
+		t.Fatalf("over token cap: %q", text)
+	}
+	if extra, _, ok := steerTextFor("claude-code", "Stop", payload); ok {
+		t.Fatalf("Stop must stay silent, got %q", extra)
 	}
 }
 
@@ -277,6 +328,28 @@ func TestGrepPreToolUseEmitsMandatory(t *testing.T) {
 	}
 	if strings.Contains(text, "so graph search") {
 		t.Fatalf("search nudge must not list so graph search (spray menu), got %q", text)
+	}
+}
+
+func TestCursorPreToolUseGrepInfersSearch(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "grep-session")
+	payload, err := json.Marshal(map[string]any{
+		"tool_name":  "Grep",
+		"tool_input": map[string]any{"pattern": "HandleRequest"},
+		"cwd":        root,
+		"session_id": "grep-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("cursor", "preToolUse", payload)
+	if !ok || !strings.Contains(text, "MANDATORY") {
+		t.Fatalf("cursor Grep without --kind should get search nudge, got %q", text)
+	}
+	if !strings.Contains(text, ".so/") {
+		t.Fatalf("nudge should mention .so/: %q", text)
 	}
 }
 

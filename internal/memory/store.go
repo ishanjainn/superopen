@@ -47,7 +47,7 @@ const (
 	metaPending         = "pending_distill"
 	metaDistillPaused   = "distill_paused"
 	quantizationInt8    = "int8-unit"
-	memorySchemaVersion = "1"
+	memorySchemaVersion = "2"
 )
 
 const memoryDDL = `
@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS memory_episodes (
   community_id TEXT NOT NULL DEFAULT '',
   centrality REAL NOT NULL DEFAULT 0,
   tier TEXT NOT NULL DEFAULT '',
+  horizon TEXT NOT NULL DEFAULT '',
+  keep_until_session INTEGER NOT NULL DEFAULT 0,
   never_decay INTEGER NOT NULL DEFAULT 0,
   tags TEXT NOT NULL DEFAULT '',
   fading INTEGER NOT NULL DEFAULT 0,
@@ -178,9 +180,11 @@ type Episode struct {
 	ValidFrom        string   `json:"valid_from,omitempty"`
 	ValidTo          string   `json:"valid_to,omitempty"`
 	CommunityID      string   `json:"community_id,omitempty"`
-	Centrality       float64  `json:"centrality,omitempty"`
-	Tier             string   `json:"tier,omitempty"`
-	NeverDecay       bool     `json:"never_decay,omitempty"`
+	Centrality        float64 `json:"centrality,omitempty"`
+	Tier              string  `json:"tier,omitempty"`
+	Horizon           string  `json:"horizon,omitempty"`
+	KeepUntilSession  int     `json:"keep_until_session,omitempty"`
+	NeverDecay        bool    `json:"never_decay,omitempty"`
 	Tags             string   `json:"tags,omitempty"`
 	Topic            string   `json:"topic,omitempty"`
 	Facts            []string `json:"facts,omitempty"`
@@ -217,6 +221,9 @@ type MemoryCounts struct {
 	Semantic   int `json:"semantic"`
 	Procedural int `json:"procedural"`
 	Working    int `json:"working"`
+	Short      int `json:"short"`
+	Medium     int `json:"medium"`
+	Long       int `json:"long"`
 	Tombstoned int `json:"tombstoned"`
 	Edges      int `json:"edges"`
 	Pins       int `json:"pins"`
@@ -271,7 +278,9 @@ type CaptureInput struct {
 	Topic        string
 	Facts        []string
 	Narrative    string
-	Concepts     []string
+	Concepts          []string
+	Horizon           string
+	KeepUntilSession  int
 }
 
 func OpenRoot(root string) (*Store, error) {
@@ -355,8 +364,43 @@ func open(path string, busyMs int) (*Store, error) {
 		s.Close()
 		return nil, err
 	}
+	if err := s.ensureHorizonSchema(); err != nil {
+		s.Close()
+		return nil, err
+	}
 	_ = s.setMeta("schema_version", memorySchemaVersion)
 	return s, nil
+}
+
+func (s *Store) ensureHorizonSchema() error {
+	cols, err := s.tableColumns("memory_episodes")
+	if err != nil {
+		return err
+	}
+	if cols["horizon"] && cols["keep_until_session"] {
+		return nil
+	}
+	drops := []string{
+		`DROP TRIGGER IF EXISTS memory_episodes_ai`,
+		`DROP TRIGGER IF EXISTS memory_episodes_ad`,
+		`DROP TRIGGER IF EXISTS memory_episodes_au`,
+		`DROP TABLE IF EXISTS memory_episodes_fts`,
+		`DROP TABLE IF EXISTS memory_vectors`,
+		`DROP TABLE IF EXISTS memory_shapes`,
+		`DROP TABLE IF EXISTS memory_edges`,
+		`DROP TABLE IF EXISTS memory_topics`,
+		`DROP TABLE IF EXISTS memory_episodes`,
+	}
+	for _, q := range drops {
+		if _, err := s.db.Exec(q); err != nil {
+			return err
+		}
+	}
+	if _, err := s.db.Exec(memoryDDL); err != nil {
+		return err
+	}
+	_, _ = s.db.Exec(`INSERT OR IGNORE INTO memory_economy(id, packs_served, tokens_injected, fallback_searches, tokens_saved, updated_at) VALUES(1,0,0,0,0,?)`, nowRFC())
+	return nil
 }
 
 func (s *Store) Close() error {
@@ -410,12 +454,12 @@ func (s *Store) upsertEpisode(ep Episode, vector Vector, embed bool) (int64, boo
 	facts := marshalStringList(ep.Facts)
 	concepts := marshalStringList(ep.Concepts)
 	res, err := s.db.Exec(`
-INSERT INTO memory_episodes(uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,faded_at,last_accessed_at,community_id,centrality,tier,never_decay,tags,fading,topic,facts,narrative,concepts,content_hash)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO memory_episodes(uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,faded_at,last_accessed_at,community_id,centrality,tier,horizon,keep_until_session,never_decay,tags,fading,topic,facts,narrative,concepts,content_hash)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(uid) DO NOTHING`,
 		ep.UID, ep.SessionID, ep.SpanID, ep.Kind, ep.Source, ep.Title, stored, files, ep.ToolName,
 		ep.Tokens, boolInt(ep.Pinned), boolInt(ep.Faded), pending, ep.CreatedAt, ep.UpdatedAt, ep.ValidFrom, ep.ValidTo, "", "",
-		ep.CommunityID, ep.Centrality, ep.Tier, boolInt(ep.NeverDecay), ep.Tags, boolInt(ep.Fading),
+		ep.CommunityID, ep.Centrality, ep.Tier, ep.Horizon, ep.KeepUntilSession, boolInt(ep.NeverDecay), ep.Tags, boolInt(ep.Fading),
 		ep.Topic, facts, ep.Narrative, concepts, ep.ContentHash)
 	if err != nil {
 		if ep.ContentHash != "" {
@@ -583,10 +627,13 @@ func (s *Store) Status() (Status, error) {
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE fading=1 AND faded=0`).Scan(&st.Fading)
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE kind=?`, KindSession).Scan(&st.RolledUp)
 	liveSQL := `faded=0 AND kind != 'tool'`
-	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE `+liveSQL+` AND tier=?`, tierEpisodic).Scan(&st.Counts.Episodic)
-	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE `+liveSQL+` AND tier=?`, tierSemantic).Scan(&st.Counts.Semantic)
-	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE `+liveSQL+` AND tier=?`, tierProcedural).Scan(&st.Counts.Procedural)
-	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE `+liveSQL+` AND tier=?`, tierWorking).Scan(&st.Counts.Working)
+	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE `+liveSQL+` AND horizon=?`, HorizonWorking).Scan(&st.Counts.Working)
+	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE `+liveSQL+` AND horizon=?`, HorizonShort).Scan(&st.Counts.Short)
+	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE `+liveSQL+` AND horizon=?`, HorizonMedium).Scan(&st.Counts.Medium)
+	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE `+liveSQL+` AND horizon=?`, HorizonLong).Scan(&st.Counts.Long)
+	st.Counts.Episodic = st.Counts.Working
+	st.Counts.Semantic = st.Counts.Short + st.Counts.Medium
+	st.Counts.Procedural = st.Counts.Long
 	st.Counts.Tombstoned = st.Faded
 	st.Counts.Edges = st.Edges
 	st.Counts.Pins = st.Pins
@@ -623,7 +670,7 @@ func (s *Store) Status() (Status, error) {
 
 func (s *Store) knowledgeCoverage() float64 {
 	var epi int
-	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE faded=0 AND kind != 'tool' AND tier=?`, tierEpisodic).Scan(&epi)
+	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE faded=0 AND kind != 'tool' AND horizon=?`, HorizonWorking).Scan(&epi)
 	if epi == 0 {
 		return 0
 	}
@@ -633,7 +680,7 @@ SELECT count(DISTINCT epi.id)
 FROM memory_episodes epi
 JOIN memory_edges e ON e.type=? AND (e.source_id=epi.id OR e.target_id=epi.id)
 JOIN memory_episodes sem ON sem.faded=0 AND sem.kind=? AND (sem.id=e.source_id OR sem.id=e.target_id) AND sem.id!=epi.id
-WHERE epi.faded=0 AND epi.kind != 'tool' AND epi.tier=?`, EdgeRolledUpFrom, KindSession, tierEpisodic).Scan(&covered)
+WHERE epi.faded=0 AND epi.kind != 'tool' AND epi.horizon=?`, EdgeRolledUpFrom, KindSession, HorizonWorking).Scan(&covered)
 	return float64(covered) / float64(epi)
 }
 
@@ -706,7 +753,7 @@ func (s *Store) ListTopics() ([]Topic, error) {
 	return out, rows.Err()
 }
 
-const episodeCols = `id,uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,community_id,centrality,tier,never_decay,tags,fading,topic,facts,narrative,concepts,content_hash`
+const episodeCols = `id,uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,community_id,centrality,tier,horizon,keep_until_session,never_decay,tags,fading,topic,facts,narrative,concepts,content_hash`
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -753,7 +800,7 @@ func scanEpisodeWithKey(s *Store, row scanner) (Episode, error) {
 	if err := row.Scan(
 		&ep.ID, &ep.UID, &ep.SessionID, &ep.SpanID, &ep.Kind, &ep.Source, &ep.Title, &ep.Text, &files, &ep.ToolName,
 		&ep.Tokens, &pinned, &faded, &pending, &ep.CreatedAt, &ep.UpdatedAt, &ep.ValidFrom, &ep.ValidTo,
-		&ep.CommunityID, &ep.Centrality, &ep.Tier, &neverDecay, &ep.Tags, &fading,
+		&ep.CommunityID, &ep.Centrality, &ep.Tier, &ep.Horizon, &ep.KeepUntilSession, &neverDecay, &ep.Tags, &fading,
 		&ep.Topic, &facts, &ep.Narrative, &concepts, &ep.ContentHash,
 	); err != nil {
 		return ep, err

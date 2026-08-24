@@ -16,7 +16,7 @@ var copyTables = []struct {
 	{name: "memory_episodes", cols: []string{
 		"id", "uid", "session_id", "span_id", "kind", "source", "title", "text", "files", "tool_name",
 		"tokens", "pinned", "faded", "embedding_pending", "created_at", "updated_at", "valid_from", "valid_to",
-		"faded_at", "last_accessed_at", "community_id", "centrality", "tier", "never_decay", "tags", "fading",
+		"faded_at", "last_accessed_at", "community_id", "centrality", "tier", "horizon", "keep_until_session", "never_decay", "tags", "fading",
 		"topic", "facts", "narrative", "concepts", "content_hash",
 	}},
 	{name: "memory_vectors", cols: []string{"episode_id", "embedder_id", "dimensions", "quantization", "vector"}},

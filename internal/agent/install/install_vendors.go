@@ -22,7 +22,7 @@ import (
 // two repo-root sources (`.claude-plugin/marketplace.json` and
 // `plugins/<vendor>/`) into a single in-tree mirror so the CLI binary
 // is self-contained - users don't need to clone the repo to run
-// `so coding install`.
+// `so install`.
 //
 // Layout inside the embed root matches the repo-root
 // layout exactly:
@@ -160,5 +160,69 @@ func vendorDestRoot(vendor string) (string, error) {
 		return paths.CodexMarketplaceDir()
 	default:
 		return "", fmt.Errorf("unknown vendor %q", vendor)
+	}
+}
+
+// InstalledVendors returns vendor ids whose hook files exist on this machine.
+func InstalledVendors() []string {
+	all, _ := vendorsFromArg("all")
+	found := make([]string, 0, len(all))
+	for _, v := range all {
+		if vendorHookPresent(v) {
+			found = append(found, v)
+		}
+	}
+	return found
+}
+
+func vendorHookPresent(vendor string) bool {
+	markers, err := vendorMarkerPaths(vendor)
+	if err != nil {
+		return false
+	}
+	for _, p := range markers {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func vendorMarkerPaths(vendor string) ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	switch vendor {
+	case "cursor":
+		p, err := userCursorHooksPath()
+		if err != nil {
+			return nil, err
+		}
+		return []string{p}, nil
+	case "claude-code", "codex":
+		d, err := vendorDestRoot(vendor)
+		if err != nil {
+			return nil, err
+		}
+		return []string{d}, nil
+	case "gemini":
+		return []string{filepath.Join(home, ".gemini", "settings.json")}, nil
+	case "opencode":
+		base, err := paths.OpenCodeConfigDir()
+		if err != nil {
+			return nil, err
+		}
+		return []string{filepath.Join(base, "plugins", "superopen.ts")}, nil
+	case "pi":
+		return []string{filepath.Join(home, ".pi", "agent", "extensions", "superopen", "index.ts")}, nil
+	case "copilot-cli":
+		base, err := paths.CopilotHome()
+		if err != nil {
+			return nil, err
+		}
+		return []string{filepath.Join(base, "hooks", "superopen.json")}, nil
+	default:
+		return nil, fmt.Errorf("unknown vendor %q", vendor)
 	}
 }

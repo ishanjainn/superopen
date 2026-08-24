@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
     const res = await soJSON<QueryPayload>(["graph", "query", q]);
     if (!res.ok) {
       return NextResponse.json(
-        { error: res.error, tip: "Ensure `so` is on PATH; try `so graph rebuild`" },
+        { error: res.error, tip: "Ensure `so` is on PATH; try `so graph build`" },
         { status: 500 },
       );
     }

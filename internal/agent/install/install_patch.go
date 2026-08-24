@@ -16,10 +16,10 @@ import (
 // caller's PATH. GUI apps (VS Code, Cursor) often launch hook subprocesses
 // with a minimal PATH that omits ~/.local/bin. Replacing the bare
 // `so` command with the absolute path of the binary that ran
-// `so coding install` removes that whole class of "hooks fire but
+// `so install` removes that whole class of "hooks fire but
 // don't find the CLI" failures.
 // The `so ...` commands being rewritten live inside JSON string values (e.g.
-// `"command": "so coding hook --vendor=cursor"`), so the replacement is
+// `"command": "so sessions hook --vendor=cursor"`), so the replacement is
 // escaped for that context. Skipping this breaks every Windows install: a raw
 // `C:\Users\...` produces the invalid JSON escape `\U`, and a shell-quoted
 // path's leading `"` terminates the string value early.
@@ -37,7 +37,7 @@ func patchManifestBytes(name string, body []byte, soBin string) []byte {
 	if jsonManifest {
 		quoted = paths.EscapeJSONString(quoted)
 	}
-	for _, verb := range []string{"so coding hook", "so sessions finalize", "so sessions refresh", "so graph refresh"} {
+	for _, verb := range []string{"so sessions hook", "so coding hook", "so sessions finalize", "so sessions refresh", "so graph refresh"} {
 		suffix := strings.TrimPrefix(verb, "so")
 		s = strings.ReplaceAll(s, verb, quoted+suffix)
 	}
@@ -198,7 +198,7 @@ func enableCodexPlugin(marketplaceRoot string) error {
 // resolveCodexBin finds the codex binary in $PATH, then falls back to
 // the Codex.app default install location used by the macOS GUI app.
 // Codex on macOS doesn't symlink itself into /usr/local/bin out of the
-// box, which is why an `so coding install --vendor=codex` from a
+// box, which is why an `so install --vendor=codex` from a
 // shell where `codex` isn't on $PATH would silently no-op without
 // this fallback.
 func resolveCodexBin() (string, error) {

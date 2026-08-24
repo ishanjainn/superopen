@@ -12,10 +12,11 @@ func (s *Store) Layout(maxNodes int) (api.LayoutResult, error) {
 		maxNodes = 2000
 	}
 	result := api.LayoutResult{Project: "memory"}
-	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE faded=0 AND kind != 'tool'`).Scan(&result.TotalNodes)
+	galaxySQL := `faded=0 AND (kind IN ('teaching','pin') OR (kind='session' AND horizon IN ('short','medium','long')))`
+	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE ` + galaxySQL).Scan(&result.TotalNodes)
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_edges`).Scan(&result.TotalEdges)
 
-	rows, err := s.db.Query(`SELECT `+episodeCols+` FROM memory_episodes WHERE faded=0 ORDER BY pinned DESC, created_at DESC LIMIT ?`, maxNodes)
+	rows, err := s.db.Query(`SELECT `+episodeCols+` FROM memory_episodes WHERE `+galaxySQL+` ORDER BY pinned DESC, created_at DESC LIMIT ?`, maxNodes)
 	if err != nil {
 		return result, err
 	}
@@ -35,13 +36,17 @@ func (s *Store) Layout(maxNodes int) (api.LayoutResult, error) {
 	topicIndex := map[string]int{}
 	nextTopic := 0
 	for _, ep := range episodes {
-		if ep.Kind == KindTool {
+		if !plotInGalaxy(ep) {
 			continue
 		}
 		keep[ep.ID] = struct{}{}
+		horizon := NormalizeHorizon(ep.Horizon)
+		if horizon == "" {
+			horizon = DefaultHorizon(ep.Kind, ep.Pinned)
+		}
 		comm := communityOf[ep.ID]
 		if comm == "" {
-			comm = ep.Kind
+			comm = horizon
 		}
 		ti, ok := topicIndex[comm]
 		if !ok {
@@ -54,7 +59,7 @@ func (s *Store) Layout(maxNodes int) (api.LayoutResult, error) {
 		theta := hash01(ep.UID+"t")*2*math.Pi + float64(ti)*0.85
 		phi := (hash01(ep.UID+"p") - 0.5) * math.Pi * 0.78
 		radius := 70 + float64(ti)*10 + hash01(ep.UID+"r")*42
-		if ep.Kind == KindSession {
+		if horizon == HorizonLong {
 			radius *= 0.55
 		}
 		cp := math.Cos(phi)
@@ -63,13 +68,13 @@ func (s *Store) Layout(maxNodes int) (api.LayoutResult, error) {
 			X:             cp * math.Cos(theta) * radius,
 			Y:             cp * math.Sin(theta) * radius,
 			Z:             math.Sin(phi) * radius * 0.88,
-			Label:         layoutLabel(ep.Kind),
+			Label:         layoutLabel(ep.Kind, horizon),
 			Name:          firstLine(ep.Title, 48),
-			QualifiedName: ep.Kind + ":" + ep.UID[:min(8, len(ep.UID))],
+			QualifiedName: horizon + ":" + ep.UID[:min(8, len(ep.UID))],
 			FilePath:      firstFile(ep.Files),
 			Degree:        1,
-			Size:          sizeForKind(ep.Kind, ep.Pinned),
-			Color:         colorForKind(ep.Kind),
+			Size:          sizeForHorizon(horizon, ep.Pinned),
+			Color:         colorForHorizon(horizon),
 			Community:     comm,
 		}
 		nodes = append(nodes, node)
@@ -98,34 +103,48 @@ func (s *Store) Layout(maxNodes int) (api.LayoutResult, error) {
 	return result, edgeRows.Err()
 }
 
-func layoutLabel(kind string) string {
-	switch kind {
-	case KindPrompt:
-		return "Prompt"
-	case KindTool:
-		return "Tool"
-	case KindSession:
-		return "Session"
-	case KindPin:
-		return "Pin"
-	case KindTeaching:
-		return "Teaching"
-	case KindWorking:
-		return "Working"
+func plotInGalaxy(ep Episode) bool {
+	if ep.Faded || ep.Kind == KindTool || ep.Kind == KindPrompt || ep.Kind == KindWorking {
+		return false
+	}
+	if ep.Kind == KindTeaching || ep.Kind == KindPin {
+		return true
+	}
+	if ep.Kind != KindSession {
+		return false
+	}
+	h := NormalizeHorizon(ep.Horizon)
+	if h == "" {
+		h = DefaultHorizon(ep.Kind, ep.Pinned)
+	}
+	return h == HorizonShort || h == HorizonMedium || h == HorizonLong
+}
+
+func layoutLabel(kind, horizon string) string {
+	if kind == KindTeaching || kind == KindPin {
+		return "Skill"
+	}
+	switch NormalizeHorizon(horizon) {
+	case HorizonLong:
+		return "Long"
+	case HorizonMedium:
+		return "Medium"
+	case HorizonShort:
+		return "Short"
 	default:
 		return "Memory"
 	}
 }
 
-func sizeForKind(kind string, pinned bool) float64 {
-	size := 6.5
-	switch kind {
-	case KindSession:
-		size = 11
-	case KindPin, KindTeaching:
-		size = 8.5
-	case KindWorking:
-		size = 7.5
+func sizeForHorizon(horizon string, pinned bool) float64 {
+	size := 7.0
+	switch NormalizeHorizon(horizon) {
+	case HorizonLong:
+		size = 12
+	case HorizonMedium:
+		size = 9
+	case HorizonShort:
+		size = 7
 	}
 	if pinned {
 		size += 2
@@ -133,20 +152,14 @@ func sizeForKind(kind string, pinned bool) float64 {
 	return size
 }
 
-func colorForKind(kind string) string {
-	switch kind {
-	case KindPrompt:
-		return "#06b6d4"
-	case KindTool:
-		return "#3b82f6"
-	case KindSession:
+func colorForHorizon(horizon string) string {
+	switch NormalizeHorizon(horizon) {
+	case HorizonLong:
 		return "#eab308"
-	case KindPin:
-		return "#ec4899"
-	case KindTeaching:
-		return "#22c55e"
-	case KindWorking:
-		return "#f97316"
+	case HorizonMedium:
+		return "#a3e635"
+	case HorizonShort:
+		return "#38bdf8"
 	default:
 		return "#a855f7"
 	}

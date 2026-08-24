@@ -60,15 +60,13 @@ func newRootCommand() *cobra.Command {
 		cmdUninstall(),
 		cmdInit(),
 		cmdGraph(),
-		cmdQuery(),
 		cmdProjects(),
 		cmdSessions(),
 		cmdMemory(),
+		cmdHarvest(),
 		cmdDev(),
-		cmdOpen(),
 		cmdStatus(),
 		cmdGC(),
-		agent.NewCmd(),
 		version.NewCmd(),
 	)
 	return root
@@ -252,13 +250,15 @@ must query the graph first.`,
 
 func cmdUninstall() *cobra.Command {
 	var keepData bool
+	var vendor string
+	var dryRun bool
 	command := &cobra.Command{
 		Use:   "uninstall",
 		Short: "Remove Superopen agent wiring and machine-local data",
 		Long: `Remove Superopen from this machine. Works from any directory on
 macOS, Linux, and Windows. No source checkout is required.
 
-Removes:
+With no flags, removes:
   - hooks, /so skill, and durable guidance for every
     supported coding agent (Claude Code, Cursor, Codex, Gemini CLI,
     OpenCode, Copilot CLI, Pi)
@@ -268,11 +268,17 @@ Removes:
   - registered repositories' .so data (unless --keep-data)
   - release-installer prefix (~/.superopen), including that channel's binary
 
+--vendor=<id> removes only that vendor's hooks (skill and data stay).
+Use --vendor=all to drop every vendor hook without a full uninstall.
+
 Does not remove a package-managed so binary (Homebrew, Scoop, WinGet,
 Chocolatey). Use that manager's uninstall after this command.
 `,
-		RunE: func(*cobra.Command, []string) error {
-			_, warnings := codinguninstall.RemoveAll(true, keepData, false, os.Stdout, os.Stderr)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if vendor != "" {
+				return codinguninstall.Run(cmd, vendor, false, dryRun)
+			}
+			_, warnings := codinguninstall.RemoveAll(true, keepData, dryRun, os.Stdout, os.Stderr)
 			for _, w := range warnings {
 				fmt.Fprintf(os.Stderr, "so uninstall: %s\n", w)
 			}
@@ -285,7 +291,9 @@ Chocolatey). Use that manager's uninstall after this command.
 			return nil
 		},
 	}
+	command.Flags().StringVar(&vendor, "vendor", "", "Remove hooks for one vendor only (claude-code | cursor | codex | gemini | opencode | copilot-cli | pi | all)")
 	command.Flags().BoolVar(&keepData, "keep-data", false, "Keep per-repo .so session/graph data")
+	command.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would be removed without modifying any files")
 	return command
 }
 
@@ -387,17 +395,5 @@ Pass --cursor-rules to also write this repo's .cursor/rules/superopen.mdc.`,
 
 func cmdGraph() *cobra.Command { return newGraphCommand() }
 
-func cmdQuery() *cobra.Command {
-	command := nativeGraphLeaf("query <question>", "Query the native repository graph", api.OpQuery, func(cmd *cobra.Command, args []string) any {
-		depth, _ := cmd.Flags().GetInt("depth")
-		budget, _ := cmd.Flags().GetInt("budget")
-		return api.QueryRequest{RepoRoot: repoRoot(), Question: args[0], Depth: depth, Budget: budget}
-	})
-	command.Args = cobra.ExactArgs(1)
-	command.Flags().Int("depth", 2, "Traversal depth")
-	command.Flags().Int("budget", 2000, "Approximate output token budget")
-	return command
-}
-
 // soGitignoreContents is written to .so/.gitignore on first `so init`.
-var soGitignoreContents = []byte("# Superopen machine-local data (do not commit).\nsessions/\ndb/\n")
+var soGitignoreContents = []byte("# Superopen machine-local data (do not commit).\nsessions/\ndb/\nharvest/\n")

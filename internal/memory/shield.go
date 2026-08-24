@@ -127,7 +127,7 @@ func packFingerprint(text string) bool {
 	}
 	for _, line := range strings.Split(s, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "Working:") || strings.HasPrefix(line, "MEM #") {
+		if strings.HasPrefix(line, "Working:") || strings.HasPrefix(line, "MEM #") || strings.HasPrefix(line, "memories[") {
 			return true
 		}
 	}

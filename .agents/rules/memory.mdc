@@ -5,3 +5,5 @@ alwaysApply: false
 ---
 
 Read @internal/memory/AGENTS.md before changing memory schema, search/recall, or capture flows.
+
+User CLI search/last/timeline is AXI TOON (`memories[n]{id,kind,title,tokens}:`). SessionStart index stays `FormatIndexLine`. Do not put memory playbooks in `SKILL.md`.

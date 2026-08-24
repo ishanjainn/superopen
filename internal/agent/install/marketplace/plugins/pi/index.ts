@@ -1,5 +1,5 @@
 // Superopen Pi extension.
-// Telemetry uses Superopen conventions (so coding hook → coding_agent.* / gen_ai.*).
+// Telemetry uses Superopen conventions (so sessions hook → coding_agent.* / gen_ai.*).
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawn, spawnSync } from "node:child_process";
 
@@ -8,7 +8,7 @@ function soBin(): string {
 }
 
 function fire(event: string, payload: Record<string, unknown>, sync = false): string {
-  const args = ["coding", "hook", "--vendor=pi", `--event=${event}`];
+  const args = ["sessions", "hook", "--vendor=pi", `--event=${event}`];
   const bin = soBin();
   const input = JSON.stringify(payload) + "\n";
   try {

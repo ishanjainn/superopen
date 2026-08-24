@@ -405,36 +405,42 @@ function isNestedSubagent(
   return true;
 }
 
+/** Keep in sync with session.CountTurnsFromSpans (Go). */
 export function countTurnsFromSpans(spans: TraceSpan[]): number {
-  let n = 0;
-  let llmTurns = 0;
+  const seen = new Set<string>();
+  let stops = 0;
+  let llms = 0;
+  let prompts = 0;
   for (const sp of spans) {
     const name = String(sp.name || "").toLowerCase();
-    if (name === "coding_agent.llm.turn" || name.includes("completion")) {
-      llmTurns++;
-    }
-    if (name.includes("user_prompt") || name.includes("user.prompt")) {
-      n++;
-      continue;
-    }
     const attrs = sp.attributes || {};
-    if (attrs["gen_ai.prompt"] || attrs["gen_ai.content.prompt"]) {
-      n++;
+    const isStop = name === "coding_agent.session.loop.stop" || name.endsWith(".loop.stop");
+    const isLLM = name === "coding_agent.llm.turn" || name.includes("completion");
+    const raw = String(attrs["gen_ai.input.messages"] || "").toLowerCase();
+    const isPrompt =
+      name.includes("user_prompt") ||
+      name.includes("user.prompt") ||
+      Boolean(attrs["gen_ai.prompt"]) ||
+      Boolean(attrs["gen_ai.content.prompt"]) ||
+      raw.includes('"role":"user"') ||
+      raw.includes('"role": "user"') ||
+      raw.includes('"role":"user_prompt"');
+    if (!isStop && !isLLM && !isPrompt) {
       continue;
     }
-    const raw = attrs["gen_ai.input.messages"] || "";
-    if (
-      raw &&
-      (raw.toLowerCase().includes('"role":"user"') ||
-        raw.toLowerCase().includes('"role": "user"') ||
-        raw.toLowerCase().includes('"role":"user_prompt"'))
-    ) {
-      n++;
+    const turnId = String(attrs["coding_agent.turn.id"] || attrs["generation_id"] || "").trim();
+    if (turnId) {
+      seen.add(turnId);
+      continue;
     }
+    if (isStop) stops++;
+    else if (isLLM) llms++;
+    else prompts++;
   }
-  // Some vendors expose model responses and tool activity but no separate
-  // prompt event. In that case response turns are the best live approximation.
-  return n || llmTurns;
+  if (seen.size > 0) return seen.size;
+  if (stops > 0) return stops;
+  if (llms > 0) return llms;
+  return prompts;
 }
 
 /** True when the repository-local stream contains real coding-agent work. */
@@ -543,6 +549,7 @@ function enrichSessionStats(
   sessionPath: string,
   meta: SessionMeta,
 ): { turns: number; hasActivity: boolean; files: string[] } {
+  const persisted = Number(meta.turns || 0);
   const spans = mergeTraceSpans(loadTranscriptSpans(sessionPath));
   const files = new Set<string>();
   for (const span of spans) {
@@ -553,7 +560,7 @@ function enrichSessionStats(
     }
   }
   return {
-    turns: countTurnsFromSpans(spans),
+    turns: persisted > 0 ? persisted : countTurnsFromSpans(spans),
     hasActivity: spansHaveActivity(spans),
     files: Array.from(files),
   };

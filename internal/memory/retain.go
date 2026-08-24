@@ -14,8 +14,10 @@ func (s *Store) DeleteExpired(cutoff time.Time) (int, error) {
 	}
 	res, err := s.db.Exec(
 		`DELETE FROM memory_episodes
-WHERE pinned=0 AND never_decay=0 AND kind NOT IN (?, ?) AND created_at < ?`,
-		KindTeaching, KindPin, cutoff.UTC().Format(time.RFC3339Nano),
+WHERE pinned=0 AND never_decay=0 AND kind NOT IN (?, ?)
+  AND (horizon=? OR horizon='' OR horizon IS NULL)
+  AND created_at < ?`,
+		KindTeaching, KindPin, HorizonWorking, cutoff.UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
 		return 0, err
@@ -37,8 +39,8 @@ func (s *Store) DeleteUnprotectedForSessions(sessionIDs []string) (int, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
-	args := make([]any, 0, len(ids)+2)
-	args = append(args, KindTeaching, KindPin)
+	args := make([]any, 0, len(ids)+3)
+	args = append(args, KindTeaching, KindPin, HorizonWorking)
 	placeholders := make([]string, 0, len(ids))
 	for _, id := range ids {
 		placeholders = append(placeholders, "?")
@@ -46,7 +48,7 @@ func (s *Store) DeleteUnprotectedForSessions(sessionIDs []string) (int, error) {
 	}
 	q := fmt.Sprintf(
 		`DELETE FROM memory_episodes
-WHERE pinned=0 AND never_decay=0 AND kind NOT IN (?, ?) AND session_id IN (%s)`,
+WHERE pinned=0 AND never_decay=0 AND kind NOT IN (?, ?) AND (horizon=? OR horizon='' OR horizon IS NULL) AND session_id IN (%s)`,
 		strings.Join(placeholders, ","),
 	)
 	res, err := s.db.Exec(q, args...)

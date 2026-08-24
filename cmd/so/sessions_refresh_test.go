@@ -43,7 +43,7 @@ func TestRefreshIngestsWithoutFinalize(t *testing.T) {
 	_ = f.Close()
 	_ = session.NewStore(layout).Start(session.Meta{ID: id, Vendor: "codex", StartedAt: time.Now().UTC(), PromptPreview: "please fix the login timeout"})
 
-	if err := refreshSession(root, id); err != nil {
+	if err := refreshSession(root, id, nil); err != nil {
 		t.Fatal(err)
 	}
 	store, err := memory.OpenRoot(root)

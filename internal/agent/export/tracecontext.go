@@ -7,7 +7,7 @@
 // Why we need it
 // --------------
 // Each Cursor / Claude Code / Codex hook fires its own
-// `so coding hook` process. Without coordination every emitted
+// `so sessions hook` process. Without coordination every emitted
 // span would generate its own random TraceId - the otel_traces table
 // would have one trace per emit, correlated only by the
 // `coding_agent.session.id` attribute. The new trace-detail UI

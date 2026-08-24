@@ -229,7 +229,6 @@ func (s *Store) ingest(sessionID string, spans []trace.Span, sessions *session.S
 			_ = s.addEdge(promptIDs[i], promptIDs[i+1], EdgeNext)
 		}
 	}
-	_ = s.ClusterTopics()
 	return res, nil
 }
 
@@ -274,11 +273,12 @@ func (s *Store) storeEpisode(ep Episode) (int64, bool, error) {
 	if ep.Tags == "" {
 		ep.Tags = entityTags(ep.Text)
 	}
+	applyHorizonDefaults(&ep, s.SessionSeq())
 	if ep.Tier == "" {
-		ep.Tier = tierForKind(ep.Kind)
+		ep.Tier = ep.Horizon
 	}
 	vec := EmbedText(ep.Title + "\n" + ep.Text)
-	if ep.Kind == KindTeaching {
+	if ep.Kind == KindTeaching || ep.Kind == KindSession {
 		if dup := s.nearDuplicate(vec, ep.Kind); dup > 0 {
 			_ = s.Reinforce(dup)
 			return dup, false, nil
@@ -342,8 +342,6 @@ func projectSpan(sessionID string, sp trace.Span) (Episode, bool) {
 		Text:        text,
 		Files:       files,
 		CreatedAt:   created,
-		Tier:        tierEpisodic,
-		Topic:       heuristicTopic(title + " " + text),
 		Tags:        entityTags(text),
 	}, true
 }
@@ -393,7 +391,6 @@ func toolObservation(sessionID string, sp trace.Span) (Episode, bool) {
 		Text:        text,
 		Files:       files,
 		CreatedAt:   created,
-		Tier:        tierEpisodic,
 		Topic:       ObservationChange,
 	}, true
 }

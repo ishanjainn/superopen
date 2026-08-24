@@ -10,7 +10,7 @@ import (
 
 // withFileLock - Unix implementation. See the godoc comment in
 // sessionstate.go for the contract. Uses BSD flock so the lock is
-// advisory and process-scoped; sufficient for the so coding hook
+// advisory and process-scoped; sufficient for the so sessions hook
 // pattern (one hook subprocess per agent event, never overlapping
 // inside the same process).
 func withFileLock(lockPath string, fn func()) {

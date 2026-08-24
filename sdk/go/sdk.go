@@ -1,4 +1,4 @@
-// Package sdk provides OpenTelemetry bootstrap used by `so coding hook`
+// Package sdk provides OpenTelemetry bootstrap used by `so sessions hook`
 // (coding-agent session telemetry). It is not a general LLM provider SDK.
 package sdk
 

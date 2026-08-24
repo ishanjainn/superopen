@@ -75,6 +75,10 @@ func TestDeleteUnprotectedForSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	knowledge, err := store.Capture(CaptureInput{SessionID: "s1", Kind: KindSession, Title: "auth cookies stay in sqlite", Text: "keep cookies in sqlite", Horizon: HorizonMedium})
+	if err != nil {
+		t.Fatal(err)
+	}
 	n, err := store.DeleteUnprotectedForSessions([]string{"s1"})
 	if err != nil {
 		t.Fatal(err)
@@ -87,5 +91,8 @@ func TestDeleteUnprotectedForSessions(t *testing.T) {
 	}
 	if _, err := store.Get(teach.ID); err != nil {
 		t.Fatal("teaching must remain")
+	}
+	if _, err := store.Get(knowledge.ID); err != nil {
+		t.Fatal("knowledge must remain")
 	}
 }

@@ -16,6 +16,8 @@ func cmdMemory() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "memory",
 		Short: "Project diary over coding sessions (search, capture, teach, distill)",
+		Args:  cobra.ArbitraryArgs,
+		RunE:  runMemoryHome,
 	}
 	command.AddCommand(
 		memorySearchCmd(),
@@ -32,6 +34,7 @@ func cmdMemory() *cobra.Command {
 		memoryWatchCmd(),
 		memoryPinCmd("pin", false),
 		memoryPinCmd("fade", true),
+		memoryForgetCmd(),
 		memoryRescueCmd(),
 		memoryStatusCmd(),
 		memoryDistillCmd(),
@@ -41,6 +44,52 @@ func cmdMemory() *cobra.Command {
 		memoryObserveCmd(),
 	)
 	return command
+}
+
+func runMemoryHome(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		return cli.UnknownCommand("memory", args[0])
+	}
+	store, err := memory.OpenRoot(repoRoot())
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	st, err := store.Status()
+	if err != nil {
+		return err
+	}
+	live, err := store.LiveKnowledge(5)
+	if err != nil {
+		return err
+	}
+	out := out()
+	out.Next(`so memory search "<cue>"`, "so memory get <id>", `so graph query "<question>"`)
+	lines := []string{
+		fmt.Sprintf("long: %d", st.Counts.Long),
+		fmt.Sprintf("medium: %d", st.Counts.Medium),
+		fmt.Sprintf("short: %d", st.Counts.Short),
+		fmt.Sprintf("diary: %d", st.Counts.Working),
+		fmt.Sprintf("faded: %d", st.Faded),
+		fmt.Sprintf("pending distill: %d", len(st.PendingDistill)),
+	}
+	if len(live) > 0 {
+		lines = append(lines, "knowledge:")
+		for _, ep := range live {
+			title := strings.TrimSpace(ep.Title)
+			if title == "" {
+				title = "(untitled)"
+			}
+			lines = append(lines, fmt.Sprintf("  #%d %s", ep.ID, out.Truncate(title, 48)))
+		}
+	}
+	out.Home("Project diary over coding sessions", lines)
+	return nil
+}
+
+func emitMemoryIndex(out *cli.Out, hits []memory.Hit) {
+	out.Next(memory.HelpForSearch(hits)...)
+	out.Rows("memories", []string{"id", "kind", "title", "tokens"}, memory.IndexRowsFromHits(hits))
 }
 
 func memorySearchCmd() *cobra.Command {
@@ -58,12 +107,14 @@ func memorySearchCmd() *cobra.Command {
 			typ, _ := cmd.Flags().GetString("type")
 			sessionID, _ := cmd.Flags().GetString("session")
 			file, _ := cmd.Flags().GetString("file")
+			horizon, _ := cmd.Flags().GetString("horizon")
 			hits, err := store.Search(memory.SearchFilter{
 				Query:         strings.Join(args, " "),
 				Kind:          kind,
 				Type:          typ,
 				SessionID:     sessionID,
 				File:          file,
+				Horizon:       horizon,
 				Limit:         limit,
 				RecordEconomy: true,
 			})
@@ -71,20 +122,8 @@ func memorySearchCmd() *cobra.Command {
 				return err
 			}
 			out := out()
-			out.Next(memory.HelpForSearch(hits)...)
-			rows := make([]memory.IndexHit, 0, len(hits))
-			for _, hit := range hits {
-				rows = append(rows, memory.IndexFromHit(hit))
-			}
-			if len(rows) == 0 {
-				out.Empty("memories")
-				return nil
-			}
-			return out.HumanOrJSON("memories", func() {
-				for _, hit := range hits {
-					fmt.Fprintln(cmd.OutOrStdout(), memory.FormatHit(hit.Episode))
-				}
-			}, rows)
+			emitMemoryIndex(out, hits)
+			return nil
 		},
 	}
 	cmd.Flags().Int("limit", 20, "Maximum results")
@@ -92,6 +131,7 @@ func memorySearchCmd() *cobra.Command {
 	cmd.Flags().String("type", "", "Observation type (decision|bugfix|feature|refactor|discovery|change)")
 	cmd.Flags().String("session", "", "Filter by session id")
 	cmd.Flags().String("file", "", "Filter by file path substring")
+	cmd.Flags().String("horizon", "", "Filter horizon (working|short|medium|long)")
 	return cmd
 }
 
@@ -118,11 +158,11 @@ func memoryRecallCmd() *cobra.Command {
 				}
 				out := out()
 				out.Next(memory.HelpForSearch(hits)...)
-				return out.HumanOrJSON("memory_recall", func() {
-					for _, hit := range hits {
-						fmt.Fprintln(cmd.OutOrStdout(), memory.FormatHit(hit.Episode))
-					}
-				}, hits)
+				if out.Flags.JSON {
+					return out.HumanOrJSON("memory_recall", nil, hits)
+				}
+				out.Rows("memories", []string{"id", "kind", "title", "tokens"}, memory.IndexRowsFromHits(hits))
+				return nil
 			}
 			res, err := store.Recall(query, budget)
 			if err != nil {
@@ -133,15 +173,15 @@ func memoryRecallCmd() *cobra.Command {
 			}
 			out := out()
 			out.Next(memory.HelpForSearch(res.Hits)...)
-			return out.HumanOrJSON("memory_recall", func() {
-				fmt.Fprintf(cmd.OutOrStdout(), "hits: %d  anti_hits: %d  budget: %d\n", len(res.Hits), len(res.AntiHits), res.BudgetTokens)
-				for _, hit := range res.Hits {
-					fmt.Fprintln(cmd.OutOrStdout(), memory.FormatHit(hit.Episode))
-				}
-				for _, hit := range res.AntiHits {
-					fmt.Fprintf(cmd.OutOrStdout(), "anti %s\n", memory.FormatHit(hit.Episode))
-				}
-			}, res)
+			if out.Flags.JSON {
+				return out.HumanOrJSON("memory_recall", nil, res)
+			}
+			fmt.Fprintf(out.W, "hits: %d  anti_hits: %d  budget: %d\n", len(res.Hits), len(res.AntiHits), res.BudgetTokens)
+			out.Rows("memories", []string{"id", "kind", "title", "tokens"}, memory.IndexRowsFromHits(res.Hits))
+			if len(res.AntiHits) > 0 {
+				out.Rows("anti_hits", []string{"id", "kind", "title", "tokens"}, memory.IndexRowsFromHits(res.AntiHits))
+			}
+			return nil
 		},
 	}
 	cmd.Flags().Int("budget", 1500, "Token budget")
@@ -166,12 +206,13 @@ func memoryTemporalRecallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return out().HumanOrJSON("memory_recall", func() {
-				fmt.Fprintf(cmd.OutOrStdout(), "hits: %d  anti_hits: %d\n", len(res.Hits), len(res.AntiHits))
-				for _, hit := range res.Hits {
-					fmt.Fprintf(cmd.OutOrStdout(), "  #%d %s %s %s\n", hit.ID, hit.Kind, hit.Title, hit.CreatedAt)
-				}
-			}, res)
+			out := out()
+			out.Next(memory.HelpForSearch(res.Hits)...)
+			if out.Flags.JSON {
+				return out.HumanOrJSON("memory_recall", nil, res)
+			}
+			out.Rows("memories", []string{"id", "kind", "title", "tokens"}, memory.IndexRowsFromHits(res.Hits))
+			return nil
 		},
 	}
 	cmd.Flags().String("as-of", "", "RFC3339 or YYYY-MM-DD valid window")
@@ -195,11 +236,10 @@ func memoryLastCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return out().HumanOrJSON("memory_last", func() {
-				for _, ep := range eps {
-					fmt.Fprintf(cmd.OutOrStdout(), "#%d %s %s\n", ep.ID, ep.Kind, ep.Title)
-				}
-			}, eps)
+			out := out()
+			out.Next("so memory get <id>", `so memory search "<cue>"`)
+			out.Rows("memories", []string{"id", "kind", "title", "tokens"}, memory.IndexRowsFromEpisodes(eps))
+			return nil
 		},
 	}
 	cmd.Flags().Int("n", 20, "Count")
@@ -232,7 +272,7 @@ func memoryGetCmd() *cobra.Command {
 			out.Next(memory.HelpForGet(eps)...)
 			return out.HumanOrJSON("memory", func() {
 				for _, ep := range eps {
-					fmt.Fprintf(cmd.OutOrStdout(), "%s\n%s\n", memory.FormatHit(ep), ep.Text)
+					fmt.Fprintf(out.W, "id: %d\nkind: %s\ntitle: %s\n%s\n", ep.ID, ep.Kind, ep.Title, out.TruncateHint(ep.Text, 500))
 				}
 			}, eps)
 		},
@@ -258,36 +298,23 @@ func memoryTimelineCmd() *cobra.Command {
 					return err
 				}
 				out := out()
-				if len(eps) > 0 {
-					out.Next(fmt.Sprintf("so memory get %d", around))
-				}
-				rows := make([]memory.IndexHit, 0, len(eps))
-				for _, ep := range eps {
-					rows = append(rows, memory.IndexFromEpisode(ep))
-				}
-				if len(rows) == 0 {
-					out.Empty("memories")
-					return nil
-				}
-				return out.HumanOrJSON("memory_timeline", func() {
-					for _, ep := range eps {
-						fmt.Fprintln(cmd.OutOrStdout(), memory.FormatHit(ep))
-					}
-				}, rows)
+				out.Next("so memory get <id>", `so memory search "<cue>"`)
+				out.Rows("memories", []string{"id", "kind", "title", "tokens"}, memory.IndexRowsFromEpisodes(eps))
+				return nil
 			}
 			limit, _ := cmd.Flags().GetInt("limit")
 			buckets, err := store.Timeline(limit)
 			if err != nil {
 				return err
 			}
-			return out().HumanOrJSON("memory_timeline", func() {
-				for _, b := range buckets {
-					fmt.Fprintf(cmd.OutOrStdout(), "%s (%d)\n", b.When, len(b.Items))
-					for _, ep := range b.Items {
-						fmt.Fprintln(cmd.OutOrStdout(), "  "+memory.FormatHit(ep))
-					}
-				}
-			}, buckets)
+			var eps []memory.Episode
+			for _, b := range buckets {
+				eps = append(eps, b.Items...)
+			}
+			out := out()
+			out.Next("so memory get <id>", `so memory search "<cue>"`)
+			out.Rows("memories", []string{"id", "kind", "title", "tokens"}, memory.IndexRowsFromEpisodes(eps))
+			return nil
 		},
 	}
 	cmd.Flags().Int("limit", 80, "Maximum episodes")
@@ -300,7 +327,7 @@ func memoryTimelineCmd() *cobra.Command {
 func memoryCaptureCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "capture",
-		Short: "Write a session rollup or note (request/learned/next)",
+		Short: "Write knowledge or a skill (requires kind, horizon, title, text)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			sessionID, _ := cmd.Flags().GetString("session")
 			title, _ := cmd.Flags().GetString("title")
@@ -309,6 +336,7 @@ func memoryCaptureCmd() *cobra.Command {
 			learned, _ := cmd.Flags().GetString("learned")
 			next, _ := cmd.Flags().GetString("next")
 			kind, _ := cmd.Flags().GetString("kind")
+			horizon, _ := cmd.Flags().GetString("horizon")
 			pin, _ := cmd.Flags().GetBool("pin")
 			if text == "" {
 				var parts []string
@@ -323,6 +351,15 @@ func memoryCaptureCmd() *cobra.Command {
 				}
 				text = strings.Join(parts, "\n")
 			}
+			if strings.TrimSpace(kind) == "" || strings.TrimSpace(horizon) == "" || strings.TrimSpace(title) == "" || strings.TrimSpace(text) == "" {
+				return fmt.Errorf("capture requires --kind, --horizon, --title, and --text")
+			}
+			switch strings.ToLower(strings.TrimSpace(kind)) {
+			case "knowledge":
+				kind = memory.KindSession
+			case "skill":
+				kind = memory.KindTeaching
+			}
 			ep, err := memory.CaptureRoot(repoRoot(), memory.CaptureInput{
 				SessionID: sessionID,
 				Kind:      kind,
@@ -330,6 +367,7 @@ func memoryCaptureCmd() *cobra.Command {
 				Title:     title,
 				Text:      text,
 				Pin:       pin,
+				Horizon:   horizon,
 			})
 			if err != nil {
 				return err
@@ -345,7 +383,8 @@ func memoryCaptureCmd() *cobra.Command {
 	cmd.Flags().String("request", "", "What was asked")
 	cmd.Flags().String("learned", "", "What was learned")
 	cmd.Flags().String("next", "", "Next steps")
-	cmd.Flags().String("kind", memory.KindSession, "Episode kind")
+	cmd.Flags().String("kind", "", "knowledge|skill (or session|teaching)")
+	cmd.Flags().String("horizon", "", "short|medium|long (required)")
 	cmd.Flags().Bool("pin", false, "Pin after capture")
 	return cmd
 }
@@ -535,8 +574,45 @@ func memoryPinCmd(use string, fade bool) *cobra.Command {
 				return err
 			}
 			ep, _ := store.Get(id)
-			return out().HumanOrJSON("memory", func() {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s #%d\n", use, id)
+			out := out()
+			if fade {
+				out.Next("so memory rescue <id>", "so memory get <id>")
+			} else {
+				out.Next("so memory get <id>", "so memory fade <id>")
+			}
+			return out.HumanOrJSON("memory", func() {
+				fmt.Fprintf(out.W, "%s #%d\n", use, id)
+			}, ep)
+		},
+	}
+}
+
+func memoryForgetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "forget <id>",
+		Short: "Hide a memory from search and the galaxy (session transcript stays)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return cli.Usage("id must be an integer", "so memory forget <id>")
+			}
+			store, err := memory.OpenRoot(repoRoot())
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+			if _, err := store.Get(id); err != nil {
+				return cli.NotFound(fmt.Sprintf("memory %d not found", id), `so memory search "<cue>"`)
+			}
+			if err := store.ForgetEpisode(id); err != nil {
+				return err
+			}
+			ep, _ := store.Get(id)
+			out := out()
+			out.Next("so memory rescue <id>", `so memory search "<cue>"`)
+			return out.HumanOrJSON("memory", func() {
+				fmt.Fprintf(out.W, "forget #%d\n", id)
 			}, ep)
 		},
 	}
@@ -582,12 +658,14 @@ func memoryStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return out().HumanOrJSON("memory_status", func() {
-				fmt.Fprintf(cmd.OutOrStdout(), "moments: %d  knowledge: %d  skills: %d  connections: %d  forgetting: %d\n",
-					st.Counts.Episodic, st.Counts.Semantic, st.Counts.Procedural, st.Counts.Edges, st.Counts.Tombstoned)
-				fmt.Fprintf(cmd.OutOrStdout(), "lifecycle: %s  coverage: %.1f%%  connected: %.2fx  cleaned: %.1f%%  pending: %d\n",
+			out := out()
+			out.Next("so memory distill <id>", `so memory search "<cue>"`)
+			return out.HumanOrJSON("memory_status", func() {
+				fmt.Fprintf(out.W, "working: %d  short: %d  medium: %d  long: %d  faded: %d\n",
+					st.Counts.Working, st.Counts.Short, st.Counts.Medium, st.Counts.Long, st.Faded)
+				fmt.Fprintf(out.W, "lifecycle: %s  coverage: %.1f%%  connected: %.2fx  cleaned: %.1f%%  pending: %d\n",
 					st.Lifecycle, st.KnowledgePct, st.Connected, st.CleanedPct, len(st.PendingDistill))
-				fmt.Fprintf(cmd.OutOrStdout(), "economy packs=%d injected=%d saved=%d searches=%d\n",
+				fmt.Fprintf(out.W, "economy packs=%d injected=%d saved=%d searches=%d\n",
 					st.Economy.PacksServed, st.Economy.TokensInjected, st.Economy.TokensSaved, st.Economy.FallbackSearches)
 			}, st)
 		},
@@ -636,8 +714,10 @@ func memoryDistillCmd() *cobra.Command {
 				if err := store.SetDistillPaused(pause && !resume); err != nil {
 					return err
 				}
-				return out().HumanOrJSON("memory_distill", func() {
-					fmt.Fprintf(cmd.OutOrStdout(), "distill paused=%v\n", pause && !resume)
+				out := out()
+				out.Next("so memory distill <id>", `so memory search "<cue>"`)
+				return out.HumanOrJSON("memory_distill", func() {
+					fmt.Fprintf(out.W, "distill paused=%v\n", pause && !resume)
 				}, map[string]any{"paused": pause && !resume})
 			}
 			if consolidate {
@@ -646,15 +726,16 @@ func memoryDistillCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				_ = store.ClusterTopics()
 				pending := append([]string{}, store.PendingDistill()...)
 				store.Close()
 				var results []memory.DistillResult
 				for _, id := range pending {
-					results = append(results, memory.MaybeDistill(root, id, detach))
+					results = append(results, memory.Distill(root, id))
 				}
-				return out().HumanOrJSON("memory_distill", func() {
-					fmt.Fprintf(cmd.OutOrStdout(), "consolidated %d pending\n", len(results))
+				out := out()
+				out.Next("so memory get <id>", "so sessions show <id>")
+				return out.HumanOrJSON("memory_distill", func() {
+					fmt.Fprintf(out.W, "consolidated %d pending\n", len(results))
 				}, results)
 			}
 			id := ""
@@ -672,16 +753,15 @@ func memoryDistillCmd() *cobra.Command {
 			if id == "" {
 				return fmt.Errorf("session id required (or --consolidate / --pause / --sleep)")
 			}
-			res, err := memory.DistillSession(root, id)
-			if err != nil {
-				return err
-			}
-			return out().HumanOrJSON("memory_distill", func() {
+			res := memory.Distill(root, id)
+			out := out()
+			out.Next("so memory get <id>", "so sessions show <id>")
+			return out.HumanOrJSON("memory_distill", func() {
 				if res.Pending {
-					fmt.Fprintf(cmd.OutOrStdout(), "pending %s (%s)\n", res.SessionID, res.Skipped)
+					fmt.Fprintf(out.W, "pending %s (%s)\n", res.SessionID, res.Skipped)
 					return
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "distilled %s via %s → #%d\n", res.SessionID, res.Provider, res.EpisodeID)
+				fmt.Fprintf(out.W, "distilled %s via %s written=%d → #%d\n", res.SessionID, res.Provider, res.Written, res.EpisodeID)
 			}, res)
 		},
 	}
@@ -689,7 +769,7 @@ func memoryDistillCmd() *cobra.Command {
 	cmd.Flags().Bool("pause", false, "Pause automatic distill")
 	cmd.Flags().Bool("resume", false, "Resume automatic distill")
 	cmd.Flags().Bool("consolidate", false, "Ingest all sessions, cluster topics, distill pending")
-	cmd.Flags().Bool("sleep", false, "Run the sleep pipeline (decay, erase hints, cluster)")
+	cmd.Flags().Bool("sleep", false, "Run the sleep pipeline (expire horizons, erase hints, embeddings)")
 	cmd.Flags().Bool("restart", false, "Resume distill then consolidate")
 	return cmd
 }

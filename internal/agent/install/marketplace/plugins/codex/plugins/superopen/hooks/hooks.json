@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=codex --event=SessionStart",
+            "command": "so sessions hook --vendor=codex --event=SessionStart",
             "timeout": 15
           },
           {
@@ -22,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=codex --event=UserPromptSubmit",
+            "command": "so sessions hook --vendor=codex --event=UserPromptSubmit",
             "timeout": 15
           }
         ]
@@ -34,7 +34,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=codex --event=PreToolUse",
+            "command": "so sessions hook --vendor=codex --event=PreToolUse",
             "timeout": 5
           }
         ]
@@ -46,7 +46,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=codex --event=PostToolUse",
+            "command": "so sessions hook --vendor=codex --event=PostToolUse",
             "timeout": 15
           }
         ]
@@ -57,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=codex --event=Stop",
+            "command": "so sessions hook --vendor=codex --event=Stop",
             "timeout": 30
           },
           {

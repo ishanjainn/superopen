@@ -63,3 +63,17 @@ export function MemoryIcon({ className, ...props }: NavIconProps) {
     </NavIcon>
   );
 }
+
+/** Harvest: compare two revisions of a playbook. */
+export function HarvestIcon({ className, ...props }: NavIconProps) {
+  return (
+    <NavIcon className={className} {...props}>
+      <circle cx="7.5" cy="6.5" r="2" />
+      <circle cx="16.5" cy="17.5" r="2" />
+      <path d="M7.5 8.5v9" />
+      <path d="M16.5 6.5v9" />
+      <path d="M5 11.5h5" />
+      <path d="M14 12.5h5" />
+    </NavIcon>
+  );
+}

@@ -24,8 +24,10 @@ When `.so/` exists in a **customer repo**, every supported coding vendor gets th
 | Outcome | What happens |
 |---------|----------------|
 | **Graph** | Agent is told to run `so graph query` before grep/read |
-| **Observability** | `so coding hook` records session start/end, user prompts, tool calls, assistant turns into `.so/sessions` |
-| **Silent lifecycle** | SessionEnd / sessionEnd detach `so sessions finalize` (no extra model text). Prompt-submit is silent unless a prior-work cue injects index lines. PostToolUse / Stop stay silent. Only explore-tool nudges (and SubagentStart where the host has subagents). Skill / `AGENTS.md` / `SKILL.md` Reads are not “skipped graph”. |
+| **Observability** | `so sessions hook` records session start/end, user prompts, tool calls, assistant turns into `.so/sessions` |
+| **Silent lifecycle** | SessionEnd / sessionEnd detach `so sessions finalize` (no extra model text). Prompt-submit is silent unless a prior-work cue injects index lines. PostToolUse / Stop stay silent. SessionStart may append one `HARVEST N OPEN` line when proposals are pending — no harvest methodology. Only explore-tool nudges (and SubagentStart where the host has subagents). Skill / `AGENTS.md` / `SKILL.md` Reads are not “skipped graph”. |
+
+`so sessions hook` is a **host-protocol exception**: stdout is vendor control JSON (`additionalContext` / `permissionDecision`), never AXI TOON/`help[]`/dashboards. Telemetry logs go to stderr. Always exit 0 on telemetry-path failure. The command is Hidden under `so sessions` so the user AXI catalog stays list/show/finalize. Users install with `so install`.
 
 | Vendor | Graph-first channel | Notes |
 |--------|---------------------|-------|
@@ -46,7 +48,7 @@ When `.so/` exists:
 3. **No ExploreAugment** on Grep/Read (`graphGate`)
 4. **Follow-ups:** snippet/trace; no search spray after TRUNCATED
 5. **SubagentStart:** `HookReminder` (hosts that have subagents)
-6. **SessionStart / UserPromptSubmit / PostToolUse / Stop / SessionEnd:** silent for steer text (observability still records `.so/sessions`)
+6. **SessionStart:** graph-first memory index; optional one HARVEST status line when OPEN/pending. **UserPromptSubmit / PostToolUse / Stop / SessionEnd:** silent for steer text (observability still records `.so/sessions`)
 
 Optional: `so install --strict` / `SUPEROPEN_HOOK_STRICT`
 
@@ -77,7 +79,7 @@ Benchmarks: [../../benchmarks/agent-graph-eval/AGENTS.md](../../benchmarks/agent
 ## Change checklist
 
 - [ ] `skills/so/SKILL.md`: query-first tripwire unless intentional.
-- [ ] Memory only in `references/memory.md`.
+- [ ] Memory only in `references/memory.md`. Harvest only in `references/harvest.md`.
 - [ ] Nudges: MANDATORY; no `so graph search` in default hook text.
 - [ ] No ExploreAugment on live Grep/Read path.
 - [ ] `Block()` / `CursorRule()`: no `--json` in always-on block.

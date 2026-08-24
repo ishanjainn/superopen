@@ -66,6 +66,40 @@ func TestParentFromCursorTranscriptPath(t *testing.T) {
 	}
 }
 
+func TestParentFromCursorTranscriptPathWindowsSlash(t *testing.T) {
+	path := `C:/Users/me/.cursor/projects/repo/agent-transcripts/f0c187a2-93b7-4d06-ac3b-7ca9f6539b1a/subagents/9e24ef36-3521-462c-b43e-e552bbf0f807.jsonl`
+	parent, child := ParentFromCursorTranscriptPath(path)
+	if parent != "f0c187a2-93b7-4d06-ac3b-7ca9f6539b1a" || child != "9e24ef36-3521-462c-b43e-e552bbf0f807" {
+		t.Fatalf("parent=%q child=%q", parent, child)
+	}
+	back := `C:\Users\me\.cursor\projects\repo\agent-transcripts\f0c187a2-93b7-4d06-ac3b-7ca9f6539b1a\subagents\9e24ef36-3521-462c-b43e-e552bbf0f807.jsonl`
+	parent, child = ParentFromCursorTranscriptPath(back)
+	if parent != "f0c187a2-93b7-4d06-ac3b-7ca9f6539b1a" || child != "9e24ef36-3521-462c-b43e-e552bbf0f807" {
+		t.Fatalf("backslash parent=%q child=%q", parent, child)
+	}
+}
+
+func TestAnnotateTitle(t *testing.T) {
+	dir := t.TempDir()
+	child := "9e24ef36-3521-462c-b43e-e552bbf0f807"
+	parent := "f0c187a2-93b7-4d06-ac3b-7ca9f6539b1a"
+	if err := Register(dir, child, parent, "cursor", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Annotate(dir, child, "explore GetStarted"); err != nil {
+		t.Fatal(err)
+	}
+	if Title(dir, child) != "explore GetStarted" {
+		t.Fatalf("title=%q", Title(dir, child))
+	}
+	if err := Annotate(dir, child, "ignored later"); err != nil {
+		t.Fatal(err)
+	}
+	if Title(dir, child) != "explore GetStarted" {
+		t.Fatalf("second annotate overwrote title: %q", Title(dir, child))
+	}
+}
+
 func TestPendingClaim(t *testing.T) {
 	dir := t.TempDir()
 	parent := "aaaaaaaa-1111-2222-3333-444444444444"

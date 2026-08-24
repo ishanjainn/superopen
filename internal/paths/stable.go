@@ -115,7 +115,8 @@ func IsSuperopenHookCommand(cmd string) bool {
 	if cmd == "" {
 		return false
 	}
-	return strings.Contains(cmd, "coding hook --vendor=cursor") ||
+	return strings.Contains(cmd, "sessions hook --vendor=cursor") ||
+		strings.Contains(cmd, "coding hook --vendor=cursor") ||
 		strings.Contains(cmd, "sessions finalize") ||
 		strings.Contains(cmd, "sessions refresh") ||
 		strings.Contains(cmd, "graph refresh")

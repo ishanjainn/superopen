@@ -15,7 +15,7 @@
 // User-scope is the documented, supported way to install agent-wide
 // hooks that apply to every workspace the user opens, and it works
 // without any in-app step. That's exactly what we want from
-// `so coding install --vendor=cursor`.
+// `so install --vendor=cursor`.
 //
 // Multiple-owner safety:
 //
@@ -25,7 +25,7 @@
 //
 //   1. Read existing hooks.json (or start fresh if missing).
 //   2. For each event in our embedded hooks.json, drop any prior entry
-//      whose `command` we own (substring `so coding hook
+//      whose `command` we own (substring `so sessions hook
 //      --vendor=cursor`) - keeps re-install idempotent.
 //   3. Append our patched entry to the event array.
 //   4. Preserve all unrelated events and top-level keys.

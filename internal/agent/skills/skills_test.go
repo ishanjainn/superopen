@@ -93,4 +93,31 @@ func TestInstallAllShipsReferences(t *testing.T) {
 	if !bytes.Contains(body, []byte("references/memory.md")) {
 		t.Fatal("SKILL.md does not point at the memory reference")
 	}
+	if !bytes.Contains(body, []byte("references/harvest.md")) {
+		t.Fatal("SKILL.md does not point at the harvest reference")
+	}
+
+	mem, err := os.ReadFile(filepath.Join(home, ".claude", "skills", "so", "references", "memory.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(mem, []byte("memories[n]{id,kind,title,tokens}:")) {
+		t.Fatal("installed memory.md must document AXI TOON search")
+	}
+	if bytes.Contains(mem, []byte("MEM #")) {
+		t.Fatal("installed memory.md must not document MEM # lines")
+	}
+}
+
+func TestMemoryReferenceIsTOON(t *testing.T) {
+	raw, err := os.ReadFile("so/references/memory.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte("memories[n]{id,kind,title,tokens}:")) {
+		t.Fatal("memory.md must document AXI TOON search")
+	}
+	if bytes.Contains(raw, []byte("MEM #")) {
+		t.Fatal("memory.md must not document MEM # lines")
+	}
 }

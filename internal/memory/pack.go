@@ -138,9 +138,9 @@ func (s *Store) BuildPack(cue, currentSession string) (Pack, error) {
 	}
 	ask := pending != "" && !s.HasSessionRollup(pending)
 	if ask {
-		writeBudget(&b, &budget, fmt.Sprintf("If continuing last session #%s: memory_capture once with request/learned/next. Skip if unrelated.", pending))
+		writeBudget(&b, &budget, LiveDistillInstruction(pending))
 	}
-	writeBudget(&b, &budget, "Fetch: memory_get / so memory get. Then so graph query to verify. Hints, not authority.")
+	writeBudget(&b, &budget, "Fetch: so memory get. Then so graph query to verify. Hints, not authority.")
 
 	text := strings.TrimSpace(b.String())
 	tokens := EstimateTokens(text)
@@ -226,12 +226,13 @@ func SessionStartIndex(root string) string {
 }
 
 func (s *Store) BuildSessionIndex() string {
-	hits, err := s.Search(SearchFilter{Limit: 12, RecordEconomy: false})
+	live, err := s.LiveKnowledge(12)
 	if err != nil {
-		hits = nil
+		live = nil
 	}
-	if len(hits) == 0 {
-		hits = s.sessionTitleHits(8)
+	var hits []Hit
+	for _, ep := range live {
+		hits = append(hits, Hit{Episode: ep})
 	}
 	if len(hits) == 0 {
 		return ""
@@ -243,13 +244,12 @@ func (s *Store) BuildSessionIndex() string {
 		return ""
 	}
 	for _, hit := range hits {
-		if hit.Kind == KindTool {
+		if hit.Kind == KindTool || hit.Kind == KindPrompt || hit.Horizon == HorizonWorking {
 			continue
 		}
 		line := FormatIndexLine(hit.Episode)
 		if strings.Contains(line, hit.Text) && hit.Text != "" && hit.Text != hit.Title {
-			// never emit bodies
-			line = FormatIndexLine(Episode{ID: hit.ID, Kind: hit.Kind, Topic: hit.Topic, Title: hit.Title, Tokens: hit.Tokens})
+			line = FormatIndexLine(Episode{ID: hit.ID, Kind: hit.Kind, Horizon: hit.Horizon, Topic: hit.Topic, Title: hit.Title, Tokens: hit.Tokens})
 		}
 		if !writeBudget(&b, &budget, line) {
 			break

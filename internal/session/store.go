@@ -37,6 +37,7 @@ type Meta struct {
 	EndedAt       *time.Time `json:"ended_at,omitempty"`
 	DurationMs    int64      `json:"duration_ms,omitempty"`
 	Tokens        int64      `json:"tokens,omitempty"`
+	Turns         int        `json:"turns,omitempty"`
 	CostUSD       float64    `json:"cost_usd,omitempty"`
 	ParentID      string     `json:"parent_id,omitempty"`
 	IsSubagent    bool       `json:"is_subagent,omitempty"`
@@ -73,10 +74,10 @@ type Document struct {
 }
 
 type indexFile struct {
-	About         artifact.About `json:"_about"`
-	Sessions      []Meta             `json:"sessions"`
-	PendingSpawns json.RawMessage    `json:"pending_spawns,omitempty"`
-	Links         json.RawMessage    `json:"links,omitempty"`
+	About         artifact.About  `json:"_about"`
+	Sessions      []Meta          `json:"sessions"`
+	PendingSpawns json.RawMessage `json:"pending_spawns,omitempty"`
+	Links         json.RawMessage `json:"links,omitempty"`
 }
 
 var sessionAbout = artifact.About{
@@ -202,7 +203,6 @@ func (s *Store) List() ([]IndexEntry, error) {
 // ListItem is a sessions-index row enriched for the UI.
 type ListItem struct {
 	Meta
-	Turns       int      `json:"turns"` // user prompt markers in transcript
 	Files       []string `json:"files,omitempty"`
 	Match       string   `json:"match,omitempty"` // why this row matched a search query
 	hasActivity bool
@@ -374,66 +374,32 @@ func (s *Store) enrich(meta Meta) ListItem {
 		}
 	}
 
-	item.Turns, item.Model, item.hasActivity = s.scanTranscript(dir, meta.Model)
-	if item.Model != "" && meta.Model == "" {
-		item.Meta.Model = item.Model
+	turns, model, hasActivity := s.scanTranscript(dir, meta.Model)
+	item.Meta.Turns = turns
+	if model != "" && meta.Model == "" {
+		item.Meta.Model = model
 	}
+	item.hasActivity = hasActivity
 	return item
 }
 
 func (s *Store) scanTranscript(dir, existingModel string) (turns int, model string, hasActivity bool) {
 	model = existingModel
-	f, err := os.Open(filepath.Join(dir, "events.jsonl"))
-	if err != nil {
+	spans := loadJSONLSpans(filepath.Join(dir, "events.jsonl"))
+	if len(spans) == 0 {
 		return 0, model, false
 	}
-	defer f.Close()
-	spans := make([]trace.Span, 0)
-
-	dec := json.NewDecoder(f)
-	for {
-		var sp trace.Span
-		if err := dec.Decode(&sp); err != nil {
-			break
-		}
-		spans = append(spans, sp)
-		attrs := sp.Attributes
-		name := strings.ToLower(sp.Name)
-		if strings.Contains(name, "user_prompt") || strings.Contains(name, "user.prompt") {
-			turns++
+	for _, sp := range spans {
+		if model != "" || sp.Attributes == nil {
 			continue
 		}
-		if attrs == nil {
-			continue
-		}
-		if model == "" {
-			if m := attrs["gen_ai.request.model"]; m != "" {
-				model = m
-			} else if m := attrs["gen_ai.response.model"]; m != "" {
-				model = m
-			}
-		}
-		if attrs["gen_ai.prompt"] != "" || attrs["gen_ai.content.prompt"] != "" {
-			turns++
-			continue
-		}
-		if raw := attrs["gen_ai.input.messages"]; raw != "" {
-			low := strings.ToLower(raw)
-			if strings.Contains(low, `"role":"user"`) || strings.Contains(low, `"role": "user"`) ||
-				strings.Contains(low, `"role":"user_prompt"`) {
-				turns++
-			}
+		if m := sp.Attributes["gen_ai.request.model"]; m != "" {
+			model = m
+		} else if m := sp.Attributes["gen_ai.response.model"]; m != "" {
+			model = m
 		}
 	}
-	if turns == 0 {
-		for _, sp := range spans {
-			name := strings.ToLower(sp.Name)
-			if name == "coding_agent.llm.turn" || strings.Contains(name, "completion") {
-				turns++
-			}
-		}
-	}
-	return turns, model, SpansHaveActivity(spans)
+	return CountTurnsFromSpans(spans), model, SpansHaveActivity(spans)
 }
 
 func (s *Store) matchQuery(item ListItem, needle string) string {
@@ -637,6 +603,9 @@ func mergeMetaSticky(existing, incoming Meta) Meta {
 	if out.Tokens == 0 {
 		out.Tokens = existing.Tokens
 	}
+	if out.Turns < existing.Turns {
+		out.Turns = existing.Turns
+	}
 	if out.CostUSD == 0 {
 		out.CostUSD = existing.CostUSD
 	}
@@ -802,7 +771,14 @@ func (s *Store) UpsertActiveFromSpans(spans []trace.Span) {
 			meta.IsSubagent = false
 		}
 		if IsPlaceholderTitle(meta.Title, meta.ID) {
-			meta.Title = truncate(meta.PromptPreview, 80)
+			if t := agentlinks.Title(s.Paths.SessionsDir, id); t != "" {
+				meta.Title = truncate(t, 80)
+			} else {
+				meta.Title = truncate(meta.PromptPreview, 80)
+			}
+		}
+		if counted := CountTurnsFromSpans(trace.DedupSpans(b.spans)); counted > meta.Turns {
+			meta.Turns = counted
 		}
 		if !validSessionTime(meta.StartedAt, time.Now().UTC()) {
 			meta.StartedAt = StartTimeFromSpans(b.spans)
@@ -960,8 +936,17 @@ func (s *Store) MaterializeFromSpans(id string, spans []trace.Span, tokens int64
 	}
 
 	if IsPlaceholderTitle(meta.Title, meta.ID) {
-		meta.Title = truncate(meta.PromptPreview, 80)
+		if t := agentlinks.Title(s.Paths.SessionsDir, id); t != "" {
+			meta.Title = truncate(t, 80)
+		} else {
+			meta.Title = truncate(meta.PromptPreview, 80)
+		}
 	}
+	countSrc := spans
+	if !rewriteEvents && len(footSpans) > 0 {
+		countSrc = footSpans
+	}
+	meta.Turns = CountTurnsFromSpans(countSrc)
 
 	if err := s.writeDocument(id, func(d *Document) { d.Meta = meta; d.Footprint = fp }); err != nil {
 		return Meta{}, err

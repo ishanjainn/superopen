@@ -2,8 +2,9 @@ package trace
 
 import "strings"
 
-// DedupSpans drops duplicate thoughts and the extra read_file span when a
-// Read of the same path is already present. Storage-only; adapters still emit.
+// DedupSpans drops duplicate thoughts, extra read_file when a Read of the
+// same path exists, and requested+completed pairs that share gen_ai.tool.call.id.
+// Storage-only; adapters still emit. Spans without a tool.call.id are kept.
 func DedupSpans(spans []Span) []Span {
 	if len(spans) < 2 {
 		return spans
@@ -38,7 +39,35 @@ func DedupSpans(spans []Span) []Span {
 		}
 		out = append(out, sp)
 	}
+	return dropRequestedWhenCompleted(out)
+}
+
+func dropRequestedWhenCompleted(spans []Span) []Span {
+	hasCompleted := map[string]bool{}
+	for _, sp := range spans {
+		id := attr(sp, "gen_ai.tool.call.id")
+		if id == "" || isRequestedName(sp.Name) {
+			continue
+		}
+		hasCompleted[id] = true
+	}
+	if len(hasCompleted) == 0 {
+		return spans
+	}
+	out := make([]Span, 0, len(spans))
+	for _, sp := range spans {
+		id := attr(sp, "gen_ai.tool.call.id")
+		if id != "" && isRequestedName(sp.Name) && hasCompleted[id] {
+			continue
+		}
+		out = append(out, sp)
+	}
 	return out
+}
+
+func isRequestedName(name string) bool {
+	n := strings.ToLower(name)
+	return strings.Contains(n, "requested")
 }
 
 func attr(sp Span, key string) string {

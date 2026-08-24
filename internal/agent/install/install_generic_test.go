@@ -97,7 +97,7 @@ func TestInstallGeminiMergesSettingsAndUsesCurrentEvents(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	seed := `{"theme":"dark","hooks":{"BeforeTool":[{"matcher":"foreign","hooks":[{"type":"command","command":"foreign-tool"}]}],"PreToolUse":[{"hooks":[{"type":"command","command":"/old/so coding hook --vendor=gemini --event=PreToolUse"}]}]}}`
+	seed := `{"theme":"dark","hooks":{"BeforeTool":[{"matcher":"foreign","hooks":[{"type":"command","command":"foreign-tool"}]}],"PreToolUse":[{"hooks":[{"type":"command","command":"/old/so sessions hook --vendor=gemini --event=PreToolUse"}]}]}}`
 	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
 		t.Fatal(err)
 	}

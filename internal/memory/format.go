@@ -12,6 +12,7 @@ type IndexHit struct {
 	ID        int64    `json:"id"`
 	Kind      string   `json:"kind"`
 	Topic     string   `json:"topic,omitempty"`
+	Horizon   string   `json:"horizon,omitempty"`
 	Title     string   `json:"title"`
 	Tokens    int      `json:"tokens"`
 	Score     float64  `json:"score,omitempty"`
@@ -26,26 +27,23 @@ func DisplayType(ep Episode) string {
 	return ep.Kind
 }
 
-func FormatHit(ep Episode) string {
-	title := compactLine(ep)
-	if title == "" {
-		title = "(untitled)"
-	}
-	return fmt.Sprintf("MEM #%d %s %q ~%dt", ep.ID, DisplayType(ep), title, ep.Tokens)
-}
-
 func FormatIndexLine(ep Episode) string {
 	title := firstLine(ep.Title, 48)
 	if title == "" {
 		title = "(untitled)"
 	}
-	return fmt.Sprintf("#%d  %s  %s  ~%dt", ep.ID, DisplayType(ep), title, ep.Tokens)
+	label := DisplayType(ep)
+	if h := NormalizeHorizon(ep.Horizon); h != "" {
+		label = h
+	}
+	return fmt.Sprintf("#%d  %s  %s", ep.ID, label, title)
 }
 
 func IndexFromEpisode(ep Episode) IndexHit {
 	return IndexHit{
 		ID:        ep.ID,
 		Kind:      ep.Kind,
+		Horizon:   ep.Horizon,
 		Topic:     ep.Topic,
 		Title:     firstLine(ep.Title, 80),
 		Tokens:    ep.Tokens,
@@ -59,6 +57,36 @@ func IndexFromHit(h Hit) IndexHit {
 	idx := IndexFromEpisode(h.Episode)
 	idx.Score = h.Score
 	return idx
+}
+
+// IndexRow is a 4-column AXI list row for search/last/timeline.
+func IndexRow(idx IndexHit) map[string]any {
+	title := strings.TrimSpace(idx.Title)
+	if title == "" {
+		title = strings.TrimSpace(idx.Topic)
+	}
+	return map[string]any{
+		"id":     idx.ID,
+		"kind":   idx.Kind,
+		"title":  title,
+		"tokens": idx.Tokens,
+	}
+}
+
+func IndexRowsFromHits(hits []Hit) []map[string]any {
+	rows := make([]map[string]any, 0, len(hits))
+	for _, h := range hits {
+		rows = append(rows, IndexRow(IndexFromHit(h)))
+	}
+	return rows
+}
+
+func IndexRowsFromEpisodes(eps []Episode) []map[string]any {
+	rows := make([]map[string]any, 0, len(eps))
+	for _, ep := range eps {
+		rows = append(rows, IndexRow(IndexFromEpisode(ep)))
+	}
+	return rows
 }
 
 func HelpForSearch(hits []Hit) []string {

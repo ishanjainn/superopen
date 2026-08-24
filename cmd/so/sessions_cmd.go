@@ -9,8 +9,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ishanjainn/superopen/internal/agent/hook"
 	"github.com/ishanjainn/superopen/internal/checkpoint"
 	"github.com/ishanjainn/superopen/internal/cli"
+	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/projects"
@@ -20,30 +22,15 @@ import (
 )
 
 func cmdSessions() *cobra.Command {
-	command := &cobra.Command{Use: "sessions", Short: "Inspect observability-derived coding sessions"}
+	command := &cobra.Command{
+		Use:   "sessions",
+		Short: "Inspect observability-derived coding sessions",
+		Args:  cobra.ArbitraryArgs,
+	}
 	list := &cobra.Command{
 		Use:   "list",
 		Short: "List coding sessions",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			root := repoRoot()
-			items, err := session.NewLocalMulti(root, paths.Resolve(root)).List(cmd.Context(), session.Filter{ProjectID: root})
-			if err != nil {
-				return err
-			}
-			rows := make([]map[string]any, 0, len(items))
-			for _, item := range items {
-				rows = append(rows, map[string]any{
-					"id": item.ID, "vendor": item.Vendor, "status": item.Status,
-					"turns": item.Turns, "tokens": item.Tokens, "title": session.DisplayName(item.Meta),
-				})
-			}
-			if len(rows) == 0 {
-				out().Empty("sessions")
-				return nil
-			}
-			out().Rows("sessions", []string{"id", "vendor", "status", "turns", "tokens", "title"}, rows)
-			return nil
-		},
+		RunE:  runSessionsList,
 	}
 	command.AddCommand(list)
 	command.AddCommand(&cobra.Command{
@@ -51,11 +38,36 @@ func cmdSessions() *cobra.Command {
 		Short: "Show a materialized session document",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			document, err := session.NewStore(paths.Resolve(repoRoot())).ReadDocument(args[0])
+			store := session.NewStore(paths.Resolve(repoRoot()))
+			document, err := store.ReadDocument(args[0])
 			if err != nil {
-				return err
+				return cli.NotFound(fmt.Sprintf("session %s not found", args[0]), "so sessions list")
 			}
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(document)
+			out := out()
+			out.Next("so sessions finalize <id>", "so sessions tokens <id>")
+			if out.Flags.JSON || out.Flags.Full {
+				return out.HumanOrJSON("session", func() {
+					enc := json.NewEncoder(out.W)
+					enc.SetIndent("", "  ")
+					_ = enc.Encode(document)
+				}, document)
+			}
+			turns := store.TurnsFor(args[0], document.Turns)
+			return out.HumanOrJSON("session", func() {
+				fmt.Fprintf(out.W, "id: %s\n", document.ID)
+				fmt.Fprintf(out.W, "vendor: %s\n", document.Vendor)
+				fmt.Fprintf(out.W, "status: %s\n", document.Status)
+				fmt.Fprintf(out.W, "title: %s\n", out.Truncate(session.DisplayName(document.Meta), cli.DefaultTruncate))
+				fmt.Fprintf(out.W, "turns: %d\n", turns)
+				fmt.Fprintf(out.W, "tokens: %d\n", document.Tokens)
+			}, map[string]any{
+				"id":     document.ID,
+				"vendor": document.Vendor,
+				"status": document.Status,
+				"title":  session.DisplayName(document.Meta),
+				"turns":  turns,
+				"tokens": document.Tokens,
+			})
 		},
 	})
 	finalize := &cobra.Command{
@@ -83,7 +95,7 @@ func cmdSessions() *cobra.Command {
 				cli.SpawnSO(root, spawn...)
 				return nil
 			}
-			return finalizeSession(root, id)
+			return finalizeSession(root, id, out())
 		},
 	}
 	finalize.Flags().Bool("detach", false, "Materialize in a background process")
@@ -97,7 +109,7 @@ func cmdSessions() *cobra.Command {
 			if len(args) == 1 {
 				id = strings.TrimSpace(args[0])
 			}
-			return refreshSession(repoRoot(), id)
+			return refreshSession(repoRoot(), id, out())
 		},
 	})
 	command.AddCommand(&cobra.Command{
@@ -119,7 +131,10 @@ func cmdSessions() *cobra.Command {
 			} else {
 				items, _ := store.List()
 				if len(items) == 0 {
-					return fmt.Errorf("no sessions")
+					out := out()
+					out.Next("so sessions list", "so install")
+					out.Empty("sessions")
+					return nil
 				}
 				id = items[0].ID
 			}
@@ -133,8 +148,35 @@ func cmdSessions() *cobra.Command {
 		},
 	})
 	command.AddCommand(cmdSessionCheckpoint())
-	command.RunE = list.RunE
+	command.AddCommand(hook.NewCmd())
+	command.RunE = func(cmd *cobra.Command, args []string) error {
+		if len(args) > 0 {
+			return cli.UnknownCommand("sessions", args[0])
+		}
+		return runSessionsList(cmd, args)
+	}
 	return command
+}
+
+func runSessionsList(cmd *cobra.Command, _ []string) error {
+	root := repoRoot()
+	items, err := session.NewStore(paths.Resolve(root)).ListDetailed()
+	if err != nil {
+		return err
+	}
+	out := out()
+	out.Next("so sessions show <id>", "so sessions finalize <id>")
+	rows := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, map[string]any{
+			"id":     item.ID,
+			"status": item.Status,
+			"title":  session.DisplayName(item.Meta),
+			"vendor": item.Vendor,
+		})
+	}
+	out.Rows("sessions", []string{"id", "status", "title", "vendor"}, rows)
+	return nil
 }
 
 func cmdSessionCheckpoint() *cobra.Command {
@@ -207,7 +249,7 @@ func cmdSessionCheckpoint() *cobra.Command {
 	return command
 }
 
-func finalizeSession(root, requestedID string) error {
+func finalizeSession(root, requestedID string, out *cli.Out) error {
 	paths := paths.Resolve(root)
 	id, spans, err := loadSessionSpans(trace.NewLocalJSONL(paths.TracesDir), requestedID)
 	if err != nil {
@@ -230,7 +272,10 @@ func finalizeSession(root, requestedID string) error {
 			}
 		}
 		if !latest.After(*existing.EndedAt) {
-			fmt.Printf("Session %s is already finalized\n", id)
+			if out != nil {
+				out.Next("so sessions show <id>", "so memory distill <id>")
+				out.OK("session", map[string]any{"id": id, "status": existing.Status})
+			}
 			return nil
 		}
 	}
@@ -254,24 +299,22 @@ func finalizeSession(root, requestedID string) error {
 		// Footprint may be empty for prompt-only sessions.
 		_ = err
 	}
-	fmt.Printf("Finalized session %s\n", id)
 	if ing, err := memory.IngestSession(root, id); err != nil {
 		fmt.Fprintf(os.Stderr, "so memory ingest: %v\n", err)
 	} else {
 		_ = ing
-		if _, err := memory.ObserveSession(root, id); err != nil {
-			fmt.Fprintf(os.Stderr, "so memory observe: %v\n", err)
-		}
-		if err := memory.SleepRoot(root); err != nil {
-			fmt.Fprintf(os.Stderr, "so memory sleep: %v\n", err)
-		}
 		_ = memory.MaybeDistill(root, id, true)
 	}
+	_ = harvest.MaybeGenerate(root, id)
 	_ = runRetentionSweep(root)
+	if out != nil {
+		out.Next("so sessions show <id>", "so memory distill <id>")
+		out.OK("session", map[string]any{"id": id, "status": meta.Status})
+	}
 	return nil
 }
 
-func refreshSession(root, requestedID string) error {
+func refreshSession(root, requestedID string, out *cli.Out) error {
 	paths := paths.Resolve(root)
 	traceStore := trace.NewLocalJSONL(paths.TracesDir)
 	id, spans, err := loadSessionSpans(traceStore, requestedID)
@@ -302,6 +345,10 @@ func refreshSession(root, requestedID string) error {
 	}
 	if _, ingErr := memory.IngestSession(root, id); ingErr != nil {
 		fmt.Fprintf(os.Stderr, "so memory ingest: %v\n", ingErr)
+	}
+	if out != nil {
+		out.Next("so sessions show <id>", "so sessions list")
+		out.OK("session", map[string]any{"id": id, "status": meta.Status})
 	}
 	return nil
 }

@@ -4,15 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/agent/headless"
-	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/session"
 )
 
-const distillTimeout = 45 * time.Second
+const (
+	distillTimeout   = 45 * time.Second
+	maxDistillWrites = 3
+)
 
 type DistillResult struct {
 	SessionID string `json:"session_id"`
@@ -20,198 +25,293 @@ type DistillResult struct {
 	Pending   bool   `json:"pending,omitempty"`
 	Skipped   string `json:"skipped,omitempty"`
 	EpisodeID int64  `json:"episode_id,omitempty"`
+	Written   int    `json:"written,omitempty"`
 }
 
-// MaybeDistill writes a local rollup after ingest. Headless distill is
-// opt-in via `so memory distill` — never auto-run from finalize.
+type distillItem struct {
+	Kind     string   `json:"kind"`
+	Horizon  string   `json:"horizon"`
+	Title    string   `json:"title"`
+	Text     string   `json:"text"`
+	Evidence []string `json:"evidence"`
+	ID       int64    `json:"id"`
+	Reason   string   `json:"reason"`
+}
+
+// MaybeDistill detaches `so memory distill` after finalize, like harvest.
+// Under go test it no-ops. SUPEROPEN_MEMORY_SYNC=1 runs Distill inline.
 func MaybeDistill(root, sessionID string, detach bool) DistillResult {
 	_ = detach
+	sessionID = strings.TrimSpace(sessionID)
 	res := DistillResult{SessionID: sessionID}
+	if sessionID == "" {
+		res.Skipped = "no-session"
+		return res
+	}
+	if testing.Testing() {
+		res.Skipped = "test"
+		return res
+	}
+	if os.Getenv("SUPEROPEN_MEMORY_SYNC") == "1" {
+		return Distill(root, sessionID)
+	}
+	cli.SpawnSO(root, "--root", root, "memory", "distill", sessionID)
+	res.Skipped = "detached"
+	return res
+}
+
+// Distill runs skip gates then at most one bounded headless call.
+func Distill(root, sessionID string) DistillResult {
+	res := DistillResult{SessionID: strings.TrimSpace(sessionID)}
+	if res.SessionID == "" {
+		res.Skipped = "no-session"
+		return res
+	}
 	store, err := OpenRoot(root)
 	if err != nil {
 		res.Skipped = err.Error()
 		return res
 	}
 	defer store.Close()
+	store.BumpSessionSeq()
+	_, _ = store.ExpireHorizons()
 	if store.DistillPaused() {
 		res.Skipped = "paused"
-		_ = store.MarkPending(sessionID)
+		_ = store.MarkPending(res.SessionID)
 		res.Pending = true
 		return res
 	}
-	if store.HasSessionRollup(sessionID) {
-		res.Skipped = "already_rolled_up"
-		_ = store.ClearPending(sessionID)
+	if store.HasDistilled(res.SessionID) {
+		res.Skipped = "already-distilled"
+		_ = store.ClearPending(res.SessionID)
 		return res
 	}
-	if err := store.writeLocalRollup(sessionID); err != nil {
-		res.Skipped = err.Error()
+	if !session.HasActivity(root, res.SessionID) {
+		res.Skipped = "empty"
+		_ = store.MarkDistilled(res.SessionID)
+		_ = store.ClearPending(res.SessionID)
 		return res
 	}
-	res.Provider = "local"
-	return res
-}
-
-func DistillSession(root, sessionID string) (DistillResult, error) {
-	res := DistillResult{SessionID: sessionID}
 	provider, ok := headless.Available()
 	if !ok {
-		store, err := OpenRoot(root)
-		if err != nil {
-			return res, err
-		}
-		defer store.Close()
-		if err := store.writeLocalRollup(sessionID); err != nil {
-			return res, err
-		}
-		res.Provider = "local"
-		return res, nil
+		res.Skipped = "no-auth"
+		res.Pending = true
+		_ = store.MarkPending(res.SessionID)
+		return res
 	}
-	prompt, err := distillPrompt(root, sessionID)
+	prompt, err := distillPrompt(root, res.SessionID, store)
 	if err != nil {
-		return res, err
+		res.Skipped = err.Error()
+		res.Pending = true
+		_ = store.MarkPending(res.SessionID)
+		return res
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), distillTimeout)
 	defer cancel()
 	out, err := headless.Run(ctx, provider, prompt)
 	if err != nil {
-		store, openErr := OpenRoot(root)
-		if openErr == nil {
-			_ = store.MarkPending(sessionID)
-			store.Close()
-		}
+		res.Skipped = err.Error()
 		res.Pending = true
-		return res, err
+		_ = store.MarkPending(res.SessionID)
+		return res
 	}
-	parsed := parseDistillJSON(out)
-	text := parsed
-	if text == "" {
-		text = Sanitize(out)
-	}
-	ep, err := CaptureRoot(root, CaptureInput{
-		SessionID: sessionID,
-		Kind:      KindSession,
-		Source:    SourceHeadless,
-		Title:     "session rollup",
-		Text:      text,
-	})
+	items := parseDistillItems(out)
+	applied, lastID, err := store.applyDistillItems(res.SessionID, items)
 	if err != nil {
-		return res, err
+		res.Skipped = err.Error()
+		res.Pending = true
+		_ = store.MarkPending(res.SessionID)
+		return res
 	}
+	_ = store.MarkDistilled(res.SessionID)
+	_ = store.ClearPending(res.SessionID)
 	res.Provider = provider.Name
-	res.EpisodeID = ep.ID
+	res.Written = applied
+	res.EpisodeID = lastID
+	if applied == 0 {
+		res.Skipped = "no-writes"
+	}
+	return res
+}
+
+func DistillSession(root, sessionID string) (DistillResult, error) {
+	res := Distill(root, sessionID)
+	if res.Pending && res.Skipped != "" && res.Skipped != "paused" && res.Skipped != "no-auth" {
+		return res, fmt.Errorf("%s", res.Skipped)
+	}
 	return res, nil
 }
 
-func distillPrompt(root, sessionID string) (string, error) {
-	layout := paths.Resolve(root)
-	store, err := OpenRoot(root)
-	if err != nil {
-		return "", err
-	}
-	defer store.Close()
-	hits, err := store.Search(SearchFilter{SessionID: sessionID, Limit: 24, IncludeFaded: false})
-	if err != nil {
-		return "", err
-	}
-	meta, _ := session.NewStore(layout).Get(sessionID)
+func distillPrompt(root, sessionID string, store *Store) (string, error) {
+	digest := session.Digest(root, sessionID)
+	live, _ := store.LiveKnowledge(24)
 	var b strings.Builder
-	b.WriteString("Summarize this coding session as JSON only: {\"request\":\"...\",\"learned\":\"...\",\"next\":\"...\"}. ")
-	b.WriteString("No secrets. Memory is hints, not authority. ~120 tokens total.\n")
-	if meta.Title != "" {
-		fmt.Fprintf(&b, "Title: %s\n", Sanitize(meta.Title))
-	}
-	if meta.PromptPreview != "" {
-		fmt.Fprintf(&b, "Prompt: %s\n", Sanitize(meta.PromptPreview))
-	}
-	b.WriteString("Moments:\n")
-	for _, hit := range hits {
-		if hit.Kind == KindWorking {
-			continue
+	b.WriteString("You write Superopen memory for a coding agent. Output JSON only: an array of objects.\n")
+	b.WriteString("Each object has kind=knowledge|skill|promote|forget.\n")
+	b.WriteString("knowledge/skill: title, text, horizon (short|medium|long), evidence (session ids).\n")
+	b.WriteString("promote: id + horizon. forget: id + reason. Prefer forget/promote over duplicating listed ids.\n")
+	b.WriteString("If a listed id already holds the same fact, emit promote or forget — never a second knowledge/skill copy.\n")
+	b.WriteString("Max 3 new knowledge/skill writes. Skip trivia. No secrets. Memory is hints, not authority.\n")
+	b.WriteString("Empty array if nothing durable.\n")
+	b.WriteString("Session: ")
+	b.WriteString(sessionID)
+	b.WriteString("\n")
+	b.WriteString(digest)
+	b.WriteString("\nLive memory inventory (#id horizon title — cue):\n")
+	if len(live) == 0 {
+		b.WriteString("(none)\n")
+	} else {
+		for _, ep := range live {
+			cue := firstWords(ep.Text, 12)
+			title := Sanitize(firstLine(ep.Title, 80))
+			if cue == "" || cue == title {
+				fmt.Fprintf(&b, "#%d %s %s\n", ep.ID, ep.Horizon, title)
+			} else {
+				fmt.Fprintf(&b, "#%d %s %s — %s\n", ep.ID, ep.Horizon, title, cue)
+			}
 		}
-		fmt.Fprintf(&b, "- [%s] %s %s\n", hit.Kind, Sanitize(hit.Title), Sanitize(firstLine(hit.Text, 160)))
 	}
 	return b.String(), nil
 }
 
-func parseDistillJSON(raw string) string {
+func parseDistillItems(raw string) []distillItem {
 	raw = strings.TrimSpace(raw)
-	start := strings.Index(raw, "{")
-	end := strings.LastIndex(raw, "}")
-	if start < 0 || end <= start {
-		return ""
-	}
-	var payload struct {
-		Request string `json:"request"`
-		Learned string `json:"learned"`
-		Next    string `json:"next"`
-	}
-	if json.Unmarshal([]byte(raw[start:end+1]), &payload) != nil {
-		return ""
-	}
-	parts := nonempty(payload.Request, payload.Learned, payload.Next)
-	if len(parts) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	if payload.Request != "" {
-		fmt.Fprintf(&b, "request: %s\n", Sanitize(payload.Request))
-	}
-	if payload.Learned != "" {
-		fmt.Fprintf(&b, "learned: %s\n", Sanitize(payload.Learned))
-	}
-	if payload.Next != "" {
-		fmt.Fprintf(&b, "next: %s\n", Sanitize(payload.Next))
-	}
-	return strings.TrimSpace(b.String())
-}
-
-func (s *Store) writeLocalRollup(sessionID string) error {
-	if s.HasSessionRollup(sessionID) {
-		_ = s.ClearPending(sessionID)
+	if raw == "" {
 		return nil
 	}
-	prompts, _ := s.Search(SearchFilter{SessionID: sessionID, Kind: KindPrompt, Limit: 8})
-	request := ""
-	if len(prompts) > 0 {
-		last := prompts[len(prompts)-1]
-		request = firstLine(last.Text, 240)
-		if request == "" {
-			request = firstLine(last.Title, 80)
+	if i := strings.Index(raw, "```"); i >= 0 {
+		rest := raw[i+3:]
+		rest = strings.TrimPrefix(rest, "json")
+		rest = strings.TrimPrefix(rest, "JSON")
+		if j := strings.Index(rest, "```"); j >= 0 {
+			raw = rest[:j]
 		}
 	}
-	obs, _ := s.Search(SearchFilter{SessionID: sessionID, Kind: KindObservation, Limit: 16})
-	learned := ""
-	for _, h := range obs {
-		switch h.Topic {
-		case ObservationDecision, ObservationBugfix, ObservationFeature, ObservationRefactor, ObservationDiscovery:
-			learned = firstLine(strings.TrimSpace(h.Title+" "+h.Text), 200)
+	body := extractJSONArray(raw)
+	var many []distillItem
+	if json.Unmarshal([]byte(body), &many) == nil {
+		return many
+	}
+	var one distillItem
+	if json.Unmarshal([]byte(body), &one) == nil && (one.Title != "" || one.ID != 0) {
+		return []distillItem{one}
+	}
+	return nil
+}
+
+func (s *Store) applyDistillItems(sessionID string, items []distillItem) (int, int64, error) {
+	written := 0
+	var lastID int64
+	for _, item := range items {
+		kind := strings.ToLower(strings.TrimSpace(item.Kind))
+		switch kind {
+		case "forget":
+			if item.ID > 0 {
+				_ = s.ForgetEpisode(item.ID)
+			}
+		case "promote":
+			if item.ID > 0 {
+				_ = s.PromoteHorizon(item.ID, item.Horizon)
+			}
+		case "knowledge", "skill":
+			if written >= maxDistillWrites {
+				continue
+			}
+			title := Sanitize(strings.TrimSpace(item.Title))
+			text := Sanitize(strings.TrimSpace(item.Text))
+			if title == "" && text == "" {
+				continue
+			}
+			horizon := NormalizeHorizon(item.Horizon)
+			if horizon == "" || horizon == HorizonWorking {
+				if kind == "skill" {
+					horizon = HorizonLong
+				} else {
+					horizon = HorizonMedium
+				}
+			}
+			capKind := KindSession
+			if kind == "skill" {
+				capKind = KindTeaching
+			}
+			if existing, ok := s.liveDistillDuplicate(capKind, title, text); ok {
+				if horizonStrength(horizon) > horizonStrength(existing.Horizon) {
+					_ = s.PromoteHorizon(existing.ID, horizon)
+				}
+				_ = s.Reinforce(existing.ID)
+				lastID = existing.ID
+				continue
+			}
+			ep, err := s.Capture(CaptureInput{
+				SessionID: sessionID,
+				Kind:      capKind,
+				Source:    SourceHeadless,
+				Title:     title,
+				Text:      text,
+				Horizon:   horizon,
+			})
+			if err != nil {
+				continue
+			}
+			written++
+			lastID = ep.ID
 		}
-		if learned != "" {
-			break
+	}
+	return written, lastID, nil
+}
+
+func (s *Store) liveDistillDuplicate(kind, title, text string) (Episode, bool) {
+	if hit, ok := s.liveByTitle(kind, title); ok {
+		return hit, true
+	}
+	cue := strings.TrimSpace(title + "\n" + text)
+	if cue == "" {
+		return Episode{}, false
+	}
+	id := s.nearDuplicate(EmbedText(cue), kind)
+	if id <= 0 {
+		return Episode{}, false
+	}
+	ep, err := s.Get(id)
+	if err != nil || ep.ID == 0 || ep.Faded {
+		return Episode{}, false
+	}
+	return ep, true
+}
+
+func (s *Store) liveByTitle(kind, title string) (Episode, bool) {
+	key := normalizeMemoryTitle(title)
+	if key == "" {
+		return Episode{}, false
+	}
+	live, err := s.LiveKnowledge(400)
+	if err != nil {
+		return Episode{}, false
+	}
+	for _, ep := range live {
+		if ep.Kind != kind {
+			continue
+		}
+		if normalizeMemoryTitle(ep.Title) == key {
+			return ep, true
 		}
 	}
-	var b strings.Builder
-	if request != "" {
-		fmt.Fprintf(&b, "request: %s\n", Sanitize(request))
+	return Episode{}, false
+}
+
+func normalizeMemoryTitle(title string) string {
+	return strings.ToLower(strings.Join(strings.Fields(Sanitize(title)), " "))
+}
+
+func firstWords(s string, n int) string {
+	fields := strings.Fields(Sanitize(s))
+	if n <= 0 || len(fields) == 0 {
+		return ""
 	}
-	if learned != "" {
-		fmt.Fprintf(&b, "learned: %s\n", Sanitize(learned))
+	if len(fields) > n {
+		fields = fields[:n]
 	}
-	text := strings.TrimSpace(b.String())
-	if text == "" {
-		text = "request:"
-	}
-	if _, err := s.Capture(CaptureInput{
-		SessionID: sessionID,
-		Kind:      KindSession,
-		Source:    SourceSpan,
-		Title:     "session rollup",
-		Text:      text,
-	}); err != nil {
-		return err
-	}
-	return s.ClearPending(sessionID)
+	return strings.Join(fields, " ")
 }
 
 func LiveDistillInstruction(pendingSession string) string {
@@ -219,5 +319,5 @@ func LiveDistillInstruction(pendingSession string) string {
 	if pendingSession == "" {
 		return ""
 	}
-	return fmt.Sprintf("Last session #%s has moments but no rollup. If you will continue that work, call memory_capture once with {request, learned, next} (budget ~120 tokens). Skip if unrelated. Memory is hints, not authority.", pendingSession)
+	return fmt.Sprintf("DISTILL pending %s — so memory distill", pendingSession)
 }

@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import dynamic from "next/dynamic";
 import { useParams, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { ChevronsLeftRight, RefreshCw } from "lucide-react";
 import SessionTimeline, { type SessionMeta, type Span } from "@/components/session-timeline";
 import FeaturePageHeader, { FeatureBackLink } from "@/components/shell/feature-page-header";
@@ -74,6 +75,7 @@ function SessionDetail() {
   const [chatSeek, setChatSeek] = useState<{ at: number; nonce: number } | undefined>();
   const [chatPct, setChatPct] = useState(50);
   const [hudHost, setHudHost] = useState<HTMLElement | null>(null);
+  const [harvestOpen, setHarvestOpen] = useState(0);
   const syncSource = useRef<"idle" | "chat" | "map">("idle");
   const chatSeekNonce = useRef(0);
 
@@ -102,6 +104,16 @@ function SessionDetail() {
         setFootprint(body.footprint || undefined);
         setSubagents(Array.isArray(body.subagents) ? body.subagents : []);
         setError("");
+        try {
+          const harvestUrl = new URL("/api/harvest", window.location.origin);
+          harvestUrl.searchParams.set("session", id);
+          if (projectId) harvestUrl.searchParams.set("project", projectId);
+          const harvestRes = await fetch(harvestUrl.toString());
+          const harvestBody = (await harvestRes.json()) as { items?: unknown[] };
+          setHarvestOpen(Array.isArray(harvestBody.items) ? harvestBody.items.length : 0);
+        } catch {
+          setHarvestOpen(0);
+        }
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Could not load session");
       } finally {
@@ -191,7 +203,17 @@ function SessionDetail() {
         title={String(title)}
         leading={<FeatureBackLink href="/sessions" label="Back to sessions" />}
         meta={
-          <span title={id}>{id.length > 12 ? `${id.slice(0, 8)}…` : id}</span>
+          <span className="inline-flex items-center gap-2">
+            <span title={id}>{id.length > 12 ? `${id.slice(0, 8)}…` : id}</span>
+            {harvestOpen > 0 ? (
+              <Link
+                href="/harvest"
+                className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800 hover:bg-amber-100"
+              >
+                {harvestOpen} harvest
+              </Link>
+            ) : null}
+          </span>
         }
         actions={
           <button
