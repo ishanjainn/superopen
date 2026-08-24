@@ -1,6 +1,9 @@
+
 # Superopen
 
 One CLI to rule them all.
+
+![Superopen Banner](https://raw.githubusercontent.com/ishanjainn/superopen/refs/heads/main/assets/superopen-banner.svg)
 
 ## Install (user-global, any directory)
 
