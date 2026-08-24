@@ -1,10 +1,10 @@
-// Package uninstall implements `so coding uninstall --vendor=...`.
+// Package uninstall implements per-vendor hook teardown for `so uninstall --vendor=...`.
 //
-// Inverse of `so coding install`: removes the per-vendor host
-// plugin manifests that install writes, optionally deregisters the
-// plugin from the vendor's own CLI (Claude Code's `claude plugin
-// uninstall`, Codex's `codex plugin remove`), and with `--purge` also
-// drops shared config and session-state cache.
+// Inverse of `so install`: removes the per-vendor host plugin manifests
+// that install writes, optionally deregisters the plugin from the vendor's
+// own CLI (Claude Code's `claude plugin uninstall`, Codex's `codex plugin
+// remove`), and with `--purge` also drops shared config and session-state
+// cache.
 //
 // We separate `--vendor` cleanup from `--purge` so the common
 // "I want to stop Cursor from being tracked but keep my Claude Code
@@ -13,55 +13,15 @@
 package uninstall
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/agent/skills"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
+	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/spf13/cobra"
 )
-
-// NewCmd returns the cobra command for `so coding uninstall`.
-func NewCmd() *cobra.Command {
-	var (
-		vendor string
-		purge  bool
-		dryRun bool
-	)
-
-	cmd := &cobra.Command{
-		Use:   "uninstall",
-		Short: "Remove per-vendor coding-agent host plugin manifests",
-		Long: `Remove host plugin manifests previously written by 'so coding install'.
-
-Vendors:
-  claude-code   current Claude plugin dirs + 'claude plugin uninstall'
-  cursor        strips Superopen entries from ~/.cursor/hooks.json (preserves other tools')
-  codex         ~/.local/share/so/codex-marketplace/ + 'codex plugin remove'
-  all           shorthand for all three
-
-Use --purge to also remove the project index, marketplace copy,
-session-state cache, and release-installer prefix (~/.superopen).
-Leave it off if you only want vendor hooks gone.
-
-This command does not remove a package-managed so binary (Homebrew,
-Scoop, WinGet, Chocolatey).`,
-		SilenceUsage:  true,
-		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return run(cmd, vendor, purge, dryRun)
-		},
-	}
-
-	cmd.Flags().StringVar(&vendor, "vendor", "", "Vendor (claude-code | cursor | codex | all)")
-	cmd.Flags().BoolVar(&purge, "purge", false, "Also remove project index, marketplace, caches, and the release-installer prefix")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would be removed without modifying any files")
-	_ = cmd.MarkFlagRequired("vendor")
-
-	return cmd
-}
 
 // RemoveAll uninstalls every coding-agent vendor hook and optionally purges shared state.
 // Used by `so uninstall` so hook teardown stays in one place. keepData skips
@@ -119,27 +79,30 @@ func RemoveAll(purge, keepData, dryRun bool, stdout, stderr io.Writer) (removed 
 	return removed, errs
 }
 
-func run(cmd *cobra.Command, vendor string, purge, dryRun bool) error {
+// Run removes hooks for --vendor. Used by `so uninstall --vendor=…`.
+func Run(cmd *cobra.Command, vendor string, purge, dryRun bool) error {
 	vendor = strings.ToLower(strings.TrimSpace(vendor))
 	if vendor == "" {
-		return errors.New("--vendor is required")
+		return cli.Usage("--vendor is required", "so uninstall --vendor=all")
 	}
 
 	targets, err := vendorsFromArg(vendor)
 	if err != nil {
-		return err
+		return cli.Usage(err.Error(), "so uninstall --vendor=all")
 	}
 
-	out := cmd.OutOrStdout()
+	out := cli.NewFromCmd(cmd)
+	rows := make([]map[string]any, 0, len(targets))
+	pathRows := make([]map[string]any, 0)
 	for _, v := range targets {
 		removed, vendErrs := uninstallVendor(v, dryRun)
-		if dryRun {
-			fmt.Fprintf(out, "[dry-run] would remove %d path(s) for %s\n", len(removed), v)
-		} else {
-			fmt.Fprintf(out, "so: removed %s plugin (%d path(s))\n", v, len(removed))
-		}
+		rows = append(rows, map[string]any{
+			"vendor":  v,
+			"files":   len(removed),
+			"dry_run": dryRun,
+		})
 		for _, p := range removed {
-			fmt.Fprintf(out, "  - %s\n", p)
+			pathRows = append(pathRows, map[string]any{"vendor": v, "path": p})
 		}
 		for _, e := range vendErrs {
 			fmt.Fprintf(cmd.ErrOrStderr(), "so uninstall %s: %s\n", v, e)
@@ -148,26 +111,25 @@ func run(cmd *cobra.Command, vendor string, purge, dryRun bool) error {
 
 	if purge {
 		removed, purgeErrs := purgeShared(dryRun, false)
-		if dryRun {
-			fmt.Fprintf(out, "[dry-run] --purge would remove %d shared path(s)\n", len(removed))
-		} else {
-			fmt.Fprintf(out, "so: purged %d shared path(s)\n", len(removed))
-		}
+		rows = append(rows, map[string]any{
+			"vendor":  "purge",
+			"files":   len(removed),
+			"dry_run": dryRun,
+		})
 		for _, p := range removed {
-			fmt.Fprintf(out, "  - %s\n", p)
+			pathRows = append(pathRows, map[string]any{"vendor": "purge", "path": p})
 		}
 		for _, e := range purgeErrs {
 			fmt.Fprintf(cmd.ErrOrStderr(), "so uninstall --purge: %s\n", e)
 		}
 	}
 
-	if !dryRun {
-		fmt.Fprintln(out, "")
-		fmt.Fprintln(out, "Hooks will stop firing on the agent's next session.")
-		if !purge {
-			fmt.Fprintln(out, "Tip: pass --purge to also drop the project index, marketplace, caches, and release-installer prefix.")
-		}
+	out.Next("so uninstall --vendor=cursor", "so install")
+	if out.Flags.Full {
+		out.Rows("files", []string{"vendor", "path"}, pathRows)
+		return nil
 	}
+	out.Rows("uninstall", []string{"vendor", "files", "dry_run"}, rows)
 	return nil
 }
 

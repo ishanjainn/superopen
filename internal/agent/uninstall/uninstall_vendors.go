@@ -319,7 +319,8 @@ func stripGeminiHooks(path string, dryRun bool) (string, error) {
 			for _, rawEntry := range entries {
 				entry, _ := rawEntry.(map[string]any)
 				command, _ := entry["command"].(string)
-				if strings.Contains(command, "coding hook --vendor=gemini") ||
+				if strings.Contains(command, "sessions hook --vendor=gemini") ||
+					strings.Contains(command, "coding hook --vendor=gemini") ||
 					strings.Contains(command, "sessions finalize") ||
 					strings.Contains(command, "sessions refresh") ||
 					strings.Contains(command, "graph refresh") {

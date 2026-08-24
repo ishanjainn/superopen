@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,8 +133,72 @@ func TestWorkingMemoryAppearsInTimelineAndLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(layout.Nodes) != 1 || layout.Nodes[0].ID != working.ID {
-		t.Fatalf("working memory missing from layout: %+v", layout.Nodes)
+	if len(layout.Nodes) != 0 {
+		t.Fatalf("diary working memory should stay off the galaxy: %+v", layout.Nodes)
+	}
+}
+
+func TestLayoutPlotsKnowledgeAndSkillsNotPrompts(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if _, err := store.Capture(CaptureInput{
+		Kind: KindPrompt, Title: "how does auth work", Text: "user asked about cookies",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	knowledge, err := store.Capture(CaptureInput{
+		Kind: KindSession, Title: "auth uses cookies", Text: "session auth is cookie based", Horizon: HorizonMedium,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill, err := store.Capture(CaptureInput{
+		Kind: KindTeaching, Title: "always pin sqlite facts", Text: "keep sqlite facts in long memory",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	layout, err := store.Layout(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(layout.Nodes) != 2 {
+		t.Fatalf("expected knowledge+skill stars, got %+v", layout.Nodes)
+	}
+	var knowledgeSize, skillSize float64
+	var knowledgeColor, skillColor string
+	for _, n := range layout.Nodes {
+		switch n.ID {
+		case knowledge.ID:
+			knowledgeSize = n.Size
+			knowledgeColor = n.Color
+		case skill.ID:
+			skillSize = n.Size
+			skillColor = n.Color
+		default:
+			t.Fatalf("unexpected galaxy node %d (%s)", n.ID, n.Name)
+		}
+	}
+	if knowledgeColor == "" {
+		t.Fatalf("knowledge missing from layout: %+v", layout.Nodes)
+	}
+	if skillColor == "" {
+		t.Fatalf("skill missing from layout: %+v", layout.Nodes)
+	}
+	if knowledgeColor == "#eab308" {
+		t.Fatalf("medium knowledge should not use long-horizon gold: color=%s", knowledgeColor)
+	}
+	if skillColor != "#eab308" {
+		t.Fatalf("long skill should use long-horizon gold, got %s", skillColor)
+	}
+	if skillSize <= knowledgeSize {
+		t.Fatalf("long should be larger than medium: skill=%v knowledge=%v", skillSize, knowledgeSize)
 	}
 }
 
@@ -259,7 +324,7 @@ func TestPackBudgetAndEconomy(t *testing.T) {
 	}
 }
 
-func TestHeadlessMissingWritesLocalRollup(t *testing.T) {
+func TestMaybeDistillNoopsUnderTest(t *testing.T) {
 	root := t.TempDir()
 	id := "sess-pending"
 	writeSession(t, root, id, []trace.Span{llmSpan("s1", "investigate the layout bloom")})
@@ -268,17 +333,21 @@ func TestHeadlessMissingWritesLocalRollup(t *testing.T) {
 	}
 	t.Setenv("PATH", t.TempDir())
 	res := MaybeDistill(root, id, false)
-	if res.Pending || res.Provider != "local" {
-		t.Fatalf("expected local rollup, got %+v", res)
+	if res.Skipped != "test" {
+		t.Fatalf("expected test skip, got %+v", res)
+	}
+	got := Distill(root, id)
+	if !got.Pending || got.Skipped != "no-auth" {
+		t.Fatalf("expected pending no-auth, got %+v", got)
 	}
 	store, _ := OpenRoot(root)
 	defer store.Close()
 	hits, err := store.Search(SearchFilter{Kind: KindSession, SessionID: id, Limit: 5})
-	if err != nil || len(hits) == 0 {
-		t.Fatalf("expected KindSession rollup: %+v %v", hits, err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(hits[0].Text, "learned:") {
-		t.Fatalf("invented learned: %q", hits[0].Text)
+	if len(hits) != 0 {
+		t.Fatalf("distill must not invent knowledge: %+v", hits)
 	}
 }
 
@@ -529,13 +598,6 @@ func TestSleepClustersAndShapeRecall(t *testing.T) {
 	if err := store.Sleep(); err != nil {
 		t.Fatal(err)
 	}
-	st, err := store.Status()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.Topics < 1 {
-		t.Fatalf("expected topics after sleep, got %+v", st)
-	}
 	hits, err := store.RecallShape("login timeout", 5)
 	if err != nil {
 		t.Fatal(err)
@@ -739,9 +801,9 @@ func TestCompactSearchOmitsBodies(t *testing.T) {
 	if strings.Contains(string(raw), body) {
 		t.Fatalf("index JSON leaked body: %s", raw)
 	}
-	line := FormatHit(hits[0].Episode)
+	line := FormatIndexLine(hits[0].Episode)
 	if strings.Contains(line, body) {
-		t.Fatalf("compact line leaked body: %s", line)
+		t.Fatalf("index line leaked body: %s", line)
 	}
 	got, err := store.Get(ep.ID)
 	if err != nil {
@@ -852,8 +914,8 @@ func TestObserverHeuristicDoesNotRewritePrompts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Inserted < 1 {
-		t.Fatalf("expected heuristic observation, got %+v", res)
+	if res.Inserted != 0 {
+		t.Fatalf("observe is disabled, got %+v", res)
 	}
 	store, err := OpenRoot(root)
 	if err != nil {
@@ -877,8 +939,11 @@ func TestObserverHeuristicDoesNotRewritePrompts(t *testing.T) {
 		t.Fatal("verbatim prompt missing after observer")
 	}
 	obs, err := store.Search(SearchFilter{Type: ObservationBugfix, Limit: 10})
-	if err != nil || len(obs) == 0 {
-		t.Fatalf("expected bugfix observation: %+v %v", obs, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(obs) != 0 {
+		t.Fatalf("observe must not invent typed rows: %+v", obs)
 	}
 }
 
@@ -1018,7 +1083,7 @@ func TestIngestToolObservationSearchByFile(t *testing.T) {
 	}
 }
 
-func TestLocalRollupOmitsInventedLearned(t *testing.T) {
+func TestDistillDoesNotInventLocalRollup(t *testing.T) {
 	root := testRoot(t)
 	id := "sess-note"
 	writeSession(t, root, id, []trace.Span{llmSpan("s1", "please jot a note about the login timeout")})
@@ -1027,8 +1092,12 @@ func TestLocalRollupOmitsInventedLearned(t *testing.T) {
 	}
 	t.Setenv("PATH", t.TempDir())
 	got := MaybeDistill(root, id, false)
-	if got.Provider != "local" && got.Skipped != "already_rolled_up" {
-		t.Fatalf("expected local rollup, got %+v", got)
+	if got.Skipped != "test" {
+		t.Fatalf("MaybeDistill under test must skip, got %+v", got)
+	}
+	res := Distill(root, id)
+	if res.Provider == "local" {
+		t.Fatalf("must not write a local rollup: %+v", res)
 	}
 	store, err := OpenRoot(root)
 	if err != nil {
@@ -1039,14 +1108,8 @@ func TestLocalRollupOmitsInventedLearned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(hits) == 0 {
-		t.Fatal("expected session rollup")
-	}
-	if strings.Contains(hits[0].Text, "learned:") {
-		t.Fatalf("invented learned: %q", hits[0].Text)
-	}
-	if !strings.Contains(hits[0].Text, "request:") {
-		t.Fatalf("missing request: %q", hits[0].Text)
+	if len(hits) != 0 {
+		t.Fatalf("no-auth distill must not invent knowledge: %+v", hits)
 	}
 }
 
@@ -1064,9 +1127,9 @@ func TestMaybeDistillStaysLocalWhenHeadlessBinaryOnPath(t *testing.T) {
 	}
 	t.Setenv("PATH", bin)
 	t.Setenv("HOME", t.TempDir())
-	got := MaybeDistill(root, id, false)
-	if got.Provider != "local" && got.Skipped != "already_rolled_up" {
-		t.Fatalf("auto distill must stay local, got %+v", got)
+	got := Distill(root, id)
+	if got.Provider == "local" {
+		t.Fatalf("must not fall back to local rollup, got %+v", got)
 	}
 	store, err := OpenRoot(root)
 	if err != nil {
@@ -1074,11 +1137,11 @@ func TestMaybeDistillStaysLocalWhenHeadlessBinaryOnPath(t *testing.T) {
 	}
 	defer store.Close()
 	hits, err := store.Search(SearchFilter{Kind: KindSession, SessionID: id, Limit: 5})
-	if err != nil || len(hits) == 0 {
-		t.Fatalf("expected local rollup: %+v %v", hits, err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(hits[0].Text, "invented") || strings.Contains(hits[0].Text, "learned:") {
-		t.Fatalf("headless invented learned: %q", hits[0].Text)
+	if len(hits) != 0 {
+		t.Fatalf("unauthenticated distill must not invent knowledge: %+v", hits)
 	}
 }
 
@@ -1213,11 +1276,11 @@ func TestIngestBackfillSkipsCurrentAndCapsAtEight(t *testing.T) {
 
 func TestFormatIndexLineTokenSuffix(t *testing.T) {
 	line := FormatIndexLine(Episode{ID: 12, Kind: KindPrompt, Title: "fix login", Tokens: 192})
-	if strings.Contains(line, "~192") && !strings.Contains(line, "~192t") {
-		t.Fatalf("bare ~192 looks like a source line: %q", line)
+	if strings.Contains(line, "~192t") || strings.Contains(line, "~192") {
+		t.Fatalf("index line must not carry token suffix: %q", line)
 	}
-	if !strings.Contains(line, "~192t") {
-		t.Fatalf("want ~192t, got %q", line)
+	if !strings.Contains(line, "#12") || !strings.Contains(line, "fix login") {
+		t.Fatalf("want #id and title, got %q", line)
 	}
 }
 
@@ -1244,8 +1307,8 @@ func TestSearchFallsBackToSessionTitles(t *testing.T) {
 		t.Fatal("expected session.json title fallback")
 	}
 	text := SessionStartIndex(root)
-	if !strings.Contains(text, "dashboard layout") {
-		t.Fatalf("SessionStart index missing session title: %q", text)
+	if strings.Contains(text, "dashboard layout") {
+		t.Fatalf("SessionStart must not inject session titles as knowledge: %q", text)
 	}
 }
 
@@ -1275,8 +1338,8 @@ func TestLiveDistillInstructionOnPending(t *testing.T) {
 	}
 	store.Close()
 	text := SessionStartIndex(root)
-	if !strings.Contains(text, "sess-pending") || !strings.Contains(text, "memory_capture") {
-		t.Fatalf("expected LiveDistill on pending empty index, got %q", text)
+	if !strings.Contains(text, "sess-pending") || !strings.Contains(text, "so memory distill") {
+		t.Fatalf("expected pending distill line, got %q", text)
 	}
 }
 
@@ -1291,8 +1354,8 @@ func TestSchemaVersionIsOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.SchemaVersion != "1" {
-		t.Fatalf("schema_version=%s want 1", st.SchemaVersion)
+	if st.SchemaVersion != "2" {
+		t.Fatalf("schema_version=%s want 2", st.SchemaVersion)
 	}
 }
 
@@ -1302,15 +1365,15 @@ func TestIngestSkipsFencedAndGraphDumps(t *testing.T) {
 		prompt string
 	}{
 		{
-			name: "fenced",
+			name:   "fenced",
 			prompt: "```\nChat dump\nuser: what wraps the page\nassistant: I read src/app.ts\n```",
 		},
 		{
-			name: "zwsp-fenced",
+			name:   "zwsp-fenced",
 			prompt: "\u200b```\ntranscript paste\nmore lines of copied chat\n```",
 		},
 		{
-			name: "graph-nodes",
+			name:   "graph-nodes",
 			prompt: "NODE File [src=src/app.ts loc=L1-80 community=src]\nNODE Function [qn=src.app.main src=src/app.ts loc=L10 community=src]\nNODE Variable [qn=src.app.FOO src=src/app.ts loc=L3 community=src]\nEDGE CONTAINS File Function\nEDGE CONTAINS File Variable",
 		},
 	}
@@ -1359,9 +1422,6 @@ func TestObserverSkipsQuestionPrompts(t *testing.T) {
 	}
 	if res.Inserted != 0 {
 		t.Fatalf("question must not spawn a typed observation, got %+v", res)
-	}
-	if heuristicTopic(prompt) == ObservationDecision {
-		t.Fatal("question typed as decision")
 	}
 	store, err := OpenRoot(root)
 	if err != nil {
@@ -1434,4 +1494,310 @@ func titlesOf(hits []Hit) []string {
 		out = append(out, h.Title)
 	}
 	return out
+}
+
+func TestApplyDistillJSONWritesHorizon(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	items := parseDistillItems(`[
+	  {"kind":"knowledge","horizon":"medium","title":"login timeout is 30s","text":"keep login timeout in sqlite"},
+	  {"kind":"skill","horizon":"long","title":"run graph query first","text":"code questions use so graph query"}
+	]`)
+	n, _, err := store.applyDistillItems("s1", items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("written=%d want 2", n)
+	}
+	hits, err := store.Search(SearchFilter{Horizon: HorizonMedium, Limit: 10})
+	if err != nil || len(hits) == 0 {
+		t.Fatalf("medium knowledge missing: %+v %v", hits, err)
+	}
+	skills, err := store.Search(SearchFilter{Horizon: HorizonLong, Limit: 10})
+	if err != nil || len(skills) == 0 {
+		t.Fatalf("long skill missing: %+v %v", skills, err)
+	}
+	text := SessionStartIndex(root)
+	if !strings.Contains(text, "login timeout") {
+		t.Fatalf("index missing knowledge title: %q", text)
+	}
+	if strings.Contains(text, "keep login timeout in sqlite") {
+		t.Fatalf("index leaked body: %q", text)
+	}
+}
+
+func TestHorizonExpiryHidesShort(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ep, err := store.Capture(CaptureInput{
+		Kind:             KindSession,
+		Title:            "wip auth rewrite",
+		Text:             "still moving cookies to sqlite",
+		Horizon:          HorizonShort,
+		KeepUntilSession: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.setMeta(metaSessionSeq, "2")
+	if _, err := store.ExpireHorizons(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get(ep.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Faded {
+		t.Fatal("short row should fade after keep_until_session")
+	}
+	text := SessionStartIndex(root)
+	if strings.Contains(text, "wip auth rewrite") {
+		t.Fatalf("expired short still in index: %q", text)
+	}
+}
+
+func TestSessionStartIndexOmitsPromptBodies(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Capture(CaptureInput{
+		Kind: KindPrompt, Title: "secret prompt body xyz", Text: "secret prompt body xyz please dump the diary",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Capture(CaptureInput{
+		Kind: KindSession, Title: "auth cookies stay in sqlite", Text: "learned: cookies live in sqlite", Horizon: HorizonMedium,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	text := SessionStartIndex(root)
+	if strings.Contains(text, "secret prompt body xyz") {
+		t.Fatalf("prompt leaked into index: %q", text)
+	}
+	if !strings.Contains(text, "auth cookies stay in sqlite") {
+		t.Fatalf("knowledge missing from index: %q", text)
+	}
+}
+
+func TestPromoteLongSurvivesExpiry(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ep, err := store.Capture(CaptureInput{
+		Kind:             KindSession,
+		Title:            "sqlite cookies for auth",
+		Text:             "auth cookies live in sqlite",
+		Horizon:          HorizonShort,
+		KeepUntilSession: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PromoteHorizon(ep.ID, HorizonLong); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.setMeta(metaSessionSeq, "9")
+	if _, err := store.ExpireHorizons(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get(ep.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Faded {
+		t.Fatal("promoted long row must not expire")
+	}
+	if got.Horizon != HorizonLong {
+		t.Fatalf("horizon=%s want long", got.Horizon)
+	}
+	text := SessionStartIndex(root)
+	if !strings.Contains(text, "sqlite cookies for auth") {
+		t.Fatalf("long knowledge missing from index: %q", text)
+	}
+}
+
+func TestForgetHidesFromIndex(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ep, err := store.Capture(CaptureInput{
+		Kind:    KindSession,
+		Title:   "timeout is 30s",
+		Text:    "login timeout is thirty seconds",
+		Horizon: HorizonMedium,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ForgetEpisode(ep.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get(ep.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Faded {
+		t.Fatal("forgotten row should be faded")
+	}
+	text := SessionStartIndex(root)
+	if strings.Contains(text, "timeout is 30s") {
+		t.Fatalf("forgotten knowledge still in index: %q", text)
+	}
+}
+
+func TestApplyDistillJSONForgetAndPromote(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	old, err := store.Capture(CaptureInput{
+		Kind: KindSession, Title: "timeout is 5s", Text: "login timeout is five seconds", Horizon: HorizonMedium,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep, err := store.Capture(CaptureInput{
+		Kind: KindSession, Title: "use sqlite sessions", Text: "sessions live in sqlite", Horizon: HorizonShort, KeepUntilSession: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := parseDistillItems(fmt.Sprintf(`[
+	  {"kind":"forget","id":%d,"reason":"superseded"},
+	  {"kind":"promote","id":%d,"horizon":"long"}
+	]`, old.ID, keep.ID))
+	if _, _, err := store.applyDistillItems("s1", items); err != nil {
+		t.Fatal(err)
+	}
+	gone, err := store.Get(old.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gone.Faded {
+		t.Fatal("forget should fade the old id")
+	}
+	live, err := store.Get(keep.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.Horizon != HorizonLong {
+		t.Fatalf("promote horizon=%s want long", live.Horizon)
+	}
+	_ = store.setMeta(metaSessionSeq, "9")
+	if _, err := store.ExpireHorizons(); err != nil {
+		t.Fatal(err)
+	}
+	text := SessionStartIndex(root)
+	if strings.Contains(text, "timeout is 5s") {
+		t.Fatalf("forgotten id still in index: %q", text)
+	}
+	if !strings.Contains(text, "use sqlite sessions") {
+		t.Fatalf("promoted long missing from index: %q", text)
+	}
+}
+
+func TestApplyDistillJSONCollapsesSameTitle(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first, err := store.Capture(CaptureInput{
+		Kind: KindSession, Title: "Session auth stays in SQLite", Text: "sqlite is the source of truth for sessions", Horizon: HorizonMedium,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := parseDistillItems(`[
+	  {"kind":"knowledge","horizon":"long","title":"Session auth stays in SQLite","text":"cookies carry the session id only; sqlite stays authoritative"}
+	]`)
+	n, last, err := store.applyDistillItems("s2", items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("duplicate title should not insert, written=%d", n)
+	}
+	if last != first.ID {
+		t.Fatalf("collapsed onto %d want %d", last, first.ID)
+	}
+	got, err := store.Get(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Horizon != HorizonLong {
+		t.Fatalf("collapse should promote medium→long, got %s", got.Horizon)
+	}
+	hits, err := store.Search(SearchFilter{Kind: KindSession, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := 0
+	for _, h := range hits {
+		if h.Kind == KindSession && !h.Faded && normalizeMemoryTitle(h.Title) == normalizeMemoryTitle(first.Title) {
+			live++
+		}
+	}
+	if live != 1 {
+		t.Fatalf("expected one live knowledge row with that title, got %d (%v)", live, titlesOf(hits))
+	}
+}
+
+func TestApplyDistillJSONCollapsesNearDuplicateKnowledge(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first, err := store.Capture(CaptureInput{
+		Kind: KindSession, Title: "keep login timeout in sqlite", Text: "the login timeout stays at thirty seconds in sqlite", Horizon: HorizonMedium,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := parseDistillItems(`[
+	  {"kind":"knowledge","horizon":"medium","title":"login timeout stays in sqlite","text":"the login timeout stays at thirty seconds in sqlite"}
+	]`)
+	n, last, err := store.applyDistillItems("s3", items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || last != first.ID {
+		t.Fatalf("near-duplicate knowledge should collapse: written=%d last=%d want 0/%d", n, last, first.ID)
+	}
+	hits, err := store.Search(SearchFilter{Kind: KindSession, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := 0
+	for _, h := range hits {
+		if h.Kind == KindSession && !h.Faded {
+			live++
+		}
+	}
+	if live != 1 {
+		t.Fatalf("expected a single live knowledge row, got %d (%v)", live, titlesOf(hits))
+	}
 }

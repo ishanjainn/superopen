@@ -5,9 +5,11 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -91,6 +93,72 @@ func FromCmd(cmd *cobra.Command, f *Flags) *Out {
 	return New(*f)
 }
 
+// FlagsFromCmd reads persistent --json / --full / --root from a cobra command.
+func FlagsFromCmd(cmd *cobra.Command) Flags {
+	return Flags{
+		JSON: flagBool(cmd, "json"),
+		Full: flagBool(cmd, "full"),
+		Root: flagString(cmd, "root"),
+	}
+}
+
+func flagBool(cmd *cobra.Command, name string) bool {
+	raw := flagValue(cmd, name)
+	if raw == "" {
+		return false
+	}
+	v, _ := strconv.ParseBool(raw)
+	return v
+}
+
+func flagString(cmd *cobra.Command, name string) string {
+	return flagValue(cmd, name)
+}
+
+func flagValue(cmd *cobra.Command, name string) string {
+	for c := cmd; c != nil; c = c.Parent() {
+		if f := c.Flags().Lookup(name); f != nil {
+			return f.Value.String()
+		}
+		if f := c.PersistentFlags().Lookup(name); f != nil {
+			return f.Value.String()
+		}
+	}
+	return ""
+}
+
+// NewFromCmd builds an Out bound to the command's stdout/stderr.
+func NewFromCmd(cmd *cobra.Command) *Out {
+	o := New(FlagsFromCmd(cmd))
+	if cmd != nil {
+		o.W = cmd.OutOrStdout()
+		o.ErrW = cmd.ErrOrStderr()
+	}
+	return o
+}
+
+// BinPath is the current executable with $HOME rendered as ~.
+func BinPath() string {
+	exe, err := os.Executable()
+	if err != nil || strings.TrimSpace(exe) == "" {
+		return "so"
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" && strings.HasPrefix(exe, home) {
+		return "~" + strings.TrimPrefix(exe, home)
+	}
+	return exe
+}
+
+// UnknownCommand is an AXI usage error for a bad group subcommand.
+func UnknownCommand(group, name string) error {
+	name = strings.TrimSpace(name)
+	hint := "so " + strings.TrimSpace(group) + " --help"
+	if name == "" {
+		return Usage("command required", hint)
+	}
+	return Usage(fmt.Sprintf("unknown command %q", name), hint)
+}
+
 // Truncate shortens s unless --full.
 func (o *Out) Truncate(s string, limit int) string {
 	if o.Flags.Full {
@@ -105,6 +173,22 @@ func (o *Out) Truncate(s string, limit int) string {
 	}
 	runes := []rune(s)
 	return string(runes[:limit]) + "…"
+}
+
+// TruncateHint truncates and appends an AXI size hint when clipped.
+func (o *Out) TruncateHint(s string, limit int) string {
+	if o.Flags.Full {
+		return s
+	}
+	if limit <= 0 {
+		limit = DefaultTruncate
+	}
+	n := utf8.RuneCountInString(s)
+	if n <= limit {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:limit]) + fmt.Sprintf("… (truncated, %d chars — use --full)", n)
 }
 
 // Next queues a next-step hint (printed after primary output in text mode;
@@ -161,23 +245,58 @@ func (o *Out) Rows(kind string, cols []string, rows []map[string]any) {
 		o.Empty(kind)
 		return
 	}
-	// Keep compact text self-describing. Agents previously interpreted an
-	// unlabeled memory row's `tokens` value as its `id` and then fetched the
-	// wrong episode. JSON remains the preferred agent contract.
-	fmt.Fprintln(o.W, strings.Join(cols, "  "))
+	fmt.Fprintf(o.W, "%s[%d]{%s}:\n", kind, len(rows), strings.Join(cols, ","))
 	for _, row := range rows {
 		parts := make([]string, 0, len(cols))
 		for _, c := range cols {
-			v := row[c]
-			s := fmt.Sprint(v)
-			if c == "title" || c == "detail" || c == "preview" || c == "snippet" {
+			s := fmt.Sprint(row[c])
+			if c == "title" || c == "detail" || c == "preview" || c == "snippet" || c == "text" {
+				orig := utf8.RuneCountInString(s)
 				s = o.Truncate(s, DefaultTruncate)
+				if !o.Flags.Full && orig > DefaultTruncate {
+					s = fmt.Sprintf("%s (truncated, %d chars — use --full)", s, orig)
+				}
 			}
-			parts = append(parts, s)
+			parts = append(parts, toonField(s))
 		}
-		fmt.Fprintln(o.W, strings.Join(parts, "  "))
+		fmt.Fprintf(o.W, "  %s\n", strings.Join(parts, ","))
 	}
-	fmt.Fprintf(o.W, "count: %d\n", len(rows))
+	fmt.Fprintf(o.W, "count: %d of %d\n", len(rows), len(rows))
+	o.flushHints()
+}
+
+func toonField(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	if s == "" || strings.ContainsAny(s, ",\"") {
+		s = strings.ReplaceAll(s, `"`, `""`)
+		return `"` + s + `"`
+	}
+	return s
+}
+
+// Home prints an AXI content-first dashboard (bin, description, body, help[]).
+func (o *Out) Home(description string, lines []string) {
+	if o.Flags.JSON {
+		payload := map[string]any{
+			"ok":          true,
+			"kind":        "home",
+			"bin":         BinPath(),
+			"description": description,
+			"lines":       lines,
+			"next":        o.hints,
+		}
+		_ = json.NewEncoder(o.W).Encode(payload)
+		return
+	}
+	fmt.Fprintf(o.W, "bin: %s\n", BinPath())
+	fmt.Fprintf(o.W, "description: %s\n", description)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			fmt.Fprintln(o.W, line)
+		}
+	}
 	o.flushHints()
 }
 
@@ -239,17 +358,17 @@ func Fail(code int, msg string, hint string) error {
 	return &Error{Code: code, Message: msg, Hint: hint}
 }
 
-// WriteError emits a structured error to stderr (JSON when --json).
+// WriteError emits a structured AXI error on stdout (stderr is debug only).
 func (o *Out) WriteError(err error) {
 	if err == nil {
 		return
 	}
-	ae, ok := err.(*Error)
-	if !ok {
+	var ae *Error
+	if !errors.As(err, &ae) {
 		ae = &Error{Code: ExitFail, Message: err.Error()}
 	}
 	if o.Flags.JSON {
-		_ = json.NewEncoder(o.ErrW).Encode(map[string]any{
+		_ = json.NewEncoder(o.W).Encode(map[string]any{
 			"ok":    false,
 			"code":  ae.Code,
 			"error": ae.Message,
@@ -257,9 +376,9 @@ func (o *Out) WriteError(err error) {
 		})
 		return
 	}
-	fmt.Fprintf(o.ErrW, "error: %s\n", ae.Message)
+	fmt.Fprintf(o.W, "error: %s\n", ae.Message)
 	if ae.Hint != "" {
-		fmt.Fprintf(o.ErrW, "hint: %s\n", ae.Hint)
+		fmt.Fprintf(o.W, "hint: %s\n", ae.Hint)
 	}
 }
 
@@ -268,7 +387,8 @@ func ExitCode(err error) int {
 	if err == nil {
 		return ExitOK
 	}
-	if ae, ok := err.(*Error); ok {
+	var ae *Error
+	if errors.As(err, &ae) {
 		return ae.Code
 	}
 	return ExitFail

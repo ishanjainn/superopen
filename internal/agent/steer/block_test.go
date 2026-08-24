@@ -44,6 +44,9 @@ func TestNudgesAreMandatoryOneLiners(t *testing.T) {
 	if !contains(SearchNudge(), "MANDATORY") || !contains(ReadNudge(), "MANDATORY") {
 		t.Fatal("nudges must stay MANDATORY")
 	}
+	if !contains(SearchNudge(), ".so/") || !contains(HookReminder(), ".so/") {
+		t.Fatal("search/reminder should tell agents not to Grep .so/")
+	}
 	if !contains(ReadNudge(), "so graph snippet") || !contains(ReadNudge(), "so graph trace") {
 		t.Fatal("read nudge should list snippet/trace as focused follow-ups")
 	}

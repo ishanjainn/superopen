@@ -5,7 +5,9 @@ description: "Use for any question about a codebase, its architecture, file rela
 
 # Superopen (`/so`)
 
-**If `test -d .so` is false, stop.** Do not run `so` and do not run `so init` unless the user explicitly asked to initialize this repo.
+**If the `.so` directory is missing, stop.** Do not run `so` and do not run `so init` unless the user explicitly asked to initialize this repo.
+
+Never Grep `.so/` or installed skill/rule directories to find the graph. When `.so/` exists and the request is about the codebase, run `so graph query` before grepping the repository. If you spawn a Task/subagent, its prompt must say to run `so graph query` first (Explore children never see SessionStart).
 
 ## Binary
 
@@ -31,4 +33,4 @@ If a NODE line already names the symbol, use `so graph snippet "<qualified_name>
 
 Do not initialize a repository because `.so/` is missing.
 
-Recipes (dead code, fan-in/out, routes): `references/query.md`. Prior-work memory: `references/memory.md`.
+Recipes (dead code, fan-in/out, routes): `references/query.md`. Prior-work memory: `references/memory.md`. Playbook harvest (on demand): `references/harvest.md`.

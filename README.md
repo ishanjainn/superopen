@@ -77,17 +77,18 @@ Session hooks refresh the graph in the background on SessionStart / SessionEnd
 (detached, fail-open) **only if the workspace already has `.so/`**. Builds are **local** (Tree-sitter + SQLite) — they do not
 invoke an LLM or the live coding agent.
 
-Default `so graph query` stdout is compact NODE/EDGE text plus AXI `help[]` next steps. `--json` and `--full` are script escape hatches.
+Default `so graph query` stdout is compact NODE/EDGE text plus `help[]` next steps. `--json` and `--full` are script escape hatches. That graphify format is intentional; memory/sessions use AXI TOON instead.
 
 ## Sessions, memory, and UI
 
 ```bash
-so sessions list
+so sessions
 so sessions show <id>
 so sessions finalize <id>
+so memory
 so memory search "login bug"
 so memory get 12
-so memory capture --request "…" --learned "…" --next "…"
+so memory capture --kind knowledge --horizon medium --title "…" --text "…"
 so projects                   # repos where Superopen has been used
 so dev                        # UI from any directory; binds the current inited repo or last managed project
 so dev -d                     # detached UI
@@ -117,6 +118,7 @@ Works from any directory. No source checkout required.
 ```bash
 so uninstall                 # agent wiring + project index + marketplace + caches + .so data
 # --keep-data                # leave per-repo .so/ in place
+# --vendor=cursor            # drop one vendor's hooks only
 ```
 
 Then remove the **binary** the same way you installed it:

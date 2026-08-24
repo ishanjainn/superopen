@@ -38,6 +38,7 @@ type Entry struct {
 	ParentID string    `json:"parent_id"`
 	Vendor   string    `json:"vendor,omitempty"`
 	Source   string    `json:"source,omitempty"`
+	Title    string    `json:"title,omitempty"`
 	At       time.Time `json:"at,omitempty"`
 }
 
@@ -176,11 +177,12 @@ func ExtractAgentID(blobs ...string) string {
 // ParentFromCursorTranscriptPath extracts parent + child when path is
 // …/agent-transcripts/<parent>/subagents/<child>.jsonl
 func ParentFromCursorTranscriptPath(path string) (parent, child string) {
-	path = filepath.Clean(strings.TrimSpace(path))
+	path = strings.TrimSpace(path)
 	if path == "" {
 		return "", ""
 	}
-	parts := strings.Split(path, string(os.PathSeparator))
+	path = filepath.ToSlash(filepath.Clean(strings.ReplaceAll(path, "\\", "/")))
+	parts := strings.Split(path, "/")
 	for i := 0; i+2 < len(parts); i++ {
 		if parts[i] != "agent-transcripts" {
 			continue
@@ -195,6 +197,26 @@ func ParentFromCursorTranscriptPath(path string) (parent, child string) {
 		}
 	}
 	return "", ""
+}
+
+// ChildIDFromTranscriptPath returns a registerable agent id from a transcript
+// filename (…/agent-<id>.jsonl or …/<uuid>.jsonl).
+func ChildIDFromTranscriptPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	path = filepath.ToSlash(strings.ReplaceAll(path, "\\", "/"))
+	base := path
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		base = path[i+1:]
+	}
+	base = strings.TrimSuffix(base, filepath.Ext(base))
+	base = strings.TrimPrefix(base, "agent-")
+	if AllowRegister(base) {
+		return base
+	}
+	return ""
 }
 
 // IsTopLevelCursorChat reports whether id has its own Cursor agent-transcripts
@@ -290,13 +312,59 @@ func Register(sessionsDir, childID, parentID, vendor, source string) error {
 	if existing, ok := doc.Links[childID]; ok && existing.ParentID == parentID {
 		return nil
 	}
+	prevTitle := ""
+	if existing, ok := doc.Links[childID]; ok {
+		prevTitle = existing.Title
+	}
 	doc.Links[childID] = Entry{
 		ParentID: parentID,
 		Vendor:   vendor,
 		Source:   source,
+		Title:    prevTitle,
 		At:       time.Now().UTC(),
 	}
 	return saveLocked(sessionsDir, doc)
+}
+
+// Annotate sets a child title when the link exists and the current title is empty.
+func Annotate(sessionsDir, childID, title string) error {
+	childID = strings.TrimSpace(childID)
+	title = strings.TrimSpace(title)
+	if sessionsDir == "" || childID == "" || title == "" {
+		return nil
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	doc, err := loadLocked(sessionsDir)
+	if err != nil || doc.Links == nil {
+		return nil
+	}
+	e, ok := doc.Links[childID]
+	if !ok {
+		return nil
+	}
+	cur := strings.TrimSpace(e.Title)
+	if cur != "" && cur != childID && !strings.EqualFold(cur, "untitled") {
+		return nil
+	}
+	e.Title = title
+	doc.Links[childID] = e
+	return saveLocked(sessionsDir, doc)
+}
+
+// Title returns a stored child title, if any.
+func Title(sessionsDir, childID string) string {
+	childID = strings.TrimSpace(childID)
+	if sessionsDir == "" || childID == "" {
+		return ""
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	doc, err := loadLocked(sessionsDir)
+	if err != nil || doc.Links == nil {
+		return ""
+	}
+	return strings.TrimSpace(doc.Links[childID].Title)
 }
 
 // Lookup returns the parent id for child, if known.

@@ -16,7 +16,7 @@ func TestStripCursorHooks_RemovesOnlyOurs(t *testing.T) {
 		"hooks": {
 			"sessionStart": [
 				{"command": "other-tool"},
-				{"command": "/Users/me/.superopen/bin/so coding hook --vendor=cursor --event=sessionStart", "timeout": 5000}
+				{"command": "/Users/me/.superopen/bin/so sessions hook --vendor=cursor --event=sessionStart", "timeout": 5000}
 			],
 			"customEvent": [{"command": "user-script"}]
 		}
@@ -61,7 +61,7 @@ func TestStripCursorHooks_DeletesFileWhenOnlyOursAndVersion(t *testing.T) {
 		"version": 1,
 		"hooks": {
 			"sessionStart": [
-				{"command": "so coding hook --vendor=cursor --event=sessionStart"}
+				{"command": "so sessions hook --vendor=cursor --event=sessionStart"}
 			]
 		}
 	}`
@@ -83,7 +83,7 @@ func TestStripCursorHooks_KeepsFileWhenOtherTopLevelKeysExist(t *testing.T) {
 	path := filepath.Join(dir, "hooks.json")
 	body := `{
 		"version": 1,
-		"hooks": {"sessionStart": [{"command": "so coding hook --vendor=cursor --event=sessionStart"}]},
+		"hooks": {"sessionStart": [{"command": "so sessions hook --vendor=cursor --event=sessionStart"}]},
 		"someCustomThing": {"foo": "bar"}
 	}`
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {

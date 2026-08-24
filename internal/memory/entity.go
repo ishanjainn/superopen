@@ -6,13 +6,6 @@ import (
 	"unicode"
 )
 
-const (
-	tierWorking    = "working"
-	tierEpisodic   = "episodic"
-	tierSemantic   = "semantic"
-	tierProcedural = "procedural"
-)
-
 var identRe = regexp.MustCompile(`[A-Za-z][A-Za-z0-9_\-./]{2,}`)
 
 func entityTags(text string) string {
@@ -45,17 +38,4 @@ func isStopWord(s string) bool {
 		}
 	}
 	return len(s) < 5
-}
-
-func tierForKind(kind string) string {
-	switch kind {
-	case KindWorking:
-		return tierWorking
-	case KindTeaching, KindPin:
-		return tierProcedural
-	case KindSession, KindObservation:
-		return tierSemantic
-	default:
-		return tierEpisodic
-	}
 }

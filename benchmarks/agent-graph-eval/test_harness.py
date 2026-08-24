@@ -412,7 +412,7 @@ class DockerPathRewriteTest(unittest.TestCase):
                                     "hooks": [
                                         {
                                             "type": "command",
-                                            "command": "/tmp/so coding hook --vendor=cc --event=PreToolUse --kind=search",
+                                            "command": "/tmp/so sessions hook --vendor=cc --event=PreToolUse --kind=search",
                                         }
                                     ]
                                 }
@@ -447,7 +447,7 @@ class DockerPathRewriteTest(unittest.TestCase):
             n = isolate.rewrite_docker_agent_paths(paths, so_bin=Path("/tmp/so"))
             self.assertGreater(n, 0)
             so_cmd = json.loads((plugin_hooks / "hooks.json").read_text())["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-            self.assertTrue(so_cmd.startswith("/usr/local/bin/so coding hook"))
+            self.assertTrue(so_cmd.startswith("/usr/local/bin/so sessions hook"))
             self.assertNotIn("/tmp/so ", so_cmd)
             market = json.loads((paths["claude"] / "settings.json").read_text())
             mpath = market["extraKnownMarketplaces"]["superopen"]["source"]["path"]
@@ -478,7 +478,7 @@ class DockerPathRewriteTest(unittest.TestCase):
                             "hookName": "PreToolUse:Bash",
                             "stderr": "Failed with non-blocking status code: /bin/sh: 1: /tmp/so: not found",
                             "exitCode": 127,
-                            "command": "/tmp/so coding hook --vendor=cc --event=PreToolUse",
+                            "command": "/tmp/so sessions hook --vendor=cc --event=PreToolUse",
                         },
                     }
                 )

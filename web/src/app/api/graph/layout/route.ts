@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
         {
           error: message,
           code: notIndexed ? "graph_not_indexed" : undefined,
-          tip: "Ensure `so` is on PATH; try `so graph rebuild`",
+          tip: "Ensure `so` is on PATH; try `so graph build`",
         },
         { status: notIndexed ? 404 : 500 },
       );

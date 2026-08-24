@@ -59,6 +59,65 @@
   overflow: visible;
 }
 
+.memory-filters {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  border-bottom: 1px solid rgb(var(--color-neutral-200));
+  padding: 8px 12px;
+}
+
+.memory-filters button {
+  border: 1px solid rgb(var(--color-neutral-300));
+  border-radius: 999px;
+  background: rgb(var(--color-white));
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+.memory-filters button.active {
+  background: rgb(var(--color-neutral-900));
+  border-color: rgb(var(--color-neutral-900));
+  color: rgb(var(--color-white));
+}
+
+.memory-chip {
+  display: inline-block;
+  margin-top: 2px;
+  margin-right: 6px;
+  border-radius: 999px;
+  background: rgb(var(--color-neutral-100));
+  padding: 1px 7px;
+  font-size: 10px;
+  text-transform: lowercase;
+  color: rgb(var(--color-neutral-600));
+}
+
+.memory-inspector .memory-error {
+  margin: 0;
+}
+
+.memory-inspector .memory-chip {
+  align-self: flex-start;
+}
+
+.memory-error {
+  margin: 8px 12px 0;
+  font-size: 12px;
+  color: rgb(180 50 50);
+}
+
+.memory-list-inspector {
+  margin: 8px 8px 12px;
+  padding: 10px;
+  border: 1px solid rgb(var(--color-neutral-200));
+  border-radius: 8px;
+}
+
+.memory-list-inspector .memory-body {
+  margin: 8px 0;
+}
+
 .memory-search-row {
   display: flex;
   flex-shrink: 0;

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=cc --event=SessionStart",
+            "command": "so sessions hook --vendor=cc --event=SessionStart",
             "timeout": 15
           },
           {
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=cc --event=UserPromptSubmit",
+            "command": "so sessions hook --vendor=cc --event=UserPromptSubmit",
             "timeout": 15
           }
         ]
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=cc --event=PreToolUse --kind=search",
+            "command": "so sessions hook --vendor=cc --event=PreToolUse --kind=search",
             "timeout": 5
           }
         ]
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=cc --event=PreToolUse --kind=read",
+            "command": "so sessions hook --vendor=cc --event=PreToolUse --kind=read",
             "timeout": 5
           }
         ]
@@ -55,7 +55,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=cc --event=PostToolUse",
+            "command": "so sessions hook --vendor=cc --event=PostToolUse",
             "timeout": 15
           }
         ]
@@ -66,7 +66,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=cc --event=Stop",
+            "command": "so sessions hook --vendor=cc --event=Stop",
             "timeout": 15
           },
           {
@@ -83,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=cc --event=SubagentStart",
+            "command": "so sessions hook --vendor=cc --event=SubagentStart",
             "timeout": 15
           }
         ]
@@ -94,7 +94,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=cc --event=SubagentStop",
+            "command": "so sessions hook --vendor=cc --event=SubagentStop",
             "timeout": 15
           }
         ]
@@ -105,7 +105,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "so coding hook --vendor=cc --event=SessionEnd",
+            "command": "so sessions hook --vendor=cc --event=SessionEnd",
             "timeout": 15
           },
           {

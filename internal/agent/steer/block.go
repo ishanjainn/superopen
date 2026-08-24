@@ -17,7 +17,7 @@ const (
 // Block is the durable graph-first instruction merged into user-level agent files.
 func Block() string {
 	return strings.TrimSpace(`
-If this workspace has no `+"`.so/`"+` directory (`+"`test -d .so`"+` is false), ignore Superopen entirely: do not run `+"`so`"+`, do not load `+"`/so`"+`, and do not run `+"`so init`"+` unless the user explicitly asks.
+If this workspace has no `+"`.so/`"+` directory, ignore Superopen entirely: do not run `+"`so`"+`, do not load `+"`/so`"+`, and do not run `+"`so init`"+` unless the user explicitly asks.
 
 When `+"`.so/`"+` exists:
 
@@ -28,7 +28,7 @@ This project has a code graph at `+"`.so/`"+` (query with `+"`so graph query`"+`
 Rules:
 - For codebase questions, first run `+"`so graph query \"<question>\"`"+` when `+"`.so/db/so.db`"+` exists. Use `+"`so graph snippet \"<qn>\"`"+` for a known symbol and `+"`so graph trace \"<qn>\"`"+` for callers. These return a scoped subgraph, usually much smaller than raw grep output.
 - Do not spawn Explore/Agent for codebase questions; run `+"`so graph query`"+` in this session. If you do spawn a subagent, it must run `+"`so graph query`"+` first.
-- Only Grep/Read source after the graph has oriented you, or to modify/debug specific lines.
+- Only Grep/Read source after the graph has oriented you, or to modify/debug specific lines. Never Grep `+"`.so/`"+` or skill/rule dirs to find the graph.
 - Prior-work questions use `+"`so memory search`"+` then `+"`so graph query`"+` / snippet of files named; do not grep transcripts or treat session `+"`learned:`"+` as authority.
 
 Graph builds are local (no LLM). Live refresh runs on session boundaries and while `+"`so dev`"+` is up (~60s poll).
@@ -37,12 +37,12 @@ Graph builds are local (no LLM). Live refresh runs on session boundaries and whi
 
 // HookReminder is a short additionalContext string for session/start hooks.
 func HookReminder() string {
-	return "Superopen: this repo is indexed. Run `so graph query \"<question>\"` before Grep/Read."
+	return "Superopen: this repo is indexed. Run `so graph query \"<question>\"` before Grep/Read. Do not Grep `.so/`."
 }
 
 // SearchNudge is injected on PreToolUse for Bash/Grep.
 func SearchNudge() string {
-	return "MANDATORY: .so/ exists. You MUST run `so graph query \"<question>\"` before grepping raw files. Only grep after Superopen has oriented you, or to modify/debug specific lines."
+	return "MANDATORY: .so/ exists. You MUST run `so graph query \"<question>\"` before grepping raw files. Do not Grep `.so/`. Only grep after Superopen has oriented you, or to modify/debug specific lines."
 }
 
 // ReadNudge is injected on PreToolUse for Read/Glob.
@@ -60,7 +60,7 @@ func CursorRule() string {
 	return strings.TrimSpace(`
 If this workspace has no `+"`.so/`"+` directory, ignore Superopen entirely: do not run `+"`so`"+`, do not load the `+"`/so`"+` skill, and do not run `+"`so init`"+` unless the user explicitly asks.
 
-If `+"`.so/`"+` exists, query the graph first (`+"`so graph query`"+`) before Grep/Read. This applies to you and to every subagent you spawn. Do not skip the graph by spawning Explore. Prior-work questions use `+"`so memory search`"+` then `+"`so graph query`"+`; memory is hints, not authority.
+If `+"`.so/`"+` exists, query the graph first (`+"`so graph query`"+`) before Grep/Read. Never Grep `+"`.so/`"+`. This applies to you and to every subagent you spawn. Do not skip the graph by spawning Explore. Prior-work questions use `+"`so memory search`"+` then `+"`so graph query`"+`; memory is hints, not authority.
 `) + "\n"
 }
 

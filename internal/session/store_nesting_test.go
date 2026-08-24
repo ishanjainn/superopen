@@ -272,3 +272,41 @@ func TestUpsertActiveFromSpansUsesAgentLinks(t *testing.T) {
 		}
 	}
 }
+
+func TestUpsertUsesAgentLinkTitle(t *testing.T) {
+	root := t.TempDir()
+	layout := paths.Paths{
+		Root:          filepath.Join(root, ".so"),
+		SessionsDir:   filepath.Join(root, ".so", "sessions"),
+		SessionsIndex: filepath.Join(root, ".so", "sessions", "index.json"),
+	}
+	if err := os.MkdirAll(layout.SessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parent := "aaaaaaaa-1111-2222-3333-444444444444"
+	child := "bbbbbbbb-1111-2222-3333-444444444444"
+	if err := agentlinks.Register(layout.SessionsDir, child, parent, "cursor", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := agentlinks.Annotate(layout.SessionsDir, child, "explore GetStarted landing"); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(layout)
+	store.UpsertActiveFromSpans([]trace.Span{{
+		Name:           "coding_agent.tool.call",
+		StartTimeUnixN: time.Now().UnixNano(),
+		Attributes: map[string]string{
+			"gen_ai.conversation.id":       child,
+			"coding_agent.agent.parent_id": parent,
+			"coding_agent.file_path":       "src/x.ts",
+			"gen_ai.tool.name":             "Read",
+		},
+	}})
+	meta, err := store.Get(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Title != "explore GetStarted landing" {
+		t.Fatalf("title=%q want agent-link task", meta.Title)
+	}
+}

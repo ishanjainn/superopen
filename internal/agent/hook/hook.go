@@ -1,4 +1,4 @@
-// Package hook implements `so coding hook --vendor=... --event=...`.
+// Package hook implements `so sessions hook --vendor=... --event=...`.
 //
 // This is the hot path: invoked once per agent event by the per-vendor
 // host plugin manifests under plugins/<vendor>/. The subcommand reads
@@ -11,7 +11,7 @@
 //   - 5s hard timeout on the entire invocation; 3s of that for file flush
 //   - panic-recover wraps the body
 //   - stdout is reserved for vendor hook control JSON (additionalContext /
-//     permissionDecision). Telemetry logs go to stderr only.
+//     permissionDecision), never AXI TOON/help[]. Telemetry logs go to stderr only.
 package hook
 
 import (
@@ -42,6 +42,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/redact"
+	"github.com/ishanjainn/superopen/internal/session"
 	"github.com/ishanjainn/superopen/internal/session/agentlinks"
 	"github.com/spf13/cobra"
 )
@@ -55,7 +56,8 @@ const (
 	flushTimeout = 3 * time.Second
 )
 
-// NewCmd returns the cobra command for `so coding hook`.
+// NewCmd returns the cobra command for `so sessions hook`.
+// Hidden: host plugin manifests invoke it; it is not an AXI user command.
 func NewCmd() *cobra.Command {
 	var (
 		vendor string
@@ -64,13 +66,16 @@ func NewCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "hook",
-		Short: "Process a coding-agent hook event (invoked by host plugin manifests)",
+		Use:    "hook",
+		Short:  "Process a coding-agent hook event (invoked by host plugin manifests)",
+		Hidden: true,
 		Long: `Process a coding-agent hook event.
 
 Reads the host plugin's payload from stdin, normalizes it to
-coding_agent.* OTel spans/events, and persists them to the repository session file. The subcommand
-always exits 0 on telemetry-path failure so a broken telemetry pipeline
+coding_agent.* OTel spans/events, and persists them to the repository session file.
+
+stdout is host control JSON (additionalContext / permissionDecision), not AXI.
+Always exits 0 on telemetry-path failure so a broken telemetry pipeline
 never blocks a developer's prompt.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -137,9 +142,8 @@ func run(cmd *cobra.Command, vendor, event, kind string) (rerr error) {
 	// CLAUDE_PLUGIN_ROOT / CLAUDE_PROJECT_DIR env envelope) and
 	// invokes those hook commands for ITS OWN agent turns, in
 	// addition to firing the native `~/.cursor/plugins/*` hooks. So
-	// a user who installed both
-	// `so coding install --vendor=cursor` AND
-	// `--vendor=claude-code` would otherwise get every Cursor chat
+	// a user who ran `so install --vendor=cursor` AND
+	// `so install --vendor=claude-code` would otherwise get every Cursor chat
 	// double-emitted: once with --vendor=cursor (the real Cursor
 	// plugin) and once with --vendor=cc (Cursor masquerading as
 	// Claude Code through the compat shim). The UI then shows the
@@ -476,6 +480,7 @@ func run(cmd *cobra.Command, vendor, event, kind string) (rerr error) {
 	// block the host if stdout JSON cannot be written.
 	emitSteerContext(vendor, event, kind, capturedPayload)
 	maybeFinalizeSession(event, capturedPayload)
+	maybeFinalizeNested(event, capturedPayload)
 	maybeIngestMemory(event, capturedPayload)
 
 	// Always succeed back to the agent.
@@ -484,11 +489,27 @@ func run(cmd *cobra.Command, vendor, event, kind string) (rerr error) {
 
 func shouldFinalize(event string) bool {
 	switch strings.TrimSpace(event) {
-	case "sessionEnd", "SessionEnd":
+	case "sessionEnd", "SessionEnd", "session.end", "session.deleted", "session_shutdown", "agent_end":
 		return true
 	default:
 		return false
 	}
+}
+
+func shouldFinalizeNested(event string) bool {
+	switch strings.TrimSpace(event) {
+	case "subagentStop", "SubagentStop":
+		return true
+	default:
+		return false
+	}
+}
+
+var spawnSessionFinalize = func(root, id string) {
+	if root == "" || id == "" {
+		return
+	}
+	cli.SpawnSO(root, "--root", root, "sessions", "finalize", id)
 }
 
 func maybeFinalizeSession(event string, payload []byte) {
@@ -503,7 +524,66 @@ func maybeFinalizeSession(event string, payload []byte) {
 	if root == "" {
 		return
 	}
-	cli.SpawnSO(root, "--root", root, "sessions", "finalize", sid)
+	spawnSessionFinalize(root, sid)
+	store := session.NewStore(paths.Resolve(root))
+	kids, err := store.Children(sid)
+	if err != nil {
+		return
+	}
+	for _, kid := range kids {
+		if kid.Status == session.StatusActive && kid.ID != "" && kid.ID != sid {
+			spawnSessionFinalize(root, kid.ID)
+		}
+	}
+}
+
+func maybeFinalizeNested(event string, payload []byte) {
+	if !shouldFinalizeNested(event) {
+		return
+	}
+	child := nestedChildSessionID(payload)
+	if child == "" {
+		return
+	}
+	root := hookRepoRoot(payload)
+	if root == "" {
+		return
+	}
+	spawnSessionFinalize(root, child)
+}
+
+func nestedChildSessionID(payload []byte) string {
+	parent := strings.TrimSpace(steerSessionID(payload))
+	var probe map[string]any
+	if json.Unmarshal(payload, &probe) != nil {
+		return ""
+	}
+	pick := func(keys ...string) string {
+		for _, k := range keys {
+			if s, ok := probe[k].(string); ok {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+	if id := pick("subagent_id", "subagentId"); agentlinks.AllowRegister(id) && id != parent {
+		return id
+	}
+	if path := pick("agent_transcript_path", "transcript_path", "transcriptPath"); path != "" {
+		if _, child := agentlinks.ParentFromCursorTranscriptPath(path); child != "" && child != parent {
+			return child
+		}
+		if child := agentlinks.ChildIDFromTranscriptPath(path); child != "" && child != parent {
+			return child
+		}
+	}
+	if id := pick("task_id", "taskId"); agentlinks.AllowRegister(id) && id != parent {
+		return id
+	}
+	return ""
 }
 
 func maybeIngestMemory(event string, payload []byte) {

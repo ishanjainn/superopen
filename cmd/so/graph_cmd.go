@@ -66,7 +66,6 @@ func graphNativeCommands() []*cobra.Command {
 		return api.BuildRequest{RepoRoot: root, Force: force, Mode: mode}
 	})
 	build.Args = cobra.MaximumNArgs(1)
-	build.Aliases = []string{"extract", "rebuild"}
 	build.Flags().Bool("force", false, "Rebuild even when the source revision is unchanged")
 	build.Flags().String("mode", "full", "Index mode")
 

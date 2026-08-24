@@ -125,7 +125,7 @@ func TestRemoveUserBinFromPATH(t *testing.T) {
 
 func TestIsSuperopenHookCommand(t *testing.T) {
 	ours := []string{
-		"/opt/homebrew/bin/so coding hook --vendor=cursor --event=sessionStart",
+		"/opt/homebrew/bin/so sessions hook --vendor=cursor --event=sessionStart",
 		"/Users/me/.superopen/bin/so graph refresh --detach",
 		"/tmp/so sessions finalize",
 		"so sessions refresh --detach",

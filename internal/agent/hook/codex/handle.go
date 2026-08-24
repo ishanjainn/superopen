@@ -52,7 +52,7 @@ type codexPayload struct {
 	PermissionMode string `json:"permission_mode"`
 }
 
-// handle is the per-invocation entry point invoked by `so coding hook`.
+// handle is the per-invocation entry point invoked by `so sessions hook`.
 func handle(ctx context.Context, in normalize.Input) error {
 	var p codexPayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {

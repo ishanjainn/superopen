@@ -8,7 +8,6 @@ import {
   type DragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import Link from "next/link";
 import { ChevronsLeftRight, Sparkles } from "lucide-react";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
 import { useProject } from "@/components/shell/project-context";
@@ -32,6 +31,7 @@ type Episode = {
   pinned?: boolean;
   faded?: boolean;
   fading?: boolean;
+  horizon?: string;
   tags?: string;
   tier?: string;
   created_at?: string;
@@ -62,6 +62,9 @@ type Status = {
     semantic?: number;
     procedural?: number;
     working?: number;
+    short?: number;
+    medium?: number;
+    long?: number;
     tombstoned?: number;
     edges?: number;
     pins?: number;
@@ -95,12 +98,44 @@ function n(value: number | undefined): string {
   return (value ?? 0).toLocaleString("en-US");
 }
 
+function unwrapEpisode(body: unknown): Episode | null {
+  if (Array.isArray(body)) {
+    return unwrapEpisode(body[0]);
+  }
+  if (!body || typeof body !== "object") {
+    return null;
+  }
+  const rec = body as Record<string, unknown>;
+  if ("data" in rec && rec.data) {
+    return unwrapEpisode(rec.data);
+  }
+  if (typeof rec.id === "number") {
+    return rec as Episode;
+  }
+  return null;
+}
+
+function horizonRank(horizon?: string): number {
+  switch (horizon) {
+    case "long":
+      return 0;
+    case "medium":
+      return 1;
+    case "short":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
 export default function MemoryPage() {
   const { projectId } = useProject();
   const [data, setData] = useState<GraphData | null>(null);
   const [status, setStatus] = useState<Status>({});
   const [timeline, setTimeline] = useState<TimelineBucket[]>([]);
   const [selected, setSelected] = useState<Episode | null>(null);
+  const [inspectError, setInspectError] = useState("");
+  const [view, setView] = useState<"knowledge" | "moments" | "skills">("knowledge");
   const [searchResults, setSearchResults] = useState<Episode[]>([]);
   const [query, setQuery] = useState("");
   const [searched, setSearched] = useState(false);
@@ -136,12 +171,26 @@ export default function MemoryPage() {
     return () => window.clearTimeout(timer);
   }, [reload, projectId]);
 
+  const closeInspect = useCallback(() => {
+    setSelected(null);
+    setInspectError("");
+  }, []);
+
   const inspect = useCallback(async (id: number) => {
+    setInspectError("");
+    setSelected((prev) => (prev?.id === id ? prev : { id, kind: "", title: "" }));
     const res = await fetch(`/api/memory/${id}`);
-    if (!res.ok) return;
-    const body = (await res.json()) as Episode | Episode[];
-    const episode = Array.isArray(body) ? body[0] : body;
-    if (!episode || typeof episode !== "object" || !episode.id) return;
+    const body = (await res.json()) as unknown;
+    if (!res.ok) {
+      const rec = body && typeof body === "object" ? (body as { error?: string }) : {};
+      setInspectError(String(rec.error || "get failed"));
+      return;
+    }
+    const episode = unwrapEpisode(body);
+    if (!episode) {
+      setInspectError("memory not found");
+      return;
+    }
     setSelected(episode);
   }, []);
 
@@ -223,11 +272,13 @@ export default function MemoryPage() {
   }, [listPctRef]);
 
   const highlighted = useMemo(() => {
+    if (selected?.id) {
+      return new Set([selected.id]);
+    }
     if (searched && searchResults.length > 0) {
       return new Set(searchResults.map((item) => item.id));
     }
-    if (!selected?.id) return null;
-    return new Set([selected.id]);
+    return null;
   }, [searched, searchResults, selected]);
 
   const allEpisodes = useMemo(
@@ -238,29 +289,41 @@ export default function MemoryPage() {
     () => allEpisodes.filter((item) => item.kind === "teaching"),
     [allEpisodes],
   );
-  const sessions = useMemo(
-    () => allEpisodes.filter((item) => item.kind === "session"),
+  const knowledge = useMemo(
+    () =>
+      allEpisodes
+        .filter(
+          (item) =>
+            item.kind === "session" &&
+            (item.horizon === "short" || item.horizon === "medium" || item.horizon === "long") &&
+            !item.faded,
+        )
+        .slice()
+        .sort((a, b) => horizonRank(a.horizon) - horizonRank(b.horizon)),
     [allEpisodes],
   );
+  const moments = useMemo(
+    () => allEpisodes.filter((item) => item.kind === "prompt" && !item.faded),
+    [allEpisodes],
+  );
+  const listItems = view === "skills" ? teachings : view === "moments" ? moments : knowledge;
 
   const empty = (data?.nodes.length ?? 0) === 0;
   const counts = status.counts ?? {};
-  const lifecycle = status.lifecycle || (status.distill_paused ? "resting" : "awake");
-  const connected = status.connected ?? 0;
-  const knowledgePct = status.knowledge_pct ?? 0;
-  const cleanedPct = status.cleaned_pct ?? 0;
-  const peak = status.activity_peak || 1;
+  const pending = status.pending_distill ?? [];
+  const paused = Boolean(status.distill_paused);
+  const distillLine = paused ? "paused" : pending.length > 0 ? `${pending.length} pending` : "idle";
 
   return (
     <div className="memory-workspace">
       <FeaturePageHeader title="Memory" />
 
       <div className="memory-vitals">
-        <span><b>{n(counts.episodic)}</b> moments</span>
-        <span><b>{n(counts.semantic)}</b> knowledge</span>
-        <span><b>{n(counts.procedural)}</b> skills</span>
-        <span><b>{n(counts.edges)}</b> connections</span>
-        <span><b>{n(counts.tombstoned)}</b> forgetting        </span>
+        <span><b>{n(counts.long)}</b> long</span>
+        <span><b>{n(counts.medium)}</b> medium</span>
+        <span><b>{n(counts.short)}</b> short</span>
+        <span><b>{n(counts.working)}</b> diary</span>
+        <span><b>{n(counts.tombstoned)}</b> faded</span>
       </div>
 
       <div className="memory-body-row">
@@ -286,6 +349,17 @@ export default function MemoryPage() {
                 {searching ? "…" : "Search"}
               </button>
             </div>
+            <div className="memory-filters">
+              <button type="button" className={view === "knowledge" ? "active" : ""} onClick={() => setView("knowledge")}>
+                Knowledge
+              </button>
+              <button type="button" className={view === "skills" ? "active" : ""} onClick={() => setView("skills")}>
+                Skills
+              </button>
+              <button type="button" className={view === "moments" ? "active" : ""} onClick={() => setView("moments")}>
+                Moments
+              </button>
+            </div>
             <div className="memory-scroll">
               {searched ? (
                 <section>
@@ -301,30 +375,30 @@ export default function MemoryPage() {
                         onClick={() => void inspect(item.id)}
                       >
                         {item.title}
-                        <span className="memory-meta">#{item.id} {item.kind}</span>
+                        <span className="memory-meta">#{item.id} {item.horizon || item.kind}</span>
                       </button>
                     ))
                   )}
                 </section>
               ) : (
                 <section>
-                  <h2 className="memory-h">When</h2>
-                  {timeline.map((bucket) => (
-                    <div key={bucket.when}>
-                      <p className="memory-group">{bucket.when} · {bucket.items.length}</p>
-                      {bucket.items.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          className={selected?.id === item.id ? "memory-item active" : "memory-item"}
-                          onClick={() => void inspect(item.id)}
-                        >
-                          {item.title}
-                          <span className="memory-meta">#{item.id} {item.kind}{item.fading ? " · fading" : ""}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ))}
+                  <h2 className="memory-h">{view === "skills" ? "Skills" : view === "moments" ? "Moments" : "Knowledge"} · {listItems.length}</h2>
+                  {listItems.length === 0 ? (
+                    <p className="memory-group">None yet</p>
+                  ) : (
+                    listItems.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={selected?.id === item.id ? "memory-item active" : "memory-item"}
+                        onClick={() => void inspect(item.id)}
+                      >
+                        {item.title}
+                        <span className="memory-chip">{item.horizon || item.kind}</span>
+                        <span className="memory-meta">#{item.id}{item.fading ? " · fading" : ""}{item.faded ? " · faded" : ""}</span>
+                      </button>
+                    ))
+                  )}
                 </section>
               )}
 
@@ -343,22 +417,6 @@ export default function MemoryPage() {
                     >
                       {topic.label}
                       <span className="memory-meta">{topic.size} memories</span>
-                    </button>
-                  ))}
-                </section>
-              ) : null}
-
-              {sessions.length > 0 ? (
-                <section>
-                  <h2 className="memory-h">Sessions</h2>
-                  {sessions.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={selected?.id === item.id ? "memory-item active" : "memory-item"}
-                      onClick={() => void inspect(item.id)}
-                    >
-                      {item.title}
                     </button>
                   ))}
                 </section>
@@ -420,57 +478,44 @@ export default function MemoryPage() {
                 showLabels
                 display={DEFAULT_GRAPH_DISPLAY}
                 onNodeClick={(node: GraphNode) => void inspect(node.id)}
-                onBackgroundClick={() => setSelected(null)}
+                onBackgroundClick={closeInspect}
               />
             )}
-            {selected ? (
-              <aside className="memory-inspector" aria-label="Selected memory">
+            {selected || inspectError ? (
+              <aside className="memory-inspector">
                 <div className="memory-inspector-head">
-                  <strong>{selected.title}</strong>
-                  <button type="button" className="memory-inspector-close" onClick={() => setSelected(null)} aria-label="Close">
+                  <strong>{selected?.title || (selected?.id ? `#${selected.id}` : "Memory")}</strong>
+                  <button type="button" className="memory-inspector-close" aria-label="Close" onClick={closeInspect}>
                     ×
                   </button>
                 </div>
-                <p className="memory-inspector-meta">
-                  #{selected.id} · {selected.kind}
-                  {selected.tier && selected.tier !== selected.kind ? ` · ${selected.tier}` : ""}
-                  {selected.fading ? " · fading" : ""}
-                  {selected.tokens ? ` · ${selected.tokens} tokens` : ""}
-                </p>
-                <p className="memory-inspector-body">{selected.text || selected.title}</p>
-                <div className="memory-inspector-links">
-                  {selected.session_id ? (
-                    <Link href={`/sessions/${selected.session_id}`}>Open session</Link>
-                  ) : null}
-                  {(selected.files ?? []).slice(0, 3).map((file) => (
-                    <Link key={file} href="/graph" title={file}>
-                      {file}
-                    </Link>
-                  ))}
-                </div>
-                {selected.tags ? <p className="memory-inspector-tags">{selected.tags}</p> : null}
-                <div className="memory-actions">
-                  <button type="button" onClick={() => void act("/api/memory/pin", { id: selected.id })}>
-                    {selected.pinned ? "Pinned" : "Pin"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(selected.text || selected.title);
-                    }}
-                  >
-                    Copy
-                  </button>
-                  {selected.fading || selected.faded ? (
-                    <button type="button" onClick={() => void act("/api/memory/rescue", { id: selected.id })}>
-                      Cancel fading
+                {selected ? (
+                  <p className="memory-inspector-meta">
+                    #{selected.id}
+                    {selected.horizon || selected.kind ? ` · ${selected.horizon || selected.kind}` : ""}
+                    {selected.fading ? " · fading" : ""}
+                    {selected.faded ? " · faded" : ""}
+                  </p>
+                ) : null}
+                {selected?.horizon ? <span className="memory-chip">{selected.horizon}</span> : null}
+                {inspectError ? <p className="memory-error">{inspectError}</p> : null}
+                {selected?.text ? <p className="memory-inspector-body">{selected.text}</p> : null}
+                {selected?.id && !inspectError ? (
+                  <div className="memory-actions">
+                    <button type="button" onClick={() => void act("/api/memory/pin", { id: selected.id })}>
+                      {selected.pinned ? "Pinned" : "Pin"}
                     </button>
-                  ) : (
-                    <button type="button" onClick={() => void act("/api/memory/fade", { id: selected.id })}>
-                      Let it fade
-                    </button>
-                  )}
-                </div>
+                    {selected.fading || selected.faded ? (
+                      <button type="button" onClick={() => void act("/api/memory/rescue", { id: selected.id })}>
+                        Restore
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => void act("/api/memory/fade", { id: selected.id })}>
+                        Forget
+                      </button>
+                    )}
+                  </div>
+                ) : null}
               </aside>
             ) : null}
           </StageViewport>
@@ -478,67 +523,22 @@ export default function MemoryPage() {
 
         <aside className="memory-rail">
           <section>
-            <h2 className="memory-h">Subconscious</h2>
-            <p className="memory-lifecycle">{lifecycle}</p>
+            <h2 className="memory-h">Distill</h2>
+            <p className="memory-lifecycle">{distillLine}</p>
             <div className="memory-controls">
-              <button type="button" disabled={busy !== ""} onClick={() => void act("/api/memory/distill", { action: "consolidate" })}>
-                Sort memories now
-              </button>
-              <button type="button" disabled={busy !== ""} onClick={() => void act("/api/memory/distill", { action: "sleep" })}>
-                Let it rest
-              </button>
-              <button type="button" disabled={busy !== ""} onClick={() => void act("/api/memory/distill", { action: "resume" })}>
-                Wake
-              </button>
-              <button type="button" disabled={busy !== ""} onClick={() => void act("/api/memory/distill", { action: "restart" })}>
-                Restart the subconscious
-              </button>
-              <button type="button" disabled={busy !== ""} onClick={() => void act("/api/memory/distill", { action: "pause" })}>
-                Rest the subconscious
+              {pending.length > 0 ? (
+                <button type="button" disabled={busy !== ""} onClick={() => void act("/api/memory/distill", { action: "consolidate" })}>
+                  Retry pending
+                </button>
+              ) : null}
+              <button
+                type="button"
+                disabled={busy !== ""}
+                onClick={() => void act("/api/memory/distill", { action: paused ? "resume" : "pause" })}
+              >
+                {paused ? "Resume auto-distill" : "Pause auto-distill"}
               </button>
             </div>
-          </section>
-
-          <section>
-            <h2 className="memory-h">Working for you</h2>
-            <p className="memory-stat">{n(status.economy?.packs_served)} memory packs served</p>
-            <p className="memory-stat">{n(status.economy?.tokens_injected)} free tokens injected</p>
-            <p className="memory-stat">{n(status.economy?.fallback_searches)} fallback searches</p>
-            <p className="memory-stat">~{n(status.economy?.tokens_saved)} tokens saved (lower bound)</p>
-          </section>
-
-          <section>
-            <h2 className="memory-h">Health</h2>
-            <div className="memory-bar">
-              <span>Turned into knowledge</span>
-              <b>{knowledgePct.toFixed(1)}%</b>
-              <i style={{ width: `${Math.min(100, knowledgePct)}%` }} />
-            </div>
-            <div className="memory-bar">
-              <span>How connected</span>
-              <b>{connected.toFixed(2)}x</b>
-              <i style={{ width: `${Math.min(100, (connected / 3) * 100)}%` }} />
-            </div>
-            <div className="memory-bar">
-              <span>Cleaned up</span>
-              <b>{cleanedPct.toFixed(1)}%</b>
-              <i style={{ width: `${Math.min(100, cleanedPct)}%` }} />
-            </div>
-          </section>
-
-          <section>
-            <h2 className="memory-h">Live activity</h2>
-            <div className="memory-spark" aria-hidden>
-              {(status.activity ?? []).map((bucket) => (
-                <span key={bucket.day} style={{ height: `${Math.max(8, (bucket.count / peak) * 100)}%` }} />
-              ))}
-            </div>
-            <p className="memory-stat">Moments {n(counts.episodic)}</p>
-            <p className="memory-stat">Knowledge {n(counts.semantic)}</p>
-            <p className="memory-stat">Skills {n(counts.procedural)}</p>
-            <p className="memory-stat">Pinned {n(counts.pins)}</p>
-            <p className="memory-stat">Being forgotten {n(counts.fading)}</p>
-            <p className="memory-stat">Working {n(counts.working)}</p>
           </section>
         </aside>
       </div>

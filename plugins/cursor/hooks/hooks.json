@@ -3,7 +3,7 @@
   "hooks": {
     "sessionStart": [
       {
-        "command": "so coding hook --vendor=cursor --event=sessionStart",
+        "command": "so sessions hook --vendor=cursor --event=sessionStart",
         "timeout": 15000
       },
       {
@@ -13,7 +13,7 @@
     ],
     "sessionEnd": [
       {
-        "command": "so coding hook --vendor=cursor --event=sessionEnd",
+        "command": "so sessions hook --vendor=cursor --event=sessionEnd",
         "timeout": 15000
       },
       {
@@ -27,85 +27,85 @@
     ],
     "beforeSubmitPrompt": [
       {
-        "command": "so coding hook --vendor=cursor --event=beforeSubmitPrompt",
+        "command": "so sessions hook --vendor=cursor --event=beforeSubmitPrompt",
         "timeout": 15000
       }
     ],
     "afterAgentResponse": [
       {
-        "command": "so coding hook --vendor=cursor --event=afterAgentResponse",
+        "command": "so sessions hook --vendor=cursor --event=afterAgentResponse",
         "timeout": 15000
       }
     ],
     "afterAgentThought": [
       {
-        "command": "so coding hook --vendor=cursor --event=afterAgentThought",
+        "command": "so sessions hook --vendor=cursor --event=afterAgentThought",
         "timeout": 15000
       }
     ],
     "preToolUse": [
       {
-        "command": "so coding hook --vendor=cursor --event=preToolUse",
+        "command": "so sessions hook --vendor=cursor --event=preToolUse",
         "timeout": 5000
       }
     ],
     "postToolUse": [
       {
-        "command": "so coding hook --vendor=cursor --event=postToolUse",
+        "command": "so sessions hook --vendor=cursor --event=postToolUse",
         "timeout": 15000
       }
     ],
     "postToolUseFailure": [
       {
-        "command": "so coding hook --vendor=cursor --event=postToolUseFailure",
+        "command": "so sessions hook --vendor=cursor --event=postToolUseFailure",
         "timeout": 15000
       }
     ],
     "subagentStart": [
       {
-        "command": "so coding hook --vendor=cursor --event=subagentStart",
+        "command": "so sessions hook --vendor=cursor --event=subagentStart",
         "timeout": 15000
       }
     ],
     "subagentStop": [
       {
-        "command": "so coding hook --vendor=cursor --event=subagentStop",
+        "command": "so sessions hook --vendor=cursor --event=subagentStop",
         "timeout": 15000
       }
     ],
     "beforeShellExecution": [
       {
-        "command": "so coding hook --vendor=cursor --event=beforeShellExecution",
+        "command": "so sessions hook --vendor=cursor --event=beforeShellExecution",
         "timeout": 15000
       }
     ],
     "afterShellExecution": [
       {
-        "command": "so coding hook --vendor=cursor --event=afterShellExecution",
+        "command": "so sessions hook --vendor=cursor --event=afterShellExecution",
         "timeout": 15000
       }
     ],
     "beforeReadFile": [
       {
-        "command": "so coding hook --vendor=cursor --event=beforeReadFile --kind=read",
+        "command": "so sessions hook --vendor=cursor --event=beforeReadFile --kind=read",
         "timeout": 5000
       }
     ],
     "afterFileEdit": [
       {
-        "command": "so coding hook --vendor=cursor --event=afterFileEdit",
+        "command": "so sessions hook --vendor=cursor --event=afterFileEdit",
         "timeout": 15000
       }
     ],
     "preCompact": [
       {
-        "command": "so coding hook --vendor=cursor --event=preCompact",
+        "command": "so sessions hook --vendor=cursor --event=preCompact",
         "timeout": 15000
       }
     ],
     "stop": [
       {
-        "command": "so coding hook --vendor=cursor --event=stop",
+        "command": "so sessions hook --vendor=cursor --event=stop",
         "timeout": 15000
       }
     ]

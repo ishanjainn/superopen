@@ -1,6 +1,6 @@
 # UI (`so dev`)
 
-Next.js app — Sessions, Memory, Graph map. Release bundle via `scripts/pack-web.sh`.
+Next.js app — Sessions, Memory, Harvest, Graph map. Release bundle via `scripts/pack-web.sh`.
 
 Parent index: [../AGENTS.md](../AGENTS.md). Memory API: [../internal/memory/AGENTS.md](../internal/memory/AGENTS.md).
 

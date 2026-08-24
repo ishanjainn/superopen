@@ -74,6 +74,21 @@ describe("file-backed active sessions", () => {
     expect(spansHaveActivity(spans)).toBe(true);
   });
 
+  it("counts loop.stop and llm.turn with the same turn id as one turn", () => {
+    expect(
+      countTurnsFromSpans([
+        {
+          name: "coding_agent.session.loop.stop",
+          attributes: { "coding_agent.turn.id": "t1" },
+        },
+        {
+          name: "coding_agent.llm.turn",
+          attributes: { "coding_agent.turn.id": "t1" },
+        },
+      ]),
+    ).toBe(1);
+  });
+
   it("still treats lifecycle-only telemetry as empty", () => {
     expect(
       spansHaveActivity([

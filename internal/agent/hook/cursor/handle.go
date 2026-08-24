@@ -719,6 +719,7 @@ func linkCursorSubagentLifecycle(cwd, parentSessionID, vendor string, p cursorPa
 	// Prefer real agent conversation ids over tool-call SubagentIDs.
 	if agentlinks.AllowRegister(p.SubagentID) {
 		_ = agentlinks.Register(sessionsDir, p.SubagentID, parent, vendor, "cursor-subagent")
+		_ = agentlinks.Annotate(sessionsDir, p.SubagentID, firstNonEmpty(p.Task, p.Description, p.Summary))
 	}
 	if p.TranscriptPath != "" {
 		if pathParent, child := agentlinks.ParentFromCursorTranscriptPath(p.TranscriptPath); child != "" {
@@ -726,8 +727,10 @@ func linkCursorSubagentLifecycle(cwd, parentSessionID, vendor string, p cursorPa
 				pathParent = parent
 			}
 			_ = agentlinks.Register(sessionsDir, child, pathParent, vendor, "cursor-transcript-path")
+			_ = agentlinks.Annotate(sessionsDir, child, firstNonEmpty(p.Task, p.Description, p.Summary))
 		} else if child := agentIDFromPath(p.TranscriptPath); child != "" {
 			_ = agentlinks.Register(sessionsDir, child, parent, vendor, "cursor-transcript-path")
+			_ = agentlinks.Annotate(sessionsDir, child, firstNonEmpty(p.Task, p.Description, p.Summary))
 		}
 	}
 }
@@ -754,16 +757,7 @@ func isTaskToolName(name string) bool {
 }
 
 func agentIDFromPath(path string) string {
-	base := path
-	if i := strings.LastIndexAny(path, `/\`); i >= 0 {
-		base = path[i+1:]
-	}
-	base = strings.TrimSuffix(base, ".jsonl")
-	base = strings.TrimPrefix(base, "agent-")
-	if agentlinks.AllowRegister(base) {
-		return base
-	}
-	return ""
+	return agentlinks.ChildIDFromTranscriptPath(path)
 }
 
 func filePathFromCursorTool(p cursorPayload) string {

@@ -15,6 +15,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph/api"
 	"github.com/ishanjainn/superopen/internal/graph/client"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
+	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 )
@@ -314,10 +315,7 @@ func memorySessionIndexText(payload []byte) string {
 		return ""
 	}
 	text := memory.SessionStartIndex(root)
-	if strings.TrimSpace(text) == "" {
-		return ""
-	}
-	return text
+	return harvest.AttachSessionStart(text, root)
 }
 
 func isSessionStartEvent(vendor, ev string) bool {

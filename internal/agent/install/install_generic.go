@@ -115,15 +115,15 @@ func copilotManifest(soBin string) (string, error) {
 	doc := map[string]any{
 		"version": 1,
 		"hooks": map[string]any{
-			"sessionStart":          []any{hook("coding hook --vendor=copilot-cli --event=sessionStart"), hook("graph refresh --detach")},
-			"sessionEnd":            []any{hook("coding hook --vendor=copilot-cli --event=sessionEnd"), hook("sessions finalize --detach"), hook("graph refresh --detach")},
-			"userPromptSubmitted":   []any{hook("coding hook --vendor=copilot-cli --event=userPromptSubmitted")},
-			"userPromptTransformed": []any{hook("coding hook --vendor=copilot-cli --event=userPromptTransformed")},
-			"preToolUse":            []any{hook("coding hook --vendor=copilot-cli --event=preToolUse")},
-			"postToolUse":           []any{hook("coding hook --vendor=copilot-cli --event=postToolUse")},
-			"postToolUseFailure":    []any{hook("coding hook --vendor=copilot-cli --event=postToolUseFailure")},
-			"errorOccurred":         []any{hook("coding hook --vendor=copilot-cli --event=errorOccurred")},
-			"agentStop":             []any{hook("coding hook --vendor=copilot-cli --event=agentStop")},
+			"sessionStart":          []any{hook("sessions hook --vendor=copilot-cli --event=sessionStart"), hook("graph refresh --detach")},
+			"sessionEnd":            []any{hook("sessions hook --vendor=copilot-cli --event=sessionEnd"), hook("sessions finalize --detach"), hook("graph refresh --detach")},
+			"userPromptSubmitted":   []any{hook("sessions hook --vendor=copilot-cli --event=userPromptSubmitted")},
+			"userPromptTransformed": []any{hook("sessions hook --vendor=copilot-cli --event=userPromptTransformed")},
+			"preToolUse":            []any{hook("sessions hook --vendor=copilot-cli --event=preToolUse")},
+			"postToolUse":           []any{hook("sessions hook --vendor=copilot-cli --event=postToolUse")},
+			"postToolUseFailure":    []any{hook("sessions hook --vendor=copilot-cli --event=postToolUseFailure")},
+			"errorOccurred":         []any{hook("sessions hook --vendor=copilot-cli --event=errorOccurred")},
+			"agentStop":             []any{hook("sessions hook --vendor=copilot-cli --event=agentStop")},
 		},
 	}
 	body, err := json.MarshalIndent(doc, "", "  ")
@@ -188,7 +188,7 @@ func installGeminiHooks(path, soBin string) ([]string, error) {
 
 func geminiCommands(soBin string) map[string][]string {
 	command := func(event string) string {
-		return hookCommand(soBin, "coding hook --vendor=gemini --event="+event)
+		return hookCommand(soBin, "sessions hook --vendor=gemini --event="+event)
 	}
 	return map[string][]string{
 		"SessionStart": {command("SessionStart"), hookCommand(soBin, "graph refresh --detach")},
@@ -217,7 +217,7 @@ func stripOwnedGeminiGroups(groups []any) []any {
 		for _, rawEntry := range entries {
 			entry, _ := rawEntry.(map[string]any)
 			command, _ := entry["command"].(string)
-			if strings.Contains(command, "coding hook --vendor=gemini") || strings.Contains(command, "sessions finalize") || strings.Contains(command, "graph refresh") {
+			if strings.Contains(command, "sessions hook --vendor=gemini") || strings.Contains(command, "coding hook --vendor=gemini") || strings.Contains(command, "sessions finalize") || strings.Contains(command, "graph refresh") {
 				continue
 			}
 			kept = append(kept, rawEntry)

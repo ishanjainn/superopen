@@ -161,8 +161,8 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 			out["claude-code"] = e == nil && hookBinaryAvailable(string(data), "cc")
 		case "cursor":
 			data, e := os.ReadFile(filepath.Join(home, ".cursor", "hooks.json"))
-			out["cursor"] = e == nil && (strings.Contains(string(data), "so coding hook --vendor=cursor") ||
-				strings.Contains(string(data), " coding hook --vendor=cursor"))
+			out["cursor"] = e == nil && (strings.Contains(string(data), "sessions hook --vendor=cursor") ||
+				strings.Contains(string(data), "coding hook --vendor=cursor"))
 		case "codex":
 			ok := false
 			if codexDir != "" {
@@ -174,7 +174,8 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 			out["codex"] = ok
 		case "gemini":
 			data, e := os.ReadFile(filepath.Join(home, ".gemini", "settings.json"))
-			out["gemini"] = e == nil && strings.Contains(string(data), "coding hook --vendor=gemini")
+			out["gemini"] = e == nil && (strings.Contains(string(data), "sessions hook --vendor=gemini") ||
+				strings.Contains(string(data), "coding hook --vendor=gemini"))
 		case "opencode":
 			// Host loads ~/.config/opencode/plugins (not ~/.opencode/plugins).
 			base, _ := paths.OpenCodeConfigDir()
@@ -184,7 +185,8 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 			// Copilot CLI: ~/.copilot/hooks (not ~/.github/hooks).
 			base, _ := paths.CopilotHome()
 			data, e := os.ReadFile(filepath.Join(base, "hooks", "superopen.json"))
-			out["copilot-cli"] = e == nil && strings.Contains(string(data), "coding hook --vendor=copilot")
+			out["copilot-cli"] = e == nil && (strings.Contains(string(data), "sessions hook --vendor=copilot") ||
+				strings.Contains(string(data), "coding hook --vendor=copilot"))
 		case "pi":
 			// Host loads ~/.pi/agent/extensions (not ~/.pi/extensions).
 			_, e := os.Stat(filepath.Join(home, ".pi", "agent", "extensions", "superopen", "index.ts"))
@@ -195,8 +197,10 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 }
 
 func hookBinaryAvailable(manifest, vendor string) bool {
-	marker := " coding hook --vendor=" + vendor
-	idx := strings.Index(manifest, marker)
+	idx := strings.Index(manifest, " sessions hook --vendor="+vendor)
+	if idx < 0 {
+		idx = strings.Index(manifest, " coding hook --vendor="+vendor)
+	}
 	if idx < 0 {
 		return false
 	}

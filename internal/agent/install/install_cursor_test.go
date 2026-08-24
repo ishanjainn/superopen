@@ -14,7 +14,7 @@ func TestMergeCursorHooks_FreshInstall(t *testing.T) {
 	template := mustParseHooks(t, `{
 		"version": 1,
 		"hooks": {
-			"sessionStart": [{"command": "so coding hook --vendor=cursor --event=sessionStart", "timeout": 5000}]
+			"sessionStart": [{"command": "so sessions hook --vendor=cursor --event=sessionStart", "timeout": 5000}]
 		}
 	}`)
 
@@ -41,7 +41,7 @@ func TestMergeCursorHooks_PreservesUnrelatedEntries(t *testing.T) {
 	template := mustParseHooks(t, `{
 		"version": 1,
 		"hooks": {
-			"sessionStart": [{"command": "so coding hook --vendor=cursor --event=sessionStart"}]
+			"sessionStart": [{"command": "so sessions hook --vendor=cursor --event=sessionStart"}]
 		}
 	}`)
 
@@ -58,7 +58,7 @@ func TestMergeCursorHooks_PreservesUnrelatedEntries(t *testing.T) {
 	if cmds[0] != "other-tool" {
 		t.Fatalf("existing entry should come first; got order %v", cmds)
 	}
-	if !strings.Contains(cmds[1], "so coding hook") {
+	if !strings.Contains(cmds[1], "so sessions hook") {
 		t.Fatalf("our entry should come second; got %q", cmds[1])
 	}
 }
@@ -70,7 +70,7 @@ func TestMergeCursorHooks_Idempotent(t *testing.T) {
 	template := mustParseHooks(t, `{
 		"version": 1,
 		"hooks": {
-			"sessionStart": [{"command": "so coding hook --vendor=cursor --event=sessionStart"}]
+			"sessionStart": [{"command": "so sessions hook --vendor=cursor --event=sessionStart"}]
 		}
 	}`)
 
@@ -93,7 +93,7 @@ func TestMergeCursorHooks_PreservesExtraTopLevelKeys(t *testing.T) {
 	template := mustParseHooks(t, `{
 		"version": 1,
 		"hooks": {
-			"sessionStart": [{"command": "so coding hook --vendor=cursor --event=sessionStart"}]
+			"sessionStart": [{"command": "so sessions hook --vendor=cursor --event=sessionStart"}]
 		}
 	}`)
 
@@ -117,9 +117,9 @@ func TestIsOurHookEntry(t *testing.T) {
 		body string
 		want bool
 	}{
-		{`{"command": "so coding hook --vendor=cursor --event=sessionStart"}`, true},
-		{`{"command": "/Users/me/.superopen/bin/so coding hook --vendor=cursor --event=sessionEnd", "timeout": 5000}`, true},
-		{`{"command": "/usr/local/bin/so coding hook --vendor=claude-code --event=sessionStart"}`, false},
+		{`{"command": "so sessions hook --vendor=cursor --event=sessionStart"}`, true},
+		{`{"command": "/Users/me/.superopen/bin/so sessions hook --vendor=cursor --event=sessionEnd", "timeout": 5000}`, true},
+		{`{"command": "/usr/local/bin/so sessions hook --vendor=claude-code --event=sessionStart"}`, false},
 		{`{"command": "other-tool"}`, false},
 		{`{}`, false},
 		{`"raw string entry"`, false},

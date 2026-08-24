@@ -62,9 +62,9 @@ export async function soJSON<T = unknown>(
   const raw = Buffer.concat(chunks).toString("utf8").trim();
   const stderr = Buffer.concat(errChunks).toString("utf8").trim();
   if (!raw) {
-    // A failing `so` command writes its envelope to stderr and leaves stdout
-    // empty. Parse it so callers see the engine's error code rather than an
-    // opaque wrapper string with JSON embedded in it.
+    // Structured CLI errors go to stdout. If stdout is empty, try stderr
+    // (debug logs or an older binary). Parse it so callers see the engine's
+    // error rather than an opaque wrapper.
     const envelope = parseEnvelope<T>(stderr);
     if (envelope) return envelope;
     return {

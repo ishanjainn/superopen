@@ -18,6 +18,7 @@ type SearchFilter struct {
 	RecordEconomy bool
 	AsOf          string
 	ChangedSince  string
+	Horizon       string
 }
 
 func (s *Store) Search(filter SearchFilter) ([]Hit, error) {
@@ -47,6 +48,10 @@ func (s *Store) Search(filter SearchFilter) ([]Hit, error) {
 	if filter.Kind != "" {
 		where = append(where, "kind=?")
 		args = append(args, filter.Kind)
+	}
+	if h := NormalizeHorizon(filter.Horizon); h != "" {
+		where = append(where, "horizon=?")
+		args = append(args, h)
 	}
 	if typ := strings.TrimSpace(filter.Type); typ != "" {
 		where = append(where, "(topic=? OR kind=?)")

@@ -10,6 +10,12 @@ import (
 
 func (s *Store) Capture(in CaptureInput) (Episode, error) {
 	in.Kind = strings.TrimSpace(in.Kind)
+	switch strings.ToLower(in.Kind) {
+	case "knowledge":
+		in.Kind = KindSession
+	case "skill":
+		in.Kind = KindTeaching
+	}
 	if in.Kind == "" {
 		in.Kind = KindSession
 	}
@@ -30,20 +36,22 @@ func (s *Store) Capture(in CaptureInput) (Episode, error) {
 	}
 	text = clipCapture(text)
 	ep := Episode{
-		UID:       episodeUID(in.SessionID, "", in.Kind+"|"+in.Source, title+"\n"+text+"|"+nowRFC()),
-		SessionID: in.SessionID,
-		Kind:      in.Kind,
-		Source:    in.Source,
-		Title:     title,
-		Text:      text,
-		Files:     normalizeFiles(in.Files),
-		ToolName:  in.ToolName,
-		Pinned:    in.Pin,
-		Tokens:    EstimateTokens(title + " " + text),
-		Topic:     strings.TrimSpace(in.Topic),
-		Facts:     in.Facts,
-		Narrative: strings.TrimSpace(in.Narrative),
-		Concepts:  in.Concepts,
+		UID:              episodeUID(in.SessionID, "", in.Kind+"|"+in.Source, title+"\n"+text+"|"+nowRFC()),
+		SessionID:        in.SessionID,
+		Kind:             in.Kind,
+		Source:           in.Source,
+		Title:            title,
+		Text:             text,
+		Files:            normalizeFiles(in.Files),
+		ToolName:         in.ToolName,
+		Pinned:           in.Pin,
+		Tokens:           EstimateTokens(title + " " + text),
+		Topic:            strings.TrimSpace(in.Topic),
+		Facts:            in.Facts,
+		Narrative:        strings.TrimSpace(in.Narrative),
+		Concepts:         in.Concepts,
+		Horizon:          in.Horizon,
+		KeepUntilSession: in.KeepUntilSession,
 	}
 	id, _, err := s.storeEpisode(ep)
 	if err != nil {
@@ -52,21 +60,6 @@ func (s *Store) Capture(in CaptureInput) (Episode, error) {
 	if in.ContradictOf > 0 {
 		if err := s.contradict(id, in.ContradictOf); err != nil {
 			return Episode{}, err
-		}
-	} else if in.Kind == KindSession && in.SessionID != "" {
-		rows, err := s.db.Query(`SELECT id FROM memory_episodes WHERE session_id=? AND kind=? AND id!=? AND faded=0 ORDER BY id`, in.SessionID, KindSession, id)
-		if err == nil {
-			var oldIDs []int64
-			for rows.Next() {
-				var old int64
-				if rows.Scan(&old) == nil {
-					oldIDs = append(oldIDs, old)
-				}
-			}
-			_ = rows.Close()
-			for _, old := range oldIDs {
-				_ = s.contradict(id, old)
-			}
 		}
 	}
 	got, err := s.Get(id)

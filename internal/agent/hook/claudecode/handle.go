@@ -48,6 +48,9 @@ type claudePayload struct {
 	// at https://code.claude.com/docs/en/hooks#subagentstop-input.
 	SubagentType string `json:"subagent_type"`
 	TaskID       string `json:"task_id"`
+	Task         string `json:"task"`
+	Description  string `json:"description"`
+	Summary      string `json:"summary"`
 }
 
 // handle is the per-invocation entry point. Claude Code passes events
@@ -193,7 +196,19 @@ func handle(ctx context.Context, in normalize.Input) error {
 			}
 		}
 		if p.TaskID != "" && p.SessionID != "" {
-			_ = agentlinks.Register(agentlinks.SessionsDir(p.CWD), p.TaskID, p.SessionID, in.Vendor, "claude-subagent-stop")
+			sessionsDir := agentlinks.SessionsDir(p.CWD)
+			_ = agentlinks.Register(sessionsDir, p.TaskID, p.SessionID, in.Vendor, "claude-subagent-stop")
+			title := strings.TrimSpace(p.Task)
+			if title == "" {
+				title = strings.TrimSpace(p.Description)
+			}
+			if title == "" {
+				title = strings.TrimSpace(p.Summary)
+			}
+			if title == "" {
+				title = strings.TrimSpace(p.SubagentType)
+			}
+			_ = agentlinks.Annotate(sessionsDir, p.TaskID, title)
 		}
 		return in.Emit.EmitSubagent(normalize.Subagent{
 			SessionID:            p.SessionID,

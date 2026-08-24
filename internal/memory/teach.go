@@ -136,11 +136,12 @@ func (s *Store) studyText(title, text string, files []string) (TeachReport, erro
 			label = title + " (" + itoa(i+1) + ")"
 		}
 		ep, err := s.Capture(CaptureInput{
-			Kind:   KindTeaching,
-			Source: SourceTeach,
-			Title:  label,
-			Text:   chunk,
-			Files:  files,
+			Kind:    KindTeaching,
+			Source:  SourceTeach,
+			Title:   label,
+			Text:    chunk,
+			Files:   files,
+			Horizon: HorizonLong,
 		})
 		if err != nil {
 			continue

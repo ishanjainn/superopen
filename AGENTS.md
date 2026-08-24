@@ -14,6 +14,7 @@
 | Graph engine | [internal/graph/AGENTS.md](internal/graph/AGENTS.md) |
 | CLI | [cmd/so/AGENTS.md](cmd/so/AGENTS.md) (+ `internal/cli/`) |
 | Memory | [internal/memory/AGENTS.md](internal/memory/AGENTS.md) |
+| Harvest | [internal/harvest/AGENTS.md](internal/harvest/AGENTS.md) |
 | Agent harness | [internal/agent/AGENTS.md](internal/agent/AGENTS.md) |
 | UI | [web/AGENTS.md](web/AGENTS.md) |
 | Tests & eval | [scripts/AGENTS.md](scripts/AGENTS.md) |
@@ -30,7 +31,7 @@ There is no repo-local `.cursor/rules` tree. Cursor still loads user-level `~/.c
 ## Principles
 
 1. **Effective, cheap, accurate** graph agent UX — [internal/graph/AGENTS.md](internal/graph/AGENTS.md)
-2. **AXI CLI** with text-first / query-first divergences — [cmd/so/AGENTS.md](cmd/so/AGENTS.md)
+2. **CLI** — graphify compact for `so graph *`; axi.md TOON/dashboards for memory and sessions — [cmd/so/AGENTS.md](cmd/so/AGENTS.md)
 3. **Minimal diffs** — match local style
 4. **No vendor names** in product or contributor copy
 

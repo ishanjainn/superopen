@@ -1,8 +1,14 @@
 package hook
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/session"
 )
 
 func TestPeekContextUsesWorkspaceRootsOnlyWhenCwdMissing(t *testing.T) {
@@ -212,10 +218,22 @@ func TestShouldFinalizeOnlySessionEnd(t *testing.T) {
 	if !shouldFinalize("sessionEnd") || !shouldFinalize("SessionEnd") {
 		t.Fatal("sessionEnd/SessionEnd must finalize")
 	}
-	for _, ev := range []string{"stop", "Stop", "sessionStart", "SessionStart", "beforeSubmitPrompt", "UserPromptSubmit"} {
+	if !shouldFinalize("session.end") || !shouldFinalize("session.deleted") {
+		t.Fatal("OpenCode session close must finalize")
+	}
+	if !shouldFinalize("session_shutdown") || !shouldFinalize("agent_end") {
+		t.Fatal("Pi session close must finalize")
+	}
+	for _, ev := range []string{"stop", "Stop", "sessionStart", "SessionStart", "beforeSubmitPrompt", "UserPromptSubmit", "subagentStop", "SubagentStop"} {
 		if shouldFinalize(ev) {
-			t.Fatalf("%s must not finalize", ev)
+			t.Fatalf("%s must not finalize parent", ev)
 		}
+	}
+	if !shouldFinalizeNested("subagentStop") || !shouldFinalizeNested("SubagentStop") {
+		t.Fatal("subagentStop must finalize nested")
+	}
+	if shouldFinalizeNested("sessionEnd") || shouldFinalizeNested("Stop") {
+		t.Fatal("sessionEnd/Stop must not use nested finalize")
 	}
 }
 
@@ -233,5 +251,95 @@ func TestShouldIngestPromptNotStop(t *testing.T) {
 	}
 	if shouldIngestBackfill("stop") {
 		t.Fatal("stop must not backfill")
+	}
+}
+
+func TestNestedChildSessionIDSkipsParent(t *testing.T) {
+	parent := "aaaaaaaa-1111-2222-3333-444444444444"
+	child := "bbbbbbbb-1111-2222-3333-444444444444"
+	payload, _ := json.Marshal(map[string]any{
+		"conversation_id": parent,
+		"subagent_id":     child,
+	})
+	if got := nestedChildSessionID(payload); got != child {
+		t.Fatalf("nestedChildSessionID=%q want %q", got, child)
+	}
+	self, _ := json.Marshal(map[string]any{
+		"conversation_id": parent,
+		"subagent_id":     parent,
+	})
+	if got := nestedChildSessionID(self); got != "" {
+		t.Fatalf("self subagent_id must skip, got %q", got)
+	}
+}
+
+func TestMaybeFinalizeNestedSpawnsChildNotParent(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".so"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parent := "aaaaaaaa-1111-2222-3333-444444444444"
+	child := "bbbbbbbb-1111-2222-3333-444444444444"
+	payload, _ := json.Marshal(map[string]any{
+		"cwd":             root,
+		"conversation_id": parent,
+		"subagent_id":     child,
+	})
+	var got []string
+	prev := spawnSessionFinalize
+	spawnSessionFinalize = func(_, id string) { got = append(got, id) }
+	t.Cleanup(func() { spawnSessionFinalize = prev })
+
+	maybeFinalizeNested("subagentStop", payload)
+	if len(got) != 1 || got[0] != child {
+		t.Fatalf("finalize ids=%v want [%s]", got, child)
+	}
+	maybeFinalizeNested("Stop", payload)
+	if len(got) != 1 {
+		t.Fatalf("Stop must not nested-finalize, got %v", got)
+	}
+}
+
+func TestMaybeFinalizeSessionCascadesActiveChildren(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	layout := paths.Resolve(root)
+	if err := layout.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	store := session.NewStore(layout)
+	parent := "parent-chat"
+	child := "child-chat"
+	now := time.Now().UTC()
+	if err := store.Start(session.Meta{ID: parent, Vendor: "cursor", Status: session.StatusActive, StartedAt: now, PromptPreview: "parent"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Start(session.Meta{
+		ID: child, Vendor: "cursor", Status: session.StatusActive, StartedAt: now,
+		ParentID: parent, IsSubagent: true, PromptPreview: "child work",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"cwd":             root,
+		"conversation_id": parent,
+	})
+	var got []string
+	prev := spawnSessionFinalize
+	spawnSessionFinalize = func(_, id string) { got = append(got, id) }
+	t.Cleanup(func() { spawnSessionFinalize = prev })
+
+	maybeFinalizeSession("sessionEnd", payload)
+	want := map[string]bool{parent: false, child: false}
+	for _, id := range got {
+		want[id] = true
+	}
+	if !want[parent] || !want[child] {
+		t.Fatalf("finalize ids=%v want parent+child", got)
 	}
 }

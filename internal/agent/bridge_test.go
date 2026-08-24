@@ -15,7 +15,7 @@ func writeClaudeManifest(t *testing.T, home, soBin string) {
 		t.Fatal(err)
 	}
 	body := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"` +
-		soBin + ` coding hook --vendor=cc --event=SessionStart","timeout":5}]}]}}`
+		soBin + ` sessions hook --vendor=cc --event=SessionStart","timeout":5}]}]}}`
 	if err := os.WriteFile(filepath.Join(dir, "hooks.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

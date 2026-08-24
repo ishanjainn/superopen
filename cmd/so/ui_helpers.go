@@ -10,35 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/spf13/cobra"
 )
-
-func cmdOpen() *cobra.Command {
-	return &cobra.Command{
-		Use:   "open [sessions|graph]",
-		Short: "Open the local Superopen UI",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			path := "/graph"
-			if len(args) == 1 {
-				selected := strings.Trim(strings.TrimSpace(args[0]), "/")
-				if selected != "sessions" && selected != "graph" {
-					return fmt.Errorf("open supports sessions or graph")
-				}
-				path = "/" + selected
-			}
-			url := "http://127.0.0.1:4444" + path
-			client := &http.Client{Timeout: 800 * time.Millisecond}
-			response, err := client.Get("http://127.0.0.1:4444/api/meta")
-			if err != nil {
-				return fmt.Errorf("UI not reachable; run `so dev` first: %w", err)
-			}
-			_ = response.Body.Close()
-			return openBrowser(url)
-		},
-	}
-}
 
 func openBrowser(url string) error {
 	var command *exec.Cmd

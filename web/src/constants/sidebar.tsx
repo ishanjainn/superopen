@@ -1,6 +1,7 @@
 import { Settings } from "lucide-react";
 import {
   GraphIcon,
+  HarvestIcon,
   MemoryIcon,
   SessionsIcon,
 } from "@/components/shell/nav-icons";
@@ -25,6 +26,12 @@ export const SIDEBAR_ITEMS: SidebarItemProps[] = [
     icon: <MemoryIcon className={ICON_CLASSES} />,
     text: "Memory",
     link: "/memory",
+    type: "action",
+  },
+  {
+    icon: <HarvestIcon className={ICON_CLASSES} />,
+    text: "Harvest",
+    link: "/harvest",
     type: "action",
   },
   {
