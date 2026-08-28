@@ -6,5 +6,5 @@ alwaysApply: false
 
 Read @cmd/so/AGENTS.md before changing commands, flags, exit codes, or default output shape.
 
-Graph success is **graphify compact** `NODE`/`EDGE`. Memory and sessions are **axi.md** TOON + dashboards + `help[]`. `so sessions hook` is Hidden host argv: stdout is host JSON, never AXI.
+Graph success is compact `NODE`/`EDGE`. Memory and sessions are **axi.md** TOON + dashboards + `help[]`. `so sessions hook` is Hidden host argv: stdout is host JSON, never AXI.
 

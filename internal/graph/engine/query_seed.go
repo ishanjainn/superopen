@@ -41,6 +41,18 @@ var queryStopwords = map[string]struct{}{
 	"trace": {}, "path": {}, "configure": {}, "load": {}, "register": {},
 }
 
+// Grammatical words skipped when ranking already-seeded neighbors by
+// question overlap. Seed stopwords still drop verbs like register so FTS
+// does not seed every Register*; neighbor ranking should keep those verbs.
+var queryOverlapSkip = map[string]struct{}{
+	"does": {}, "did": {}, "how": {}, "what": {}, "when": {}, "where": {}, "which": {},
+	"that": {}, "this": {}, "these": {}, "those": {}, "with": {}, "from": {}, "into": {},
+	"onto": {}, "about": {}, "them": {}, "they": {}, "their": {}, "have": {}, "been": {},
+	"were": {}, "will": {}, "than": {}, "then": {}, "also": {}, "just": {}, "only": {},
+	"more": {}, "some": {}, "such": {}, "each": {}, "both": {}, "please": {}, "explain": {},
+	"show": {}, "tell": {}, "work": {}, "works": {}, "working": {},
+}
+
 type seedCandidate struct {
 	node   api.Node
 	score  float64
@@ -97,6 +109,26 @@ func queryTerms(question string, extra []string) []string {
 	return content
 }
 
+func queryOverlapTerms(question string, extra []string) []string {
+	raw := strings.ToLower(strings.TrimSpace(question + " " + strings.Join(extra, " ")))
+	var out []string
+	seen := map[string]struct{}{}
+	for _, tok := range queryWordToken.FindAllString(raw, -1) {
+		if len(tok) < 4 {
+			continue
+		}
+		if _, skip := queryOverlapSkip[tok]; skip {
+			continue
+		}
+		if _, ok := seen[tok]; ok {
+			continue
+		}
+		seen[tok] = struct{}{}
+		out = append(out, tok)
+	}
+	return out
+}
+
 func queryNodeDisplayName(n api.Node) string {
 	if n.Label != "File" && n.Label != "Folder" {
 		return n.Name
@@ -132,6 +164,33 @@ func (s *Store) querySeedCandidates(ctx context.Context, project, question strin
 			}
 			seen[match.ID] = true
 			nodes = append(nodes, match.Node)
+		}
+		for _, name := range queryProperNames(question) {
+			named, err := s.Search(ctx, api.SearchRequest{Project: project, Query: name, Limit: 12})
+			if err != nil {
+				return nil, err
+			}
+			for _, match := range named.Matches {
+				if seen[match.ID] {
+					continue
+				}
+				seen[match.ID] = true
+				nodes = append(nodes, match.Node)
+			}
+			// FTS boosts Method/Function over Class, so a CamelCase name in
+			// the question can be buried (QuerySet class vs queryset method).
+			// Exact-name lookup is language-general and cheap.
+			exact, err := s.findNodes(ctx, project, name, 16)
+			if err != nil {
+				return nil, err
+			}
+			for _, node := range exact {
+				if seen[node.ID] || isSyntheticQueryFile(node.Location.File) {
+					continue
+				}
+				seen[node.ID] = true
+				nodes = append(nodes, node)
+			}
 		}
 	}
 	degree, err := s.nodeDegrees(ctx, project)
@@ -170,7 +229,7 @@ func computeIDF(candidates []seedCandidate, terms []string) map[string]float64 {
 	return idf
 }
 
-func scoreQuerySeeds(candidates []seedCandidate, terms []string) querySeedResult {
+func scoreQuerySeeds(candidates []seedCandidate, terms []string, question string) querySeedResult {
 	if len(candidates) == 0 || len(terms) == 0 {
 		return querySeedResult{}
 	}
@@ -188,6 +247,8 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string) querySeedResult
 	if len(normTerms) == 0 {
 		return querySeedResult{}
 	}
+	idents := queryIdentifierLower(question, terms)
+	hasDotted := queryHasDottedQualifier(question, terms)
 	idf := computeIDF(candidates, normTerms)
 	joined := strings.Join(normTerms, " ")
 	joinedW := 1.0
@@ -244,7 +305,7 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string) querySeedResult
 			if t == normLabel || t == bareLabel {
 				tierValue = exactMatchBonus * w
 				matched++
-			} else if strings.HasPrefix(normLabel, t) || strings.HasPrefix(bareLabel, t) {
+			} else if idents[t] && (strings.HasPrefix(normLabel, t) || strings.HasPrefix(bareLabel, t)) {
 				tierValue = prefixMatchBonus * w
 				matched++
 			} else if strings.Contains(normLabel, t) || strings.Contains(qnLower, t) {
@@ -261,11 +322,17 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string) querySeedResult
 			singleton := 0.0
 			if t == normLabel || t == bareLabel || t == labelTokens || strings.HasSuffix(qnLower, "."+t) {
 				singleton = exactMatchBonus * 10 * w
-			} else if strings.HasPrefix(normLabel, t) || strings.HasPrefix(bareLabel, t) || strings.HasPrefix(labelTokens, t) {
+			} else if idents[t] && (strings.HasPrefix(normLabel, t) || strings.HasPrefix(bareLabel, t) || strings.HasPrefix(labelTokens, t)) {
 				singleton = prefixMatchBonus * 10 * w
 			}
-			singleton += tierValue + substrValue + sourceValue
-			if singleton > 0 {
+			singleton += tierValue + sourceValue
+			// Substring-only matches must not claim a term (class → test_*_class).
+			// Property/Attribute name collisions (django field vs django module)
+			// must not claim a bare word unless the question used a dotted qualifier.
+			if singleton > 0 && (tierValue > 0 || strings.HasSuffix(qnLower, "."+t) || t == labelTokens) {
+				if queryWeakLabel(cand.node.Label) && !hasDotted {
+					continue
+				}
 				cur, ok := bestByTerm[t]
 				better := !ok || singleton > cur.score ||
 					(singleton == cur.score && cand.degree > cur.cand.degree) ||
@@ -284,6 +351,30 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string) querySeedResult
 			if score > 0 {
 				score += 0.01
 			}
+		}
+		for _, name := range queryProperNames(question) {
+			if cand.node.Name == name || strings.HasSuffix(cand.node.QualifiedName, "."+name) {
+				score += exactMatchBonus * 25
+				switch cand.node.Label {
+				case "Class", "Interface", "Struct", "Enum", "Type":
+					score += exactMatchBonus * 8
+				}
+			}
+		}
+		if score > 0 && queryWeakLabel(cand.node.Label) && !hasDotted {
+			exactName := false
+			for _, t := range normTerms {
+				if t == normLabel || t == bareLabel {
+					exactName = true
+					break
+				}
+			}
+			if exactName {
+				score *= 0.02
+			}
+		}
+		if score > 0 && queryNodeLooksLikeTest(cand.node) && !queryMentionsTests(question, terms) {
+			score *= 0.05
 		}
 		if score > 0 {
 			ranked = append(ranked, scored{cand: cand, score: score})
@@ -409,6 +500,132 @@ func (s *Store) nodeDegrees(ctx context.Context, project string) (map[int64]int,
 		degree[id] += count
 	}
 	return degree, degRows.Err()
+}
+
+func queryProperNames(question string) []string {
+	var out []string
+	seen := map[string]struct{}{}
+	add := func(tok string) {
+		tok = strings.Trim(tok, `"'`+"`.,:;!?()[]{}")
+		if len(tok) < 3 {
+			return
+		}
+		key := strings.ToLower(tok)
+		if _, stop := queryStopwords[key]; stop {
+			return
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, tok)
+	}
+	for _, piece := range strings.Fields(question) {
+		clean := strings.Trim(piece, `"'`+"`")
+		if strings.Contains(clean, ".") && queryWordToken.MatchString(clean) {
+			add(clean)
+		}
+		for _, tok := range queryWordToken.FindAllString(clean, -1) {
+			if queryLooksProper(tok) {
+				add(tok)
+			}
+		}
+	}
+	return out
+}
+
+func queryIdentifierLower(question string, terms []string) map[string]bool {
+	out := map[string]bool{}
+	for _, name := range queryProperNames(question) {
+		out[strings.ToLower(name)] = true
+	}
+	for _, t := range terms {
+		tl := strings.ToLower(strings.TrimSpace(t))
+		if tl == "" {
+			continue
+		}
+		if strings.Contains(tl, "_") || strings.Contains(tl, ".") {
+			out[tl] = true
+		}
+	}
+	return out
+}
+
+func queryHasDottedQualifier(question string, terms []string) bool {
+	for _, t := range terms {
+		if strings.Contains(t, ".") {
+			return true
+		}
+	}
+	for _, piece := range strings.Fields(question) {
+		clean := strings.Trim(piece, `"'`+"`.,:;!?()[]{}")
+		if strings.Contains(clean, ".") && queryWordToken.MatchString(clean) {
+			return true
+		}
+	}
+	return false
+}
+
+func queryWeakLabel(label string) bool {
+	switch label {
+	case "Property", "Attribute", "Field", "Variable":
+		return true
+	default:
+		return false
+	}
+}
+
+func queryLooksProper(tok string) bool {
+	if len(tok) < 3 {
+		return false
+	}
+	upper, lower := 0, 0
+	for _, r := range tok {
+		if unicode.IsUpper(r) {
+			upper++
+		}
+		if unicode.IsLower(r) {
+			lower++
+		}
+	}
+	if upper == 0 {
+		return false
+	}
+	// CamelCase, initial-cap identifiers, or ALLCAPS acronyms of length >= 3.
+	return upper >= 2 || (unicode.IsUpper([]rune(tok)[0]) && lower > 0)
+}
+
+func queryMentionsTests(question string, terms []string) bool {
+	for _, t := range terms {
+		switch t {
+		case "test", "tests", "testing", "spec", "specs", "fixture", "fixtures":
+			return true
+		}
+	}
+	q := strings.ToLower(question)
+	for _, w := range []string{" test ", " tests ", " spec ", " fixture "} {
+		if strings.Contains(" "+q+" ", w) {
+			return true
+		}
+	}
+	return false
+}
+
+func queryNodeLooksLikeTest(n api.Node) bool {
+	if isTestPath(n.Location.File) || isTestFunctionName(n.Name) || isTestQualifiedName(n.QualifiedName) {
+		return true
+	}
+	if n.Properties != nil {
+		switch v := n.Properties["is_test"].(type) {
+		case bool:
+			return v
+		case float64:
+			return v != 0
+		case int:
+			return v != 0
+		}
+	}
+	return false
 }
 
 func lastDotted(value string) string {

@@ -8,3 +8,4 @@ Read @internal/agent/AGENTS.md — contributor docs vs installed user skill.
 
 Do not re-enable ExploreAugment on Grep/Read without explicit product approval.
 `so sessions hook` stdout is host control JSON, never AXI TOON/`help[]`.
+Steer agents to invoke `so` with Bash. Do not add MCP, plugin tools, or a `so` tool schema.

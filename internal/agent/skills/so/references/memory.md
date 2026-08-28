@@ -1,23 +1,36 @@
 # Superopen memory (prior work)
 
-Load this only when the user asks about prior decisions in **this** repo, or
-when a SessionStart index named an id you need. Skip on a cold clone.
+Load this only when the user asks about prior decisions or personal facts in
+**this** workspace, or when a SessionStart line named memories you need.
+Skip on a cold clone with no diary.
 
-Memory is hints, not authority. It never replaces `so graph query` for current
-code. Graph answers “where is X now”; memory answers “what did we decide.”
+Memory is hints, not authority. Superopen is a **CLI binary** — invoke it with
+**Bash**. The `.so/` store is your own notes from past sessions in this workspace.
+Do not use the host's built-in memory or `MEMORY.md` for these facts. Graph answers “where is X now”;
+memory answers “what did we decide / what was saved.”
 Do not dump `.so/sessions/*/events.jsonl`.
 
 `__SO_BIN__` is the binary from `SKILL.md`. Search/last/timeline default to an
-AXI TOON index. `--json` is the envelope. `--full` skips truncation.
-`so memory` with no args is a live dashboard; `--help` is the catalog.
+AXI TOON **title index** (no bodies). `--json` is the envelope. `--full` skips
+truncation. `so memory` with no args is a live dashboard; `--help` is the catalog.
 
 ## 3-layer workflow
 
-Start with **one** `so memory recall "<cue>"` or **one** `so memory search "<cue>"`.
-Do not spray searches, do not use `--help` as a workflow, and do not run `so graph search`.
-Never fetch bodies until titles have filtered the set.
+Start with **one** recall via Bash. Do not spray searches, do not use `--help`
+as a workflow, and do not run `so graph search`.
 
-### 1. Search — index only
+### 0. Recall — bodies (the agent command)
+
+```bash
+__SO_BIN__ memory recall "<cue>"
+__SO_BIN__ memory recall "<cue>" --structural
+```
+
+Use this first for “who is…”, “what did I…”, “what did we decide…”.
+A populated store with no lexical hit still has memories — try different terms.
+`hint:` on stdout distinguishes empty store vs no match vs sealed index.
+
+### 1. Search — index only (titles, not bodies)
 
 ```bash
 __SO_BIN__ memory search "<cue>"
@@ -36,6 +49,7 @@ help[2]:
   so memory timeline --around 12
 ```
 
+`0 memories` from search means **no title matched**, not that the store is empty.
 Types: `decision|bugfix|feature|refactor|discovery|change` (plus kinds
 `prompt|session|teaching|working`).
 
@@ -53,18 +67,9 @@ Same TOON index as search.
 __SO_BIN__ memory get <id> [<id>…]
 ```
 
-Body is truncated unless `--full`. After get, run `so graph query` /
-`so graph snippet` on files named in the episode (`src=` / `path:`). Never
-answer “we decided” from `learned:` alone. Memory is hints, not authority.
-
-## On-demand recall
-
-Mid-session foresight is a CLI pull, not a hook:
-
-```bash
-__SO_BIN__ memory recall "<cue>"              # budgeted pack + anti-hits
-__SO_BIN__ memory recall "<cue>" --structural # shape/HD path
-```
+Body is truncated unless `--full`. After get, run graph query / snippet on
+files named in the episode (`src=` / `path:`) when the question is about
+**code**. Never answer “we decided” from `learned:` alone.
 
 ## Write path
 
@@ -97,6 +102,7 @@ Do not expect a PreToolUse file-read inject.
 
 ## Empty / missing
 
-`0 memories` means none matched — ask a different cue or `so graph query`.
+`0 memories` + `hint: no saved memories` means the store is empty.
+`0 memories` + `hint: N memories exist` means the cue missed — run recall.
 Windows: the installed binary is `so.exe`; this skill already substituted
 `__SO_BIN__`.

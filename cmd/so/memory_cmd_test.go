@@ -348,3 +348,52 @@ func TestMemoryForgetHidesAXI(t *testing.T) {
 		t.Fatalf("exit=%d want not-found, err=%v", cli.ExitCode(err), err)
 	}
 }
+
+func TestMemoryRecallPrintsBodySearchDoesNot(t *testing.T) {
+	root := t.TempDir()
+	if err := paths.Resolve(root).EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := memory.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := "UNIQUE_RECALL_BODY_keep_this_fact_in_sqlite"
+	if _, err := store.Capture(memory.CaptureInput{Kind: memory.KindSession, Title: "login timeout is 30s", Text: body}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	cliFlags.Root = root
+	cliFlags.JSON = false
+	t.Cleanup(func() { cliFlags.Root = ""; cliFlags.JSON = false })
+
+	var recallOut bytes.Buffer
+	recallStdout := captureStdout(t, func() {
+		cmd := newRootCommand()
+		cmd.SetOut(&recallOut)
+		cmd.SetErr(io.Discard)
+		cmd.SetArgs([]string{"--root", root, "memory", "recall", "login timeout sqlite"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	recall := recallStdout + recallOut.String()
+	if !strings.Contains(recall, body) {
+		t.Fatalf("recall must print clipped bodies, got %q", recall)
+	}
+
+	var searchOut bytes.Buffer
+	searchStdout := captureStdout(t, func() {
+		cmd := newRootCommand()
+		cmd.SetOut(&searchOut)
+		cmd.SetErr(io.Discard)
+		cmd.SetArgs([]string{"--root", root, "memory", "search", "login timeout sqlite"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	search := searchStdout + searchOut.String()
+	if strings.Contains(search, body) {
+		t.Fatalf("search must stay title-only, leaked body: %q", search)
+	}
+}

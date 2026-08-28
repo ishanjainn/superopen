@@ -473,11 +473,12 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 	maxChars := budget * queryCharsPerToken
 
 	terms := queryTerms(req.Question, req.Terms)
+	overlap := queryOverlapTerms(req.Question, req.Terms)
 	candidates, err := s.querySeedCandidates(ctx, req.Project, req.Question, terms)
 	if err != nil {
 		return api.QueryResult{}, err
 	}
-	seeded := scoreQuerySeeds(candidates, terms)
+	seeded := scoreQuerySeeds(candidates, terms, req.Question)
 	if len(seeded.seeds) == 0 {
 		return api.QueryResult{
 			Text:   "No matching nodes found.",
@@ -485,7 +486,6 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 		}, nil
 	}
 
-	communityByID, _ := s.communityLabelByNodeID(ctx, req.Project)
 	degrees, err := s.nodeDegrees(ctx, req.Project)
 	if err != nil {
 		return api.QueryResult{}, err
@@ -516,35 +516,51 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 		expand = expand[:seedMaxK]
 	}
 
-	edgeLines, err := s.queryExpandBFS(ctx, expand, seedIDs, depth, degrees, nodesByID, seenEdges, &result.Edges)
+	edgeLines, err := s.queryExpandBFS(ctx, expand, seedIDs, depth, degrees, nodesByID, seenEdges, &result.Edges, overlap)
 	if err != nil {
 		return api.QueryResult{}, err
 	}
 
-	orderedNodes := orderQueryNodes(seedOrder, nodesByID)
+	orderedAll := s.spliceWideTypeMethods(ctx, orderQueryNodes(seedOrder, nodesByID, overlap), overlap)
+	reachable := len(orderedAll)
+	orderedNodes := orderedAll
+	foundNodes := reachable
+	rowCapped := foundNodes > queryMaxNodeRows
+	if rowCapped {
+		orderedNodes = orderedNodes[:queryMaxNodeRows]
+	}
+	if len(edgeLines) > queryMaxEdgeRows {
+		edgeLines = edgeLines[:queryMaxEdgeRows]
+		rowCapped = true
+	}
+	if len(result.Edges) > queryMaxEdgeRows {
+		result.Edges = result.Edges[:queryMaxEdgeRows]
+		rowCapped = true
+	}
 	result.Nodes = result.Nodes[:0]
 	for _, hit := range orderedNodes {
 		result.Nodes = append(result.Nodes, hit.node)
 	}
 
-	var body strings.Builder
-	for _, hit := range orderedNodes {
-		body.WriteString(formatQueryNodeLine(hit, communityByID))
-	}
+	var edgeBody strings.Builder
 	for _, line := range edgeLines {
-		body.WriteString(line)
-		body.WriteByte('\n')
+		edgeBody.WriteString(line)
+		edgeBody.WriteByte('\n')
 	}
 
-	header := fmt.Sprintf("Traversal: BFS depth=%d | Start: %v | %d nodes found\n\n", depth, seedLabels, len(orderedNodes))
-	output, truncated := applyQueryBudget(header, body.String(), len(seedOrder), orderedNodes, communityByID, budget, maxChars)
+	header := fmt.Sprintf("Traversal: BFS depth=%d | Start: %v | %d nodes\n\n", depth, seedLabels, len(orderedNodes))
+	nodeBody := preferQueryNodeBody(header, queryNodeBody(orderedNodes, true), queryNodeBody(orderedNodes, false), edgeBody.String(), maxChars)
+	output, truncated := applyQueryBudget(header, nodeBody, edgeBody.String(), len(seedOrder), orderedNodes, budget, maxChars, len(orderedNodes))
+	if bodies := s.appendQueryBodies(ctx, req.Project, pickQueryAttachNodes(orderedNodes, overlap, queryAttachBodyMax)); bodies != "" {
+		output += bodies
+	}
 
 	result.Text = output
 	result.Budget.RequestedTokens = budget
 	result.Budget.ReturnedTokens = (len(output) + queryCharsPerToken - 1) / queryCharsPerToken
-	result.Budget.Truncated = truncated
-	result.Page.Total = len(result.Nodes)
-	result.Page.Truncated = truncated
+	result.Budget.Truncated = truncated || rowCapped
+	result.Page.Total = foundNodes
+	result.Page.Truncated = truncated || rowCapped
 	return result, nil
 }
 
@@ -813,12 +829,16 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 		return api.SnippetResult{}, errors.New("snippet path escapes repository")
 	}
 	fileOrModule := matched != nil && (matched.Label == "File" || matched.Label == "Module")
+	maxSpan := 80
+	if fileOrModule {
+		maxSpan = 500
+	}
 	missingFileSpan := fileOrModule && matched.Location.EndLine <= matched.Location.StartLine
 	if start <= 0 {
 		start = 1
 	}
 	if missingFileSpan {
-		end = start + 500
+		end = start + maxSpan
 	} else if end < start {
 		end = start
 	}
@@ -832,8 +852,8 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 	}
 	end += contextLines
 	clipped := false
-	if !missingFileSpan && end-start > 500 {
-		end = start + 500
+	if !missingFileSpan && end-start > maxSpan {
+		end = start + maxSpan
 		clipped = true
 	}
 	handle, err := os.Open(abs)

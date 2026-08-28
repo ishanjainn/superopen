@@ -191,6 +191,8 @@ func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot b
 		defer runner.Stop()
 	}
 	fmt.Println("Live graph refresh active (local git poll ~60s; no LLM).")
+	memory.EnsureEmbedWorker()
+	fmt.Printf("Embed worker http://%s\n", memory.DefaultEmbedListen)
 	go func() {
 		_ = runRetentionSweep(root)
 		ticker := time.NewTicker(5 * time.Minute)

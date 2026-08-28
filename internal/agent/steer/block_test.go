@@ -26,29 +26,96 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if !contains(first, "Do not spawn Explore") {
 		t.Fatalf("block must close the Explore hole: %s", first)
 	}
-	if contains(first, "so graph search") {
-		t.Fatalf("always-on block must not list so graph search as the default: %s", first)
+	if !contains(first, "list the tree") {
+		t.Fatalf("block must say not to list the tree to confirm Superopen: %s", first)
+	}
+	if !contains(first, "TRUNCATED") {
+		t.Fatalf("block must allow a follow-up query only after TRUNCATED: %s", first)
+	}
+	if contains(first, "so graph trace") || contains(first, "so graph search") {
+		t.Fatalf("always-on block must not list trace/search as the default: %s", first)
+	}
+	if !contains(first, "so graph snippet") {
+		t.Fatalf("block must name snippet as overflow for a listed NODE: %s", first)
+	}
+	if !contains(first, "BODIES") {
+		t.Fatalf("block must tell agents to stop on query BODIES: %s", first)
 	}
 	if !contains(first, "so memory search") {
-		t.Fatalf("block must point prior-work at so memory search: %s", first)
+		t.Fatalf("block must say search is a title index: %s", first)
+	}
+	if !contains(first, "memory recall") {
+		t.Fatalf("block must point prior-work at memory recall: %s", first)
+	}
+	if !contains(first, "CLI binary") {
+		t.Fatalf("block must say so is a CLI binary: %s", first)
+	}
+	if !contains(first, "Bash") {
+		t.Fatalf("block must say invoke with Bash: %s", first)
+	}
+	if contains(first, "personal questions") {
+		t.Fatalf("block must not frame diary as personal/privacy: %s", first)
 	}
 	if !contains(first, "learned:") {
 		t.Fatalf("block must say learned: is not authority: %s", first)
 	}
 }
 
-func TestNudgesAreMandatoryOneLiners(t *testing.T) {
+func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 	if contains(SearchNudge(), "so graph search") || contains(ReadNudge(), "so graph search") {
 		t.Fatal("nudges must not list so graph search (spray menu)")
 	}
-	if !contains(SearchNudge(), "MANDATORY") || !contains(ReadNudge(), "MANDATORY") {
-		t.Fatal("nudges must stay MANDATORY")
+	for _, n := range []string{SearchNudge(), ReadNudge(), MemoryNudge(), GraphStartLine(), MemoryStartLine(3), HookReminder(), MemoryHookReminder(), SnippetOverflowNudge(), QueryRepeatNudge()} {
+		if contains(n, "MANDATORY") {
+			t.Fatalf("hooks must not say MANDATORY: %s", n)
+		}
+		if contains(n, "\n") {
+			t.Fatalf("nudge must be one line: %q", n)
+		}
+		if contains(n, `"`) {
+			t.Fatalf("nudge must not contain double quotes (OpenCode/Pi echo): %q", n)
+		}
+		if !contains(n, "Bash") && !contains(n, "bash") {
+			t.Fatalf("nudge should say Bash: %s", n)
+		}
+	}
+	if contains(SearchNudge(), "not an MCP") || contains(ReadNudge(), "not an MCP") || contains(MemoryNudge(), "not an MCP") {
+		t.Fatal("per-hook lines must not repeat the MCP denial")
+	}
+	if !contains(MemoryNudge(), "memory recall") || contains(MemoryNudge(), "graph query") && !contains(MemoryNudge(), "Skip Grep and graph query") {
+		t.Fatal("memory nudge must point at recall and skip graph query")
+	}
+	if !contains(MemoryNudge(), "own notes") || !contains(MemoryStartLine(2), "own notes") {
+		t.Fatal("memory steer must say the store is the user's own notes")
+	}
+	if !contains(MemoryNudge(), "MEMORY.md") || !contains(MemoryStartLine(2), "MEMORY.md") {
+		t.Fatal("memory steer must disambiguate host MEMORY.md")
 	}
 	if !contains(SearchNudge(), ".so/") || !contains(HookReminder(), ".so/") {
 		t.Fatal("search/reminder should tell agents not to Grep .so/")
 	}
-	if !contains(ReadNudge(), "so graph snippet") || !contains(ReadNudge(), "so graph trace") {
-		t.Fatal("read nudge should list snippet/trace as focused follow-ups")
+	if contains(ReadNudge(), "so graph snippet") || contains(ReadNudge(), "so graph trace") {
+		t.Fatal("read nudge must not list snippet/trace (spray menu)")
+	}
+	if ReadNudge() != SearchNudge() {
+		t.Fatal("read nudge should match search nudge (query only)")
+	}
+	overflow := SnippetOverflowNudge()
+	if !contains(overflow, "so graph snippet") {
+		t.Fatal("post-query overflow must name snippet")
+	}
+	if contains(overflow, "so graph search") || contains(overflow, "so graph trace") {
+		t.Fatal("overflow must not spray search/trace")
+	}
+	if contains(overflow, "MANDATORY") || contains(overflow, `"`) || contains(overflow, "\n") {
+		t.Fatalf("overflow must be one line without quotes: %q", overflow)
+	}
+	repeat := QueryRepeatNudge()
+	if !contains(repeat, "so graph snippet") || !contains(repeat, "TRUNCATED") {
+		t.Fatalf("repeat-query overflow must name snippet and TRUNCATED: %q", repeat)
+	}
+	if contains(SearchNudge(), "Do not ls") == false {
+		t.Fatal("search nudge must discourage listing to confirm Superopen")
 	}
 }
 
@@ -60,11 +127,14 @@ func TestCursorRuleIsShortGate(t *testing.T) {
 	if contains(rule, "memory_search") {
 		t.Fatalf("alwaysApply rule must not dump the memory playbook: %s", rule)
 	}
-	if !contains(rule, "so memory search") {
-		t.Fatalf("alwaysApply rule should point prior-work at so memory search: %s", rule)
+	if !contains(rule, "memory recall") {
+		t.Fatalf("alwaysApply rule should point prior-work at memory recall: %s", rule)
 	}
 	if !contains(rule, "query") {
 		t.Fatalf("alwaysApply rule should mention query-first: %s", rule)
+	}
+	if !contains(rule, "/ls") && !contains(rule, "Read/ls") {
+		t.Fatalf("alwaysApply rule should query before ls: %s", rule)
 	}
 	if !contains(rule, "subagent") {
 		t.Fatalf("alwaysApply rule must apply to spawned subagents: %s", rule)

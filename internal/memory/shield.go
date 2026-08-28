@@ -7,7 +7,7 @@ import (
 
 const (
 	minCaptureLen = 12
-	maxCaptureLen = 8000
+	maxCaptureLen = 100000
 )
 
 func blockedCapture(text string) bool {
@@ -123,6 +123,9 @@ func packFingerprint(text string) bool {
 		return true
 	}
 	if strings.HasPrefix(s, "Superopen: codebase questions") {
+		return true
+	}
+	if strings.HasPrefix(s, "Superopen:") && (strings.Contains(s, "CLI binary") || strings.Contains(s, "memories in this workspace")) {
 		return true
 	}
 	for _, line := range strings.Split(s, "\n") {

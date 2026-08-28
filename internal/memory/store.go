@@ -109,23 +109,10 @@ CREATE TABLE IF NOT EXISTS memory_edges (
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_episodes_fts USING fts5(
   title, text, files, tool_name,
-  content='memory_episodes',
-  content_rowid='id',
   tokenize='unicode61 remove_diacritics 2'
 );
-CREATE TRIGGER IF NOT EXISTS memory_episodes_ai AFTER INSERT ON memory_episodes BEGIN
-  INSERT INTO memory_episodes_fts(rowid, title, text, files, tool_name)
-  VALUES (new.id, new.title, new.text, new.files, new.tool_name);
-END;
 CREATE TRIGGER IF NOT EXISTS memory_episodes_ad AFTER DELETE ON memory_episodes BEGIN
-  INSERT INTO memory_episodes_fts(memory_episodes_fts, rowid, title, text, files, tool_name)
-  VALUES ('delete', old.id, old.title, old.text, old.files, old.tool_name);
-END;
-CREATE TRIGGER IF NOT EXISTS memory_episodes_au AFTER UPDATE ON memory_episodes BEGIN
-  INSERT INTO memory_episodes_fts(memory_episodes_fts, rowid, title, text, files, tool_name)
-  VALUES ('delete', old.id, old.title, old.text, old.files, old.tool_name);
-  INSERT INTO memory_episodes_fts(rowid, title, text, files, tool_name)
-  VALUES (new.id, new.title, new.text, new.files, new.tool_name);
+  DELETE FROM memory_episodes_fts WHERE rowid = old.id;
 END;
 CREATE TABLE IF NOT EXISTS memory_topics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,6 +138,18 @@ CREATE TABLE IF NOT EXISTS memory_shapes (
   episode_id INTEGER PRIMARY KEY REFERENCES memory_episodes(id) ON DELETE CASCADE,
   blob BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS memory_passages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  episode_id INTEGER NOT NULL REFERENCES memory_episodes(id) ON DELETE CASCADE,
+  ord INTEGER NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  embedder_id TEXT NOT NULL,
+  dimensions INTEGER NOT NULL,
+  quantization TEXT NOT NULL,
+  vector BLOB NOT NULL,
+  UNIQUE(episode_id, ord)
+);
+CREATE INDEX IF NOT EXISTS memory_passages_episode ON memory_passages(episode_id);
 `
 
 type Store struct {
@@ -180,11 +179,11 @@ type Episode struct {
 	ValidFrom        string   `json:"valid_from,omitempty"`
 	ValidTo          string   `json:"valid_to,omitempty"`
 	CommunityID      string   `json:"community_id,omitempty"`
-	Centrality        float64 `json:"centrality,omitempty"`
-	Tier              string  `json:"tier,omitempty"`
-	Horizon           string  `json:"horizon,omitempty"`
-	KeepUntilSession  int     `json:"keep_until_session,omitempty"`
-	NeverDecay        bool    `json:"never_decay,omitempty"`
+	Centrality       float64  `json:"centrality,omitempty"`
+	Tier             string   `json:"tier,omitempty"`
+	Horizon          string   `json:"horizon,omitempty"`
+	KeepUntilSession int      `json:"keep_until_session,omitempty"`
+	NeverDecay       bool     `json:"never_decay,omitempty"`
 	Tags             string   `json:"tags,omitempty"`
 	Topic            string   `json:"topic,omitempty"`
 	Facts            []string `json:"facts,omitempty"`
@@ -266,21 +265,21 @@ type Status struct {
 }
 
 type CaptureInput struct {
-	SessionID    string
-	Kind         string
-	Source       string
-	Title        string
-	Text         string
-	Files        []string
-	ToolName     string
-	ContradictOf int64
-	Pin          bool
-	Topic        string
-	Facts        []string
-	Narrative    string
-	Concepts          []string
-	Horizon           string
-	KeepUntilSession  int
+	SessionID        string
+	Kind             string
+	Source           string
+	Title            string
+	Text             string
+	Files            []string
+	ToolName         string
+	ContradictOf     int64
+	Pin              bool
+	Topic            string
+	Facts            []string
+	Narrative        string
+	Concepts         []string
+	Horizon          string
+	KeepUntilSession int
 }
 
 func OpenRoot(root string) (*Store, error) {
@@ -356,6 +355,7 @@ func open(path string, busyMs int) (*Store, error) {
 		s.Close()
 		return nil, err
 	}
+	EnsureEmbedWorker()
 	if err := s.ensureEmbedder(); err != nil {
 		s.Close()
 		return nil, err
@@ -365,6 +365,14 @@ func open(path string, busyMs int) (*Store, error) {
 		return nil, err
 	}
 	if err := s.ensureHorizonSchema(); err != nil {
+		s.Close()
+		return nil, err
+	}
+	if err := s.ensurePlaintextFTS(); err != nil {
+		s.Close()
+		return nil, err
+	}
+	if err := s.ensurePassagesSchema(); err != nil {
 		s.Close()
 		return nil, err
 	}
@@ -412,13 +420,27 @@ func (s *Store) Close() error {
 
 func (s *Store) ensureEmbedder() error {
 	existing, _ := s.meta(metaEmbedder)
+	want := CurrentEmbedder()
 	if existing == "" {
-		return s.setMeta(metaEmbedder, CurrentEmbedder())
+		return s.setMeta(metaEmbedder, want)
 	}
-	if existing != CurrentEmbedder() {
-		return fmt.Errorf("refuse mixed embedder generations: store %s process %s", existing, CurrentEmbedder())
+	if existing == want {
+		return nil
 	}
-	return nil
+	if existing == EmbedderID && want != EmbedderID {
+		return s.upgradeHashStore(want)
+	}
+	return fmt.Errorf("refuse mixed embedder generations: store %s process %s", existing, want)
+}
+
+func (s *Store) upgradeHashStore(want string) error {
+	if _, err := s.db.Exec(`DELETE FROM memory_vectors`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE memory_episodes SET embedding_pending=1, updated_at=? WHERE faded=0`, nowRFC()); err != nil {
+		return err
+	}
+	return s.setMeta(metaEmbedder, want)
 }
 
 func (s *Store) meta(key string) (string, error) {
@@ -481,11 +503,17 @@ ON CONFLICT(uid) DO NOTHING`,
 		return 0, false, err
 	}
 	inserted := n > 0
+	if inserted {
+		_ = s.writeFTS(id, ep.Title, plain, files, ep.ToolName)
+	}
 	if embed && !isZero(vector) {
 		if err := s.writeVector(id, vector); err != nil {
 			return id, inserted, err
 		}
 		_, _ = s.db.Exec(`UPDATE memory_episodes SET embedding_pending=0, updated_at=? WHERE id=?`, now, id)
+		if inserted {
+			_ = s.writePassages(id, plain)
+		}
 	}
 	return id, inserted, nil
 }

@@ -64,7 +64,7 @@ func runMemoryHome(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	out := out()
-	out.Next(`so memory search "<cue>"`, "so memory get <id>", `so graph query "<question>"`)
+	out.Next(`so memory recall "<cue>"`, `so memory search "<cue>"`, "so memory get <id>")
 	lines := []string{
 		fmt.Sprintf("long: %d", st.Counts.Long),
 		fmt.Sprintf("medium: %d", st.Counts.Medium),
@@ -87,9 +87,12 @@ func runMemoryHome(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func emitMemoryIndex(out *cli.Out, hits []memory.Hit) {
+func emitMemoryIndex(out *cli.Out, store *memory.Store, hits []memory.Hit) {
 	out.Next(memory.HelpForSearch(hits)...)
 	out.Rows("memories", []string{"id", "kind", "title", "tokens"}, memory.IndexRowsFromHits(hits))
+	if len(hits) == 0 && store != nil && !out.Flags.JSON {
+		fmt.Fprintf(out.W, "hint: %s\n", memory.EmptyHitHint(store.LiveMemoryCount(), store.FTSDocCount(), store.IndexSealed()))
+	}
 }
 
 func memorySearchCmd() *cobra.Command {
@@ -122,7 +125,7 @@ func memorySearchCmd() *cobra.Command {
 				return err
 			}
 			out := out()
-			emitMemoryIndex(out, hits)
+			emitMemoryIndex(out, store, hits)
 			return nil
 		},
 	}
@@ -178,6 +181,16 @@ func memoryRecallCmd() *cobra.Command {
 			}
 			fmt.Fprintf(out.W, "hits: %d  anti_hits: %d  budget: %d\n", len(res.Hits), len(res.AntiHits), res.BudgetTokens)
 			out.Rows("memories", []string{"id", "kind", "title", "tokens"}, memory.IndexRowsFromHits(res.Hits))
+			if len(res.Hits) == 0 {
+				fmt.Fprintf(out.W, "hint: %s\n", memory.EmptyRecallHint(store.LiveMemoryCount(), store.FTSDocCount(), store.IndexSealed()))
+			} else {
+				for _, h := range res.Hits {
+					fmt.Fprintf(out.W, "%s\n%s\n", memory.FormatIndexLine(h.Episode), strings.TrimSpace(h.Text))
+				}
+				if hint := memory.ClippedBodyHint(res.Hits); hint != "" {
+					fmt.Fprintf(out.W, "hint: %s\n", hint)
+				}
+			}
 			if len(res.AntiHits) > 0 {
 				out.Rows("anti_hits", []string{"id", "kind", "title", "tokens"}, memory.IndexRowsFromHits(res.AntiHits))
 			}
@@ -848,6 +861,6 @@ func memoryEmbedWorkerCmd() *cobra.Command {
 			return memory.ServeEmbedWorker(listen)
 		},
 	}
-	cmd.Flags().String("listen", "127.0.0.1:0", "Listen address")
+	cmd.Flags().String("listen", memory.DefaultEmbedListen, "Listen address")
 	return cmd
 }

@@ -18,8 +18,11 @@ func TestExploreAugmentRendersHits(t *testing.T) {
 			t.Fatalf("missing %q in:\n%s", want, text)
 		}
 	}
-	if !strings.Contains(text, "so graph snippet") {
-		t.Fatalf("augment should tell the agent what to call next: %s", text)
+	if !strings.Contains(text, "so graph query") {
+		t.Fatalf("augment should tell the agent to query, got: %s", text)
+	}
+	if strings.Contains(text, "so graph snippet") || strings.Contains(text, "so graph search") {
+		t.Fatalf("augment must not open a snippet/search spray: %s", text)
 	}
 }
 

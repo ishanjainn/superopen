@@ -31,7 +31,7 @@ There is no repo-local `.cursor/rules` tree. Cursor still loads user-level `~/.c
 ## Principles
 
 1. **Effective, cheap, accurate** graph agent UX — [internal/graph/AGENTS.md](internal/graph/AGENTS.md)
-2. **CLI** — graphify compact for `so graph *`; axi.md TOON/dashboards for memory and sessions — [cmd/so/AGENTS.md](cmd/so/AGENTS.md)
+2. **CLI only** — `so` is a Bash-invoked binary. There is no MCP server, no host plugin tool schema, and none will be added. Compact `NODE`/`EDGE` for `so graph *`; axi.md TOON/dashboards for memory and sessions — [cmd/so/AGENTS.md](cmd/so/AGENTS.md)
 3. **Minimal diffs** — match local style
 4. **No vendor names** in product or contributor copy
 
@@ -52,5 +52,5 @@ sh scripts/install.sh   # dogfood in another repo with so init
 | `plugins/` | Vendor hook payloads (source of truth; run `make sync-plugins`) |
 | `sdk/go/` | OTel span helpers + semconv |
 | `scripts/` | Installers, packaging, Homebrew dev formula |
-| `benchmarks/` | Agent eval harness + `bench-init.sh` |
+| `benchmarks/` | Mode-gated benchmark harness (`benchmarks/run.py`) |
 | `tools/` | Maintainer CLIs for graph WASM/spec/model assets |

@@ -87,3 +87,22 @@ func TestHelpForSnippetDirections(t *testing.T) {
 		t.Fatalf("hints=%v", hints)
 	}
 }
+
+func TestSnippetCompactEmitsSrc(t *testing.T) {
+	text := format.SnippetCompact(api.SnippetResult{
+		QualifiedName: "pkg.Foo.bar",
+		Name:          "bar",
+		Label:         "Method",
+		Location:      api.Location{File: "foo.go", StartLine: 1674, EndLine: 1682},
+		Code:          "func bar() {}\n",
+	})
+	if !strings.Contains(text, "file: foo.go") {
+		t.Fatalf("missing file: %q", text)
+	}
+	if !strings.Contains(text, "src=foo.go") {
+		t.Fatalf("missing src=: %q", text)
+	}
+	if !strings.Contains(text, "lines: 1674-1682") {
+		t.Fatalf("missing lines: %q", text)
+	}
+}

@@ -27,9 +27,9 @@ Parent index: [../../AGENTS.md](../../AGENTS.md)
 
 1. **Seeds:** FTS via `Search` (limit ~50), not `ORDER BY id LIMIT N` over callables. Do not File-prepend; BFS `DEFINES` from File would spray Variables.
 2. **Search vs query:** `so graph search` filters File/Folder/Module/Section and data-language Variables. Exported source consts stay searchable. Query uses the same FTS pool.
-3. **Expand:** Bounded BFS; hub skip for non-seed transit nodes.
+3. **Expand:** Bounded BFS; hub skip for non-seed transit nodes; per-hop neighbor cap (same-file / same-package / question-name overlap / CALLS first). Header counts listed nodes, not the raw walk.
 4. **Render:** NODE lines include `qn=` for callables; File NODE names use `dir/basename.go` when useful.
-5. **Budget:** `TRUNCATED` → `so graph snippet <qn>` or narrow the question. Do not lead with `--budget` or Cypher.
+5. **Budget:** `TRUNCATED` → narrow the question first; `so graph snippet <qn>` only for a NODE already listed. Query may append up to 2 clipped Method/Function bodies after NODE/EDGE when the symbol name matches the question (80-line cap, not Class/Module dumps, not counted against the 1200-token locator budget). Do not lead with `--budget` or Cypher.
 
 ## Graph contracts (G)
 

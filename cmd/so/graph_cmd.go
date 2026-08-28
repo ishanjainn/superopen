@@ -113,7 +113,7 @@ func graphNativeCommands() []*cobra.Command {
 	})
 	query.Args = cobra.ExactArgs(1)
 	query.Flags().Int("depth", 2, "Traversal depth")
-	query.Flags().Int("budget", 2000, "Approximate output token budget")
+	query.Flags().Int("budget", 1200, "Approximate output token budget")
 	query.Flags().StringSlice("term", nil, "Additional exact graph seed")
 
 	codeSearch := nativeGraphLeaf("code-search <pattern>", "Search indexed source code", api.OpCodeSearch, func(cmd *cobra.Command, args []string) any {

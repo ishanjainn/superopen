@@ -1,68 +1,50 @@
 
-# Superopen
+<p align="center">
+  <a href="https://github.com/ishanjainn/superopen"><img src="./assets/brand-wordmark.png" width="50%" height="50%" alt="Superopen"/></a>
 
-One CLI to rule them all.
+  <a href="https://github.com/ishanjainn/superopen"><img src="./assets/superopen-banner.svg" width="100%" height="100%" alt="Superopen"/></a>
+</p>
 
-![Superopen Banner](https://raw.githubusercontent.com/ishanjainn/superopen/refs/heads/main/assets/superopen-banner.svg)
+Superopen is not another coding agent. It builds the open source harness around
+Claude Code, Cursor, Codex, and similar agents so every coding session improves
+the next with less token waste and lower cost.
 
-## Install (user-global, any directory)
+- **The harness watches, the graph answers.** Hooks capture each session while a
+  local Tree-sitter graph lets the agent query a scoped subgraph instead of
+  grepping file by file -> **fewer input tokens**
+- **Sessions become memory.** What one session learns is distilled into the same
+  SQLite store the graph lives in; the next session starts from a **≤350-token**
+  injected index instead of re-discovering your codebase.
+- **Memory compounds, cost drops.** Follow-up sessions skip redundant
+  exploration and re-explanation -> **lower cost per task**
 
-Works on **Linux, macOS, and Windows** across supported coding agents
-(Claude Code, Cursor, Codex, Gemini CLI, OpenCode, Copilot CLI, Pi).
-
-```bash
-brew install ishanjainn/superopen/so   # or the curl/release installer
-so install                            # /so skill + hooks + guidance
-```
-
-The curl/`install.ps1` installer puts `so` in `~/.superopen/bin`, the prebuilt Sessions/Memory/Graph UI in `~/.superopen/share/superopen/web` (`so-web.tar.gz` from the GitHub Release, same as the CLI binary), and adds `bin` to PATH (new terminals; the current shell needs `export PATH="$HOME/.superopen/bin:$PATH"` or a new tab). Homebrew installs that same UI bundle under its prefix `share/superopen/web`. Neither path runs `npm install` / `next build` on your machine. `so dev` uses that prefix from any repo; it does not look up a Superopen git clone. Running the UI needs [Node.js](https://nodejs.org/) on PATH (`node server.js`); Homebrew installs Node as a dependency.
-
-`so install` writes into each agent’s **user** skill/plugin/config directories
-(OS-agnostic home / XDG / `%APPDATA%` / `%LOCALAPPDATA%`). It is not tied to
-the Superopen source repo (users never need that) and not tied to the current
-working tree. It installs:
-
-- the `/so` skill
-- observability hooks
-- durable graph-first guidance (user-level instruction surfaces)
-
-That wiring is **capability on this machine**. A repository is managed only after
-`so init` creates `.so/` in that tree. Opening other clones in a coding agent
-does not initialize them, does not write `.so/`, and does not expose Superopen
-hook context (so agents do not spend tokens on Superopen there).
-
-A teammate who never ran `so install` is unaffected: nothing Superopen-specific
-is required in git besides an optional `.so/.gitignore`. There are no git hooks.
-
-## Initialize a repository
-
-In a coding agent (after `so install`), or from a shell inside the repo:
+## Getting Started
 
 ```bash
-so init          # or /so init in the agent (only when the user asks)
+brew install ishanjainn/superopen/so   
+so install                        
 ```
 
-Defaults to the **repository root** (nearest existing `.so` or git top-level).
-Use `--root` / `SUPEROPEN_ROOT` for an explicit nested package graph.
+Then, in your Repository:
 
-Agents must **not** run `so init` just because `.so/` is missing.
+```bash
+so init         # or /so init in the agent chat          
+```
 
-Creates:
+That's it. You get a `.so/` in that tree.
 
 ```text
 .so/
-  sessions/      # observability sessions (gitignored)
-  db/so.db       # shared Superopen SQLite store (gitignored)
+  sessions/     # session events, transcripts, checkpoints
+  db/so.db      # SQLite store: Graph + Memory
   .gitignore
 ```
 
-Registers the repo in the user-wide project index under the Superopen config
-dir (`~/.config/superopen` / `%APPDATA%\superopen`).
-
-## Native graph (automatic for agents in inited repos)
-
-After install + init **in that repository**, coding agents are steered to use the graph for structural
-questions without the user saying `/so`. Repositories without `.so/` stay unmanaged.
+From here
+1. coding agents steer themselves: structural questions go straight to the **graph** to reduce tokens spent in grepping.
+2. Hooks record every session in the background, finalizing transcripts into a session map plus relevant memory. 
+3. At session end, harvest proposes small
+improvements to your instruction files; nothing lands until you approve.
 
 ```bash
 so graph build
@@ -77,25 +59,7 @@ Session hooks refresh the graph in the background on SessionStart / SessionEnd
 (detached, fail-open) **only if the workspace already has `.so/`**. Builds are **local** (Tree-sitter + SQLite) — they do not
 invoke an LLM or the live coding agent.
 
-Default `so graph query` stdout is compact NODE/EDGE text plus `help[]` next steps. `--json` and `--full` are script escape hatches. That graphify format is intentional; memory/sessions use AXI TOON instead.
-
-## Sessions, memory, and UI
-
-```bash
-so sessions
-so sessions show <id>
-so sessions finalize <id>
-so memory
-so memory search "login bug"
-so memory get 12
-so memory capture --kind knowledge --horizon medium --title "…" --text "…"
-so projects                   # repos where Superopen has been used
-so dev                        # UI from any directory; binds the current inited repo or last managed project
-so dev -d                     # detached UI
-```
-
-`so dev` does not require cwd to be an inited repo: if this folder has no `.so/`, it uses the active
-(or most recently seen) Superopen-managed project. `so init` is still required once per repo you want managed.
+Default `so graph query` stdout is compact NODE/EDGE text plus `help[]` next steps. `--json` and `--full` are script escape hatches. That compact graph format is intentional; memory/sessions use AXI TOON instead.
 
 ## Layout summary
 
@@ -110,6 +74,9 @@ so dev -d                     # detached UI
 One `so` binary includes the native graph engine. There is no separate graph binary.
 
 Contributors: read [`AGENTS.md`](AGENTS.md) and the nested `AGENTS.md` in the area you edit; shared rules in [`.agents/rules/`](.agents/rules/). Repo-only — not what `so install` writes to customer projects.
+
+Benchmarks: [BENCHMARKS.md](BENCHMARKS.md). Offline smoke: `make bench-offline`.
+Manual full runs (Docker, writes `BENCHMARKS.md`): `.github/workflows/bench.yml`.
 
 ## Uninstall
 

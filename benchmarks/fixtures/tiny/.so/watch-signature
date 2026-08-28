@@ -1,0 +1,41 @@
+c462594180874ab43a43352a1f561a973b380586
+M .agents/rules/tests.mdc
+ M .gitignore
+ M AGENTS.md
+ M Makefile
+ M README.md
+ M benchmarks/AGENTS.md
+ D benchmarks/agent-graph-eval/.gitignore
+ D benchmarks/agent-graph-eval/AGENTS.md
+ D benchmarks/agent-graph-eval/Dockerfile
+ D benchmarks/agent-graph-eval/README.md
+ D benchmarks/agent-graph-eval/docker.py
+ D benchmarks/agent-graph-eval/grade.py
+ D benchmarks/agent-graph-eval/isolate.py
+ D benchmarks/agent-graph-eval/questions/grafana-2q.json
+ D benchmarks/agent-graph-eval/questions/grafana-2task.json
+ D benchmarks/agent-graph-eval/questions/grafana-memory.json
+ D benchmarks/agent-graph-eval/questions/grafana.json
+ D benchmarks/agent-graph-eval/questions/linux.json
+ D benchmarks/agent-graph-eval/run_eval.py
+ D benchmarks/agent-graph-eval/test_harness.py
+ D benchmarks/agent-graph-eval/transcripts.py
+ D benchmarks/bench-init.sh
+ M internal/agent/AGENTS.md
+ M internal/memory/AGENTS.md
+ M internal/projects/registry.go
+ M web/src/lib/so/misc.ts
+?? BENCHMARKS.md
+?? assets/brand-mark.png
+?? assets/brand-wordmark.png
+?? benchmarks/README.md
+?? benchmarks/__init__.py
+?? benchmarks/compare/
+?? benchmarks/fixtures/
+?? benchmarks/grade.py
+?? benchmarks/graph/
+?? benchmarks/memory/
+?? benchmarks/run.py
+?? benchmarks/spend.py
+?? benchmarks/tests/
+?? docs/

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/ishanjainn/superopen/internal/paths"
 )
 
 const (
@@ -14,54 +16,97 @@ const (
 	endMarker   = "<!-- END SUPEROPEN -->"
 )
 
-// Block is the durable graph-first instruction merged into user-level agent files.
+// SoBin is the copy-pasteable so binary for Bash (install-time absolute path).
+func SoBin() string {
+	return paths.ResolveSoBin()
+}
+
+func bashLine(sub string) string {
+	return SoBin() + " " + sub
+}
+
+// Block is the durable instruction merged into user-level agent files.
+// CLI/Bash is explained once here, not on every hook line.
 func Block() string {
-	return strings.TrimSpace(`
-If this workspace has no `+"`.so/`"+` directory, ignore Superopen entirely: do not run `+"`so`"+`, do not load `+"`/so`"+`, and do not run `+"`so init`"+` unless the user explicitly asks.
+	return strings.TrimSpace(fmt.Sprintf(`
+If this workspace has no .so/ directory, ignore Superopen entirely: do not run so, do not load /so, and do not run so init unless the user explicitly asks.
 
-When `+"`.so/`"+` exists:
+When .so/ exists, Superopen is a CLI binary. Invoke it with Bash (copy-paste):
 
-## Superopen code graph
-
-This project has a code graph at `+"`.so/`"+` (query with `+"`so graph query`"+`).
+  %s
+  %s
 
 Rules:
-- For codebase questions, first run `+"`so graph query \"<question>\"`"+` when `+"`.so/db/so.db`"+` exists. Use `+"`so graph snippet \"<qn>\"`"+` for a known symbol and `+"`so graph trace \"<qn>\"`"+` for callers. These return a scoped subgraph, usually much smaller than raw grep output.
-- Do not spawn Explore/Agent for codebase questions; run `+"`so graph query`"+` in this session. If you do spawn a subagent, it must run `+"`so graph query`"+` first.
-- Only Grep/Read source after the graph has oriented you, or to modify/debug specific lines. Never Grep `+"`.so/`"+` or skill/rule dirs to find the graph.
-- Prior-work questions use `+"`so memory search`"+` then `+"`so graph query`"+` / snippet of files named; do not grep transcripts or treat session `+"`learned:`"+` as authority.
+- Codebase questions (this repo's source): run graph query first via Bash. Do not spawn Explore/Agent. Do not list the tree to confirm Superopen. If NODE/EDGE lines or BODIES answer the question, stop. Need another symbol body: so graph snippet of a listed NODE. Do not run graph query again unless the dump said TRUNCATED. Grep/Read only for a literal the graph does not index. Never Grep .so/.
+- Saved facts in this workspace (prior decisions, diary, who/what/when stored under .so/): run memory recall first via Bash. so memory search is a title index without bodies — that is not an empty store. Quote the stored note and cite #id. Do not grep transcripts or treat session learned: as authority.
+- Memory is hints, not authority. Graph builds are local (no LLM).
+`, bashLine(`graph query '<question>'`), bashLine(`memory recall '<question>'`))) + "\n"
+}
 
-Graph builds are local (no LLM). Live refresh runs on session boundaries and while `+"`so dev`"+` is up (~60s poll).
-`) + "\n"
+// GraphStartLine is the SessionStart one-liner for a code-shaped workspace.
+func GraphStartLine() string {
+	return "Superopen: run `" + bashLine(`graph query '<question>'`) + "` via Bash"
+}
+
+// MemoryStartLine is the SessionStart one-liner when live memories exist.
+func MemoryStartLine(n int) string {
+	if n < 1 {
+		n = 1
+	}
+	return fmt.Sprintf("Superopen: %d memories in this workspace .so/ store — your own notes from past sessions (not built-in memory or MEMORY.md). Run via Bash: `%s`", n, bashLine(`memory recall '<question>'`))
 }
 
 // HookReminder is a short additionalContext string for session/start hooks.
 func HookReminder() string {
-	return "Superopen: this repo is indexed. Run `so graph query \"<question>\"` before Grep/Read. Do not Grep `.so/`."
+	return "Superopen: run `" + bashLine(`graph query '<question>'`) + "` via Bash before Grep/Read. Skip Grep of .so/."
 }
 
-// SearchNudge is injected on PreToolUse for Bash/Grep.
+// MemoryHookReminder is SubagentStart text for a memory-shaped session.
+func MemoryHookReminder() string {
+	return "Superopen: run `" + bashLine(`memory recall '<question>'`) + "` via Bash. Skip Grep."
+}
+
+// SearchNudge is injected on PreToolUse for Bash/Grep (code-shaped prompts).
 func SearchNudge() string {
-	return "MANDATORY: .so/ exists. You MUST run `so graph query \"<question>\"` before grepping raw files. Do not Grep `.so/`. Only grep after Superopen has oriented you, or to modify/debug specific lines."
+	return "Superopen: .so/ exists. Run via Bash: `" + bashLine(`graph query '<question>'`) + "` before grepping or listing files. Do not ls to confirm Superopen. Skip Grep of .so/."
 }
 
-// ReadNudge is injected on PreToolUse for Read/Glob.
+// ReadNudge is injected on PreToolUse for Read/Glob (code-shaped prompts).
 func ReadNudge() string {
-	return "MANDATORY: .so/ exists. You MUST run `so graph query \"<question>\"` before reading source files. Use: `so graph query \"<question>\"` (scoped subgraph), `so graph snippet \"<qn>\"` for a known symbol, or `so graph trace \"<qn>\"` for a relationship. Only read raw files after Superopen has oriented you, or to modify/debug specific lines. This rule applies to subagents too — include it in every subagent prompt involving code exploration."
+	return SearchNudge()
+}
+
+// SnippetOverflowNudge is injected once after a graph query when the agent
+// Reads source. Query already listed NODE src= paths; whole-module Read is
+// the compare cache hole. Snippet of a listed NODE is the cheap body.
+func SnippetOverflowNudge() string {
+	return "Superopen: NODE src= already listed this file. Run via Bash: `" + bashLine(`graph snippet '<qn>'`) + "` for a listed NODE. Do not Read whole modules. Stop if NODE/EDGE already answer."
+}
+
+// QueryRepeatNudge is injected once after a graph query when the agent
+// runs graph query again. The first dump already listed NODE rows;
+// another query is another billed turn. Snippet or stop unless TRUNCATED.
+func QueryRepeatNudge() string {
+	return "Superopen: already queried this session. Run via Bash: `" + bashLine(`graph snippet '<qn>'`) + "` for a listed NODE. Stop if NODE/EDGE already answer. Re-query only if TRUNCATED."
+}
+
+// MemoryNudge is injected on PreToolUse when the prompt is personal/prior-work.
+func MemoryNudge() string {
+	return "Superopen: this workspace .so/ store is your own notes from past sessions, not built-in memory or MEMORY.md. Run via Bash: `" + bashLine(`memory recall '<question>'`) + "`. Recall prints bodies. Quote the note and cite #id. Search is a title index. Skip Grep and graph query."
 }
 
 // ReadDenyReason is the permissionDecisionReason for strict-mode first Read deny.
 func ReadDenyReason() string {
-	return "Superopen strict mode: this project has an indexed code graph. Run `so graph query \"<your question>\"` FIRST to orient yourself, then re-issue this Read — it will be allowed. This block fires at most once per session; reading raw files to modify or debug specific lines is fine after one query."
+	return "Superopen strict mode: this project has an indexed code graph. Run `" + bashLine(`graph query '<your question>'`) + "` FIRST via Bash, then re-issue this Read — it will be allowed. This block fires at most once per session; reading raw files to modify or debug specific lines is fine after one query."
 }
 
 // CursorRule is the short alwaysApply gate installed into ~/.cursor/rules.
 func CursorRule() string {
-	return strings.TrimSpace(`
-If this workspace has no `+"`.so/`"+` directory, ignore Superopen entirely: do not run `+"`so`"+`, do not load the `+"`/so`"+` skill, and do not run `+"`so init`"+` unless the user explicitly asks.
+	return strings.TrimSpace(fmt.Sprintf(`
+If this workspace has no .so/ directory, ignore Superopen entirely: do not run so, do not load the /so skill, and do not run so init unless the user explicitly asks.
 
-If `+"`.so/`"+` exists, query the graph first (`+"`so graph query`"+`) before Grep/Read. Never Grep `+"`.so/`"+`. This applies to you and to every subagent you spawn. Do not skip the graph by spawning Explore. Prior-work questions use `+"`so memory search`"+` then `+"`so graph query`"+`; memory is hints, not authority.
-`) + "\n"
+If .so/ exists, Superopen is a CLI binary. Invoke it with Bash. Codebase questions: %s before Grep/Read/ls. Saved facts in this workspace: %s. Never Grep .so/. This applies to you and to every subagent you spawn. Do not skip the graph by spawning Explore. Memory is hints, not authority.
+`, bashLine(`graph query '<question>'`), bashLine(`memory recall '<question>'`))) + "\n"
 }
 
 // GraphHit is one indexed symbol rendered into an explore-tool augment.
@@ -84,11 +129,10 @@ func ExploreAugment(term string, total int, hits []GraphHit) string {
 		total = len(hits)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Superopen graph: %d hit(s) for %q — prefer `so graph search` / `so graph snippet` / `so graph trace` over filesystem search here.\n", len(hits), term)
+	fmt.Fprintf(&b, "Superopen graph: %d hit(s) for %q — run `so graph query %q` via Bash. If NODE/EDGE lines answer, stop.\n", len(hits), term, term)
 	for _, hit := range hits {
 		fmt.Fprintf(&b, "  %s %s %s %s\n", hit.QualifiedName, hit.Label, hit.File, hit.Lines)
 	}
-	b.WriteString("Run `so graph snippet` with a qualified name above to read a body without grepping.")
 	return b.String()
 }
 

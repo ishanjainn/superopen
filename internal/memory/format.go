@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // IndexHit is the cheap search/timeline row: IDs, type, title, tokens.
@@ -36,7 +37,29 @@ func FormatIndexLine(ep Episode) string {
 	if h := NormalizeHorizon(ep.Horizon); h != "" {
 		label = h
 	}
+	if d := episodeDateLabel(ep); d != "" {
+		return fmt.Sprintf("#%d  %s  %s  %s", ep.ID, label, d, title)
+	}
 	return fmt.Sprintf("#%d  %s  %s", ep.ID, label, title)
+}
+
+func episodeDateLabel(ep Episode) string {
+	raw := strings.TrimSpace(ep.CreatedAt)
+	if raw == "" {
+		raw = strings.TrimSpace(ep.ValidFrom)
+	}
+	if raw == "" {
+		return ""
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t.UTC().Format("2006-01-02")
+		}
+	}
+	if len(raw) >= 10 && raw[4] == '-' && raw[7] == '-' {
+		return raw[:10]
+	}
+	return ""
 }
 
 func IndexFromEpisode(ep Episode) IndexHit {
@@ -93,13 +116,26 @@ func HelpForSearch(hits []Hit) []string {
 	if len(hits) == 0 {
 		return []string{
 			`so memory recall "<cue>"`,
-			`so graph query "<question>"`,
+			`so memory search "<cue>"`,
 		}
 	}
 	return []string{
-		fmt.Sprintf("so memory get %d", hits[0].ID),
+		fmt.Sprintf("so memory get %d --full", hits[0].ID),
 		fmt.Sprintf("so memory timeline --around %d", hits[0].ID),
 	}
+}
+
+// ClippedBodyHint tells the agent recall bodies are windows, not the full episode.
+func ClippedBodyHint(hits []Hit) string {
+	if len(hits) == 0 {
+		return ""
+	}
+	for _, h := range hits {
+		if strings.HasPrefix(h.Text, "…") || strings.HasSuffix(h.Text, "…") || strings.TrimSpace(h.Text) == "" {
+			return fmt.Sprintf("bodies clipped — so memory get %d --full for the complete text", hits[0].ID)
+		}
+	}
+	return ""
 }
 
 func HelpForGet(eps []Episode) []string {

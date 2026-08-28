@@ -11,10 +11,11 @@ import (
 )
 
 // EmbedderID stamps hashed 384-d int8 vectors used when the loopback
-// worker is unavailable. A loaded MiniLM worker uses a different id so
-// geometries are never mixed.
+// worker is unavailable. Neural workers use distinct ids so geometries
+// are never mixed.
 const EmbedderID = "so-prose-384-v1"
 const miniLMEmbedderID = "so-minilm-l6-v2-384"
+const bgeEmbedderID = "so-bge-small-en-v1.5-384"
 
 var activeEmbedderID = EmbedderID
 
@@ -54,9 +55,30 @@ func vectorFromBytes(raw []byte) (Vector, bool) {
 }
 
 // EmbedText encodes prose for memory ingest and recall.
+// When a loopback worker is configured, a failed embed returns a zero
+// vector (embedding_pending) instead of silently hashing — hash vectors
+// must not drive session near-dup against a neural store.
 func EmbedText(text string) Vector {
+	EnsureEmbedWorker()
 	if v, ok := embedViaWorker(text); ok {
 		return v
+	}
+	if workerConfigured() {
+		return Vector{}
+	}
+	return EmbedSentence(text)
+}
+
+// EmbedQuery encodes a search query. The BGE worker gets input_type=query
+// (instruction prefix). The hash fallback is unprefixed so it stays symmetric
+// with stored document vectors on machines without the Python worker.
+func EmbedQuery(text string) Vector {
+	EnsureEmbedWorker()
+	if v, ok := embedQueryViaWorker(text); ok {
+		return v
+	}
+	if workerConfigured() {
+		return Vector{}
 	}
 	return EmbedSentence(text)
 }

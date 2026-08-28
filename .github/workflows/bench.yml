@@ -1,0 +1,168 @@
+# Manual Superopen benchmark run. Builds Linux `so`, runs the harness with
+# `--isolate docker` for product modes, and uploads the generated BENCHMARKS.md.
+# Does not commit or push.
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Harness modes to run
+        type: choice
+        default: offline
+        options:
+          - offline
+          - contradict
+          - graph
+          - memory
+          - compare
+          - product-small
+          - all
+      scale:
+        description: small = confidence gate; full = publishable n
+        type: choice
+        default: small
+        options:
+          - small
+          - full
+      phase:
+        description: Memory phase (2 retrieve, 3 coding-agent QA)
+        type: choice
+        default: "2"
+        options:
+          - "2"
+          - "3"
+      max_spend:
+        description: USD cap for compare / phase 3
+        type: string
+        default: "20"
+      split:
+        description: Memory split (ignored when suite runs both locomo and LME)
+        type: choice
+        default: locomo
+        options:
+          - locomo
+          - longmemeval
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: Bench / ${{ inputs.suite }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SUPEROPEN_LOCOMO_URL: ${{ secrets.SUPEROPEN_LOCOMO_URL }}
+      SUPEROPEN_LME_URL: ${{ secrets.SUPEROPEN_LME_URL }}
+      CLAUDE_CREDENTIALS_JSON: ${{ secrets.CLAUDE_CREDENTIALS_JSON }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Install native build deps
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc libc6-dev
+
+      - name: Build Superopen CLI (Linux ELF, bind-mounted into Docker)
+        env:
+          CGO_ENABLED: "1"
+        run: make build-native
+
+      - name: Restore benchmark cache (Django mirror + datasets)
+        uses: actions/cache@v4
+        with:
+          path: |
+            benchmarks/cache/django
+            benchmarks/datasets
+          key: bench-${{ runner.os }}-django-5.2.4-datasets
+
+      - name: Optional Claude credentials
+        run: |
+          set -euo pipefail
+          if [ -n "${CLAUDE_CREDENTIALS_JSON:-}" ]; then
+            mkdir -p "$HOME/.claude"
+            printf '%s\n' "$CLAUDE_CREDENTIALS_JSON" > "$HOME/.claude/.credentials.json"
+            chmod 600 "$HOME/.claude/.credentials.json"
+          fi
+
+      - name: Run harness (Docker isolate for product modes)
+        env:
+          SUITE: ${{ inputs.suite }}
+          SCALE: ${{ inputs.scale }}
+          PHASE: ${{ inputs.phase }}
+          MAX_SPEND: ${{ inputs.max_spend }}
+          SPLIT: ${{ inputs.split }}
+        run: |
+          set -euo pipefail
+          MODE=""
+          case "$SUITE" in
+            offline) MODE=offline ;;
+            contradict) MODE=contradict ;;
+            graph) MODE=graph ;;
+            memory) MODE=memory ;;
+            compare) MODE=compare ;;
+            product-small) MODE=contradict,latency,index,graph,memory ;;
+            all) MODE=all ;;
+            *)
+              echo "unknown suite: $SUITE" >&2
+              exit 1
+              ;;
+          esac
+
+          need_key=0
+          case "$SUITE" in
+            compare|all) need_key=1 ;;
+          esac
+          if [ "$PHASE" = 3 ] && { [ "$SUITE" = memory ] || [ "$SUITE" = product-small ] || [ "$SUITE" = all ]; }; then
+            need_key=1
+          fi
+          if [ "$need_key" = 1 ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "ANTHROPIC_API_KEY secret is required for this suite/phase." >&2
+            exit 1
+          fi
+          if [ "$SUITE" = memory ]; then
+            if [ "$SPLIT" = locomo ] && [ ! -f benchmarks/datasets/locomo/locomo10.json ] && [ -z "${SUPEROPEN_LOCOMO_URL:-}" ]; then
+              echo "LOCOMO dataset missing. Set secret SUPEROPEN_LOCOMO_URL or seed the datasets cache." >&2
+              exit 1
+            fi
+            if [ "$SPLIT" = longmemeval ] && [ ! -f benchmarks/datasets/longmemeval/longmemeval_s.json ] && [ -z "${SUPEROPEN_LME_URL:-}" ]; then
+              echo "LongMemEval dataset missing. Set secret SUPEROPEN_LME_URL or seed the datasets cache." >&2
+              exit 1
+            fi
+          elif { [ "$SUITE" = product-small ] || [ "$SUITE" = all ]; } && \
+               [ ! -f benchmarks/datasets/locomo/locomo10.json ] && \
+               [ -z "${SUPEROPEN_LOCOMO_URL:-}" ]; then
+            echo "LOCOMO dataset missing. Set secret SUPEROPEN_LOCOMO_URL or seed the datasets cache." >&2
+            exit 1
+          fi
+
+          cmd=(
+            python3 benchmarks/run.py
+            --mode "$MODE"
+            --scale "$SCALE"
+            --phase "$PHASE"
+            --split "$SPLIT"
+            --max-spend "$MAX_SPEND"
+            --host claude-code
+            --model claude-sonnet-5
+            --isolate docker
+            --so-bin ./bin/so
+          )
+          if [ "$SUITE" = "product-small" ] || [ "$SUITE" = "all" ]; then
+            cmd+=(--also-lme)
+          fi
+          "${cmd[@]}"
+
+      - name: Upload BENCHMARKS.md
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks-${{ inputs.suite }}-${{ github.run_id }}
+          if-no-files-found: warn
+          path: BENCHMARKS.md

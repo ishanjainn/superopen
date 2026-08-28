@@ -42,6 +42,15 @@ func TestInstallAllWritesSkill(t *testing.T) {
 			if !bytes.Contains(body, []byte("graph query first")) {
 				t.Fatalf("%s description must treat codebase questions as graph query first", path)
 			}
+			if !bytes.Contains(body, []byte("CLI binary")) {
+				t.Fatalf("%s must say so is a CLI binary", path)
+			}
+			if !bytes.Contains(body, []byte("not an MCP")) {
+				t.Fatalf("%s must say so is not an MCP tool", path)
+			}
+			if !bytes.Contains(body, []byte("memory recall")) {
+				t.Fatalf("%s must include the memory recall Bash line", path)
+			}
 			if bytes.Contains(body, []byte("memory search first")) {
 				t.Fatalf("%s description must not lead with memory search: %s", path, body[:400])
 			}

@@ -22,6 +22,13 @@ func (s *Store) RecallFilter(filter SearchFilter, budget int) (RecallResult, err
 	if filter.Limit <= 0 {
 		filter.Limit = 40
 	}
+	// Diary (prompt/working) is never knowledge (M3). When distilled notes
+	// exist, default recall drops those kinds so the live question cannot
+	// occupy the top hits. Explicit Kind still searches diary. Pre-distill
+	// stores keep ranking diary (M5).
+	if strings.TrimSpace(filter.Kind) == "" && len(filter.ExcludeKinds) == 0 && s.hasKnowledge() {
+		filter.ExcludeKinds = []string{KindPrompt, KindWorking}
+	}
 	hits, err := s.Search(filter)
 	if err != nil {
 		return RecallResult{BudgetTokens: budget}, err
@@ -57,7 +64,7 @@ func (s *Store) RecallFilter(filter SearchFilter, budget int) (RecallResult, err
 	if len(anti) > 3 {
 		anti = anti[:3]
 	}
-	current = trimToBudget(current, budget)
+	current = trimToBudget(current, budget, filter.Query)
 	return RecallResult{Hits: current, AntiHits: anti, BudgetTokens: budget}, nil
 }
 

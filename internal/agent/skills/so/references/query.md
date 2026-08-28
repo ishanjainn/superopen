@@ -4,7 +4,7 @@ Load this only when the task needs a recipe below. The stop-early loop in `SKILL
 answers most structural questions without it.
 
 `__SO_BIN__` is the binary path from `SKILL.md`. Graph commands default to
-compact `NODE` / `EDGE` text (graphify), not AXI TOON. `--json` is the full
+compact `NODE` / `EDGE` text, not AXI TOON. `--json` is the full
 envelope.
 
 ## Callers, callees, and paths

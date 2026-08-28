@@ -206,6 +206,9 @@ func SnippetCompact(result api.SnippetResult) string {
 		fmt.Fprintf(&b, "label: %s\n", result.Label)
 	}
 	fmt.Fprintf(&b, "file: %s\n", result.Location.File)
+	if src := strings.TrimSpace(result.Location.File); src != "" {
+		fmt.Fprintf(&b, "src=%s\n", src)
+	}
 	fmt.Fprintf(&b, "lines: %s\n", lineRange(result.Location.StartLine, result.Location.EndLine))
 	fmt.Fprintf(&b, "callers: %d\n", result.Callers)
 	fmt.Fprintf(&b, "callees: %d\n", result.Callees)

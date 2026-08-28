@@ -123,6 +123,11 @@ SELECT name, seq FROM memsrc.sqlite_sequence WHERE name LIKE 'memory_%'`); err !
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	_, _ = dst.db.Exec(`DETACH DATABASE memsrc`)
+	_, _ = dst.db.Exec(`PRAGMA foreign_keys = ON`)
+	if err := dst.rebuildFTS(); err != nil {
+		return fmt.Errorf("preserve memory fts: %w", err)
+	}
 	if _, err := dst.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 		return fmt.Errorf("checkpoint preserved memory: %w", err)
 	}

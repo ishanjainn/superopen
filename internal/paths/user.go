@@ -69,6 +69,19 @@ func CodexMarketplaceDir() (string, error) {
 	return filepath.Join(base, "codex-marketplace"), nil
 }
 
+// ClaudeConfigDir returns Claude Code's user config root. CLAUDE_CONFIG_DIR
+// is authoritative when set; otherwise Claude uses ~/.claude.
+func ClaudeConfigDir() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); configured != "" {
+		return filepath.Clean(configured), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home directory: %w", err)
+	}
+	return filepath.Join(home, ".claude"), nil
+}
+
 // CodexHome returns the host's Codex configuration root. CODEX_HOME is
 // authoritative when set; otherwise Codex uses ~/.codex on every platform.
 func CodexHome() (string, error) {
@@ -177,4 +190,23 @@ func EscapeJSONString(s string) string {
 func IsSoBinary(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
 	return base == "so" || base == "so.exe"
+}
+
+// ResolveSoBin is the absolute so binary to paste into Bash, or "so"/"so.exe"
+// when this process is not the CLI (tests). Prefer the running executable so
+// hooks and SessionStart match `so install`, then SUPEROPEN_SO_BIN, then PATH name.
+func ResolveSoBin() string {
+	if exe, err := os.Executable(); err == nil && IsSoBinary(exe) {
+		if abs, err := filepath.Abs(exe); err == nil {
+			return QuoteForHook(abs)
+		}
+		return QuoteForHook(exe)
+	}
+	if v := strings.TrimSpace(os.Getenv("SUPEROPEN_SO_BIN")); v != "" {
+		return QuoteForHook(v)
+	}
+	if runtime.GOOS == "windows" {
+		return "so.exe"
+	}
+	return "so"
 }

@@ -8,7 +8,7 @@ import (
 func (s *Store) ensureKnobs() error {
 	defaults := map[string]string{
 		"capture_floor":     "12",
-		"capture_cap":       "8000",
+		"capture_cap":       "100000",
 		"stale_weight":      "0.5",
 		"supersede_window":  "10",
 		"lex_fusion":        "0.35",
