@@ -90,6 +90,8 @@ func (s *Store) rebuildFTS() error {
 }
 
 func (s *Store) writeFTS(id int64, title, plain, files, tool string) error {
+	// FTS stores plaintext of episode bodies so keyword search works;
+	// memory_episodes.text remains AES-GCM sealed. See docs/memory.md.
 	if id <= 0 {
 		return nil
 	}

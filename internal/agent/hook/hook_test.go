@@ -9,6 +9,7 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/session"
+	"github.com/spf13/cobra"
 )
 
 func TestPeekContextUsesWorkspaceRootsOnlyWhenCwdMissing(t *testing.T) {
@@ -79,7 +80,20 @@ func TestIsClaudeCodeVendor(t *testing.T) {
 	}
 }
 
-// TestIsRealClaudeCodeInvocation pins down the rule that drives the
+func TestHeadlessEnvSkipsHook(t *testing.T) {
+	t.Setenv("SUPEROPEN_HEADLESS", "1")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDECODE", "1")
+	root := t.TempDir()
+	writeHookSession(t, root, "worker-sess")
+	cmd := &cobra.Command{}
+	if err := run(cmd, "claude-code", "SessionStart", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".so", "sessions", "worker-sess", "session.json")); err == nil {
+		t.Fatal("headless worker must not materialize a session")
+	}
+}
 // host-mismatch guard's right-hand side: only `CLAUDECODE=1` is
 // authoritative. Cursor 3.4+ honours the Claude Code plugin spec and
 // fires our --vendor=cc hook for Cursor's own agent turns, mirroring
@@ -341,5 +355,18 @@ func TestMaybeFinalizeSessionCascadesActiveChildren(t *testing.T) {
 	}
 	if !want[parent] || !want[child] {
 		t.Fatalf("finalize ids=%v want parent+child", got)
+	}
+}
+
+func TestPickAdapterFallsBackToGeneric(t *testing.T) {
+	got, err := pickAdapter("rovo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Vendor() != "rovo" {
+		t.Fatalf("vendor=%q", got.Vendor())
+	}
+	if _, err := pickAdapter(""); err == nil {
+		t.Fatal("empty vendor must still error")
 	}
 }

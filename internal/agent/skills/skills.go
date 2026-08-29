@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -94,7 +93,7 @@ func resolveSoBin() (string, error) {
 			return exe, nil
 		}
 	}
-	return exec.LookPath("so")
+	return paths.LookPathSo()
 }
 
 // RemoveAll deletes installed Superopen skill trees (best-effort).

@@ -13,10 +13,56 @@ from pathlib import Path
 from typing import Any
 
 from grade import grade_answer, recall_any_at_k, wrap_prompt
-from memory.adapters.bm25 import BM25Index, dense_search, rrf_merge
+from memory.adapters.bm25 import BM25Index, bow_search, rrf_merge
 from memory.adapters import superopen as so_adapter
 from memory.fetch_datasets import dataset_path, ensure_readme
 from spend import SpendLedger
+
+
+def assert_bge_worker(env: dict[str, str] | None = None) -> dict[str, str]:
+    """Fail closed unless the embed worker reports BGE.
+
+    A hash fallback would silently zero the dense/passage leg and still
+    produce a recall number. Set SO_EMBED_ALLOW_HASH=1 only for local debug.
+    """
+    import urllib.error
+    import urllib.request
+
+    merged = env or os.environ
+    if str(merged.get("SO_EMBED_ALLOW_HASH") or os.environ.get("SO_EMBED_ALLOW_HASH") or "") == "1":
+        return {"url": "", "model": "hash", "allowed": "1"}
+    url = (merged.get("SO_EMBED_URL") or os.environ.get("SO_EMBED_URL") or "http://127.0.0.1:18765").rstrip("/")
+    health = url + "/health"
+    try:
+        with urllib.request.urlopen(health, timeout=3) as resp:
+            body = json.loads(resp.read().decode("utf-8") or "{}")
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+        raise SystemExit(f"embed worker not reachable at {health}: {exc}") from exc
+    model = str(body.get("model") or "").lower()
+    if model != "bge":
+        raise SystemExit(
+            f"embed worker at {health} reports model={model!r}; want bge. "
+            "Hash fallback is not a valid memory score. Start `so memory embed` / fetch models, "
+            "or set SO_EMBED_ALLOW_HASH=1 for a non-publish run."
+        )
+    return {"url": url, "model": model}
+
+
+def _stored_doc_ids(id_to_docs: dict[int, Any]) -> set[str]:
+    out: set[str] = set()
+    for mapped in id_to_docs.values():
+        if isinstance(mapped, str):
+            out.add(mapped)
+            continue
+        if isinstance(mapped, list):
+            out.update(str(x) for x in mapped if x)
+    return out
+
+
+def _gold_ids(item: dict[str, Any]) -> list[str]:
+    gold = item.get("gold_session_ids") or item.get("gold") or []
+    return [str(g) for g in gold if g]
+
 
 
 def _observation_text(obs: Any) -> str:
@@ -188,10 +234,10 @@ def _adapter_rank(
         return so_adapter.rank_doc_ids(so_bin, store, query, id_to_docs or {}, limit=10, env=env)
     if name == "bm25":
         return bm25.search(query, k=10)
-    if name == "dense":
-        return dense_search(docs, query, k=10)
+    if name in ("bow", "dense"):
+        return bow_search(docs, query, k=10)
     if name == "rrf":
-        return rrf_merge([bm25.search(query, k=10), dense_search(docs, query, k=10)], k=10)
+        return rrf_merge([bm25.search(query, k=10), bow_search(docs, query, k=10)], k=10)
     raise ValueError(f"unknown adapter: {name}")
 
 
@@ -530,12 +576,15 @@ def run_memory_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> d
         docs = _synthetic_corpus(items)
     bm25 = BM25Index(docs)
     adapters = [a.strip() for a in args.adapters.split(",") if a.strip()]
+    if "dense" in adapters:
+        adapters = ["bow" if a == "dense" else a for a in adapters]
     results: dict[str, Any] = {
         "split": args.split,
         "n": len(items),
         "phase": args.phase,
         "scale": getattr(args, "scale", "small"),
         "adapters": {},
+        "baseline_note": "BM25/bow/RRF rank the raw flattened docs. Superopen ranks the post-capture store (collapse/skip can drop gold).",
     }
 
     store = out / "memory" / args.split
@@ -544,6 +593,8 @@ def run_memory_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> d
     paths, env = _memory_arm(out, str(args.split), so_bin, host_name, store)
     args._memory_paths = paths
     args._memory_env = env
+    if "superopen" in adapters:
+        results["embed_worker"] = assert_bge_worker(env)
     ingest = args.phase in (1, 3) or ("superopen" in adapters and args.phase >= 2)
     skip_ingest = os.environ.get("SO_BENCH_SKIP_INGEST") == "1"
     id_to_docs: dict[int, list[str]] = {}
@@ -567,6 +618,7 @@ def run_memory_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> d
             if rec.get("title"):
                 unique_titles.add(rec["title"])
         eid = so_adapter.embedder_id(so_bin, store, env=env)
+        st = so_adapter.memory_status(so_bin, store, env=env)
         results["embedder_id"] = eid
         results["ingest"] = {
             "store": str(store),
@@ -577,6 +629,7 @@ def run_memory_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> d
             "unique_titles_returned": len(unique_titles),
             "stored_episode_ids": len(id_to_docs),
             "embedder_id": eid,
+            "embedding_pending": int(st.get("embedding_pending") or 0),
             "llm_usd": 0.0,
         }
         results["ingest_sample"] = captures[:12]
@@ -616,6 +669,29 @@ def run_memory_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> d
             "hits_at_10": hits10,
             "hits": hits10,
             "total": total,
+        }
+
+    if "superopen" in adapters:
+        stored = _stored_doc_ids(id_to_docs)
+        hard = 0
+        scored = 0
+        for item in items:
+            gold = _gold_ids(item)
+            if not gold:
+                continue
+            scored += 1
+            if not any(g in stored for g in gold):
+                hard += 1
+        so = results["adapters"].get("superopen") or {}
+        hits10 = int(so.get("hits_at_10") or so.get("hits") or 0)
+        total = int(so.get("total") or scored or 0)
+        rank = max(total - hits10 - hard, 0)
+        results["gold_in_store"] = {
+            "scored": total,
+            "hard_miss": hard,
+            "rank_miss": rank,
+            "stored_docs": len(stored),
+            "note": "hard_miss = gold never captured; rank_miss = captured but not in top-10. BM25/bow/RRF search raw docs, Superopen searches the post-capture store.",
         }
 
     if args.phase >= 3:
@@ -666,7 +742,7 @@ def run_latency_mode(out: Path, so_bin: str) -> dict[str, Any]:
     return payload
 
 
-def run_contradiction_mode(out: Path, seeds: list[int]) -> dict[str, Any]:
+def run_contradiction_mode(out: Path) -> dict[str, Any]:
     cmd = [
         "go",
         "test",
@@ -677,15 +753,11 @@ def run_contradiction_mode(out: Path, seeds: list[int]) -> dict[str, Any]:
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(Path.cwd()))
     payload = {
-        "seeds": seeds,
         "ok": proc.returncode == 0,
-        "rescue_at_10": "pending",
-        "historical_verbatim": "pending",
+        "rescue_at_10": 1.0 if proc.returncode == 0 else 0.0,
+        "historical_verbatim": 1.0 if proc.returncode == 0 else 0.0,
         "note": "Go unit tests gate contradiction ranking.",
-        "log_tail": (proc.stdout or "")[-1500:],
+        "log_tail": ((proc.stdout or "") + (proc.stderr or ""))[-1500:],
     }
-    if proc.returncode == 0:
-        payload["rescue_at_10"] = 1.0
-        payload["historical_verbatim"] = 1.0
     (out / "contradiction.json").write_text(json.dumps(payload, indent=2) + "\n")
     return payload

@@ -5,11 +5,11 @@ from __future__ import annotations
 import os
 from typing import Any
 
-# Locomo small/full both cap at 100 (category-stratified). n=300 is too expensive
-# for coding-agent QA and is not a default. LongMemEval-S English n=50 is already
-# the Superopen split — do not shrink it. Compare uses the whole 6-question Django bank.
+# Locomo small n=100 (category-stratified). Full uses the 300-item file for
+# retrieve; coding-agent QA still samples via --qa-n. LongMemEval-S English
+# n=50 is already the Superopen split. Compare uses the whole 6-question Django bank.
 SMALL = {"locomo": 100, "longmemeval": 50, "compare": 6}
-FULL = {"locomo": 100, "longmemeval": 50, "compare": 6}
+FULL = {"locomo": 300, "longmemeval": 50, "compare": 6}
 
 MIN_LOCOMO = SMALL["locomo"]
 MIN_LME = SMALL["longmemeval"]
@@ -25,7 +25,11 @@ def apply_scale(args: Any) -> None:
     if getattr(args, "n", None) is None:
         args.n = table.get(split, table["locomo"])
     if not getattr(args, "qa_n", None):
-        args.qa_n = int(args.n)
+        # Full retrieve uses n=300; coding-agent QA stays a 20-item sample unless set.
+        if scale == "full" and split == "locomo":
+            args.qa_n = 20
+        else:
+            args.qa_n = int(args.n)
     if getattr(args, "compare_n", None) is None:
         args.compare_n = table["compare"]
     args.scale = scale

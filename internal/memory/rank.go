@@ -13,10 +13,6 @@ const (
 	staleDownweight    = 0.5
 	supersedeCapEps    = 1e-4
 	supersedeCapWindow = 10
-	lexFusionW         = 0.35
-	cosineWeight       = 0.6
-	centralityWeight   = 0.4
-	shapeFusionW       = 0.25
 	pinWeight          = 0.35
 	recallBudgetTok    = 1500
 	// Ten ranked ids (index + bodies). Top hits get a usable body; the rest
@@ -25,10 +21,16 @@ const (
 	recallDeepHits      = 3
 	recallDeepTok       = 350
 	rrfK                = 60
-	ftsCandidateLimit   = 200
-	denseCandidateLimit = 200
-	ftsPrimaryKeep      = 8
-	denseComplement     = 2
+	ftsRRFNum           = 2.0
+	denseRRFNum         = 1.0
+	denseRRFLexical     = 0.05
+	ftsCandidateLimit   = 400
+	denseCandidateLimit = 400
+	// Lexical-first blend: identifiers, names, and error strings usually
+	// are the right memories in any repo. Two slots stay open for hits
+	// that only matched by meaning.
+	ftsPrimaryKeep  = 8
+	denseComplement = 2
 )
 
 // blendLexicalSemantic keeps the strongest keyword matches in front and
@@ -257,10 +259,6 @@ func clipHitToTokens(h Hit, maxTok int, query string) Hit {
 	return h
 }
 
-func clipToTokens(s string, maxTok int) string {
-	return clipAroundQuery(s, "", maxTok)
-}
-
 type queryAnchor struct {
 	term    string
 	bytePos int
@@ -407,14 +405,6 @@ func (w clipSpan) render() string {
 		out += "…"
 	}
 	return out
-}
-
-func queryMatchByte(s, query string) int {
-	anchors := queryAnchors(s, query)
-	if len(anchors) == 0 {
-		return -1
-	}
-	return anchors[0].bytePos
 }
 
 // queryAnchors ranks query terms by in-document frequency (rarest first) so a

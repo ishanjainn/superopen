@@ -3,9 +3,14 @@ package memory
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,7 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -37,8 +41,12 @@ const (
 
 var (
 	workerOnce          sync.Once
+	embedWarnOnce       sync.Once
+	embedFailMu         sync.Mutex
+	embedFailWarned     bool
 	workerURL           string
 	workerMu            sync.Mutex
+	lastEmbedErr        error
 	embedRequestTimeout = 30 * time.Second
 	healthHTTP          = &http.Client{Timeout: healthRequestTimeout}
 )
@@ -72,8 +80,6 @@ func stampEmbedder(model string) {
 	switch strings.ToLower(strings.TrimSpace(model)) {
 	case "bge":
 		activeEmbedderID = bgeEmbedderID
-	case "minilm":
-		activeEmbedderID = miniLMEmbedderID
 	case "hash", "prose":
 		activeEmbedderID = EmbedderID
 	case "":
@@ -85,6 +91,18 @@ func stampEmbedder(model string) {
 
 func defaultEmbedURL() string {
 	return "http://" + DefaultEmbedListen
+}
+
+func warnEmbedFallback(format string, args ...any) {
+	embedWarnOnce.Do(func() {
+		fmt.Fprintf(os.Stderr, "so memory: "+format+"\n", args...)
+	})
+}
+
+func setLastEmbedErr(err error) {
+	if err != nil {
+		lastEmbedErr = err
+	}
 }
 
 // EnsureEmbedWorker points capture/recall at the shared loopback worker.
@@ -102,9 +120,19 @@ func EnsureEmbedWorker() {
 		if attachDefaultWorker() {
 			return
 		}
-		_ = FetchModels()
+		if err := FetchModels(); err != nil {
+			setLastEmbedErr(err)
+			warnEmbedFallback("BGE model fetch failed (%v); using hash embeddings until python3+onnxruntime is available", err)
+		}
 		_ = spawnDefaultWorker()
-		attachDefaultWorker()
+		if attachDefaultWorker() {
+			return
+		}
+		detail := "install python3 with numpy and onnxruntime, or set SO_EMBED_URL"
+		if lastEmbedErr != nil {
+			detail = lastEmbedErr.Error()
+		}
+		warnEmbedFallback("BGE worker did not start (%s); using hash embeddings. Dense recall is weaker until the worker is healthy", detail)
 	})
 }
 
@@ -232,14 +260,6 @@ func readWorkerPID() int {
 	return pid
 }
 
-func pidAlive(pid int) bool {
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return p.Signal(syscall.Signal(0)) == nil
-}
-
 func healthOK(url string) bool {
 	resp, err := healthHTTP.Get(url + "/health")
 	if err != nil {
@@ -284,21 +304,67 @@ func embedViaWorkerTyped(text, inputType string) (Vector, bool) {
 	if inputType == "" {
 		inputType = "document"
 	}
+	v, ok, timedOut := postEmbedOnce(url, text, inputType)
+	if ok {
+		return v, true
+	}
+	if timedOut {
+		warnEmbedRequestFail()
+		return Vector{}, false
+	}
+	v, ok, _ = postEmbedOnce(url, text, inputType)
+	if ok {
+		return v, true
+	}
+	warnEmbedRequestFail()
+	return Vector{}, false
+}
+
+func postEmbedOnce(url, text, inputType string) (Vector, bool, bool) {
 	body, _ := json.Marshal(embedRequest{Texts: []string{text}, InputType: inputType})
 	client := &http.Client{Timeout: embedRequestTimeout}
 	resp, err := client.Post(url+"/embed", "application/json", bytes.NewReader(body))
 	if err != nil {
-		return Vector{}, false
+		var ne net.Error
+		timedOut := errors.As(err, &ne) && ne.Timeout()
+		setLastEmbedErr(err)
+		return Vector{}, false, timedOut
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		setLastEmbedErr(fmt.Errorf("embed worker HTTP %d", resp.StatusCode))
+		return Vector{}, false, false
+	}
 	var out embedResponse
 	if json.NewDecoder(resp.Body).Decode(&out) != nil || len(out.Vectors) == 0 {
-		return Vector{}, false
+		setLastEmbedErr(fmt.Errorf("embed worker returned no vectors"))
+		return Vector{}, false, false
 	}
 	if out.Model != "" {
 		stampEmbedder(out.Model)
 	}
-	return vectorFromFloats(out.Vectors[0]), true
+	return vectorFromFloats(out.Vectors[0]), true, false
+}
+
+func warnEmbedRequestFail() {
+	embedFailMu.Lock()
+	defer embedFailMu.Unlock()
+	if embedFailWarned {
+		return
+	}
+	embedFailWarned = true
+	detail := "ranking without dense matches until the worker is healthy"
+	if lastEmbedErr != nil {
+		detail = lastEmbedErr.Error() + "; " + detail
+	}
+	fmt.Fprintf(os.Stderr, "so memory: embed worker request failed (%s)\n", detail)
+}
+
+func resetEmbedFailWarnForTest() {
+	embedFailMu.Lock()
+	embedFailWarned = false
+	embedFailMu.Unlock()
 }
 
 func vectorFromFloats(in []float64) Vector {
@@ -320,6 +386,9 @@ func ServeEmbedWorker(addr string) error {
 		if startBGEChild(addr, dir) {
 			return nil
 		}
+	}
+	if strings.TrimSpace(os.Getenv("SO_EMBED_ALLOW_HASH")) != "1" {
+		return fmt.Errorf("bge embed worker unavailable at %s (set SO_EMBED_ALLOW_HASH=1 for hash fallback)", addr)
 	}
 	model := "hash"
 	mux := http.NewServeMux()
@@ -398,6 +467,7 @@ func startBGEChild(addr, dir string) bool {
 	script := filepath.Join(dir, "serve.py")
 	if _, err := os.Stat(script); err != nil {
 		if err := writeBGEScript(dir); err != nil {
+			setLastEmbedErr(err)
 			return false
 		}
 	}
@@ -408,13 +478,19 @@ func startBGEChild(addr, dir string) bool {
 			modelPath = quant
 		}
 	}
-	cmd := exec.Command("python3", script, "--listen", addr, "--model-dir", dir)
+	cmd := pythonCommand(script, "--listen", addr, "--model-dir", dir)
+	if cmd == nil {
+		setLastEmbedErr(fmt.Errorf("python3, python, or py -3 not found on PATH"))
+		return false
+	}
 	if filepath.Base(modelPath) != "model.onnx" {
 		cmd.Env = append(os.Environ(), "SO_BGE_ONNX="+modelPath)
 	}
+	stderr := &capBuffer{max: 4096}
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
+		setLastEmbedErr(fmt.Errorf("start python embed worker: %w", err))
 		return false
 	}
 	url := "http://" + addr
@@ -428,7 +504,47 @@ func startBGEChild(addr, dir string) bool {
 		time.Sleep(40 * time.Millisecond)
 	}
 	_ = cmd.Process.Kill()
+	if tail := strings.TrimSpace(string(stderr.buf)); tail != "" {
+		setLastEmbedErr(fmt.Errorf("embed worker failed to become healthy: %s", tail))
+	} else {
+		setLastEmbedErr(fmt.Errorf("embed worker at %s did not pass /health within %s", addr, spawnReadyWait))
+	}
 	return false
+}
+
+// pythonCommand prefers python3 so existing machines resolve identically,
+// then python, then the Windows py launcher.
+func pythonCommand(script string, extra ...string) *exec.Cmd {
+	candidates := [][]string{{"python3"}, {"python"}, {"py", "-3"}}
+	for _, c := range candidates {
+		if _, err := exec.LookPath(c[0]); err != nil {
+			continue
+		}
+		args := append(append([]string{}, c[1:]...), script)
+		args = append(args, extra...)
+		return exec.Command(c[0], args...)
+	}
+	return nil
+}
+
+type capBuffer struct {
+	buf []byte
+	max int
+}
+
+func (c *capBuffer) Write(p []byte) (int, error) {
+	if c.max <= 0 {
+		return len(p), nil
+	}
+	remain := c.max - len(c.buf)
+	if remain > 0 {
+		if len(p) > remain {
+			c.buf = append(c.buf, p[:remain]...)
+		} else {
+			c.buf = append(c.buf, p...)
+		}
+	}
+	return len(p), nil
 }
 
 func FetchModels() error {
@@ -441,11 +557,11 @@ func FetchModels() error {
 	}
 	tok := filepath.Join(dir, "tokenizer.json")
 	mod := filepath.Join(dir, "model.onnx")
-	if _, err := os.Stat(tok); err != nil {
-		_ = downloadFile(bgeTokenizerURL, tok)
+	if err := ensurePinnedFile(bgeTokenizerURL, tok, bgeTokenizerSHA256); err != nil {
+		return err
 	}
-	if _, err := os.Stat(mod); err != nil {
-		_ = downloadFile(bgeQuantizedONNXURL, mod)
+	if err := ensurePinnedFile(bgeQuantizedONNXURL, mod, bgeQuantizedONNXSHA256); err != nil {
+		return err
 	}
 	return nil
 }
@@ -458,7 +574,7 @@ func writeBGEScript(dir string) error {
 	return os.WriteFile(filepath.Join(dir, "serve.py"), raw, 0o644)
 }
 
-func downloadFile(url, dest string) error {
+func downloadFile(url, dest, wantSHA string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -471,23 +587,47 @@ func downloadFile(url, dest string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return nil
+		return fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
 	}
 	tmp := dest + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
-	_, copyErr := io.Copy(f, resp.Body)
+	h := sha256.New()
+	_, copyErr := io.Copy(io.MultiWriter(f, h), resp.Body)
 	_ = f.Close()
 	if copyErr != nil {
 		_ = os.Remove(tmp)
 		return copyErr
 	}
+	got := hex.EncodeToString(h.Sum(nil))
+	if wantSHA != "" && got != wantSHA {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("checksum mismatch for %s (got %s)", filepath.Base(dest), got)
+	}
 	return os.Rename(tmp, dest)
 }
 
+func fileSHA256(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func ensurePinnedFile(url, dest, wantSHA string) error {
+	if got, err := fileSHA256(dest); err == nil && got == wantSHA {
+		return nil
+	}
+	return downloadFile(url, dest, wantSHA)
+}
+
 const (
-	bgeTokenizerURL     = "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/tokenizer.json?download=true"
-	bgeQuantizedONNXURL = "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/onnx/model_quantized.onnx?download=true"
+	bgeTokenizerURL        = "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/tokenizer.json?download=true"
+	bgeQuantizedONNXURL    = "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/onnx/model_quantized.onnx?download=true"
+	bgeTokenizerSHA256     = "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+	bgeQuantizedONNXSHA256 = "6c9c6101a956d62dfb5e7190c538226c0c5bb9cb27b651234b6df063ee7dbfe4"
 )

@@ -154,16 +154,13 @@ def main() -> int:
     parser.add_argument("--split", default="locomo", choices=("locomo", "longmemeval"))
     parser.add_argument("--scale", default="small", choices=("small", "full"), help="small = valid gate; full = publishable")
     parser.add_argument("--n", type=int, default=None, help="Override QA/retrieve count (must meet scale minimums)")
-    parser.add_argument("--adapters", default="superopen,bm25,dense,rrf")
+    parser.add_argument("--adapters", default="superopen,bm25,bow,rrf")
     parser.add_argument("--max-spend", type=float, default=0.0, dest="max_spend")
     parser.add_argument("--repo", default="django")
-    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--host", default="claude-code", choices=("opencode", "claude-code"))
     parser.add_argument("--model", default=None)
-    parser.add_argument("--max-turns", type=int, default=14, dest="max_turns")
     parser.add_argument("--index-timeout", type=int, default=1800, dest="index_timeout")
     parser.add_argument("--agent-timeout", type=int, default=900, dest="agent_timeout")
-    parser.add_argument("--seeds", default="13,42,137")
     parser.add_argument("--so-bin", default=None, dest="so_bin")
     parser.add_argument(
         "--isolate",
@@ -245,8 +242,7 @@ def main() -> int:
             elif mode == "compare":
                 summary["compare"] = run_compare_mode(args, out, so_bin, ledger)
             elif mode == "contradict":
-                seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
-                summary["contradict"] = run_contradiction_mode(out, seeds)
+                summary["contradict"] = run_contradiction_mode(out)
             elif mode == "latency":
                 summary["latency"] = run_latency_mode(out, host_so)
             elif mode == "index":

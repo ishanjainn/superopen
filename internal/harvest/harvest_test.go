@@ -5,8 +5,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ishanjainn/superopen/internal/agent/headless"
 	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/session"
 )
 
 func testRepo(t *testing.T) string {
@@ -184,10 +187,31 @@ func TestParseProposalsCapsAndPrefersSimplify(t *testing.T) {
 	}
 }
 
-func TestSessionStartLine(t *testing.T) {
+func TestSessionStartLinePendingNotOpenReview(t *testing.T) {
 	root := testRepo(t)
-	if line := SessionStartLine(root); line != "" {
+	if line := PendingSessionStartLine(root); line != "" {
 		t.Fatalf("expected empty, got %q", line)
+	}
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.InsertRun("sess-pending", StatusPending, "", "await-live"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	line := PendingSessionStartLine(root)
+	if !strings.Contains(line, "HARVEST pending") || !strings.Contains(line, "so harvest propose") {
+		t.Fatalf("line %q", line)
+	}
+	if !strings.Contains(line, "so harvest brief") || !strings.Contains(line, "so harvest skip") {
+		t.Fatalf("live line must name brief then skip: %q", line)
+	}
+	if strings.Contains(line, "harvest scan") {
+		t.Fatalf("live line must not name headless scan: %q", line)
+	}
+	if strings.Contains(line, "OPEN") || strings.Contains(line, "review") {
+		t.Fatalf("OPEN review must not be on SessionStart: %q", line)
 	}
 	p, err := Propose(root, ProposeInput{
 		Title: "add harvest line", Target: "AGENTS.md", Reason: "missing",
@@ -199,16 +223,9 @@ func TestSessionStartLine(t *testing.T) {
 	if p.Status != StatusOpen {
 		t.Fatalf("status %s", p.Status)
 	}
-	line := SessionStartLine(root)
-	if !strings.Contains(line, "HARVEST") || !strings.Contains(line, "OPEN") {
-		t.Fatalf("line %q", line)
-	}
-	attached := AttachSessionStart("", root)
-	if !strings.HasPrefix(attached, "Superopen: codebase questions") {
-		t.Fatalf("must stay graph-first: %q", attached)
-	}
-	if !strings.Contains(attached, "HARVEST") {
-		t.Fatalf("missing harvest: %q", attached)
+	// OPEN proposals still must not change the pending pointer into a review nag.
+	if strings.Contains(PendingSessionStartLine(root), "review") {
+		t.Fatalf("pending line must not become review: %q", PendingSessionStartLine(root))
 	}
 }
 
@@ -266,5 +283,147 @@ func TestInventoryFindsMdc(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("mdc missing: %+v", files)
+	}
+}
+
+func startHarvestSession(t *testing.T, root, id, vendor, title, model string) {
+	t.Helper()
+	store := session.NewStore(paths.Resolve(root))
+	if err := store.Start(session.Meta{
+		ID: id, Vendor: vendor, Title: title, Model: model,
+		PromptPreview: title, StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMaybeGenerateCursorAwaitsLive(t *testing.T) {
+	root := testRepo(t)
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	startHarvestSession(t, root, "cursor-1", "cursor", "fix the dashboard", "grok")
+	res := MaybeGenerate(root, "cursor-1")
+	if !res.Pending || res.Skipped != "await-live" {
+		t.Fatalf("cursor must not steal a CLI: %+v", res)
+	}
+}
+
+func TestMaybeGenerateOncePerSession(t *testing.T) {
+	root := testRepo(t)
+	startHarvestSession(t, root, "cursor-dup", "cursor", "fix the dashboard", "grok")
+	first := MaybeGenerate(root, "cursor-dup")
+	if !first.Pending || first.Skipped != "await-live" {
+		t.Fatalf("first: %+v", first)
+	}
+	second := MaybeGenerate(root, "cursor-dup")
+	if second.Skipped != "already-queued" {
+		t.Fatalf("second SessionEnd must not queue again: %+v", second)
+	}
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if !store.HasAttempt("cursor-dup") {
+		t.Fatal("expected one harvest attempt")
+	}
+}
+
+func TestProposeResolvesPending(t *testing.T) {
+	root := testRepo(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.InsertRun("sess-pending", StatusPending, "", SkipAwaitLive); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	_, err = Propose(root, ProposeInput{
+		SessionID: "sess-pending", Title: "add harvest line", Target: "AGENTS.md",
+		Reason: "missing", Kind: KindImprove, Diff: additiveDiff(),
+		Evidence: []Evidence{{Kind: "session", ID: "sess-pending", Label: "wrap-up"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if PendingSessionStartLine(root) != "" {
+		t.Fatalf("propose must clear pending: %q", PendingSessionStartLine(root))
+	}
+}
+
+func TestSkipResolvesPending(t *testing.T) {
+	root := testRepo(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.InsertRun("sess-skip", StatusPending, "", SkipAwaitLive); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	if err := Skip(root, "sess-skip", "nothing to change"); err != nil {
+		t.Fatal(err)
+	}
+	if PendingSessionStartLine(root) != "" {
+		t.Fatalf("skip must clear pending: %q", PendingSessionStartLine(root))
+	}
+}
+
+func TestGenerateCursorNoAuth(t *testing.T) {
+	root := testRepo(t)
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	startHarvestSession(t, root, "cursor-scan", "cursor", "fix the dashboard", "grok")
+	res := Generate(root, "cursor-scan")
+	if res.Skipped != "no-auth" || !res.Pending {
+		t.Fatalf("cursor scan must not steal a CLI: %+v", res)
+	}
+	if PendingSessionStartLine(root) == "" {
+		t.Fatal("failed own-CLI scan must leave pending for SessionStart")
+	}
+}
+
+func TestBriefUsesPendingSession(t *testing.T) {
+	root := testRepo(t)
+	startHarvestSession(t, root, "brief-1", "cursor", "fix the dashboard", "grok")
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.InsertRun("brief-1", StatusPending, "", SkipAwaitLive); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	text, err := Brief(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "brief-1") || !strings.Contains(text, "You propose playbook patches") {
+		t.Fatalf("brief: %q", text)
+	}
+}
+
+func TestMaybeGenerateSkipsWorkerSession(t *testing.T) {
+	root := testRepo(t)
+	startHarvestSession(t, root, "w1", "claude-code", headless.WorkerHarvestPrefix+" for Superopen harvest.", "<synthetic>")
+	res := MaybeGenerate(root, "w1")
+	if res.Skipped != "worker-session" || res.Pending {
+		t.Fatalf("worker session must skip without pending: %+v", res)
+	}
+}
+
+func TestGenerateSkipsWorkerFingerprint(t *testing.T) {
+	root := testRepo(t)
+	startHarvestSession(t, root, "w2", "claude-code", headless.WorkerDistillPrefix+" for a coding agent.", "<synthetic>")
+	res := Generate(root, "w2")
+	if res.Skipped != "worker-session" {
+		t.Fatalf("got %+v", res)
 	}
 }

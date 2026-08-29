@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -110,9 +111,16 @@ func CopilotHome() (string, error) {
 
 // OpenCodeConfigDir returns OpenCode's global configuration directory.
 // OpenCode documents ~/.config/opencode and honors XDG_CONFIG_HOME.
+// Native Windows uses %APPDATA%\opencode unless XDG_CONFIG_HOME is set
+// (WSL and Git-Bash users who export XDG still follow the Unix branch).
 func OpenCodeConfigDir() (string, error) {
 	if configured := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); configured != "" {
 		return filepath.Join(configured, "opencode"), nil
+	}
+	if runtime.GOOS == "windows" {
+		if cfg, err := os.UserConfigDir(); err == nil && cfg != "" {
+			return filepath.Join(cfg, "opencode"), nil
+		}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -190,6 +198,24 @@ func EscapeJSONString(s string) string {
 func IsSoBinary(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
 	return base == "so" || base == "so.exe"
+}
+
+// LookPathSo finds so or so.exe on PATH. On Windows it tries so.exe first
+// then so, matching PATHEXT-aware lookup without depending on it.
+func LookPathSo() (string, error) {
+	name := "so"
+	if runtime.GOOS == "windows" {
+		name = "so.exe"
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p, nil
+	}
+	if runtime.GOOS == "windows" {
+		if p, err := exec.LookPath("so"); err == nil {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("%s binary not found on PATH", name)
 }
 
 // ResolveSoBin is the absolute so binary to paste into Bash, or "so"/"so.exe"

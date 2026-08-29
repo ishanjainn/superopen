@@ -29,8 +29,8 @@ func TestBashLooksLikeReadAndListing(t *testing.T) {
 	if !bashLooksLikeRead("sed -n '1,80p' django/db/models/query.py") {
 		t.Fatal("sed -n should count as a file read")
 	}
-	if !bashLooksLikeRead("cat ./django/urls/exceptions.py") {
-		t.Fatal("cat should count as a file read")
+	if !bashLooksLikeRead("python3 -c \"print(open('django/db/models/query.py').read())\"") {
+		t.Fatal("python3 -c should count as a file read")
 	}
 	if !bashLooksLikeListing("ls") || !bashLooksLikeListing("ls -la /work") {
 		t.Fatal("ls should count as a listing")
@@ -112,22 +112,6 @@ func TestSearchTermFromPayloadStripsRegexSyntax(t *testing.T) {
 	}
 }
 
-func TestExploreAugmentSilentForNonExploreTool(t *testing.T) {
-	payload := []byte(`{"tool_name":"Bash","tool_input":{"command":"ls -la"},"cwd":"/tmp"}`)
-	if got := exploreAugment(payload, "claude-code"); got != "" {
-		t.Fatalf("expected silence for Bash, got %q", got)
-	}
-}
-
-func TestExploreAugmentSilentWithoutGraph(t *testing.T) {
-	// t.TempDir has no .so database, so the hook must add nothing rather
-	// than emitting an unconditional reminder.
-	payload := []byte(`{"tool_name":"Grep","tool_input":{"pattern":"HandleRequest"},"cwd":"` + t.TempDir() + `"}`)
-	if got := exploreAugment(payload, "claude-code"); got != "" {
-		t.Fatalf("expected silence without a graph, got %q", got)
-	}
-}
-
 func TestSteerTextForIgnoresEditTools(t *testing.T) {
 	payload := []byte(`{"tool_name":"Edit","session_id":"s1","tool_input":{"file_path":"/repo/main.go"}}`)
 	if _, _, ok := steerTextFor("claude-code", "PreToolUse", payload); ok {
@@ -206,6 +190,69 @@ func TestSessionStartHarvestOneLiner(t *testing.T) {
 	}
 	if extra, _, ok := steerTextFor("claude-code", "Stop", payload); ok {
 		t.Fatalf("Stop must stay silent, got %q", extra)
+	}
+}
+
+func TestSessionStartPendingHarvestOneLiner(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "pending-session")
+	writeHookSourceFile(t, root)
+	store, err := harvest.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.InsertRun("old-cursor-sess", harvest.StatusPending, "", "await-live"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	payload, err := json.Marshal(map[string]any{
+		"session_id": "pending-session",
+		"cwd":        root,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("cursor", "sessionStart", payload)
+	if !ok || !strings.Contains(text, "HARVEST pending") || !strings.Contains(text, "so harvest propose") {
+		t.Fatalf("pending harvest one-liner, got ok=%v %q", ok, text)
+	}
+	if strings.Contains(text, "review") {
+		t.Fatalf("must not inject OPEN review: %q", text)
+	}
+}
+
+func TestPromptSubmitPendingHarvestOnCodePrompt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "code-harvest")
+	writeHookSourceFile(t, root)
+	store, err := harvest.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.InsertRun("old-cursor-sess", harvest.StatusPending, "", harvest.SkipAwaitLive); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	payload, err := json.Marshal(map[string]any{
+		"session_id": "code-harvest",
+		"cwd":        root,
+		"prompt":     "Where is the plugin's App plugin registered?",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("cursor", "beforeSubmitPrompt", payload)
+	if !ok || !strings.Contains(text, "HARVEST pending") || !strings.Contains(text, "so harvest propose") {
+		t.Fatalf("code prompt must still inject live harvest, got ok=%v %q", ok, text)
+	}
+	if strings.Contains(text, "review") {
+		t.Fatalf("must not inject OPEN review: %q", text)
+	}
+	second, _, ok := steerTextFor("cursor", "beforeSubmitPrompt", payload)
+	if ok && strings.Contains(second, "HARVEST pending") {
+		t.Fatalf("second prompt-submit must not re-nag harvest: %q", second)
 	}
 }
 
@@ -669,6 +716,9 @@ func TestPriorWorkCueInjectsIndex(t *testing.T) {
 	text, _, ok := steerTextFor("claude-code", "UserPromptSubmit", payload)
 	if !ok || !strings.Contains(text, "JWT expiry") {
 		t.Fatalf("cue should inject index lines, got ok=%v text=%q", ok, text)
+	}
+	if !strings.Contains(text, "import ids") || !strings.Contains(text, "cite both") || !strings.Contains(text, "second cue") {
+		t.Fatalf("cue pack must include diary framing, got %q", text)
 	}
 	if !strings.Contains(text, "UNIQUE_CUE_BODY") {
 		t.Fatalf("cue should inject matching recalled body, got %q", text)

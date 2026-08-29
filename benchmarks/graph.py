@@ -102,13 +102,31 @@ def _probe_trace(direction: str):
 
 def _probe_query(root: Path, env: dict[str, str], so_bin: str) -> tuple[bool, bool, str]:
     proc = _so(
-        ["graph", "query", "How does Django middleware call get_response?"],
+        ["graph", "query", "How does the QuerySet class build and evaluate its query, including the SQL compiler?"],
         root,
         env,
         so_bin,
     )
-    ok = proc.returncode == 0 and "NODE" in (proc.stdout or "")
-    return ok, False, (proc.stdout or "")[:500]
+    out = proc.stdout or ""
+    has_node = proc.returncode == 0 and "NODE" in out
+    has_qs = "QuerySet" in out
+    ok = has_node and has_qs
+    partial = has_node and not has_qs
+    return ok, partial, out[:500]
+
+
+def _probe_query_register(root: Path, env: dict[str, str], so_bin: str) -> tuple[bool, bool, str]:
+    proc = _so(
+        ["graph", "query", "How does Django admin Site.register bind a model?"],
+        root,
+        env,
+        so_bin,
+    )
+    out = proc.stdout or ""
+    has_node = proc.returncode == 0 and "NODE" in out
+    has_reg = "register" in out
+    ok = has_node and has_reg
+    return ok, has_node and not has_reg, out[:500]
 
 
 def _probe_files(root: Path, env: dict[str, str], so_bin: str) -> tuple[bool, bool, str]:
@@ -127,9 +145,9 @@ PROBES: list[Probe] = [
     Probe("Q6", "text search", _probe_search("QuerySet", "Method")),
     Probe("Q7", "outbound trace", _probe_trace("outbound")),
     Probe("Q8", "inbound trace", _probe_trace("inbound")),
-    Probe("Q9", "NL query", _probe_query),
+    Probe("Q9", "NL query QuerySet", _probe_query),
     Probe("Q10", "properties", _probe_snippet),
-    Probe("Q11", "inheritance", _probe_trace("outbound")),
+    Probe("Q11", "NL query register", _probe_query_register),
     Probe("Q12", "list files", _probe_files),
 ]
 
@@ -137,8 +155,12 @@ PROBES: list[Probe] = [
 def run_graph_probes(root: Path, env: dict[str, str], so_bin: str) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     total = 0.0
+    times: list[float] = []
     for probe in PROBES:
+        t0 = time.perf_counter()
         ok, partial, notes = probe.run(root, env, so_bin)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        times.append(elapsed_ms)
         score = graph_probe_grade(ok, partial)
         total += score
         rows.append(
@@ -148,14 +170,20 @@ def run_graph_probes(root: Path, env: dict[str, str], so_bin: str) -> dict[str, 
                 "score": score,
                 "ok": ok,
                 "partial": partial,
+                "ms": round(elapsed_ms, 1),
                 "notes": notes,
             }
         )
     denom = len(PROBES)
+    times_sorted = sorted(times)
+    p50 = times_sorted[len(times_sorted) // 2] if times_sorted else None
+    p95 = times_sorted[int(len(times_sorted) * 0.95)] if times_sorted else None
     return {
         "score": total,
         "max": float(denom),
         "pct": (total / denom * 100.0) if denom else 0.0,
+        "p50_ms": p50,
+        "p95_ms": p95,
         "probes": rows,
     }
 

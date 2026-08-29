@@ -20,7 +20,9 @@ func cmdHarvest() *cobra.Command {
 	cmd.AddCommand(
 		harvestInventoryCmd(),
 		harvestProposeCmd(),
+		harvestBriefCmd(),
 		harvestScanCmd(),
+		harvestSkipCmd(),
 		harvestListCmd(),
 		harvestShowCmd(),
 		harvestApplyCmd(),
@@ -96,9 +98,9 @@ func harvestProposeCmd() *cobra.Command {
 }
 
 func harvestScanCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "scan [session]",
-		Short: "Run skip gates then at most one bounded headless generate",
+		Short: "Run skip gates then at most one bounded generate on the session's own CLI",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
@@ -119,6 +121,54 @@ func harvestScanCmd() *cobra.Command {
 			}, res)
 		},
 	}
+	return cmd
+}
+
+func harvestBriefCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "brief [session]",
+		Short: "Print the harvest prompt for the live agent (pending session if omitted)",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root := repoRoot()
+			if skipIfUnmanaged(cmd, root) {
+				return nil
+			}
+			id := ""
+			if len(args) == 1 {
+				id = args[0]
+			}
+			text, err := harvest.Brief(root, id)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), text)
+			return nil
+		},
+	}
+}
+
+func harvestSkipCmd() *cobra.Command {
+	var reason string
+	cmd := &cobra.Command{
+		Use:   "skip <session>",
+		Short: "Close a pending harvest with nothing to propose",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root := repoRoot()
+			if skipIfUnmanaged(cmd, root) {
+				return nil
+			}
+			if err := harvest.Skip(root, args[0], reason); err != nil {
+				return err
+			}
+			return out().HumanOrJSON("harvest_skip", func() {
+				fmt.Fprintf(cmd.OutOrStdout(), "skipped %s\n", args[0])
+			}, map[string]any{"session_id": args[0], "status": "skipped"})
+		},
+	}
+	cmd.Flags().StringVar(&reason, "reason", "", "Why nothing was proposed")
+	return cmd
 }
 
 func harvestListCmd() *cobra.Command {

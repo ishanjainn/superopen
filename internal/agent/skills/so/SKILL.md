@@ -25,7 +25,7 @@ When `.so/` exists and the request is about **this repository's source** (how do
 __SO_BIN__ graph query "<question>"
 ```
 
-Answer from NODE/EDGE lines, their `src=` paths, and any BODIES the query already printed. **If those answer the question, stop.** Do not Read whole modules. Do not list the tree to confirm Superopen.
+Answer from NODE/EDGE lines, their `src=` paths, and any BODIES the query already printed. **If those answer the question, stop.** Do not run `memory recall` for a source question. Do not Read whole modules. Do not list the tree to confirm Superopen.
 
 If you still need a symbol body, run `__SO_BIN__ graph snippet "<qualified_name>"` for a NODE already listed. Do not run `so graph query` again unless the dump said TRUNCATED. Grep/Read only for a literal string the graph does not index. `__SO_BIN__ graph trace "<qn>"` for callers if the listed NODE is not enough. Do not start a `so graph search` spray.
 
@@ -37,7 +37,9 @@ When the question is personal, about prior decisions, or this workspace is a mem
 __SO_BIN__ memory recall "<question>"
 ```
 
-That command returns bodies. `so memory search` is a title-only index — `0 memories` there means no title match, not an empty store. Then `so memory get <id>` if you need one row. Do not run graph query for a diary question.
+That command returns bodies. Quote the note and cite `#id`. Titles that look like import ids are still this workspace diary. If two notes conflict, cite both `#id`s and pick the most specific or recent. If recall misses, try a second cue. `so memory search` is a title-only index — `0 memories` there means no title match, not an empty store. Then `so memory get <id>` if you need one row. Do not run graph query for a diary question.
+
+If a hook line says `HARVEST pending`, you are the live agent: run `__SO_BIN__ harvest brief <id>` then `__SO_BIN__ harvest propose` (JSON on stdin, include `session_id`) **before answering**. If nothing to propose, run `__SO_BIN__ harvest skip <id>`. Same for `DISTILL pending` (`memory distill --brief <id>`, then `memory distill --apply <id>`; empty array if nothing durable). See `references/harvest.md`.
 
 Do not initialize a repository because `.so/` is missing.
 

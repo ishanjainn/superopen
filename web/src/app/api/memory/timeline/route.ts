@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { projectIdFromRequest, runWithProjectAsync } from "@/lib/so/workspace";
-import { soJSON } from "@/lib/so/exec";
+import { soJSON, soJSONRows } from "@/lib/so/exec";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
     if (!res.ok) {
       return NextResponse.json({ error: res.error, buckets: [] }, { status: 200 });
     }
-    return NextResponse.json({ buckets: res.data ?? [] });
+    const items = soJSONRows(res);
+    return NextResponse.json({ buckets: [{ when: "recent", items }] });
   });
 }

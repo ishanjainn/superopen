@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
@@ -20,6 +22,16 @@ const (
 	queryNeighborFetch = 200
 	queryNeighborKeep  = 48
 )
+
+func queryRowCap() int {
+	if v := strings.TrimSpace(os.Getenv("SUPEROPEN_GRAPH_QUERY_MAX_ROWS")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err == nil && n > 0 {
+			return n
+		}
+	}
+	return queryMaxNodeRows
+}
 
 func hubThreshold(degrees map[int64]int) int {
 	if len(degrees) == 0 {
@@ -251,6 +263,19 @@ func queryNodeBody(ordered []queryNodeHit, withFact bool) string {
 	return b.String()
 }
 
+func queryNodeBodyFit(ordered []queryNodeHit, header, edges string, maxChars int) string {
+	var facts, plain strings.Builder
+	for _, hit := range ordered {
+		facts.WriteString(formatQueryNodeLineFact(hit, true))
+		plain.WriteString(formatQueryNodeLineFact(hit, false))
+	}
+	withFacts := facts.String()
+	if maxChars <= 0 || len(header)+len(withFacts)+len(edges) <= maxChars {
+		return withFacts
+	}
+	return plain.String()
+}
+
 // preferQueryNodeBody keeps ~40-char signature/docstring facts only when they
 // fit the existing token cap. Do not raise queryDefaultBudget to make room.
 func preferQueryNodeBody(header, withFacts, plain, edges string, maxChars int) string {
@@ -331,7 +356,7 @@ func (s *Store) spliceWideTypeMethods(ctx context.Context, ordered []queryNodeHi
 		return ordered
 	}
 	seen := map[int64]bool{}
-	out := make([]queryNodeHit, 0, len(ordered)+queryMaxNodeRows)
+	out := make([]queryNodeHit, 0, len(ordered)+queryRowCap())
 	var wide []queryNodeHit
 	for _, hit := range ordered {
 		if !hit.seed {
@@ -347,7 +372,7 @@ func (s *Store) spliceWideTypeMethods(ctx context.Context, ordered []queryNodeHi
 		}
 	}
 	for _, owner := range wide {
-		remain := queryMaxNodeRows - len(out)
+		remain := queryRowCap() - len(out)
 		if remain <= 0 {
 			break
 		}
@@ -365,7 +390,7 @@ func (s *Store) spliceWideTypeMethods(ctx context.Context, ordered []queryNodeHi
 		if !queryWideType(hit.node) {
 			continue
 		}
-		remain := queryMaxNodeRows - len(out)
+		remain := queryRowCap() - len(out)
 		if remain <= 0 {
 			continue
 		}
@@ -404,10 +429,7 @@ func (s *Store) wideTypeMethods(ctx context.Context, owner api.Node, seen map[in
 			cand = append(cand, queryNodeHit{node: item.node, hop: 1})
 		}
 	}
-	if items, err := s.neighbors(ctx, owner, "outgoing", []string{"DEFINES_METHOD"}, queryNeighborFetch); err == nil {
-		appendItems(items)
-	}
-	if items, err := s.neighbors(ctx, owner, "outgoing", []string{"DEFINES"}, queryNeighborFetch); err == nil {
+	if items, err := s.neighbors(ctx, owner, "outgoing", []string{"DEFINES_METHOD", "DEFINES"}, queryNeighborFetch); err == nil {
 		appendItems(items)
 	}
 	sort.SliceStable(cand, func(i, j int) bool {
@@ -435,7 +457,7 @@ func queryNodeLoc(node api.Node) string {
 	return fmt.Sprintf("L%d", start)
 }
 
-func applyQueryBudget(header, nodeBody, edgeBody string, seedCount int, ordered []queryNodeHit, budget, maxChars, reachable int) (string, bool) {
+func applyQueryBudget(header, nodeBody, edgeBody string, seedCount int, ordered []queryNodeHit, budget, maxChars, listed int) (string, bool) {
 	edgeReserve := 0
 	if strings.TrimSpace(edgeBody) != "" {
 		edgeReserve = maxChars / 4
@@ -501,13 +523,17 @@ func applyQueryBudget(header, nodeBody, edgeBody string, seedCount int, ordered 
 		body += keptEdges
 	}
 	shownNodes := strings.Count(body, "NODE ")
-	totalNodes := len(ordered)
-	cutCount := totalNodes - shownNodes
+	pageNodes := len(ordered)
+	foundNodes := listed
+	if foundNodes < pageNodes {
+		foundNodes = pageNodes
+	}
+	cutCount := pageNodes - shownNodes
 	if cutCount < 0 {
 		cutCount = 0
 	}
 	shownEdges := strings.Count(body, "EDGE ")
-	if !nodeTrunc && shownNodes >= totalNodes && (edgeBody == "" || shownEdges == strings.Count(edgeBody, "EDGE ") || strings.Count(edgeBody, "EDGE ") == 0) {
+	if !nodeTrunc && shownNodes >= pageNodes && (edgeBody == "" || shownEdges == strings.Count(edgeBody, "EDGE ") || strings.Count(edgeBody, "EDGE ") == 0) {
 		if len(header+nodeBody+edgeBody) <= maxChars {
 			return header + nodeBody + edgeBody, false
 		}
@@ -516,14 +542,15 @@ func applyQueryBudget(header, nodeBody, edgeBody string, seedCount int, ordered 
 		estTokens := len(body) / queryCharsPerToken
 		return fmt.Sprintf(
 			"[i] Complete answer over budget: all %d nodes and %d edges shown (~%d tokens vs the requested ~%d-token budget). Narrow the question if you need a smaller subgraph, or run `so graph snippet <qn>` on a NODE below. Do not pipe through head/tail.\n\n%s",
-			totalNodes, shownEdges, estTokens, budget, body,
+			pageNodes, shownEdges, estTokens, budget, body,
 		), false
 	}
-	if reachable < totalNodes {
-		reachable = totalNodes
+	omitted := foundNodes - shownNodes
+	if omitted < 0 {
+		omitted = 0
 	}
 	return fmt.Sprintf(
 		"[!] TRUNCATED: showing %d of %d listed nodes (~%d-token budget). Narrow the question first. The answer may be among the %d cut nodes — `so graph snippet <qn>` only for a NODE already shown.\n\n%s\n... (%d more nodes omitted.)",
-		shownNodes, totalNodes, budget, cutCount, strings.TrimRight(body, "\n"), cutCount,
+		shownNodes, foundNodes, budget, omitted, strings.TrimRight(body, "\n"), omitted,
 	), true
 }

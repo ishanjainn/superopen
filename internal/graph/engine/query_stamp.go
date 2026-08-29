@@ -59,10 +59,6 @@ func QueryStampFreshAt(path string) bool {
 	return time.Since(info.ModTime()) < queryStampTTL()
 }
 
-func queryStampPath(repoRoot string) string {
-	return queryStampPathFor(repoRoot, "")
-}
-
 func queryStampPathFor(repoRoot, sessionID string) string {
 	paths, err := CachePaths(repoRoot)
 	if err != nil {

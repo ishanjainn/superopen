@@ -6,7 +6,7 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). CLI: [../../cmd/so/AGENTS.md](
 
 ## Why
 
-A bad always-on rule is paid on every future session. Harvest stays **off the hot path**: no Stop/SessionEnd inject, no methodology in `Block()`. At most one bounded headless call after finalize. Prefer **simplify/delete**. Cap 3 proposals. Skip when already harvested, empty, duplicate, or the live file already contains the change.
+A bad always-on rule is paid on every future session. Harvest stays **off the hot path**: no Stop/SessionEnd inject, no methodology in `Block()`. Live agent first: SessionStart and the first prompt-submit inject `HARVEST pending` (`so harvest brief <id>` then `so harvest propose`, or `so harvest skip <id>`). SessionEnd uses the live vendor's own one-shot CLI when it is authenticated; Cursor/Copilot/Gemini and failed one-shot runs mark pending for the next SessionStart. There is no cross-vendor fallback. Prefer **simplify/delete**. Cap 3 proposals. Skip when already harvested, empty, duplicate, worker session, or the live file already contains the change. Headless workers set `SUPEROPEN_HEADLESS=1` and must not be recorded as sessions. SessionEnd finalize is **single-flight per session**. Harvest/distill run at most once per session; duplicate SessionEnd must not spawn another worker.
 
 ## Layout
 
@@ -19,7 +19,7 @@ A bad always-on rule is paid on every future session. Harvest stays **off the ho
 | `propose.go` | Ingest JSON from live agent or headless |
 | `generate.go` | Skip gates + bounded headless |
 | `apply.go` | Gated live write |
-| `start.go` | Optional SessionStart one-liner |
+| `start.go` | Pending live line (`brief` then `propose` or `skip`), never OPEN review |
 
 ## Product rules
 

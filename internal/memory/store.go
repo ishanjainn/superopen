@@ -47,7 +47,7 @@ const (
 	metaPending         = "pending_distill"
 	metaDistillPaused   = "distill_paused"
 	quantizationInt8    = "int8-unit"
-	memorySchemaVersion = "2"
+	memorySchemaVersion = "3"
 )
 
 const memoryDDL = `
@@ -235,33 +235,34 @@ type ActivityBucket struct {
 }
 
 type Status struct {
-	Episodes       int              `json:"episodes"`
-	Vectors        int              `json:"vectors"`
-	Edges          int              `json:"edges"`
-	Topics         int              `json:"topics"`
-	Teachings      int              `json:"teachings"`
-	Pins           int              `json:"pins"`
-	Faded          int              `json:"faded"`
-	Fading         int              `json:"fading"`
-	RolledUp       int              `json:"rolled_up"`
-	PendingDistill []string         `json:"pending_distill"`
-	DistillPaused  bool             `json:"distill_paused"`
-	EmbedderID     string           `json:"embedder_id"`
-	RolledUpPct    float64          `json:"rolled_up_pct"`
-	FadePct        float64          `json:"fade_pct"`
-	EdgeDensity    float64          `json:"edge_density"`
-	Coverage       float64          `json:"coverage"`
-	Live           int              `json:"live"`
-	Lifecycle      string           `json:"lifecycle"`
-	KnowledgePct   float64          `json:"knowledge_pct"`
-	Connected      float64          `json:"connected"`
-	CleanedPct     float64          `json:"cleaned_pct"`
-	Counts         MemoryCounts     `json:"counts"`
-	Activity       []ActivityBucket `json:"activity,omitempty"`
-	ActivityPeak   int              `json:"activity_peak"`
-	Economy        Economy          `json:"economy"`
-	SchemaVersion  string           `json:"schema_version"`
-	TopicsDetail   []Topic          `json:"topics_detail,omitempty"`
+	Episodes         int              `json:"episodes"`
+	Vectors          int              `json:"vectors"`
+	Edges            int              `json:"edges"`
+	Topics           int              `json:"topics"`
+	Teachings        int              `json:"teachings"`
+	Pins             int              `json:"pins"`
+	Faded            int              `json:"faded"`
+	Fading           int              `json:"fading"`
+	RolledUp         int              `json:"rolled_up"`
+	PendingDistill   []string         `json:"pending_distill"`
+	DistillPaused    bool             `json:"distill_paused"`
+	EmbedderID       string           `json:"embedder_id"`
+	EmbeddingPending int              `json:"embedding_pending"`
+	RolledUpPct      float64          `json:"rolled_up_pct"`
+	FadePct          float64          `json:"fade_pct"`
+	EdgeDensity      float64          `json:"edge_density"`
+	Coverage         float64          `json:"coverage"`
+	Live             int              `json:"live"`
+	Lifecycle        string           `json:"lifecycle"`
+	KnowledgePct     float64          `json:"knowledge_pct"`
+	Connected        float64          `json:"connected"`
+	CleanedPct       float64          `json:"cleaned_pct"`
+	Counts           MemoryCounts     `json:"counts"`
+	Activity         []ActivityBucket `json:"activity,omitempty"`
+	ActivityPeak     int              `json:"activity_peak"`
+	Economy          Economy          `json:"economy"`
+	SchemaVersion    string           `json:"schema_version"`
+	TopicsDetail     []Topic          `json:"topics_detail,omitempty"`
 }
 
 type CaptureInput struct {
@@ -347,9 +348,16 @@ func open(path string, busyMs int) (*Store, error) {
 		s.Close()
 		return nil, fmt.Errorf("initialize memory schema: %w", err)
 	}
+	priorSchema, _ := s.meta("schema_version")
 	if err := s.ensureKnobs(); err != nil {
 		s.Close()
 		return nil, err
+	}
+	if priorSchema == "" || priorSchema == "1" || priorSchema == "2" {
+		if err := s.dropSeededRankingKnobs(); err != nil {
+			s.Close()
+			return nil, err
+		}
 	}
 	if err := s.ensureKey(); err != nil {
 		s.Close()
@@ -434,11 +442,16 @@ func (s *Store) ensureEmbedder() error {
 }
 
 func (s *Store) upgradeHashStore(want string) error {
+	var n int
+	_ = s.db.QueryRow(`SELECT count(*) FROM memory_vectors`).Scan(&n)
 	if _, err := s.db.Exec(`DELETE FROM memory_vectors`); err != nil {
 		return err
 	}
 	if _, err := s.db.Exec(`UPDATE memory_episodes SET embedding_pending=1, updated_at=? WHERE faded=0`, nowRFC()); err != nil {
 		return err
+	}
+	if n > 0 && !testingBinary() {
+		fmt.Fprintf(os.Stderr, "so memory: discarded %d hash embeddings for BGE; run `so memory sleep` to re-embed pending rows\n", n)
 	}
 	return s.setMeta(metaEmbedder, want)
 }
@@ -615,6 +628,30 @@ func (s *Store) ClearPending(sessionID string) error {
 	return s.setMeta(metaPending, joinCSV(setKeys(set)))
 }
 
+func distillFailKey(sessionID string) string {
+	return "distill_fail_" + strings.TrimSpace(sessionID)
+}
+
+func (s *Store) DistillFailCount(sessionID string) int {
+	raw, _ := s.meta(distillFailKey(sessionID))
+	n := 0
+	for _, c := range raw {
+		if c >= '0' && c <= '9' {
+			n = n*10 + int(c-'0')
+		}
+	}
+	return n
+}
+
+func (s *Store) BumpDistillFail(sessionID string) {
+	n := s.DistillFailCount(sessionID) + 1
+	_ = s.setMeta(distillFailKey(sessionID), fmt.Sprintf("%d", n))
+}
+
+func (s *Store) ClearDistillFail(sessionID string) {
+	_ = s.setMeta(distillFailKey(sessionID), "")
+}
+
 func (s *Store) DistillPaused() bool {
 	v, _ := s.meta(metaDistillPaused)
 	return v == "1" || strings.EqualFold(v, "true")
@@ -647,6 +684,7 @@ func (s *Store) Status() (Status, error) {
 	st := Status{EmbedderID: CurrentEmbedder(), SchemaVersion: memorySchemaVersion, PendingDistill: s.PendingDistill(), DistillPaused: s.DistillPaused()}
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes`).Scan(&st.Episodes)
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_vectors`).Scan(&st.Vectors)
+	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE embedding_pending=1 AND faded=0`).Scan(&st.EmbeddingPending)
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_edges`).Scan(&st.Edges)
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_topics`).Scan(&st.Topics)
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE kind=?`, KindTeaching).Scan(&st.Teachings)

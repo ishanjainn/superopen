@@ -1,7 +1,6 @@
 package hook
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,23 +11,13 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/agent/sessionstate"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
-	"github.com/ishanjainn/superopen/internal/graph/api"
-	"github.com/ishanjainn/superopen/internal/graph/client"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
+	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 )
 
 const (
-	// augmentHitLimit caps how many indexed symbols one augment carries.
-	augmentHitLimit = 5
-	// augmentSessionCap caps how many explore-tool augments a session
-	// receives. Past this the agent has either adopted the graph or
-	// decided not to, and repeating only spends the user's tokens.
-	augmentSessionCap = 3
-	// augmentTimeout bounds the embedded graph lookup so a cold or
-	// locked database can never stall the host's tool call.
-	augmentTimeout = 1500 * time.Millisecond
 	// augmentMinTermLen skips terms too short to rank meaningfully.
 	augmentMinTermLen = 3
 )
@@ -167,6 +156,9 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		// Stop, SessionEnd, and other lifecycle events are observability-only.
 		return steerDecision{}, false
 	case toolEvent:
+		// Codex does not consume additionalContext / deny from PreToolUse
+		// the way Claude and Cursor do; emitting steer text would be dropped
+		// by the host. Session and prompt events still fire.
 		if vendor == "codex" {
 			return steerDecision{}, false
 		}
@@ -182,13 +174,15 @@ func graphGate(payload []byte, vendor, kind, hookEvent string) (steerDecision, b
 	}
 	cmd := bashCommandFromPayload(payload)
 	if commandLooksLikeSo(cmd) {
-		if bashLooksLikeGraphQuery(cmd) && engine.QueryStampFreshFor(stampRoot(payload), steerSessionID(payload)) {
-			if !claimQueryRepeat(payload, vendor) {
-				return steerDecision{}, false
+		if bashLooksLikeGraphQuery(cmd) {
+			if engine.QueryStampFreshFor(stampRoot(payload), steerSessionID(payload)) {
+				if !claimQueryRepeat(payload, vendor) {
+					return steerDecision{}, false
+				}
+				return steerDecision{text: steer.QueryRepeatNudge(), hookEvent: hookEvent}, true
 			}
-			return steerDecision{text: steer.QueryRepeatNudge(), hookEvent: hookEvent}, true
+			engine.RecordQueryStampFor(stampRoot(payload), steerSessionID(payload))
 		}
-		engine.RecordQueryStampFor(stampRoot(payload), steerSessionID(payload))
 		return steerDecision{}, false
 	}
 	gate := strings.ToLower(strings.TrimSpace(kind))
@@ -369,17 +363,24 @@ func sessionStartText(payload []byte, vendor string) string {
 	}
 	route := workspaceRoute(root)
 	rememberWorkspaceRoute(payload, vendor, route)
+	var core string
 	switch route {
 	case routeCode:
-		return steer.GraphStartLine()
+		core = steer.GraphStartLine()
 	case routeMemory:
 		if text := memory.SessionStartIndex(root); text != "" {
-			return text
+			core = text
+		} else {
+			core = steer.MemoryStartLine(memory.CountLiveMemories(root))
 		}
-		return steer.MemoryStartLine(memory.CountLiveMemories(root))
 	default:
-		return memory.SessionStartIndex(root)
+		core = memory.SessionStartIndex(root)
 	}
+	extra := harvest.PendingSessionStartLine(root)
+	if extra == "" && route == routeCode {
+		extra = memory.PendingDistillLine(root)
+	}
+	return harvest.JoinStart(core, extra)
 }
 
 func promptSubmitText(payload []byte, vendor string) string {
@@ -403,23 +404,37 @@ func promptSubmitText(payload []byte, vendor string) string {
 	if kind == routeCode || kind == routeMemory || kind == routeEmpty {
 		rememberPromptKind(payload, vendor, kind)
 	}
+	live := ""
+	if pending := pendingLiveWork(root); pending != "" && claimHarvestPending(payload, vendor) {
+		live = pending
+	}
 	if kind != routeMemory {
-		return ""
+		return live
 	}
 	if root == "" {
-		return ""
+		return live
 	}
 	if pack := memory.PromptRecallPack(root, prompt); pack != "" {
-		return pack
+		return harvest.JoinStart(pack, live)
 	}
 	if !claimMemoryIndex(payload, vendor) {
-		return ""
+		return live
 	}
 	text := memory.SessionStartIndex(root)
 	if text == "" {
+		return live
+	}
+	return harvest.JoinStart(text, live)
+}
+
+func pendingLiveWork(root string) string {
+	if root == "" {
 		return ""
 	}
-	return text
+	if line := harvest.PendingSessionStartLine(root); line != "" {
+		return line
+	}
+	return memory.PendingDistillLine(root)
 }
 
 func subagentSteer(payload []byte, vendor, ev string) (steerDecision, bool) {
@@ -452,6 +467,12 @@ func claimMemoryIndex(payload []byte, vendor string) bool {
 	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
 		return &s.MemoryIndexInjected
 	}, "last_memory_index")
+}
+
+func claimHarvestPending(payload []byte, vendor string) bool {
+	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
+		return &s.HarvestPendingInjected
+	}, "last_harvest_pending")
 }
 
 func claimSubagentSteer(payload []byte, vendor string) bool {
@@ -534,96 +555,6 @@ func isSessionStartEvent(vendor, ev string) bool {
 	default:
 		return false
 	}
-}
-
-// exploreAugment turns an imminent Grep/Glob/Read into graph context: it looks
-// the term up in the embedded graph and returns compact matches, or "" when
-// the tool carries no usable term, the repository has no graph, the term is
-// unindexed, or this session already spent its augment budget.
-func exploreAugment(payload []byte, vendor string) string {
-	tool := toolNameFromPayload(payload)
-	if !isExploreTool(tool) {
-		return ""
-	}
-	term := searchTermFromPayload(payload)
-	if term == "" {
-		return ""
-	}
-	root := graphRoot(payload)
-	if root == "" {
-		return ""
-	}
-
-	sessionID := steerSessionID(payload)
-	var state *sessionstate.State
-	if sessionID != "" {
-		state = sessionstate.Load(sessionID, vendor)
-		if state.GraphSteerCount >= augmentSessionCap {
-			return ""
-		}
-		for _, seen := range state.GraphSteerTerms {
-			if strings.EqualFold(seen, term) {
-				return ""
-			}
-		}
-	}
-
-	total, hits := searchGraphForTerm(root, term)
-	if len(hits) == 0 {
-		return ""
-	}
-	text := steer.ExploreAugment(term, total, hits)
-	if text == "" {
-		return ""
-	}
-	if state != nil {
-		state.GraphSteerCount++
-		state.GraphSteerTerms = append(state.GraphSteerTerms, term)
-		sessionstate.Save(sessionID, vendor, state)
-	}
-	return text
-}
-
-// searchGraphForTerm runs a bounded search against the embedded engine.
-// Every failure path returns no hits so the hook stays silent.
-func searchGraphForTerm(root, term string) (int, []steer.GraphHit) {
-	graphClient, err := client.Resolve()
-	if err != nil {
-		return 0, nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), augmentTimeout)
-	defer cancel()
-
-	var raw json.RawMessage
-	request := api.SearchRequest{RepoRoot: root, Query: term, Limit: augmentHitLimit}
-	if err := graphClient.Call(ctx, api.OpSearch, request, &raw); err != nil {
-		return 0, nil
-	}
-	var result api.SearchResult
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return 0, nil
-	}
-	matches := result.Matches
-	if len(matches) == 0 {
-		matches = result.Semantic
-	}
-	if len(matches) > augmentHitLimit {
-		matches = matches[:augmentHitLimit]
-	}
-	hits := make([]steer.GraphHit, 0, len(matches))
-	for _, match := range matches {
-		hits = append(hits, steer.GraphHit{
-			QualifiedName: match.QualifiedName,
-			Label:         match.Label,
-			File:          match.Location.File,
-			Lines:         lineSpan(match.Location.StartLine, match.Location.EndLine),
-		})
-	}
-	total := result.Page.Total
-	if total == 0 {
-		total = len(hits)
-	}
-	return total, hits
 }
 
 // managedFromPayload is true when the hook workspace already has .so/.
@@ -769,7 +700,7 @@ func bashLooksLikeSearch(cmd string) bool {
 
 func bashLooksLikeRead(cmd string) bool {
 	lower := strings.ToLower(strings.TrimSpace(cmd))
-	for _, tok := range []string{"cat ", "cat\t", "sed -n", "head ", "head\t", "tail ", "tail\t", "nl ", "less ", "more ", "awk "} {
+	for _, tok := range []string{"cat ", "cat\t", "sed -n", "head ", "head\t", "tail ", "tail\t", "nl ", "less ", "more ", "awk ", "python -c", "python3 -c"} {
 		if strings.Contains(lower, tok) || strings.HasPrefix(lower, strings.TrimSpace(tok)) {
 			return true
 		}
@@ -821,14 +752,4 @@ func fileStem(raw string) string {
 		return ""
 	}
 	return raw
-}
-
-func lineSpan(start, end int) string {
-	if start <= 0 {
-		return "-"
-	}
-	if end <= 0 || end == start {
-		return fmt.Sprintf("%d", start)
-	}
-	return fmt.Sprintf("%d-%d", start, end)
 }

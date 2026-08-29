@@ -292,7 +292,6 @@ func (s *Store) storeEpisode(ep Episode) (int64, bool, error) {
 	if err != nil || id == 0 {
 		return id, inserted, err
 	}
-	_ = s.writeShape(id, vec)
 	return id, inserted, err
 }
 

@@ -3,24 +3,32 @@
 After a coding session, harvest proposes small patches to instruction files —
 `AGENTS.md`, vendor rules, skills. **Humans approve before anything becomes
 always-on.** A bad always-on rule is paid on every future session, so harvest
-stays off the hot path: no hook injection while you work, at most one bounded
-headless call after finalize.
+stays off the hot path: no hook injection while you work. Live agent first:
+SessionStart and the first prompt-submit inject `HARVEST pending` (`brief`,
+then `propose`, or `skip <id>`). SessionEnd uses the live vendor's own
+one-shot CLI when it is authenticated; otherwise work stays pending for the
+next SessionStart. There is no cross-vendor fallback. Headless workers are
+not recorded as sessions.
 
 ## Flow
 
 ```bash
-so harvest scan        # skip gates, then at most one bounded headless generate
-so harvest list        # open proposals
-so harvest show <id>   # reason, evidence, unified diff
-so harvest review      # compact OPEN pack (load only when asked)
-so harvest apply <id>  # gated write to the live playbook
+so harvest brief [session]   # prompt for the live agent (pending session if omitted)
+so harvest propose           # ingest JSON from stdin / --file
+so harvest skip <session>    # close pending with nothing to propose
+so harvest scan [session]    # SessionEnd: own one-shot CLI only
+so harvest list              # open proposals
+so harvest show <id>         # reason, evidence, unified diff
+so harvest review            # compact OPEN pack (load only when asked)
+so harvest apply <id>        # gated write to the live playbook
 so harvest decline <id>
-so harvest inventory   # discovered playbook files (hash, protected)
+so harvest inventory         # discovered playbook files (hash, protected)
 ```
 
 Proposals enter either from the live agent's wrap-up or from `scan`
 (`propose` ingests JSON on stdin/`--file`). Every proposal requires a
-`reason`; `evidence` is required when the session id is known.
+`reason`; `evidence` is required when the session id is known. A propose or
+skip with a session id clears that session's pending row.
 
 ## Guardrails
 
@@ -31,10 +39,12 @@ Proposals enter either from the live agent's wrap-up or from `scan`
 - Nothing writes live playbooks from finalize or headless runs — only
   `apply` writes, and it re-validates before doing so.
 - Graph refresh never waits on harvest.
-- At most one optional status line (`HARVEST N OPEN`) on SessionStart; no
-  methodology text anywhere else.
-- Headless generation sees inventory hashes plus a compact session digest —
-  not full transcripts or playbook bodies.
+- At most one optional **pending** line on SessionStart **and** the first
+  prompt-submit (`HARVEST pending … brief` then `propose`, or `skip <id>`).
+  OPEN review is `so harvest review` on demand, never injected.
+- Headless workers set `SUPEROPEN_HEADLESS` and are not recorded as sessions.
+  Generation sees inventory hashes plus a compact session digest — not full
+  transcripts or playbook bodies. `scan` never launches another vendor's CLI.
 
 ## For contributors
 

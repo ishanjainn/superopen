@@ -333,8 +333,8 @@ func TestMaybeDistillNoopsUnderTest(t *testing.T) {
 	}
 	t.Setenv("PATH", t.TempDir())
 	res := MaybeDistill(root, id, false)
-	if res.Skipped != "test" {
-		t.Fatalf("expected test skip, got %+v", res)
+	if !res.Pending || res.Skipped != "await-live" {
+		t.Fatalf("cursor session must await live, got %+v", res)
 	}
 	got := Distill(root, id)
 	if !got.Pending || got.Skipped != "no-auth" {
@@ -348,6 +348,53 @@ func TestMaybeDistillNoopsUnderTest(t *testing.T) {
 	}
 	if len(hits) != 0 {
 		t.Fatalf("distill must not invent knowledge: %+v", hits)
+	}
+}
+
+func TestMaybeDistillOncePerSession(t *testing.T) {
+	root := testRoot(t)
+	id := "sess-pending-once"
+	writeSession(t, root, id, []trace.Span{llmSpan("s1", "investigate the layout bloom")})
+	first := MaybeDistill(root, id, false)
+	if !first.Pending || first.Skipped != "await-live" {
+		t.Fatalf("first: %+v", first)
+	}
+	second := MaybeDistill(root, id, false)
+	if !second.Pending || second.Skipped != "await-live" {
+		t.Fatalf("second must stay await-live, got %+v", second)
+	}
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	n := 0
+	for _, pending := range store.PendingDistill() {
+		if pending == id {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("pending distill for %s: %d in %v", id, n, store.PendingDistill())
+	}
+}
+
+func TestMaybeDistillSkipsWorkerSession(t *testing.T) {
+	root := testRoot(t)
+	id := "worker-distill"
+	writeSession(t, root, id, []trace.Span{llmSpan("s1", "You write Superopen memory for a coding agent")})
+	store := session.NewStore(paths.Resolve(root))
+	if err := store.Start(session.Meta{
+		ID: id, Vendor: "claude-code", Model: "<synthetic>",
+		Title: "You write Superopen memory for a coding agent",
+		PromptPreview: "You write Superopen memory for a coding agent",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	res := MaybeDistill(root, id, false)
+	if res.Skipped != "worker-session" || res.Pending {
+		t.Fatalf("got %+v", res)
 	}
 }
 
@@ -982,6 +1029,9 @@ func TestSessionStartIndexEmptyAndCap(t *testing.T) {
 	if !strings.Contains(text, "memories in this workspace") {
 		t.Fatalf("must say memories exist: %q", text)
 	}
+	if !strings.Contains(text, "import ids") || !strings.Contains(text, "second cue") {
+		t.Fatalf("SessionStart must carry diary framing, got %q", text)
+	}
 	if !strings.Contains(text, "memory recall") {
 		t.Fatalf("must give recall command: %q", text)
 	}
@@ -1016,6 +1066,15 @@ func TestPromptRecallPackInjectsMatchingBodies(t *testing.T) {
 	}
 	if !strings.Contains(text, "--full") {
 		t.Fatalf("prompt pack must point at get --full, got %q", text)
+	}
+	if !strings.Contains(text, "import ids") {
+		t.Fatalf("prompt pack must say import-looking titles are this workspace diary, got %q", text)
+	}
+	if !strings.Contains(text, "cite both") {
+		t.Fatalf("prompt pack must say to cite both conflicting notes, got %q", text)
+	}
+	if !strings.Contains(text, "second cue") {
+		t.Fatalf("prompt pack must say to recall with a second cue, got %q", text)
 	}
 	empty := testRoot(t)
 	if PromptRecallPack(empty, "what did we decide last time") != "" {
@@ -1125,8 +1184,8 @@ func TestDistillDoesNotInventLocalRollup(t *testing.T) {
 	}
 	t.Setenv("PATH", t.TempDir())
 	got := MaybeDistill(root, id, false)
-	if got.Skipped != "test" {
-		t.Fatalf("MaybeDistill under test must skip, got %+v", got)
+	if !got.Pending || got.Skipped != "await-live" {
+		t.Fatalf("MaybeDistill cursor must await live, got %+v", got)
 	}
 	res := Distill(root, id)
 	if res.Provider == "local" {
@@ -1371,8 +1430,33 @@ func TestLiveDistillInstructionOnPending(t *testing.T) {
 	}
 	store.Close()
 	text := SessionStartIndex(root)
-	if !strings.Contains(text, "sess-pending") || !strings.Contains(text, "so memory distill") {
+	if !strings.Contains(text, "sess-pending") || !strings.Contains(text, "so memory distill --apply") {
 		t.Fatalf("expected pending distill line, got %q", text)
+	}
+	if !strings.Contains(text, "so memory distill --brief") {
+		t.Fatalf("live distill must name brief: %q", text)
+	}
+	if strings.Contains(text, "memory distill sess-pending") && !strings.Contains(text, "--apply") {
+		t.Fatalf("must not fall back to headless distill: %q", text)
+	}
+}
+
+func TestSessionStartIndexPendingWithKnowledge(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Capture(CaptureInput{Kind: KindSession, Title: "refresh is 30s", Text: "dashboard refresh 30s not 5s", Horizon: HorizonLong}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkPending("sess-later"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	text := SessionStartIndex(root)
+	if !strings.Contains(text, "sess-later") || !strings.Contains(text, "DISTILL pending") {
+		t.Fatalf("pending distill must survive live memories, got %q", text)
 	}
 }
 
@@ -1387,8 +1471,82 @@ func TestSchemaVersionIsOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.SchemaVersion != "2" {
-		t.Fatalf("schema_version=%s want 2", st.SchemaVersion)
+	if st.SchemaVersion != "3" {
+		t.Fatalf("schema_version=%s want 3", st.SchemaVersion)
+	}
+}
+
+func TestFreshStoreHasNoRankingSeeds(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	got, err := store.meta("fts_keep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Fatalf("fts_keep should be absent on a fresh store, got %q", got)
+	}
+	if store.knobInt("fts_keep", ftsPrimaryKeep) != ftsPrimaryKeep {
+		t.Fatalf("search should fall through to constant %d", ftsPrimaryKeep)
+	}
+	if store.knobInt("dense_keep", denseComplement) != denseComplement {
+		t.Fatalf("dense_keep should fall through to constant %d", denseComplement)
+	}
+}
+
+func TestSchema3DropsSeededRankingKnobs(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.setMeta("schema_version", "2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetProfile("fts_keep", "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetProfile("dense_keep", "3"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	store, err = OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if got, _ := store.meta("fts_keep"); got != "" {
+		t.Fatalf("schema 2→3 must drop seeded fts_keep, got %q", got)
+	}
+	if got, _ := store.meta("dense_keep"); got != "" {
+		t.Fatalf("schema 2→3 must drop seeded dense_keep, got %q", got)
+	}
+	if store.knobInt("fts_keep", ftsPrimaryKeep) != ftsPrimaryKeep {
+		t.Fatalf("search should fall through to constant %d", ftsPrimaryKeep)
+	}
+}
+
+func TestSchema3KeepsExplicitRankingOverride(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetProfile("fts_keep", "7"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	store, err = OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if store.knobInt("fts_keep", ftsPrimaryKeep) != 7 {
+		t.Fatalf("explicit SetProfile after schema 3 must survive reopen, got %d", store.knobInt("fts_keep", ftsPrimaryKeep))
 	}
 }
 
@@ -1958,8 +2116,8 @@ func TestFTSQueryUsesContentOR(t *testing.T) {
 	if !strings.Contains(got, "caroline") || !strings.Contains(got, "race") {
 		t.Fatalf("content words missing: %q", got)
 	}
-	if !strings.Contains(got, " AND ") {
-		t.Fatalf("proper name must be required, got %q", got)
+	if !strings.Contains(got, " OR ") {
+		t.Fatalf("proper name should boost as an OR group, got %q", got)
 	}
 }
 
@@ -1978,8 +2136,8 @@ func TestFTSQueryPrefixesVerbsAndRequiresName(t *testing.T) {
 	if !strings.Contains(got, "move*") {
 		t.Fatalf("verb should prefix-match moved/moving, got %q", got)
 	}
-	if !strings.Contains(got, "caroline") || !strings.Contains(got, " AND ") {
-		t.Fatalf("Caroline must be required, got %q", got)
+	if !strings.Contains(got, "caroline") || !strings.Contains(got, " OR ") {
+		t.Fatalf("Caroline should still be in the query as a soft OR, got %q", got)
 	}
 }
 

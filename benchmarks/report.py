@@ -155,10 +155,10 @@ def _adapter_row(block: dict[str, Any], name: str, k: int = 10) -> str:
 
 def _internal_recall(block: dict[str, Any] | None, k: int = 10) -> str:
     if not block:
-        return "BM25 / dense / RRF"
+        return "BM25 / bow / RRF"
     parts = [
         f"BM25 {_adapter_row(block, 'bm25', k)}",
-        f"dense {_adapter_row(block, 'dense', k)}",
+        f"bow {_adapter_row(block, 'bow', k) if _has_recall(block) and (block.get('adapters') or {}).get('bow') else _adapter_row(block, 'dense', k)}",
         f"RRF {_adapter_row(block, 'rrf', k)}",
     ]
     if all("pending" in p for p in parts):
@@ -207,6 +207,30 @@ def _fmt_qa(block: dict[str, Any] | None) -> str:
     return "; ".join(parts)
 
 
+def _fmt_gold_store(block: dict[str, Any] | None) -> str:
+    if not block:
+        return ""
+    gold = block.get("gold_in_store") or {}
+    if not gold:
+        ingest = block.get("ingest") or {}
+        if not ingest:
+            return ""
+        collapsed = ingest.get("collapsed_near_duplicate")
+        skipped = ingest.get("skipped")
+        if collapsed is None and skipped is None:
+            return ""
+        return (
+            f"Capture-side: collapsed={collapsed or 0}, skipped={skipped or 0}. "
+            "BM25/bow/RRF search raw docs; Superopen searches the post-capture store."
+        )
+    return (
+        f"Gold-in-store: hard_miss={gold.get('hard_miss', 0)}, "
+        f"rank_miss={gold.get('rank_miss', 0)} of scored={gold.get('scored', 0)} "
+        f"(stored_docs={gold.get('stored_docs', 0)}). "
+        f"{gold.get('note') or ''}"
+    ).strip()
+
+
 def _graph_score(payload: dict[str, Any]) -> str:
     graph = payload.get("graph") or {}
     inner = graph.get("graph") if isinstance(graph.get("graph"), dict) else graph
@@ -221,6 +245,18 @@ def _graph_score(payload: dict[str, Any]) -> str:
     if pct is not None:
         return f"{float(pct):.0f}%"
     return PENDING
+
+
+def _graph_p95(payload: dict[str, Any]) -> str:
+    graph = payload.get("graph") or {}
+    inner = graph.get("graph") if isinstance(graph.get("graph"), dict) else graph
+    p95 = inner.get("p95_ms")
+    p50 = inner.get("p50_ms")
+    if p95 is None:
+        return PENDING
+    if p50 is None:
+        return f"p95={float(p95):.0f} ms"
+    return f"p50={float(p50):.0f} ms, p95={float(p95):.0f} ms"
 
 
 def _index_block(payload: dict[str, Any]) -> dict[str, Any]:
@@ -311,6 +347,13 @@ def _fmt_contradict_metric(payload: dict[str, Any], key: str) -> str:
         return str(val)
 
 
+def _bow_row(block: dict[str, Any], k: int = 10) -> str:
+    adapters = block.get("adapters") or {}
+    if "bow" in adapters:
+        return _adapter_row(block, "bow", k)
+    return _adapter_row(block, "dense", k)
+
+
 def _fmt_ingest(block: dict[str, Any] | None) -> str:
     if not block:
         return PENDING
@@ -320,7 +363,21 @@ def _fmt_ingest(block: dict[str, Any] | None) -> str:
     usd = ingest.get("llm_usd")
     if usd is None:
         usd = 0.0
-    return f"${float(usd):.2f}"
+    parts = [f"${float(usd):.2f}"]
+    eid = ingest.get("embedder_id") or block.get("embedder_id")
+    if eid:
+        parts.append(str(eid))
+    pending = ingest.get("embedding_pending")
+    if pending is not None:
+        parts.append(f"pending={pending}")
+    collapsed = ingest.get("collapsed_near_duplicate")
+    skipped = ingest.get("skipped")
+    if collapsed is not None or skipped is not None:
+        parts.append(f"collapsed={collapsed or 0} skipped={skipped or 0}")
+    worker = (block.get("embed_worker") or {}).get("model")
+    if worker:
+        parts.append(f"worker={worker}")
+    return "; ".join(parts)
 
 
 def _fmt_latency(payload: dict[str, Any]) -> str:
@@ -503,8 +560,8 @@ def render(payload: dict[str, Any]) -> str:
     locomo_r10 = _fmt_recall(locomo, k=10)
     locomo_bm5 = _adapter_row(locomo, "bm25", 5)
     locomo_bm10 = _adapter_row(locomo, "bm25", 10)
-    locomo_dense5 = _adapter_row(locomo, "dense", 5)
-    locomo_dense10 = _adapter_row(locomo, "dense", 10)
+    locomo_bow5 = _bow_row(locomo, 5)
+    locomo_bow10 = _bow_row(locomo, 10)
     locomo_rrf5 = _adapter_row(locomo, "rrf", 5)
     locomo_rrf10 = _adapter_row(locomo, "rrf", 10)
     locomo_qa = _fmt_qa(locomo)
@@ -512,8 +569,8 @@ def render(payload: dict[str, Any]) -> str:
     lme_r10 = _fmt_recall(lme, k=10)
     lme_bm5 = _adapter_row(lme, "bm25", 5)
     lme_bm10 = _adapter_row(lme, "bm25", 10)
-    lme_dense5 = _adapter_row(lme, "dense", 5)
-    lme_dense10 = _adapter_row(lme, "dense", 10)
+    lme_bow5 = _bow_row(lme, 5)
+    lme_bow10 = _bow_row(lme, 10)
     lme_rrf5 = _adapter_row(lme, "rrf", 5)
     lme_rrf10 = _adapter_row(lme, "rrf", 10)
     lme_qa = _fmt_qa(lme)
@@ -521,6 +578,9 @@ def render(payload: dict[str, Any]) -> str:
     verbatim = _fmt_contradict_metric(payload, "historical_verbatim")
     ingest_usd = _fmt_ingest(locomo) if locomo else _fmt_ingest(lme)
     graph_s = _graph_score(payload)
+    graph_lat = _graph_p95(payload)
+    locomo_store = _fmt_gold_store(locomo)
+    lme_store = _fmt_gold_store(lme)
     cov = _fmt_compare_coverage(cmp_)
     usd = _fmt_compare_usd(cmp_)
     cache = _fmt_compare_cache(cmp_)
@@ -591,6 +651,7 @@ Last updated: {_today()}. Generated by `python3 benchmarks/run.py`.
 | Graph | {django_ds} | index time | {index_time} |
 | Graph | {django_ds} | index size | {index_line} |
 | Graph | {django_ds} | 12-probe score | {graph_s} |
+| Graph | {django_ds} | probe latency | {graph_lat} |
 | Memory | {locomo_label} | QA accuracy | {locomo_qa} |
 | Memory | {locomo_label} | recall@10 | {locomo_r10} |
 | Memory | {locomo_label} | recall@5 | {locomo_r5} |
@@ -611,7 +672,7 @@ Last updated: {_today()}. Generated by `python3 benchmarks/run.py`.
 
 | Dataset | What we score | Notes |
 |---|---|---|
-| LOCOMO (`locomo10.json`) | 100 category-stratified QA over the full session corpus | File has 300 items; n cap is 100 |
+| LOCOMO (`locomo10.json`) | 100 category-stratified QA (small); 300 on `--scale full` | File has 300 items |
 | LongMemEval-S | 50 English questions | Haystack is not shrunk |
 | Django | tag `{django_tag}` | Graph probes + native vs Superopen sessions |
 | Contradiction | Rescue@10, historical-verbatim | Go tests in `internal/memory/` |
@@ -624,7 +685,7 @@ Last updated: {_today()}. Generated by `python3 benchmarks/run.py`.
 |---|---|---|
 | Superopen (`so memory recall`) | {locomo_r5} | {locomo_r10} |
 | BM25 | {locomo_bm5} | {locomo_bm10} |
-| dense | {locomo_dense5} | {locomo_dense10} |
+| bow (bag-of-words) | {locomo_bow5} | {locomo_bow10} |
 | RRF | {locomo_rrf5} | {locomo_rrf10} |
 
 QA accuracy: {locomo_qa}.
@@ -635,6 +696,7 @@ python3 benchmarks/run.py --mode memory --phase 3 --split locomo --scale small -
 ```
 
 Asked n={locomo_repro_n}. Items without a mappable gold episode id are not scored.
+{locomo_store}
 
 ### LongMemEval-S
 
@@ -642,13 +704,15 @@ Asked n={locomo_repro_n}. Items without a mappable gold episode id are not score
 |---|---|---|
 | Superopen (`so memory recall`) | {lme_r5} | {lme_r10} |
 | BM25 | {lme_bm5} | {lme_bm10} |
-| dense | {lme_dense5} | {lme_dense10} |
+| bow (bag-of-words) | {lme_bow5} | {lme_bow10} |
 | RRF | {lme_rrf5} | {lme_rrf10} |
 
 QA accuracy: {lme_qa}.
+{lme_store}
 
 ```bash
 python3 benchmarks/run.py --mode memory --phase 2 --split longmemeval --scale small --so-bin ./bin/so
+python3 benchmarks/run.py --mode memory --phase 3 --split longmemeval --scale small --qa-n 20 --host claude-code --model claude-sonnet-5 --max-spend 15 --so-bin ./bin/so
 ```
 
 ### Contradiction
@@ -659,14 +723,14 @@ python3 benchmarks/run.py --mode memory --phase 2 --split longmemeval --scale sm
 | historical-verbatim | {verbatim} |
 
 ```bash
-python3 benchmarks/run.py --mode contradict --seeds 13,42,137
+python3 benchmarks/run.py --mode contradict
 ```
 
 ## Code intelligence
 
 ### Graph-tools (Django, 12 probes)
 
-Score: **{graph_s}**. Index: {index_line}.
+Score: **{graph_s}**. Probe latency: {graph_lat}. Index: {index_line}.
 
 ```bash
 python3 benchmarks/run.py --mode graph --repo django --index-timeout 1800 --so-bin ./bin/so
@@ -681,7 +745,7 @@ USD: **{usd}**.
 cache_read: **{cache}**.
 
 ```bash
-python3 benchmarks/run.py --mode compare --scale small --host claude-code --model claude-sonnet-5 --max-turns 14 --max-spend 20 --so-bin ./bin/so
+python3 benchmarks/run.py --mode compare --scale small --host claude-code --model claude-sonnet-5 --max-spend 20 --so-bin ./bin/so
 ```
 
 ## Temporal (Django LTS)

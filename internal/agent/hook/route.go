@@ -20,9 +20,9 @@ const (
 )
 
 // Generic personal/prior-work cues. No dataset name lists.
-var memoryCue = regexp.MustCompile(`(?i)(?:last time|we decided|remember|what did we|who(?:'s|\s+is|\s+was|\s+were)\b|what\s+did\s+i\b|when\s+did\s+i\b|where\s+did\s+i\b|where\s+do\s+i\b|what\s+(?:is|was)\s+my\b|what\s+degree|i\s+graduate|graduated|\bmy\s+(?:degree|school|birthday|family|parents|job|hometown)\b)`)
+var memoryCue = regexp.MustCompile(`(?i)(?:last time|we decided|remember|what did we|who(?:'s|\s+is|\s+was|\s+were)\b|what\s+did\s+i\b|when\s+did\s+i\b|where\s+did\s+i\b|where\s+do\s+i\b|what\s+(?:is|was)\s+my\b|what\s+degree|i\s+graduate|graduated|\bmy\s+(?:degree|school|birthday|family|parents|job|hometown|commute|playlist|occupation)\b|how\s+long\b.{0,48}(?:commute|drive|trip|travel)|how\s+many\b.{0,40}(?:\bdo\s+i\b|\bdid\s+i\b|\bi\s+have\b|\bi've\b)|where\s+(?:did|do)\s+i\s+(?:buy|bought|get|got|shop)|what\s+did\s+i\s+(?:name|buy|get))`)
 
-var codeCue = regexp.MustCompile(`(?i)(?:\.(?:go|py|ts|tsx|js|jsx|rs|java|rb|php|c|h|cc|cpp|cs|kt|swift)\b|\b(?:function|class|method|module|package|import|export|caller|callee|queryset|endpoint|handler|middleware|architecture|codebase|refactor|implement|stacktrace|traceback)\b|\b(?:src|pkg|internal|lib)/|\bwhere is\b|\bhow does\b|\bwho calls\b|\bcallers of\b)`)
+var codeCue = regexp.MustCompile(`(?i)(?:\.(?:go|py|ts|tsx|js|jsx|rs|java|rb|php|c|h|cc|cpp|cs|kt|swift)\b|\b(?:function|class|method|module|package|import|export|caller|callee|queryset|endpoint|handler|middleware|architecture|codebase|refactor|implement|stacktrace|traceback|orm|migration|migrations|admin|signal|signals|manage\.py|django-admin)\b|\b(?:src|pkg|internal|lib)/|\bwhere is\b|\bhow does\b|\bwho calls\b|\bcallers of\b)`)
 
 var sourceExt = map[string]struct{}{
 	".go": {}, ".py": {}, ".ts": {}, ".tsx": {}, ".js": {}, ".jsx": {},
@@ -35,7 +35,7 @@ var skipWalkDir = map[string]struct{}{
 	"build": {}, "target": {}, ".venv": {}, "venv": {}, "__pycache__": {},
 }
 
-const sourceWalkCap = 400
+const sourceWalkCap = 4000
 
 func classifyPrompt(prompt string) string {
 	p := strings.TrimSpace(prompt)

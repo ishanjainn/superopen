@@ -161,9 +161,15 @@ export default function MemoryPage() {
     layout.edges ??= [];
     setData(layout);
     setStatus((await statusRes.json()) as Status);
-    const tl = (await timeRes.json()) as { buckets?: TimelineBucket[] };
-    const buckets = tl.buckets ?? [];
-    setTimeline(buckets);
+    const tl = (await timeRes.json()) as { buckets?: TimelineBucket[]; items?: Episode[] };
+    const buckets = (tl.buckets ?? []).filter((b) => Array.isArray(b.items));
+    if (buckets.length > 0) {
+      setTimeline(buckets);
+    } else if (Array.isArray(tl.items) && tl.items.length > 0) {
+      setTimeline([{ when: "recent", items: tl.items }]);
+    } else {
+      setTimeline([]);
+    }
   }, []);
 
   useEffect(() => {
@@ -295,8 +301,12 @@ export default function MemoryPage() {
         .filter(
           (item) =>
             item.kind === "session" &&
-            (item.horizon === "short" || item.horizon === "medium" || item.horizon === "long") &&
-            !item.faded,
+            !item.faded &&
+            (item.horizon == null ||
+              item.horizon === "" ||
+              item.horizon === "short" ||
+              item.horizon === "medium" ||
+              item.horizon === "long"),
         )
         .slice()
         .sort((a, b) => horizonRank(a.horizon) - horizonRank(b.horizon)),

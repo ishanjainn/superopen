@@ -20,6 +20,8 @@ const (
 	KindPrinciple = "principle"
 
 	MaxProposals = 3
+
+	SkipAwaitLive = "await-live"
 )
 
 type Evidence struct {

@@ -80,14 +80,17 @@ func (s *Store) sealText(ad, plain string) string {
 	compressed := compressBytes(plain)
 	block, err := aes.NewCipher(s.key)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "so memory: AES setup failed; storing episode text unencrypted\n")
 		return plain
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "so memory: AES-GCM setup failed; storing episode text unencrypted\n")
 		return plain
 	}
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		fmt.Fprintf(os.Stderr, "so memory: nonce draw failed; storing episode text unencrypted\n")
 		return plain
 	}
 	out := gcm.Seal(nonce, nonce, compressed, []byte(ad))

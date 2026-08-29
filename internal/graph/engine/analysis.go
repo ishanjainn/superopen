@@ -474,7 +474,7 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 
 	terms := queryTerms(req.Question, req.Terms)
 	overlap := queryOverlapTerms(req.Question, req.Terms)
-	candidates, err := s.querySeedCandidates(ctx, req.Project, req.Question, terms)
+	candidates, degrees, err := s.querySeedCandidates(ctx, req.Project, req.Question, terms)
 	if err != nil {
 		return api.QueryResult{}, err
 	}
@@ -484,11 +484,6 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 			Text:   "No matching nodes found.",
 			Budget: api.Budget{RequestedTokens: budget, ReturnedTokens: 1, Truncated: false},
 		}, nil
-	}
-
-	degrees, err := s.nodeDegrees(ctx, req.Project)
-	if err != nil {
-		return api.QueryResult{}, err
 	}
 
 	result := api.QueryResult{Seeds: seeded.seeds}
@@ -522,19 +517,19 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 	}
 
 	orderedAll := s.spliceWideTypeMethods(ctx, orderQueryNodes(seedOrder, nodesByID, overlap), overlap)
-	reachable := len(orderedAll)
 	orderedNodes := orderedAll
-	foundNodes := reachable
-	rowCapped := foundNodes > queryMaxNodeRows
+	foundNodes := len(orderedAll)
+	capN := queryRowCap()
+	rowCapped := foundNodes > capN
 	if rowCapped {
-		orderedNodes = orderedNodes[:queryMaxNodeRows]
+		orderedNodes = orderedNodes[:capN]
 	}
-	if len(edgeLines) > queryMaxEdgeRows {
-		edgeLines = edgeLines[:queryMaxEdgeRows]
+	if len(edgeLines) > capN {
+		edgeLines = edgeLines[:capN]
 		rowCapped = true
 	}
-	if len(result.Edges) > queryMaxEdgeRows {
-		result.Edges = result.Edges[:queryMaxEdgeRows]
+	if len(result.Edges) > capN {
+		result.Edges = result.Edges[:capN]
 		rowCapped = true
 	}
 	result.Nodes = result.Nodes[:0]
@@ -549,10 +544,18 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 	}
 
 	header := fmt.Sprintf("Traversal: BFS depth=%d | Start: %v | %d nodes\n\n", depth, seedLabels, len(orderedNodes))
-	nodeBody := preferQueryNodeBody(header, queryNodeBody(orderedNodes, true), queryNodeBody(orderedNodes, false), edgeBody.String(), maxChars)
-	output, truncated := applyQueryBudget(header, nodeBody, edgeBody.String(), len(seedOrder), orderedNodes, budget, maxChars, len(orderedNodes))
-	if bodies := s.appendQueryBodies(ctx, req.Project, pickQueryAttachNodes(orderedNodes, overlap, queryAttachBodyMax)); bodies != "" {
-		output += bodies
+	nodeBody := queryNodeBodyFit(orderedNodes, header, edgeBody.String(), maxChars)
+	output, truncated := applyQueryBudget(header, nodeBody, edgeBody.String(), len(seedOrder), orderedNodes, budget, maxChars, foundNodes)
+	if !truncated && !rowCapped {
+		if bodies := s.appendQueryBodies(ctx, req.Project, pickQueryAttachNodes(orderedNodes, overlap, queryAttachBodyMax)); bodies != "" {
+			output += bodies
+		}
+	}
+	if rowCapped && !strings.Contains(output, "TRUNCATED") {
+		output = fmt.Sprintf(
+			"[!] TRUNCATED: showing %d of %d listed ids (row cap %d). Narrow the question. `so graph snippet <qn>` for a listed id.\n\n%s",
+			len(orderedNodes), foundNodes, capN, output,
+		)
 	}
 
 	result.Text = output

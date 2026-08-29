@@ -127,11 +127,12 @@ function isEligibleProject(repoRoot: string): boolean {
   if (repoRoot === home) return false;
   const normalized = repoRoot.replaceAll("\\", "/");
   for (const marker of [
-    "/benchmarks/agent-graph-eval/work/",
     "/.claude/plugins/cache/",
     "/.cursor/projects/",
   ]) {
     if (normalized.includes(marker)) return false;
   }
+  if (process.env.SUPEROPEN_SCRATCH === "1") return false;
+  if (fileExists(join(repoRoot, ".superopen-scratch"))) return false;
   return fileExists(join(repoRoot, ".git"));
 }

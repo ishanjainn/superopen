@@ -51,7 +51,7 @@ func (s *Store) backfillPassages(whereSQL string, args []any) {
 WHERE ` + whereSQL + `
 AND tokens > ?
 AND id NOT IN (SELECT episode_id FROM memory_passages)
-LIMIT 8`
+LIMIT 200`
 	in := append(append([]any{}, args...), teachChunkTokens)
 	rows, err := s.db.Query(q, in...)
 	if err != nil {

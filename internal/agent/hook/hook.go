@@ -30,6 +30,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/config"
 	"github.com/ishanjainn/superopen/internal/agent/export"
 	"github.com/ishanjainn/superopen/internal/agent/git"
+	"github.com/ishanjainn/superopen/internal/agent/headless"
 	"github.com/ishanjainn/superopen/internal/agent/hook/claudecode"
 	"github.com/ishanjainn/superopen/internal/agent/hook/codex"
 	"github.com/ishanjainn/superopen/internal/agent/hook/cursor"
@@ -84,7 +85,7 @@ never blocks a developer's prompt.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&vendor, "vendor", "", "Vendor: cc | claude-code | cursor | codex")
+	cmd.Flags().StringVar(&vendor, "vendor", "", "Vendor: claude-code | cursor | codex | gemini | opencode | copilot-cli | pi")
 	cmd.Flags().StringVar(&event, "event", "", "Hook event name (vendor-specific; e.g. SessionStart, PreToolUse)")
 	cmd.Flags().StringVar(&kind, "kind", "", "Graph-gate kind for PreToolUse: search | read")
 	_ = cmd.MarkFlagRequired("vendor")
@@ -110,6 +111,10 @@ func run(cmd *cobra.Command, vendor, event, kind string) (rerr error) {
 	// no longer need the alias for back-compat, so collapse it here
 	// before any downstream code sees the raw flag.
 	vendor = canonicalVendor(vendor)
+
+	if headless.Isolated() {
+		return nil
+	}
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), hardTimeout)
 	defer cancel()
@@ -658,7 +663,7 @@ func hookRepoRoot(payload []byte) string {
 // have used historically (`cc`, `claudecode`, `claude_code`, …) onto
 // the canonical names used everywhere else: `cursor`, `claude-code`,
 // `codex`. Returns the input unchanged when it's already canonical or
-// unrecognized - pickAdapter then surfaces the unknown-vendor error.
+// unrecognized — pickAdapter then uses the generic adapter.
 // Empty input is preserved so the "--vendor required" error fires as
 // before.
 func canonicalVendor(vendor string) string {
@@ -703,7 +708,7 @@ func pickAdapter(vendor string) (normalize.Adapter, error) {
 	case "":
 		return nil, errors.New("--vendor is required")
 	default:
-		return nil, fmt.Errorf("unknown --vendor %q", vendor)
+		return generic.New(vendor), nil
 	}
 }
 

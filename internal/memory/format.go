@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // IndexHit is the cheap search/timeline row: IDs, type, title, tokens.
@@ -29,7 +31,7 @@ func DisplayType(ep Episode) string {
 }
 
 func FormatIndexLine(ep Episode) string {
-	title := firstLine(ep.Title, 48)
+	title := displayTitle(ep, 48)
 	if title == "" {
 		title = "(untitled)"
 	}
@@ -68,7 +70,7 @@ func IndexFromEpisode(ep Episode) IndexHit {
 		Kind:      ep.Kind,
 		Horizon:   ep.Horizon,
 		Topic:     ep.Topic,
-		Title:     firstLine(ep.Title, 80),
+		Title:     displayTitle(ep, 80),
 		Tokens:    ep.Tokens,
 		Score:     ep.Score,
 		SessionID: ep.SessionID,
@@ -88,12 +90,16 @@ func IndexRow(idx IndexHit) map[string]any {
 	if title == "" {
 		title = strings.TrimSpace(idx.Topic)
 	}
-	return map[string]any{
+	row := map[string]any{
 		"id":     idx.ID,
 		"kind":   idx.Kind,
 		"title":  title,
 		"tokens": idx.Tokens,
 	}
+	if h := strings.TrimSpace(idx.Horizon); h != "" {
+		row["horizon"] = h
+	}
+	return row
 }
 
 func IndexRowsFromHits(hits []Hit) []map[string]any {
@@ -147,6 +153,108 @@ func HelpForGet(eps []Episode) []string {
 		hints = append(hints, fmt.Sprintf("so memory contradict %d --text \"…\"", eps[0].ID))
 	}
 	return hints
+}
+
+// displayTitle is the CLI/pack headline. Opaque stored titles (import ids,
+// uuids) stay on the row; agents see the first informative sentence of the
+// body and still cite #id. Capture does not rewrite memory_episodes.title.
+func displayTitle(ep Episode, limit int) string {
+	title := strings.TrimSpace(ep.Title)
+	if !opaqueTitle(title) {
+		if t := firstLine(title, limit); t != "" {
+			return t
+		}
+	}
+	if h := firstInformative(ep.Text, limit); h != "" {
+		return h
+	}
+	if t := firstLine(title, limit); t != "" {
+		return t
+	}
+	return "(untitled)"
+}
+
+func opaqueTitle(title string) bool {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return true
+	}
+	for _, r := range t {
+		if unicode.IsSpace(r) {
+			return false
+		}
+	}
+	if uuidLike(t) {
+		return true
+	}
+	if strings.Contains(t, "_") || strings.ContainsRune(t, ':') {
+		return true
+	}
+	return false
+}
+
+func uuidLike(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if !isHexByte(c) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isHexByte(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+func firstInformative(text string, limit int) string {
+	s := strings.TrimSpace(text)
+	for s != "" {
+		line := s
+		rest := ""
+		if i := strings.IndexAny(s, "\n\r"); i >= 0 {
+			line = strings.TrimSpace(s[:i])
+			rest = strings.TrimSpace(s[i+1:])
+		}
+		s = rest
+		if line == "" {
+			continue
+		}
+		if j := sentenceEnd(line); j > 0 {
+			line = strings.TrimSpace(line[:j])
+		}
+		if opaqueTitle(line) {
+			continue
+		}
+		return firstLine(line, limit)
+	}
+	return ""
+}
+
+func sentenceEnd(s string) int {
+	for i, r := range s {
+		if r == '.' || r == '!' || r == '?' || r == '。' || r == '！' || r == '？' {
+			end := i + len(string(r))
+			if end >= len(s) {
+				return end
+			}
+			next, _ := utf8.DecodeRuneInString(s[end:])
+			if unicode.IsSpace(next) {
+				return end
+			}
+		}
+	}
+	return 0
 }
 
 func ParseIDs(args []string) ([]int64, error) {

@@ -6,7 +6,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 try:
     import numpy as np
     import onnxruntime as ort
-except Exception:
+except Exception as exc:
+    sys.stderr.write(
+        "so embed worker: install numpy and onnxruntime in this Python (%s)\n" % exc
+    )
     sys.exit(1)
 
 MAX_LEN = 512

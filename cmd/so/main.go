@@ -236,7 +236,7 @@ must query the graph first.`,
 			_ = memory.FetchModels()
 			report.Write(cmd.OutOrStdout())
 			if findWebDir("") == "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "note: web UI is not in %s; re-run sh scripts/install.sh (or brew) so so dev works from any repo.\n", expectedWebDir())
+				fmt.Fprintf(cmd.OutOrStdout(), "note: web UI is not in %s; reinstall Superopen (release tarball, brew, or install.ps1) so `so dev` works from any repo.\n", expectedWebDir())
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "Next: open your coding agent and run /so init in a repository.")
 			fmt.Fprintln(cmd.OutOrStdout(), "Restart the agent so it loads the new hooks.")

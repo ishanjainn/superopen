@@ -14,7 +14,7 @@ must look like that product:
 - Bind-mount the locally built Superopen CLI (`--so-bin`); do not bake `so` into the image.
 - **No benchmark-only hacks** in `so` (no gold-id rankers, dataset packing, API pack-readers).
 - Superopen **modes** (`--mode`, `--scale`). Do not port another product's harness into `so`.
-- `--scale small` is a valid gate (LOCOMO 100 stratified / LME 50 / compare 6 / graph 12). `--scale full` is what you publish.
+- `--scale small` is a valid gate (LOCOMO 100 stratified / LME 50 / compare 6 / graph 12). `--scale full` is what you publish (LOCOMO retrieve n=300; QA still `--qa-n 20`).
 
 ## Two ways to run
 
@@ -77,13 +77,14 @@ Compare runs **identical prompts** on both arms. Only the superopen arm gets `so
 | `--mode` | Command |
 |----------|---------|
 | `offline` | `python3 benchmarks/run.py --mode offline` |
-| `contradict` | `python3 benchmarks/run.py --mode contradict --seeds 13,42,137` |
+| `contradict` | `python3 benchmarks/run.py --mode contradict` |
 | `latency` | `python3 benchmarks/run.py --mode latency` |
 | `index` | `python3 benchmarks/run.py --mode index --repo django --index-timeout 1800` |
 | `graph` | `python3 benchmarks/run.py --mode graph --repo django --index-timeout 1800` |
-| `memory` (retrieve, small) | `python3 benchmarks/run.py --mode memory --phase 2 --split locomo --scale small --adapters superopen,bm25,dense,rrf --max-spend 0` |
+| `memory` (retrieve, small) | `python3 benchmarks/run.py --mode memory --phase 2 --split locomo --scale small --adapters superopen,bm25,bow,rrf --max-spend 0` |
 | `memory` (QA) | `python3 benchmarks/run.py --mode memory --phase 3 --split locomo --scale small --host claude-code --model claude-sonnet-5 --max-spend 15` |
-| `compare` | `python3 benchmarks/run.py --mode compare --scale small --host claude-code --model claude-sonnet-5 --max-turns 14 --max-spend 20` |
+| `memory` (LME QA) | `python3 benchmarks/run.py --mode memory --phase 3 --split longmemeval --scale small --host claude-code --model claude-sonnet-5 --max-spend 15` |
+| `compare` | `python3 benchmarks/run.py --mode compare --scale small --host claude-code --model claude-sonnet-5 --max-spend 20` |
 | `temporal` | `python3 benchmarks/run.py --mode temporal --repo django` |
 | `all` | `python3 benchmarks/run.py --mode all --repo django --phase 2 --max-spend 20` |
 
@@ -119,7 +120,7 @@ Unit tests in `tests/test_harness.py`. **These do not exercise Superopen** — t
 |------|----------------|---------------|
 | `test_grade_partial_credit` | Key-fact coverage formula | under 1 s |
 | `test_graph_probe_grades` | PASS / PARTIAL / FAIL scoring | under 1 s |
-| `test_bm25_search` | Internal BM25 + dense + RRF (Python baselines, not `so`) | under 1 s |
+| `test_bm25_search` | Internal BM25 + bow + RRF (Python baselines, not `so`) | under 1 s |
 | `test_spend_ledger` | `--max-spend` ledger | under 1 s |
 | `test_django_questions_json` | Compare question bank has 6 prompts | under 1 s |
 | `test_dataset_readme_layout` | Dataset README layout | under 1 s |

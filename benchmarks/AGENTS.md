@@ -13,7 +13,7 @@ product.
 3. This runner is **mode-gated** (`--mode`, `--scale`). Do not copy another
    product's ingest/grader into Superopen source.
 4. `--scale small` (default) is a **valid** gate (LOCOMO 100 stratified, LME 50,
-   compare 6, graph 12). `--scale full` is publishable. Reject toy slices.
+   compare 6, graph 12). `--scale full` publishes LOCOMO n=300 retrieve (QA stays `--qa-n 20`). Reject toy slices.
 
 See repo-root [BENCHMARKS.md](../BENCHMARKS.md). Every run overwrites that
 file. Harness work dirs are deleted afterwards. Manual CI: `.github/workflows/bench.yml`.

@@ -26,6 +26,9 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if !contains(first, "Do not spawn Explore") {
 		t.Fatalf("block must close the Explore hole: %s", first)
 	}
+	if !contains(first, "Do not run memory recall for a source question") {
+		t.Fatalf("block must not send codebase questions to memory: %s", first)
+	}
 	if !contains(first, "list the tree") {
 		t.Fatalf("block must say not to list the tree to confirm Superopen: %s", first)
 	}
@@ -46,6 +49,15 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	}
 	if !contains(first, "memory recall") {
 		t.Fatalf("block must point prior-work at memory recall: %s", first)
+	}
+	if !contains(first, "import ids") {
+		t.Fatalf("block must say import-looking titles are this workspace diary: %s", first)
+	}
+	if !contains(first, "cite both") {
+		t.Fatalf("block must say to cite both conflicting notes: %s", first)
+	}
+	if !contains(first, "second cue") {
+		t.Fatalf("block must say to recall with a second cue: %s", first)
 	}
 	if !contains(first, "CLI binary") {
 		t.Fatalf("block must say so is a CLI binary: %s", first)
@@ -85,8 +97,14 @@ func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 	if !contains(MemoryNudge(), "memory recall") || contains(MemoryNudge(), "graph query") && !contains(MemoryNudge(), "Skip Grep and graph query") {
 		t.Fatal("memory nudge must point at recall and skip graph query")
 	}
-	if !contains(MemoryNudge(), "own notes") || !contains(MemoryStartLine(2), "own notes") {
-		t.Fatal("memory steer must say the store is the user's own notes")
+	if !contains(MemoryNudge(), "import ids") || !contains(MemoryStartLine(2), "import ids") {
+		t.Fatal("memory steer must say import-looking titles are this workspace diary")
+	}
+	if !contains(MemoryNudge(), "cite both") || !contains(MemoryStartLine(2), "cite both") {
+		t.Fatal("memory steer must say to cite both conflicting notes")
+	}
+	if !contains(MemoryNudge(), "second cue") || !contains(MemoryStartLine(2), "second cue") {
+		t.Fatal("memory steer must say to try a second cue")
 	}
 	if !contains(MemoryNudge(), "MEMORY.md") || !contains(MemoryStartLine(2), "MEMORY.md") {
 		t.Fatal("memory steer must disambiguate host MEMORY.md")

@@ -2,8 +2,12 @@ package memory
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -111,6 +115,69 @@ func TestEmbedViaWorkerTimesOut(t *testing.T) {
 	}
 }
 
+func TestEmbedQueryRetriesThenSucceeds(t *testing.T) {
+	restoreEmbedder(t)
+	restoreWorkerURL(t)
+	resetEmbedFailWarnForTest()
+	t.Cleanup(resetEmbedFailWarnForTest)
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "embed") {
+			_, _ = w.Write([]byte(`{"ok":true,"model":"bge"}`))
+			return
+		}
+		n++
+		if n == 1 {
+			http.Error(w, "nope", http.StatusBadGateway)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(embedResponse{Vectors: [][]float64{unitVectorJSON(384)}, Model: "bge"})
+	}))
+	t.Cleanup(srv.Close)
+	setWorkerURL(srv.URL)
+	vec := EmbedQuery("how long is my commute")
+	if n != 2 {
+		t.Fatalf("want one retry, got %d requests", n)
+	}
+	if isZero(vec) {
+		t.Fatal("retry must keep the dense channel")
+	}
+}
+
+func TestEmbedQueryFailedWorkerDoesNotPanicAndWarnsOnce(t *testing.T) {
+	restoreWorkerURL(t)
+	resetEmbedFailWarnForTest()
+	t.Cleanup(resetEmbedFailWarnForTest)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusBadGateway)
+	}))
+	t.Cleanup(srv.Close)
+	setWorkerURL(srv.URL)
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	vec := EmbedQuery("where did I buy the kettle")
+	vec2 := EmbedQuery("where did I buy the kettle")
+	_ = w.Close()
+	os.Stderr = old
+	logged, _ := io.ReadAll(r)
+	_ = r.Close()
+	if !isZero(vec) || !isZero(vec2) {
+		t.Fatal("failed worker must not silently hash")
+	}
+	text := string(logged)
+	if !strings.Contains(text, "embed worker request failed") {
+		t.Fatalf("want stderr once, got %q", text)
+	}
+	if strings.Count(text, "embed worker request failed") != 1 {
+		t.Fatalf("stderr must fire once, got %q", text)
+	}
+}
+
 func TestEmbedTextNoSilentHashWhenWorkerFails(t *testing.T) {
 	restoreWorkerURL(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -167,5 +234,18 @@ func TestEmbedQuerySendsInputTypeQuery(t *testing.T) {
 	}
 	if gotType != "document" {
 		t.Fatalf("ingest input_type=%q want document", gotType)
+	}
+}
+
+func TestPythonCommandPrefersPython3(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not on PATH")
+	}
+	cmd := pythonCommand("script.py", "--listen", "127.0.0.1:9")
+	if cmd == nil {
+		t.Fatal("expected a python command")
+	}
+	if filepath.Base(cmd.Args[0]) != "python3" {
+		t.Fatalf("argv0=%q want python3 first so bench interpreter resolution stays identical", cmd.Args[0])
 	}
 }

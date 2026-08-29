@@ -205,7 +205,7 @@ def recall_pack_text(
     return "\n\n".join(titled)
 
 
-def embedder_id(so_bin: str, root: Path, env: dict[str, str] | None = None) -> str:
+def memory_status(so_bin: str, root: Path, env: dict[str, str] | None = None) -> dict[str, Any]:
     root = root.resolve()
     proc = _run(
         [so_bin, "--json", "memory", "status", "--root", str(root)],
@@ -214,15 +214,17 @@ def embedder_id(so_bin: str, root: Path, env: dict[str, str] | None = None) -> s
         timeout=30,
     )
     if proc.returncode != 0:
-        return ""
+        return {}
     try:
         payload = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
-        return ""
+        return {}
     data = payload.get("data") or payload
-    if isinstance(data, dict):
-        return str(data.get("embedder_id") or "")
-    return ""
+    return data if isinstance(data, dict) else {}
+
+
+def embedder_id(so_bin: str, root: Path, env: dict[str, str] | None = None) -> str:
+    return str(memory_status(so_bin, root, env=env).get("embedder_id") or "")
 
 
 def get_texts(so_bin: str, root: Path, ids: list[Any], env: dict[str, str] | None = None) -> list[str]:

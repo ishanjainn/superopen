@@ -3,6 +3,7 @@ package memory
 import (
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -36,6 +37,17 @@ func (s *Store) Search(filter SearchFilter) ([]Hit, error) {
 	staleW := s.knobFloat("stale_weight", staleDownweight)
 	recencyHL := s.knobFloat("recency_half_life", 21)
 	window := s.knobInt("supersede_window", supersedeCapWindow)
+	kRRF := s.knobInt("rrf_k", rrfK)
+	if kRRF < 1 {
+		kRRF = rrfK
+	}
+	ftsW := s.knobFloat("fts_rrf", ftsRRFNum)
+	denseW := s.knobFloat("dense_rrf", denseRRFNum)
+	denseLexW := s.knobFloat("dense_rrf_lexical", denseRRFLexical)
+	ftsLim := s.knobInt("fts_candidates", ftsCandidateLimit)
+	denseLim := s.knobInt("dense_candidates", denseCandidateLimit)
+	lexKeep := s.knobInt("fts_keep", ftsPrimaryKeep)
+	semKeep := s.knobInt("dense_keep", denseComplement)
 
 	where := []string{"1=1"}
 	args := []any{}
@@ -90,10 +102,10 @@ func (s *Store) Search(filter SearchFilter) ([]Hit, error) {
 	ftsRank := map[int64]int{}
 	cosRank := map[int64]int{}
 	if query != "" {
-		ftsRank = s.ftsRanked(query, ftsCandidateLimit, whereSQL, args)
+		ftsRank = s.ftsRanked(query, ftsLim, whereSQL, args)
 		qvec := EmbedQuery(query)
 		if !isZero(qvec) {
-			cosRank = s.denseRanked(qvec, denseCandidateLimit, whereSQL, args)
+			cosRank = s.denseRanked(qvec, denseLim, whereSQL, args)
 		}
 	}
 
@@ -148,13 +160,13 @@ func (s *Store) Search(filter SearchFilter) ([]Hit, error) {
 		score := 0.0
 		_, lex := ftsRank[ep.ID]
 		if r, ok := ftsRank[ep.ID]; ok {
-			score += 2.0 / (float64(rrfK) + float64(r))
+			score += ftsW / (float64(kRRF) + float64(r))
 		}
 		if r, ok := cosRank[ep.ID]; ok {
 			if lex {
-				score += 0.05 / (float64(rrfK) + float64(r))
+				score += denseLexW / (float64(kRRF) + float64(r))
 			} else {
-				score += 1.0 / (float64(rrfK) + float64(r))
+				score += denseW / (float64(kRRF) + float64(r))
 			}
 		}
 		if query != "" && len(ftsRank) == 0 && len(cosRank) == 0 {
@@ -196,15 +208,15 @@ func (s *Store) Search(filter SearchFilter) ([]Hit, error) {
 	hits = applySupersedeCap(hits, outgoing, stale, hist, window)
 	sortHits(hits)
 	if query != "" {
-		hits = blendLexicalSemantic(hits, ftsRank, cosRank, ftsPrimaryKeep, denseComplement)
+		hits = blendLexicalSemantic(hits, ftsRank, cosRank, lexKeep, semKeep)
 	}
 	if len(hits) > filter.Limit {
 		hits = hits[:filter.Limit]
 	}
-	// A3: prefer hits that contain a proper-noun/identifier token from the
-	// query, but only reorder within the top window so the retrieved set (and
-	// thus R@10) is unchanged — this fixes ordering ("Caroline" note ahead of a
-	// generic "move" note) without dropping semantically-relevant gold.
+	// Prefer hits that contain a proper-noun/identifier token from the
+	// query, but only reorder within the already-retrieved top window so
+	// the candidate set is unchanged. This surfaces named entities ahead
+	// of a generic keyword match without dropping other strong hits.
 	preferQueryProperNames(hits, query, recallHitCap)
 	return hits, nil
 }
@@ -346,7 +358,7 @@ func (s *Store) ftsRanked(query string, limit int, whereSQL string, args []any) 
 	}
 	// Bind WHERE args first, then MATCH, then LIMIT — the same order as the
 	// SQL. Prepending MATCH to ExcludeKinds args made every default recall
-	// search for the literal kind name "prompt" (LME phase-2 collapse).
+	// search for the literal kind name "prompt".
 	q := `
 SELECT f.rowid FROM memory_episodes_fts f
 WHERE f.rowid IN (SELECT id FROM memory_episodes WHERE ` + whereSQL + `)
@@ -356,6 +368,7 @@ LIMIT ?`
 	in := append(append([]any{}, args...), match, limit)
 	rows, err := s.db.Query(q, in...)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "so memory: FTS query failed (%v); ranking without keyword matches\n", err)
 		return out
 	}
 	defer rows.Close()
@@ -480,10 +493,10 @@ func ftsQuery(q string) string {
 	if len(names) == 0 {
 		return termQ
 	}
-	// A capitalized/identifier token in the question is the subject. Require
-	// it so a verb-only collision ("move" in another diary) cannot outrank
-	// the named note. Prefix terms still sit in the OR group.
-	return "(" + joinFTSTerms(names) + ") AND (" + termQ + ")"
+	// Names are a soft OR group so a missing/wrong capitalized token cannot
+	// zero the match set. Ranking still prefers named hits via
+	// preferQueryProperNames.
+	return "(" + joinFTSTerms(names) + ") OR (" + termQ + ")"
 }
 
 func ftsProperNameTerms(q string) []string {
@@ -683,8 +696,8 @@ func isSelfEcho(query string, ep Episode) bool {
 	}
 	// Otherwise only a short row near the query's own length can be an echo.
 	// Substantial bodies (session knowledge, long diary) that merely share
-	// vocabulary with the question stay ranked — dropping them here was the
-	// phase-2 recall regression.
+	// vocabulary with the question stay ranked — dropping them treated a
+	// real memory as an echo of the live query.
 	if EstimateTokens(ep.Text) > EstimateTokens(q)*3+48 {
 		return false
 	}

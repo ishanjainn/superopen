@@ -17,8 +17,8 @@ import (
 
 const generateTimeout = 45 * time.Second
 
-// MaybeGenerate is called from session finalize. It detaches a harvest scan so
-// SessionEnd stays fast. Under go test it no-ops (re-exec would fork the test binary).
+// MaybeGenerate is called from session finalize. Cursor/Copilot/Gemini mark
+// pending for the next live SessionStart. One-shot vendors spawn their own CLI.
 func MaybeGenerate(root, sessionID string) GenerateResult {
 	sessionID = strings.TrimSpace(sessionID)
 	res := GenerateResult{SessionID: sessionID}
@@ -26,23 +26,58 @@ func MaybeGenerate(root, sessionID string) GenerateResult {
 		res.Skipped = "no-session"
 		return res
 	}
+	skipped, pending, spawn := headless.SessionEndPolicy(root, sessionID)
+	store, storeErr := OpenRoot(root)
+	if storeErr == nil && store.HasAttempt(sessionID) {
+		_ = store.Close()
+		res.Skipped = "already-queued"
+		res.Pending = pending
+		return res
+	}
+	if !spawn {
+		res.Skipped = skipped
+		res.Pending = pending
+		if pending && storeErr == nil {
+			_, _ = store.InsertRun(sessionID, StatusPending, "", skipped)
+		}
+		if storeErr == nil {
+			_ = store.Close()
+		}
+		return res
+	}
+	if storeErr == nil {
+		_ = store.Close()
+	}
 	if testing.Testing() {
 		res.Skipped = "test"
 		return res
 	}
 	if os.Getenv("SUPEROPEN_HARVEST_SYNC") == "1" {
-		return Generate(root, sessionID)
+		return generate(root, sessionID)
+	}
+	if store, err := OpenRoot(root); err == nil {
+		_, _ = store.InsertRun(sessionID, StatusPending, "", "detached")
+		_ = store.Close()
 	}
 	cli.SpawnSO(root, "--root", root, "harvest", "scan", sessionID)
 	res.Skipped = "detached"
+	res.Pending = true
 	return res
 }
 
-// Generate runs skip gates then at most one bounded headless call.
+// Generate runs skip gates then at most one bounded call on the session's own CLI.
 func Generate(root, sessionID string) GenerateResult {
+	return generate(root, sessionID)
+}
+
+func generate(root, sessionID string) GenerateResult {
 	res := GenerateResult{SessionID: strings.TrimSpace(sessionID)}
 	if res.SessionID == "" {
 		res.Skipped = "no-session"
+		return res
+	}
+	if reason, ok := headless.SkipWorker(root, res.SessionID); ok {
+		res.Skipped = reason
 		return res
 	}
 	store, err := OpenRoot(root)
@@ -53,25 +88,45 @@ func Generate(root, sessionID string) GenerateResult {
 	defer store.Close()
 	if store.SuccessfulRun(res.SessionID) || store.HasOpenForSession(res.SessionID) {
 		res.Skipped = "already-harvested"
-		_, _ = store.InsertRun(res.SessionID, StatusSkipped, "", res.Skipped)
+		_ = store.ResolvePending(res.SessionID, StatusSkipped, res.Skipped)
 		return res
 	}
 	if !sessionActive(root, res.SessionID) {
 		res.Skipped = "empty"
-		_, _ = store.InsertRun(res.SessionID, StatusSkipped, "", res.Skipped)
+		_ = store.ResolvePending(res.SessionID, StatusSkipped, res.Skipped)
 		return res
 	}
-	provider, ok := headless.Available()
+	unlock, lockErr := headless.TryLock(headless.LockPath(root, "harvest"))
+	if lockErr != nil {
+		res.Skipped = "busy"
+		res.Pending = true
+		_, _ = store.InsertRun(res.SessionID, StatusPending, "", res.Skipped)
+		return res
+	}
+	defer unlock()
+
+	vendor := ""
+	if meta, err := headless.LoadMeta(root, res.SessionID); err == nil {
+		vendor = meta.Vendor
+	}
+	provider, ok := headless.AvailableLive(vendor)
 	if !ok {
 		res.Skipped = "no-auth"
 		res.Pending = true
 		_, _ = store.InsertRun(res.SessionID, StatusPending, "", res.Skipped)
 		return res
 	}
+	if store.ProviderFailCount(res.SessionID, provider.Name) >= headless.MaxProviderFails() {
+		res.Skipped = "provider-unhealthy"
+		res.Pending = true
+		_, _ = store.InsertRun(res.SessionID, StatusPending, provider.Name, res.Skipped)
+		return res
+	}
 	prompt, err := buildPrompt(root, res.SessionID, store)
 	if err != nil {
 		res.Skipped = err.Error()
-		_, _ = store.InsertRun(res.SessionID, StatusFailed, provider.Name, res.Skipped)
+		res.Pending = true
+		_, _ = store.InsertRun(res.SessionID, StatusPending, provider.Name, res.Skipped)
 		return res
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), generateTimeout)
@@ -98,10 +153,45 @@ func Generate(root, sessionID string) GenerateResult {
 		status = StatusSkipped
 		res.Skipped = "no-proposals"
 	}
-	_, _ = store.InsertRun(res.SessionID, status, provider.Name, res.Skipped)
+	_ = store.ResolvePending(res.SessionID, status, res.Skipped)
 	res.Provider = provider.Name
 	res.Inserted = inserted
 	return res
+}
+
+// Brief is the same prompt the one-shot CLI would see, for the live agent.
+func Brief(root, sessionID string) (string, error) {
+	store, err := OpenRoot(root)
+	if err != nil {
+		return "", err
+	}
+	defer store.Close()
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		sessionID = store.PendingSession()
+	}
+	if sessionID == "" {
+		return "", fmt.Errorf("no pending harvest session")
+	}
+	return buildPrompt(root, sessionID, store)
+}
+
+// Skip closes a pending harvest with nothing to propose.
+func Skip(root, sessionID, reason string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("session id required")
+	}
+	store, err := OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "live-skip"
+	}
+	return store.ResolvePending(sessionID, StatusSkipped, reason)
 }
 
 func pickProposals(in []ProposeInput) []ProposeInput {
@@ -200,7 +290,7 @@ func parseProposals(raw string) []ProposeInput {
 		return many
 	}
 	var one ProposeInput
-	if err := json.Unmarshal([]byte(raw), &one); err == nil && one.Title != "" {
+	if json.Unmarshal([]byte(raw), &one) == nil && one.Title != "" {
 		return []ProposeInput{one}
 	}
 	return nil

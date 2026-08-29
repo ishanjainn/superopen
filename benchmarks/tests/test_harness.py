@@ -12,7 +12,7 @@ BENCH = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BENCH))
 
 from grade import grade_answer, graph_probe_grade  # noqa: E402
-from memory.adapters.bm25 import BM25Index, dense_search, rrf_merge  # noqa: E402
+from memory.adapters.bm25 import BM25Index, bow_search, rrf_merge  # noqa: E402
 from spend import SpendLedger  # noqa: E402
 
 
@@ -42,7 +42,7 @@ class HarnessTests(unittest.TestCase):
         idx = BM25Index(docs)
         hits = idx.search("queryset lazy", k=1)
         self.assertEqual(hits, ["1"])
-        merged = rrf_merge([hits, dense_search(docs, "queryset lazy", k=1)], k=1)
+        merged = rrf_merge([hits, bow_search(docs, "queryset lazy", k=1)], k=1)
         self.assertTrue(merged)
 
     def test_spend_ledger(self) -> None:
@@ -83,7 +83,8 @@ class HarnessTests(unittest.TestCase):
         full = Namespace(scale="full", split="locomo", n=None, qa_n=None, compare_n=None, compare_ids="")
         apply_scale(full)
         validate_sizes(full)
-        self.assertEqual(full.n, 100)
+        self.assertEqual(full.n, 300)
+        self.assertEqual(full.qa_n, 20)
 
         lme = Namespace(scale="small", split="longmemeval", n=None, qa_n=None, compare_n=None, compare_ids="")
         apply_scale(lme)
@@ -220,7 +221,7 @@ class HarnessTests(unittest.TestCase):
                         "total": 98,
                     },
                     "bm25": {"recall_at_5": 0.88, "recall_at_10": 0.9081632653061225, "hits": 89, "total": 98},
-                    "dense": {"recall_at_5": 0.3, "recall_at_10": 0.4, "hits": 40, "total": 98},
+                    "bow": {"recall_at_5": 0.3, "recall_at_10": 0.4, "hits": 40, "total": 98},
                     "rrf": {"recall_at_5": 0.8, "recall_at_10": 0.86, "hits": 85, "total": 98},
                 },
                 "qa_n": 20,

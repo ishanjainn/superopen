@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -198,7 +199,8 @@ func memoryRecallCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Int("budget", 1500, "Token budget")
-	cmd.Flags().Bool("structural", false, "Shape/HD recall over embeddings")
+	cmd.Flags().Bool("structural", false, "")
+	_ = cmd.Flags().MarkHidden("structural")
 	return cmd
 }
 
@@ -678,6 +680,7 @@ func memoryStatusCmd() *cobra.Command {
 					st.Counts.Working, st.Counts.Short, st.Counts.Medium, st.Counts.Long, st.Faded)
 				fmt.Fprintf(out.W, "lifecycle: %s  coverage: %.1f%%  connected: %.2fx  cleaned: %.1f%%  pending: %d\n",
 					st.Lifecycle, st.KnowledgePct, st.Connected, st.CleanedPct, len(st.PendingDistill))
+				fmt.Fprintf(out.W, "embedder: %s  embedding_pending: %d\n", st.EmbedderID, st.EmbeddingPending)
 				fmt.Fprintf(out.W, "economy packs=%d injected=%d saved=%d searches=%d\n",
 					st.Economy.PacksServed, st.Economy.TokensInjected, st.Economy.TokensSaved, st.Economy.FallbackSearches)
 			}, st)
@@ -698,6 +701,9 @@ func memoryDistillCmd() *cobra.Command {
 			sleep, _ := cmd.Flags().GetBool("sleep")
 			restart, _ := cmd.Flags().GetBool("restart")
 			detach, _ := cmd.Flags().GetBool("detach")
+			applyJSON, _ := cmd.Flags().GetBool("apply")
+			brief, _ := cmd.Flags().GetBool("brief")
+			allPending, _ := cmd.Flags().GetBool("all")
 			if restart {
 				store, err := memory.OpenRoot(root)
 				if err != nil {
@@ -741,6 +747,10 @@ func memoryDistillCmd() *cobra.Command {
 				}
 				pending := append([]string{}, store.PendingDistill()...)
 				store.Close()
+				capN := memory.ConsolidateCap()
+				if !allPending && len(pending) > capN {
+					pending = pending[:capN]
+				}
 				var results []memory.DistillResult
 				for _, id := range pending {
 					results = append(results, memory.Distill(root, id))
@@ -754,6 +764,32 @@ func memoryDistillCmd() *cobra.Command {
 			id := ""
 			if len(args) == 1 {
 				id = args[0]
+			}
+			if brief {
+				if id == "" {
+					return fmt.Errorf("session id required for --brief")
+				}
+				text, err := memory.DistillBrief(root, id)
+				if err != nil {
+					return err
+				}
+				fmt.Fprint(cmd.OutOrStdout(), text)
+				return nil
+			}
+			if applyJSON {
+				if id == "" {
+					return fmt.Errorf("session id required for --apply")
+				}
+				raw, err := io.ReadAll(cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+				res := memory.ApplyJSON(root, id, raw)
+				out := out()
+				out.Next("so memory get <id>", "so sessions show <id>")
+				return out.HumanOrJSON("memory_distill", func() {
+					fmt.Fprintf(out.W, "applied %s via live written=%d → #%d\n", res.SessionID, res.Written, res.EpisodeID)
+				}, res)
 			}
 			if detach {
 				spawn := []string{"memory", "distill"}
@@ -782,6 +818,9 @@ func memoryDistillCmd() *cobra.Command {
 	cmd.Flags().Bool("pause", false, "Pause automatic distill")
 	cmd.Flags().Bool("resume", false, "Resume automatic distill")
 	cmd.Flags().Bool("consolidate", false, "Ingest all sessions, cluster topics, distill pending")
+	cmd.Flags().Bool("all", false, "With --consolidate, distill every pending session")
+	cmd.Flags().Bool("apply", false, "Ingest distill JSON from stdin (live agent)")
+	cmd.Flags().Bool("brief", false, "Print the distill prompt for the live agent")
 	cmd.Flags().Bool("sleep", false, "Run the sleep pipeline (expire horizons, erase hints, embeddings)")
 	cmd.Flags().Bool("restart", false, "Resume distill then consolidate")
 	return cmd

@@ -37,8 +37,8 @@ When .so/ exists, Superopen is a CLI binary. Invoke it with Bash (copy-paste):
   %s
 
 Rules:
-- Codebase questions (this repo's source): run graph query first via Bash. Do not spawn Explore/Agent. Do not list the tree to confirm Superopen. If NODE/EDGE lines or BODIES answer the question, stop. Need another symbol body: so graph snippet of a listed NODE. Do not run graph query again unless the dump said TRUNCATED. Grep/Read only for a literal the graph does not index. Never Grep .so/.
-- Saved facts in this workspace (prior decisions, diary, who/what/when stored under .so/): run memory recall first via Bash. so memory search is a title index without bodies — that is not an empty store. Quote the stored note and cite #id. Do not grep transcripts or treat session learned: as authority.
+- Codebase questions (this repo's source): run graph query first via Bash. Do not run memory recall for a source question. Do not spawn Explore/Agent. Do not list the tree to confirm Superopen. If NODE/EDGE lines or BODIES answer the question, stop. Need another symbol body: so graph snippet of a listed NODE. Do not run graph query again unless the dump said TRUNCATED. Grep/Read only for a literal the graph does not index. Never Grep .so/.
+- Saved facts in this workspace (prior decisions, diary, who/what/when stored under .so/): notes in .so/ are this workspace's diary even if titles look like import ids. Run memory recall first via Bash. so memory search is a title index without bodies — that is not an empty store. Quote the stored note and cite #id. If two notes conflict, cite both #ids and pick the most specific or recent. If the pack does not answer, run memory recall with a second cue. Do not grep transcripts or treat session learned: as authority.
 - Memory is hints, not authority. Graph builds are local (no LLM).
 `, bashLine(`graph query '<question>'`), bashLine(`memory recall '<question>'`))) + "\n"
 }
@@ -53,7 +53,7 @@ func MemoryStartLine(n int) string {
 	if n < 1 {
 		n = 1
 	}
-	return fmt.Sprintf("Superopen: %d memories in this workspace .so/ store — your own notes from past sessions (not built-in memory or MEMORY.md). Run via Bash: `%s`", n, bashLine(`memory recall '<question>'`))
+	return fmt.Sprintf("Superopen: %d memories in this workspace .so/ store — your own notes from past sessions (not built-in memory or MEMORY.md). Titles that look like import ids are still this workspace diary. If two notes conflict cite both #ids. If recall misses try a second cue. Run via Bash: `%s`", n, bashLine(`memory recall '<question>'`))
 }
 
 // HookReminder is a short additionalContext string for session/start hooks.
@@ -92,7 +92,7 @@ func QueryRepeatNudge() string {
 
 // MemoryNudge is injected on PreToolUse when the prompt is personal/prior-work.
 func MemoryNudge() string {
-	return "Superopen: this workspace .so/ store is your own notes from past sessions, not built-in memory or MEMORY.md. Run via Bash: `" + bashLine(`memory recall '<question>'`) + "`. Recall prints bodies. Quote the note and cite #id. Search is a title index. Skip Grep and graph query."
+	return "Superopen: this workspace .so/ store is your own notes from past sessions, not built-in memory or MEMORY.md. Titles that look like import ids are still this workspace diary. If two notes conflict cite both #ids. If recall misses try a second cue. Run via Bash: `" + bashLine(`memory recall '<question>'`) + "`. Recall prints bodies. Quote the note and cite #id. Search is a title index. Skip Grep and graph query."
 }
 
 // ReadDenyReason is the permissionDecisionReason for strict-mode first Read deny.
@@ -105,35 +105,8 @@ func CursorRule() string {
 	return strings.TrimSpace(fmt.Sprintf(`
 If this workspace has no .so/ directory, ignore Superopen entirely: do not run so, do not load the /so skill, and do not run so init unless the user explicitly asks.
 
-If .so/ exists, Superopen is a CLI binary. Invoke it with Bash. Codebase questions: %s before Grep/Read/ls. Saved facts in this workspace: %s. Never Grep .so/. This applies to you and to every subagent you spawn. Do not skip the graph by spawning Explore. Memory is hints, not authority.
+If .so/ exists, Superopen is a CLI binary. Invoke it with Bash. Codebase questions: %s before Grep/Read/ls. Do not run memory recall for a source question. Saved facts in this workspace: %s. Notes in .so/ are this workspace diary even if titles look like import ids; if two notes conflict cite both #ids; if recall misses try a second cue. If a hook says HARVEST pending, run harvest brief then harvest propose before answering; if nothing to propose, harvest skip <id>. Never Grep .so/. This applies to you and to every subagent you spawn. Do not skip the graph by spawning Explore. Memory is hints, not authority.
 `, bashLine(`graph query '<question>'`), bashLine(`memory recall '<question>'`))) + "\n"
-}
-
-// GraphHit is one indexed symbol rendered into an explore-tool augment.
-type GraphHit struct {
-	QualifiedName string
-	Label         string
-	File          string
-	Lines         string
-}
-
-// ExploreAugment renders indexed matches for the term an agent was about to
-// grep for, so the hook spends its tokens on graph facts rather than a nudge.
-// Returns "" when there is nothing worth injecting.
-func ExploreAugment(term string, total int, hits []GraphHit) string {
-	term = strings.TrimSpace(term)
-	if term == "" || len(hits) == 0 {
-		return ""
-	}
-	if total < len(hits) {
-		total = len(hits)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Superopen graph: %d hit(s) for %q — run `so graph query %q` via Bash. If NODE/EDGE lines answer, stop.\n", len(hits), term, term)
-	for _, hit := range hits {
-		fmt.Fprintf(&b, "  %s %s %s %s\n", hit.QualifiedName, hit.Label, hit.File, hit.Lines)
-	}
-	return b.String()
 }
 
 // MergeBlock replaces or appends the Superopen sentinel block in content.

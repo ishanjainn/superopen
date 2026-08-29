@@ -125,6 +125,7 @@ type State struct {
 	MemorySteerReminded   bool `json:"memory_steer_reminded,omitempty"`
 	MemoryDistillAsked    bool `json:"memory_distill_asked,omitempty"`
 	MemoryIndexInjected   bool `json:"memory_index_injected,omitempty"`
+	HarvestPendingInjected bool `json:"harvest_pending_injected,omitempty"`
 	SubagentSteerReminded bool `json:"subagent_steer_reminded,omitempty"`
 
 	// WorkspaceRoute is "code", "memory", or "empty" from SessionStart

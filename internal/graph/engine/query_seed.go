@@ -146,7 +146,7 @@ func queryNodeDisplayName(n api.Node) string {
 
 const queryFTSSeedLimit = 50
 
-func (s *Store) querySeedCandidates(ctx context.Context, project, question string, terms []string) ([]seedCandidate, error) {
+func (s *Store) querySeedCandidates(ctx context.Context, project, question string, terms []string) ([]seedCandidate, map[int64]int, error) {
 	seen := map[int64]bool{}
 	var nodes []api.Node
 	q := strings.TrimSpace(question)
@@ -156,7 +156,7 @@ func (s *Store) querySeedCandidates(ctx context.Context, project, question strin
 	if q != "" {
 		res, err := s.Search(ctx, api.SearchRequest{Project: project, Query: q, Limit: queryFTSSeedLimit})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, match := range res.Matches {
 			if seen[match.ID] {
@@ -168,7 +168,7 @@ func (s *Store) querySeedCandidates(ctx context.Context, project, question strin
 		for _, name := range queryProperNames(question) {
 			named, err := s.Search(ctx, api.SearchRequest{Project: project, Query: name, Limit: 12})
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			for _, match := range named.Matches {
 				if seen[match.ID] {
@@ -182,7 +182,7 @@ func (s *Store) querySeedCandidates(ctx context.Context, project, question strin
 			// Exact-name lookup is language-general and cheap.
 			exact, err := s.findNodes(ctx, project, name, 16)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			for _, node := range exact {
 				if seen[node.ID] || isSyntheticQueryFile(node.Location.File) {
@@ -195,13 +195,13 @@ func (s *Store) querySeedCandidates(ctx context.Context, project, question strin
 	}
 	degree, err := s.nodeDegrees(ctx, project)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]seedCandidate, 0, len(nodes))
 	for _, node := range nodes {
 		out = append(out, seedCandidate{node: node, degree: degree[node.ID]})
 	}
-	return out, nil
+	return out, degree, nil
 }
 
 func computeIDF(candidates []seedCandidate, terms []string) map[string]float64 {
@@ -247,7 +247,11 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string, question string
 	if len(normTerms) == 0 {
 		return querySeedResult{}
 	}
-	idents := queryIdentifierLower(question, terms)
+	names := queryProperNames(question)
+	idents := queryIdentifierLower("", terms)
+	for _, name := range names {
+		idents[strings.ToLower(name)] = true
+	}
 	hasDotted := queryHasDottedQualifier(question, terms)
 	idf := computeIDF(candidates, normTerms)
 	joined := strings.Join(normTerms, " ")
@@ -327,8 +331,9 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string, question string
 			}
 			singleton += tierValue + sourceValue
 			// Substring-only matches must not claim a term (class → test_*_class).
-			// Property/Attribute name collisions (django field vs django module)
-			// must not claim a bare word unless the question used a dotted qualifier.
+			// Weak labels (Property, Attribute, Module) must not claim a
+			// bare word unless the question used a dotted qualifier —
+			// otherwise a field named after a package steals the seed.
 			if singleton > 0 && (tierValue > 0 || strings.HasSuffix(qnLower, "."+t) || t == labelTokens) {
 				if queryWeakLabel(cand.node.Label) && !hasDotted {
 					continue
@@ -352,7 +357,7 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string, question string
 				score += 0.01
 			}
 		}
-		for _, name := range queryProperNames(question) {
+		for _, name := range names {
 			if cand.node.Name == name || strings.HasSuffix(cand.node.QualifiedName, "."+name) {
 				score += exactMatchBonus * 25
 				switch cand.node.Label {
