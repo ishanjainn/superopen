@@ -154,7 +154,8 @@ Defaults (see [graph](graph.md)):
 - At most 16 NODE rows and 16 EDGE rows unless `SUPEROPEN_GRAPH_QUERY_MAX_ROWS` is set
 - File/Module snippets clip at about 500 lines
 
-`so graph --no-refresh` skips the query-path freshness check (CI).
+`so graph --no-refresh` skips the query-path freshness check (CI). Session
+hooks do not spawn `so graph refresh`; reads probe and refresh on demand.
 
 Concurrent builds: `SUPEROPEN_BUILD_SLOTS` (default 2). Status `pool_full` means wait or raise the cap.
 

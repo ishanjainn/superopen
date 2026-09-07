@@ -15,8 +15,11 @@ so graph status    # build state of the current project
 so graph projects  # every indexed project on this machine
 ```
 
-Session hooks refresh the graph in the background on SessionStart and
-SessionEnd (detached, fail-open), only when the workspace already has `.so/`.
+Graph reads (`query`, `search`, `snippet`, …) probe for unindexed edits and
+spawn an incremental `so graph refresh --probe` when the workspace already
+has `.so/`. Session hooks do not spawn graph refresh. Skip the check with
+`so graph --no-refresh` (CI). If the wait times out, the answer is prefixed
+with `[!] graph stale: edit not indexed yet`.
 
 At most `SUPEROPEN_BUILD_SLOTS` builds run at once (default 2; `0` is
 unlimited). If refresh says `pool_full`, wait or raise the cap.

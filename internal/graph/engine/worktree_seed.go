@@ -60,20 +60,14 @@ func SeedLinkedWorktree(repoRoot string) {
 		return
 	}
 	dest := paths.Resolve(root).Root
-	lockPath := filepath.Join(tmpSO, paths.DBName, paths.BuildLock)
-	unlock, err := tryAcquireBuildLock(lockPath)
-	if err != nil {
-		return
-	}
-	defer unlock()
+	// Do not hold a file handle inside tmpSO: Windows cannot rename a
+	// directory while a file in it is open (and copying that lock file
+	// then fails with a sharing violation).
 	if err := os.Rename(tmpSO, dest); err != nil {
 		if copyErr := copyDir(tmpSO, dest); copyErr != nil {
 			_ = os.RemoveAll(dest)
 			return
 		}
-		cleanup = false
-		_, _ = paths.EnsureRepoIgnore(root)
-		return
 	}
 	cleanup = false
 	_, _ = paths.EnsureRepoIgnore(root)
@@ -109,7 +103,7 @@ func isSQLiteFile(path string) bool {
 }
 
 func vacuumInto(src, dest string) error {
-	dsn := sqliteURI(src) + "?mode=ro"
+	dsn := "file:" + filepath.ToSlash(src) + "?mode=ro"
 	db, err := sql.Open(sqliteDriverName, dsn)
 	if err != nil {
 		return err
@@ -117,17 +111,6 @@ func vacuumInto(src, dest string) error {
 	defer db.Close()
 	_, err = db.Exec("VACUUM INTO " + sqliteStringLiteral(filepath.ToSlash(dest)))
 	return err
-}
-
-func sqliteURI(path string) string {
-	slash := filepath.ToSlash(path)
-	if len(slash) >= 2 && slash[1] == ':' {
-		return "file:///" + slash
-	}
-	if strings.HasPrefix(slash, "/") {
-		return "file://" + slash
-	}
-	return "file:" + slash
 }
 
 func sqliteStringLiteral(s string) string {
@@ -149,6 +132,9 @@ func copyDir(from, to string) error {
 		target := filepath.Join(to, rel)
 		if info.IsDir() {
 			return os.MkdirAll(target, info.Mode())
+		}
+		if info.Name() == paths.BuildLock {
+			return nil
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err

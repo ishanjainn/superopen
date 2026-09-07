@@ -85,13 +85,19 @@ If that directory is missing, reinstall Superopen. Graph query, sessions, and me
 
 ## Graph looks stale
 
-Session hooks refresh the graph in the background on SessionStart and SessionEnd. On a large repo that can lag a few seconds.
+`so graph query` and other graph reads probe for dirty files and spawn an
+incremental `so graph refresh --probe` when the workspace already has `.so/`.
+Session hooks do not refresh the graph. On a large repo the query may wait a
+couple of seconds, then prefix the answer with
+`[!] graph stale: edit not indexed yet` if the index is still behind.
 
 ```bash
 so graph refresh          # incremental
 so graph build --force    # full rebuild
 so graph status           # build state
 ```
+
+Skip query-path refresh with `so graph --no-refresh`.
 
 If refresh prints `build pool full`, another repo is building. Default pool size is 2. Set `SUPEROPEN_BUILD_SLOTS` (use `0` for unlimited). See [configuration](configuration.md).
 

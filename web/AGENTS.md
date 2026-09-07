@@ -41,4 +41,3 @@ make lint
 - [ ] `npm run typecheck` + `npm test`
 - [ ] Breaking API changes documented in PR.
 
-Rules: [.agents/rules/ui.mdc](../.agents/rules/ui.mdc)

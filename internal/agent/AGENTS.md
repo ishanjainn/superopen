@@ -86,4 +86,3 @@ Benchmarks: [../../benchmarks/agent-graph-eval/AGENTS.md](../../benchmarks/agent
 - [ ] `plugins/*/hooks/hooks.json` synced with install tests.
 - [ ] No MCP server, MCP tools, or host plugin tool named `so`.
 
-Rules: [.agents/rules/agent-harness.mdc](../../.agents/rules/agent-harness.mdc)

@@ -28,7 +28,8 @@ func TestSeedLinkedWorktreeCopiesParentDB(t *testing.T) {
 	}
 	SeedLinkedWorktree(wt)
 	if !paths.Managed(wt) {
-		t.Fatal("seed must create worktree .so/")
+		parent, ok := paths.LinkedWorktreeParent(wt)
+		t.Fatalf("seed must create worktree .so/; parent ok=%v path=%q managed=%v", ok, parent, ok && paths.Managed(parent))
 	}
 	if _, err := os.Stat(paths.Resolve(wt).Database); err != nil {
 		t.Fatalf("seeded db missing: %v", err)
@@ -39,6 +40,29 @@ func TestSeedLinkedWorktreeCopiesParentDB(t *testing.T) {
 	}
 	if string(before) != string(after) {
 		t.Fatal("seed must not write the parent database")
+	}
+}
+
+func TestSeedLinkedWorktreeCopyFallback(t *testing.T) {
+	base := t.TempDir()
+	parent := filepath.Join(base, "main")
+	if err := os.Mkdir(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepoAt(t, parent, map[string]string{"README": "hi\n"})
+	seedGraphDB(t, parent, map[string]string{"README": "hi\n"})
+	wt := filepath.Join(base, "feat")
+	runGit(t, parent, "worktree", "add", "-b", "feat", wt)
+	blocker := filepath.Join(wt, paths.DirName)
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	SeedLinkedWorktree(wt)
+	if !paths.Managed(wt) {
+		t.Fatal("seed copy fallback must replace a blocking .so file")
+	}
+	if _, err := os.Stat(paths.Resolve(wt).Database); err != nil {
+		t.Fatalf("seeded db missing: %v", err)
 	}
 }
 

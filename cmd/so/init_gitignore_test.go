@@ -37,6 +37,29 @@ func TestWriteInitGitignoresHidesSO(t *testing.T) {
 	}
 }
 
+func TestWriteInitGitignoresPreservesExisting(t *testing.T) {
+	root := t.TempDir()
+	layout := paths.Resolve(root)
+	if err := layout.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	ignorePath := filepath.Join(layout.Root, ".gitignore")
+	custom := "# custom\nsessions/\ndb/\nharvest/\nscratch/\n"
+	if err := os.WriteFile(ignorePath, []byte(custom), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeInitGitignores(root); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(ignorePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != custom {
+		t.Fatalf("existing .so/.gitignore must be left alone, got %q", got)
+	}
+}
+
 func runGitInit(t *testing.T, root string) {
 	t.Helper()
 	runGit(t, root, "init")

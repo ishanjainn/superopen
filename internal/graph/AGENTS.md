@@ -76,4 +76,3 @@ Maintainer-only CLIs (not in CI). Run from repo root with `SUPEROPEN_GRAPH_SOURC
 
 **Anti-patterns:** RAM-load all nodes for seeds; JSON-first query default; hook-style hit lists in query output.
 
-Rules: [.agents/rules/graph-engine.mdc](../../.agents/rules/graph-engine.mdc)

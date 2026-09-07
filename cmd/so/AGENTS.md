@@ -65,5 +65,3 @@ Dogfood: `sh scripts/install.sh`, then `so init` in **another** repo. See [CONTR
 - [ ] `help[]` updated when adding graph subcommands.
 - [ ] Graph UX changes covered by `internal/graph/engine/` tests.
 - [ ] No MCP surface added.
-
-Rules: [.agents/rules/cli.mdc](../../.agents/rules/cli.mdc)

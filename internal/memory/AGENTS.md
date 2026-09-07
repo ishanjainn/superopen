@@ -58,4 +58,3 @@ python3 benchmarks/tests/test_harness.py
 - [ ] `TestPublishPreservesMemory` still passes.
 - [ ] UI routes updated if exposed on web.
 
-Rules: [.agents/rules/memory.mdc](../../.agents/rules/memory.mdc)
