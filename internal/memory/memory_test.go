@@ -1430,10 +1430,10 @@ func TestLiveDistillInstructionOnPending(t *testing.T) {
 	}
 	store.Close()
 	text := SessionStartIndex(root)
-	if !strings.Contains(text, "sess-pending") || !strings.Contains(text, "so memory distill --apply") {
+	if !strings.Contains(text, "sess-pending") || !paths.MentionsCommand(text, "memory distill --apply") {
 		t.Fatalf("expected pending distill line, got %q", text)
 	}
-	if !strings.Contains(text, "so memory distill --brief") {
+	if !paths.MentionsCommand(text, "memory distill --brief") {
 		t.Fatalf("live distill must name brief: %q", text)
 	}
 	if strings.Contains(text, "memory distill sess-pending") && !strings.Contains(text, "--apply") {

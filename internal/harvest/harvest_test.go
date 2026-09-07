@@ -201,10 +201,10 @@ func TestSessionStartLinePendingNotOpenReview(t *testing.T) {
 	}
 	store.Close()
 	line := PendingSessionStartLine(root)
-	if !strings.Contains(line, "HARVEST pending") || !strings.Contains(line, "so harvest propose") {
+	if !strings.Contains(line, "HARVEST pending") || !paths.MentionsCommand(line, "harvest propose") {
 		t.Fatalf("line %q", line)
 	}
-	if !strings.Contains(line, "so harvest brief") || !strings.Contains(line, "so harvest skip") {
+	if !paths.MentionsCommand(line, "harvest brief") || !paths.MentionsCommand(line, "harvest skip") {
 		t.Fatalf("live line must name brief then skip: %q", line)
 	}
 	if strings.Contains(line, "harvest scan") {

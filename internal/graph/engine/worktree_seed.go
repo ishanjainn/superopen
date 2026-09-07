@@ -2,6 +2,7 @@ package engine
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,7 @@ func SeedLinkedWorktree(repoRoot string) {
 	if _, err := os.Stat(parentDB); err != nil {
 		return
 	}
-	tmpSO, err := os.MkdirTemp(root, ".so.seed-*")
+	tmpSO, err := os.MkdirTemp(root, "so-seed-*")
 	if err != nil {
 		return
 	}
@@ -84,7 +85,31 @@ func seedDisabled() bool {
 }
 
 func backupSQLite(src, dest string) error {
-	dsn := "file:" + filepath.ToSlash(src) + "?mode=ro"
+	if err := vacuumInto(src, dest); err == nil {
+		return nil
+	}
+	if !isSQLiteFile(src) {
+		return fmt.Errorf("not sqlite")
+	}
+	return copyFile(src, dest)
+}
+
+func isSQLiteFile(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	var hdr [16]byte
+	n, err := f.Read(hdr[:])
+	if err != nil || n < 16 {
+		return false
+	}
+	return string(hdr[:]) == "SQLite format 3\x00"
+}
+
+func vacuumInto(src, dest string) error {
+	dsn := sqliteURI(src) + "?mode=ro"
 	db, err := sql.Open(sqliteDriverName, dsn)
 	if err != nil {
 		return err
@@ -92,6 +117,17 @@ func backupSQLite(src, dest string) error {
 	defer db.Close()
 	_, err = db.Exec("VACUUM INTO " + sqliteStringLiteral(filepath.ToSlash(dest)))
 	return err
+}
+
+func sqliteURI(path string) string {
+	slash := filepath.ToSlash(path)
+	if len(slash) >= 2 && slash[1] == ':' {
+		return "file:///" + slash
+	}
+	if strings.HasPrefix(slash, "/") {
+		return "file://" + slash
+	}
+	return "file:" + slash
 }
 
 func sqliteStringLiteral(s string) string {

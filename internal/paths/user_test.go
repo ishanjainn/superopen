@@ -105,3 +105,15 @@ func TestQuoteAndShellPath(t *testing.T) {
 		t.Fatal("IsSoBinary")
 	}
 }
+
+func TestMentionsCommand(t *testing.T) {
+	if !paths.MentionsCommand("`so harvest propose`", "harvest propose") {
+		t.Fatal("unix so")
+	}
+	if !paths.MentionsCommand("`so.exe harvest propose`", "harvest propose") {
+		t.Fatal("windows so.exe")
+	}
+	if paths.MentionsCommand("`so harvest list`", "harvest propose") {
+		t.Fatal("substring must not match a different subcommand")
+	}
+}

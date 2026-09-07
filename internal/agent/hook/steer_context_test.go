@@ -10,6 +10,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
+	"github.com/ishanjainn/superopen/internal/paths"
 )
 
 func TestIsExploreToolExcludesShellAndListing(t *testing.T) {
@@ -214,7 +215,7 @@ func TestSessionStartPendingHarvestOneLiner(t *testing.T) {
 		t.Fatal(err)
 	}
 	text, _, ok := steerTextFor("cursor", "sessionStart", payload)
-	if !ok || !strings.Contains(text, "HARVEST pending") || !strings.Contains(text, "so harvest propose") {
+	if !ok || !strings.Contains(text, "HARVEST pending") || !paths.MentionsCommand(text, "harvest propose") {
 		t.Fatalf("pending harvest one-liner, got ok=%v %q", ok, text)
 	}
 	if strings.Contains(text, "review") {
@@ -244,7 +245,7 @@ func TestPromptSubmitPendingHarvestOnCodePrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	text, _, ok := steerTextFor("cursor", "beforeSubmitPrompt", payload)
-	if !ok || !strings.Contains(text, "HARVEST pending") || !strings.Contains(text, "so harvest propose") {
+	if !ok || !strings.Contains(text, "HARVEST pending") || !paths.MentionsCommand(text, "harvest propose") {
 		t.Fatalf("code prompt must still inject live harvest, got ok=%v %q", ok, text)
 	}
 	if strings.Contains(text, "review") {
@@ -371,11 +372,11 @@ func TestSubagentStartInjectsHookReminder(t *testing.T) {
 	if ev != "SubagentStart" {
 		t.Fatalf("hookEvent = %q, want SubagentStart", ev)
 	}
-	if !strings.Contains(text, "so graph query") {
+	if !paths.MentionsCommand(text, "graph query") {
 		t.Fatalf("SubagentStart text missing graph reminder: %q", text)
 	}
 	cursorText, cursorEv, cursorOK := steerTextFor("cursor", "subagentStart", payload)
-	if !cursorOK || cursorEv != "subagentStart" || !strings.Contains(cursorText, "so graph query") {
+	if !cursorOK || cursorEv != "subagentStart" || !paths.MentionsCommand(cursorText, "graph query") {
 		t.Fatalf("cursor subagentStart must inject the same reminder, got ok=%v ev=%q text=%q", cursorOK, cursorEv, cursorText)
 	}
 	if text, _, ok := steerTextFor("claude-code", "SubagentStart", payload); ok {
@@ -418,7 +419,7 @@ func TestGrepPreToolUseEmitsGraphNudge(t *testing.T) {
 		t.Fatal(err)
 	}
 	text, _, ok := steerTextFor("claude-code", "PreToolUse", payload)
-	if !ok || !strings.Contains(text, "so graph query") {
+	if !ok || !paths.MentionsCommand(text, "graph query") {
 		t.Fatalf("grep should get a graph-first nudge, got %q", text)
 	}
 	if strings.Contains(text, "MANDATORY") {
@@ -447,7 +448,7 @@ func TestCursorPreToolUseGrepInfersSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	text, _, ok := steerTextFor("cursor", "preToolUse", payload)
-	if !ok || !strings.Contains(text, "so graph query") {
+	if !ok || !paths.MentionsCommand(text, "graph query") {
 		t.Fatalf("cursor Grep without --kind should get search nudge, got %q", text)
 	}
 	if strings.Contains(text, "MANDATORY") {
@@ -499,7 +500,7 @@ func TestStrictDenyFirstReadOnce(t *testing.T) {
 	if !ok || second.deny {
 		t.Fatalf("second Read must nudge, not deny; ok=%v deny=%v text=%q", ok, second.deny, second.text)
 	}
-	if !strings.Contains(second.text, "so graph query") {
+	if !paths.MentionsCommand(second.text, "graph query") {
 		t.Fatalf("second Read should still carry the graph nudge, got %q", second.text)
 	}
 	if strings.Contains(second.text, "MANDATORY") {
@@ -536,7 +537,7 @@ func TestQueryStampFreshReadOverflowsToSnippetOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, ok := steerDecisionFor("claude-code", "PreToolUse", "read", readPayload)
-	if !ok || d.deny || !strings.Contains(d.text, "so graph snippet") {
+	if !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") {
 		t.Fatalf("after query, source Read must overflow to snippet once, got ok=%v deny=%v text=%q", ok, d.deny, d.text)
 	}
 	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "read", readPayload); ok {
@@ -580,7 +581,7 @@ func TestQueryRepeatOverflowOnceAfterStamp(t *testing.T) {
 		t.Fatalf("first graph query must run without overflow, got %q", d.text)
 	}
 	d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", queryPayload)
-	if !ok || d.deny || !strings.Contains(d.text, "so graph snippet") || !strings.Contains(d.text, "TRUNCATED") {
+	if !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") || !strings.Contains(d.text, "TRUNCATED") {
 		t.Fatalf("second graph query must overflow to snippet (no deny), got ok=%v deny=%v text=%q", ok, d.deny, d.text)
 	}
 	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "search", queryPayload); ok {
@@ -623,7 +624,7 @@ func TestStrictSkipDenyWhenQueryStampFresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, ok := steerDecisionFor("claude-code", "PreToolUse", "read", readPayload)
-	if !ok || d.deny || !strings.Contains(d.text, "so graph snippet") {
+	if !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") {
 		t.Fatalf("fresh stamp Read must overflow to snippet (no deny), got ok=%v deny=%v text=%q", ok, d.deny, d.text)
 	}
 	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "read", readPayload); ok {
@@ -838,7 +839,7 @@ func TestOpenCodePiToolBeforeEmitsGraphNudge(t *testing.T) {
 	}
 	for _, vendor := range []string{"opencode", "pi"} {
 		text, _, ok := steerTextFor(vendor, "tool.execute.before", payload)
-		if !ok || !strings.Contains(text, "so graph query") {
+		if !ok || !paths.MentionsCommand(text, "graph query") {
 			t.Fatalf("%s tool.execute.before should nudge graph query, ok=%v text=%q", vendor, ok, text)
 		}
 		if strings.Contains(text, "MANDATORY") || strings.Contains(text, `"`) {
@@ -855,7 +856,7 @@ func TestOpenCodePiToolBeforeEmitsGraphNudge(t *testing.T) {
 		t.Fatal(err)
 	}
 	piStart, _, ok := steerTextFor("pi", "tool_execution_start", piPayload)
-	if !ok || !strings.Contains(piStart, "so graph query") {
+	if !ok || !paths.MentionsCommand(piStart, "graph query") {
 		t.Fatalf("pi tool_execution_start should nudge, ok=%v text=%q", ok, piStart)
 	}
 }
@@ -995,7 +996,7 @@ func TestEmptySessionIDUsesRootStampOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	text, _, ok := steerTextFor("claude-code", "PreToolUse", payload)
-	if !ok || !strings.Contains(text, "so graph query") {
+	if !ok || !paths.MentionsCommand(text, "graph query") {
 		t.Fatalf("first grep without session id should nudge, ok=%v text=%q", ok, text)
 	}
 	if text, _, ok := steerTextFor("claude-code", "PreToolUse", payload); ok {

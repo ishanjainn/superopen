@@ -323,19 +323,32 @@ export default function (pi: ExtensionAPI) {
       (event as { args?: Record<string, unknown>; input?: Record<string, unknown> }).args ||
       (event as { input?: Record<string, unknown> }).input ||
       {};
-    fire("tool_execution_end", {
-      type: "tool_execution_end",
-      cwd: ctx.cwd,
-      session_file: ctx.sessionManager.getSessionFile(),
-      session_id: sid(ctx),
-      toolName: (event as { toolName?: string }).toolName,
-      tool_name: (event as { toolName?: string }).toolName,
-      toolCallId: (event as { toolCallId?: string }).toolCallId,
-      isError: (event as { isError?: boolean }).isError,
-      result: (event as { result?: string }).result,
-      args,
-      input: args,
-    });
+    const toolName = String((event as { toolName?: string }).toolName || "");
+    const stdout = fire(
+      "tool_execution_end",
+      {
+        type: "tool_execution_end",
+        cwd: ctx.cwd,
+        session_file: ctx.sessionManager.getSessionFile(),
+        session_id: sid(ctx),
+        toolName,
+        tool_name: toolName,
+        toolCallId: (event as { toolCallId?: string }).toolCallId,
+        isError: (event as { isError?: boolean }).isError,
+        result: (event as { result?: string }).result,
+        path: args.path || args.file_path,
+        args,
+        input: args,
+      },
+      true
+    );
+    const nudge = additionalContext(stdout);
+    if (nudge && isEditTool(toolName)) {
+      const ev = event as { result?: string };
+      if (typeof ev.result === "string") {
+        ev.result = ev.result + "\n" + nudge;
+      }
+    }
   });
 
   // Primary turn export: assistant content blocks + toolResults.

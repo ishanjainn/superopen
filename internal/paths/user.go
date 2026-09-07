@@ -218,6 +218,15 @@ func LookPathSo() (string, error) {
 	return "", fmt.Errorf("%s binary not found on PATH", name)
 }
 
+// MentionsCommand reports whether s includes a so or so.exe invocation of sub.
+func MentionsCommand(s, sub string) bool {
+	sub = strings.TrimSpace(sub)
+	if sub == "" {
+		return false
+	}
+	return strings.Contains(s, "so "+sub) || strings.Contains(s, "so.exe "+sub)
+}
+
 // ResolveSoBin is the absolute so binary to paste into the host shell tool, or
 // "so"/"so.exe" when this process is not the CLI (tests). Prefer the running
 // executable so hooks and SessionStart match `so install`, then SUPEROPEN_SO_BIN,
