@@ -13,6 +13,26 @@ import (
 	"time"
 )
 
+func TestIsTestExecutable(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"so.test", true},
+		{"/tmp/go-build/so.test", true},
+		{`C:\Users\RUNNER~1\AppData\Local\Temp\go-build1\b001\so.test.exe`, true},
+		{`C:\Users\RUNNER~1\AppData\Local\Temp\go-build1\b001\so.test.EXE`, true},
+		{"so.exe", false},
+		{"so", false},
+		{`C:\Program Files\Superopen\so.exe`, false},
+	}
+	for _, tc := range tests {
+		if got := isTestExecutable(tc.path); got != tc.want {
+			t.Fatalf("isTestExecutable(%q)=%v want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
 func restoreEmbedder(t *testing.T) {
 	t.Helper()
 	old := activeEmbedderID

@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 )
 
@@ -55,7 +56,22 @@ var (
 var bgeServeFS embed.FS
 
 func testingBinary() bool {
-	return strings.HasSuffix(os.Args[0], ".test")
+	if testing.Testing() {
+		return true
+	}
+	return isTestExecutable(os.Args[0])
+}
+
+// isTestExecutable reports go test binaries. Unix names end in ".test";
+// Windows names end in ".test.exe". Sniffing only ".test" lets Windows
+// tests re-exec so.test.exe as the embed worker and lock the file until
+// `go test` tries to delete it.
+func isTestExecutable(path string) bool {
+	base := filepath.Base(strings.TrimSpace(path))
+	if ext := filepath.Ext(base); strings.EqualFold(ext, ".exe") {
+		base = strings.TrimSuffix(base, ext)
+	}
+	return strings.HasSuffix(base, ".test")
 }
 
 func workerConfigured() bool {
@@ -158,7 +174,7 @@ func spawnDefaultWorker() bool {
 	}
 	defer releaseWorkerLock()
 	self, err := os.Executable()
-	if err != nil {
+	if err != nil || isTestExecutable(self) {
 		return false
 	}
 	cmd := exec.Command(self, "memory", "embed-worker", "--listen", DefaultEmbedListen)
