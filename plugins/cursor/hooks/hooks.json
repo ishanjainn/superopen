@@ -5,10 +5,6 @@
       {
         "command": "so sessions hook --vendor=cursor --event=sessionStart",
         "timeout": 15000
-      },
-      {
-        "command": "so graph refresh --detach",
-        "timeout": 15000
       }
     ],
     "sessionEnd": [
@@ -18,10 +14,6 @@
       },
       {
         "command": "so sessions finalize --detach",
-        "timeout": 15000
-      },
-      {
-        "command": "so graph refresh --detach",
         "timeout": 15000
       }
     ],

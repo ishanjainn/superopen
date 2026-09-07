@@ -3,15 +3,9 @@ package engine
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
-)
-
-const (
-	queryAttachBodyMax         = 2
-	queryAttachContainsMinTerm = 8
 )
 
 func queryAttachableLabel(label string) bool {
@@ -21,26 +15,6 @@ func queryAttachableLabel(label string) bool {
 	default:
 		return false
 	}
-}
-
-func queryShouldAttachBody(n api.Node, terms []string) bool {
-	if !queryAttachableLabel(n.Label) {
-		return false
-	}
-	if queryNameOverlap(n, terms) >= 10 {
-		return true
-	}
-	name, last := querySymbolNames(n)
-	for _, t := range terms {
-		tl := strings.ToLower(strings.TrimSpace(t))
-		if len(tl) < queryAttachContainsMinTerm {
-			continue
-		}
-		if strings.Contains(name, tl) || strings.Contains(last, tl) {
-			return true
-		}
-	}
-	return false
 }
 
 func querySymbolNames(n api.Node) (name, last string) {
@@ -56,43 +30,66 @@ func querySymbolNames(n api.Node) (name, last string) {
 	return name, last
 }
 
-func pickQueryAttachNodes(ordered []queryNodeHit, terms []string, limit int) []api.Node {
-	if limit <= 0 || len(ordered) == 0 {
-		return nil
-	}
-	type scored struct {
-		node  api.Node
-		score int
-		idx   int
-	}
-	var cand []scored
-	for i, hit := range ordered {
-		if !queryShouldAttachBody(hit.node, terms) {
-			continue
+func pickQueryAttachNodes(ordered []queryNodeHit) []api.Node {
+	out := make([]api.Node, 0, len(ordered))
+	for _, hit := range ordered {
+		if queryAttachableLabel(hit.node.Label) {
+			out = append(out, hit.node)
 		}
-		cand = append(cand, scored{node: hit.node, score: queryNameOverlap(hit.node, terms), idx: i})
-	}
-	sort.SliceStable(cand, func(i, j int) bool {
-		if cand[i].score != cand[j].score {
-			return cand[i].score > cand[j].score
-		}
-		return cand[i].idx < cand[j].idx
-	})
-	if len(cand) > limit {
-		cand = cand[:limit]
-	}
-	out := make([]api.Node, 0, len(cand))
-	for _, c := range cand {
-		out = append(out, c.node)
 	}
 	return out
 }
 
-// appendQueryBodies reads clipped source for name-matching listed callables.
-// Fail-open: a missing file or snippet error skips that symbol so query
-// locators still return. Bodies are not Class/Module/File dumps.
-func (s *Store) appendQueryBodies(ctx context.Context, project string, nodes []api.Node) string {
-	if len(nodes) == 0 {
+func fileRoundRobinNodes(ordered []queryNodeHit) []queryNodeHit {
+	if len(ordered) < 2 {
+		return ordered
+	}
+	lockFile := ordered[0].node.Location.File
+	type group struct {
+		file  string
+		nodes []queryNodeHit
+	}
+	var groups []group
+	index := map[string]int{}
+	for _, hit := range ordered {
+		file := hit.node.Location.File
+		if i, ok := index[file]; ok {
+			groups[i].nodes = append(groups[i].nodes, hit)
+			continue
+		}
+		index[file] = len(groups)
+		groups = append(groups, group{file: file, nodes: []queryNodeHit{hit}})
+	}
+	if lockFile != "" {
+		if i, ok := index[lockFile]; ok && i != 0 {
+			groups[0], groups[i] = groups[i], groups[0]
+		}
+	}
+	out := make([]queryNodeHit, 0, len(ordered))
+	if len(groups) > 0 {
+		out = append(out, groups[0].nodes...)
+		groups = groups[1:]
+	}
+	max := 0
+	for _, g := range groups {
+		if len(g.nodes) > max {
+			max = len(g.nodes)
+		}
+	}
+	for depth := 0; depth < max; depth++ {
+		for _, g := range groups {
+			if depth < len(g.nodes) {
+				out = append(out, g.nodes[depth])
+			}
+		}
+	}
+	return out
+}
+
+// appendQueryBodies reads clipped source for listed callables until leftover
+// chars are exhausted. Fail-open per symbol. Not Class/Module/File dumps.
+func (s *Store) appendQueryBodies(ctx context.Context, project string, nodes []api.Node, leftover int) string {
+	if len(nodes) == 0 || leftover <= 0 {
 		return ""
 	}
 	type body struct {
@@ -100,6 +97,8 @@ func (s *Store) appendQueryBodies(ctx context.Context, project string, nodes []a
 		code  string
 	}
 	var parts []body
+	used := 0
+	headerBudget := 80
 	for _, node := range nodes {
 		qn := strings.TrimSpace(node.QualifiedName)
 		if qn == "" {
@@ -116,10 +115,20 @@ func (s *Store) appendQueryBodies(ctx context.Context, project string, nodes []a
 		if strings.TrimSpace(got.Name) != "" {
 			display = api.Node{Label: got.Label, Name: got.Name, QualifiedName: got.QualifiedName, Location: got.Location}
 		}
-		parts = append(parts, body{
-			title: fmt.Sprintf("%s [%s src=%s loc=%s]", queryNodeDisplayName(display), display.Label, got.Location.File, queryNodeLoc(display)),
-			code:  got.Code,
-		})
+		title := fmt.Sprintf("%s [%s src=%s loc=%s]", queryNodeDisplayName(display), display.Label, got.Location.File, queryNodeLoc(display))
+		block := "\n--- " + title + " ---\n" + got.Code + "\n"
+		if used == 0 {
+			if leftover < headerBudget+len(block) {
+				break
+			}
+		} else if used+len(block) > leftover {
+			break
+		}
+		parts = append(parts, body{title: title, code: got.Code})
+		if used == 0 {
+			used += headerBudget
+		}
+		used += len(block)
 	}
 	if len(parts) == 0 {
 		return ""

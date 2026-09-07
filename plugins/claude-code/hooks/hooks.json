@@ -7,11 +7,6 @@
             "type": "command",
             "command": "so sessions hook --vendor=cc --event=SessionStart",
             "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "so graph refresh --detach",
-            "timeout": 15
           }
         ]
       }
@@ -68,11 +63,6 @@
             "type": "command",
             "command": "so sessions hook --vendor=cc --event=Stop",
             "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "so graph refresh --detach",
-            "timeout": 15
           }
         ]
       }
@@ -111,11 +101,6 @@
           {
             "type": "command",
             "command": "so sessions finalize --detach",
-            "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "so graph refresh --detach",
             "timeout": 15
           }
         ]

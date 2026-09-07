@@ -208,6 +208,46 @@ def copy_auth(dest: Path, names: tuple[str, ...] = AUTH_FILES) -> list[str]:
     return copied
 
 
+def ensure_github_mirror(cache: Path, repo: str) -> Path:
+    dest = cache / "swebench" / repo.replace("/", "__")
+    if (dest / ".git").is_dir():
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    url = f"https://github.com/{repo}.git"
+    proc = host_run(["git", "clone", "--filter=blob:none", url, str(dest)], timeout=1800)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr or proc.stdout or f"clone failed: {repo}")
+    return dest
+
+
+def fetch_sha(mirror: Path, sha: str) -> None:
+    proc = host_run(["git", "-C", str(mirror), "fetch", "--depth", "1", "origin", sha], timeout=1800)
+    if proc.returncode != 0:
+        proc = host_run(["git", "-C", str(mirror), "fetch", "origin", sha], timeout=1800)
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr or proc.stdout or f"fetch failed: {sha}")
+
+
+def checkout_sha(mirror: Path, worktree: Path, sha: str) -> None:
+    host_run(["git", "-C", str(mirror), "worktree", "prune"], timeout=60)
+    if worktree.is_dir():
+        host_run(
+            ["git", "-C", str(mirror), "worktree", "remove", "--force", str(worktree)],
+            timeout=120,
+        )
+        shutil.rmtree(worktree, ignore_errors=True)
+    worktree.parent.mkdir(parents=True, exist_ok=True)
+    proc = host_run(
+        ["git", "-C", str(mirror), "worktree", "add", "--detach", str(worktree), sha],
+        timeout=600,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr or proc.stdout or f"worktree add failed: {sha}")
+    isolate_clean = host_run(["git", "-C", str(worktree), "clean", "-fdx"], timeout=120)
+    if isolate_clean.returncode != 0:
+        raise RuntimeError(isolate_clean.stderr or isolate_clean.stdout or "git clean failed")
+
+
 def add_worktree(mirror: Path, worktree: Path) -> None:
     if worktree.is_dir():
         shutil.rmtree(worktree, ignore_errors=True)
@@ -221,6 +261,17 @@ def add_worktree(mirror: Path, worktree: Path) -> None:
         proc = host_run(["git", "worktree", "add", "--detach", str(worktree), "HEAD"], cwd=mirror)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr or proc.stdout or "worktree add failed")
+
+
+def copy_so_store(src_worktree: Path, dest_worktree: Path) -> None:
+    """Reuse a seeded `.so/` graph index instead of running `so init` again."""
+    src = src_worktree / ".so"
+    dest = dest_worktree / ".so"
+    if dest.exists():
+        shutil.rmtree(dest)
+    if not src.is_dir():
+        raise RuntimeError(f"seeded Superopen store missing at {src}")
+    shutil.copytree(src, dest, symlinks=True)
 
 
 def parse_graph_status(stdout: str) -> dict[str, Any]:

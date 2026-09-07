@@ -5,11 +5,15 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/ishanjainn/superopen/internal/agent/config"
 	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/harvest"
+	"github.com/ishanjainn/superopen/internal/retention"
 )
 
 func cmdHarvest() *cobra.Command {
@@ -173,6 +177,7 @@ func harvestSkipCmd() *cobra.Command {
 
 func harvestListCmd() *cobra.Command {
 	var status string
+	var history bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List harvest proposals (default: open)",
@@ -186,6 +191,9 @@ func harvestListCmd() *cobra.Command {
 				return err
 			}
 			defer store.Close()
+			if history || strings.EqualFold(strings.TrimSpace(status), "history") {
+				return listHarvestHistory(cmd, store)
+			}
 			items, err := store.List(status)
 			if err != nil {
 				return err
@@ -206,8 +214,38 @@ func harvestListCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&status, "status", "", "Filter status (open|applied|declined|noop|stale)")
+	cmd.Flags().StringVar(&status, "status", "", "Filter status (open|applied|declined|noop|stale|history)")
+	cmd.Flags().BoolVar(&history, "history", false, "List closed proposals and skipped runs (session retention window)")
 	return cmd
+}
+
+func listHarvestHistory(_ *cobra.Command, store *harvest.Store) error {
+	cutoff := time.Now().UTC().Add(-config.HoursDuration(config.DefaultRetentionHours))
+	if settings, err := retention.LoadSettings(); err == nil {
+		if d := config.HoursDuration(settings.SessionHours); d > 0 {
+			cutoff = time.Now().UTC().Add(-d)
+		} else {
+			cutoff = time.Time{}
+		}
+	}
+	items, err := store.ListHistory(cutoff)
+	if err != nil {
+		return err
+	}
+	rows := make([]map[string]any, 0, len(items))
+	for _, p := range items {
+		rows = append(rows, map[string]any{
+			"id": p.ID, "status": p.Status, "kind": p.Kind, "target": p.Target,
+			"title": p.Title, "reason": p.Reason, "source": p.Source,
+			"session": p.SessionID, "created_at": p.CreatedAt,
+		})
+	}
+	if len(rows) == 0 {
+		out().Empty("history")
+		return nil
+	}
+	out().Rows("history", []string{"id", "status", "kind", "source", "target", "title"}, rows)
+	return nil
 }
 
 func harvestShowCmd() *cobra.Command {

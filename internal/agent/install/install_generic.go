@@ -115,8 +115,8 @@ func copilotManifest(soBin string) (string, error) {
 	doc := map[string]any{
 		"version": 1,
 		"hooks": map[string]any{
-			"sessionStart":          []any{hook("sessions hook --vendor=copilot-cli --event=sessionStart"), hook("graph refresh --detach")},
-			"sessionEnd":            []any{hook("sessions hook --vendor=copilot-cli --event=sessionEnd"), hook("sessions finalize --detach"), hook("graph refresh --detach")},
+			"sessionStart":          []any{hook("sessions hook --vendor=copilot-cli --event=sessionStart")},
+			"sessionEnd":            []any{hook("sessions hook --vendor=copilot-cli --event=sessionEnd"), hook("sessions finalize --detach")},
 			"userPromptSubmitted":   []any{hook("sessions hook --vendor=copilot-cli --event=userPromptSubmitted")},
 			"userPromptTransformed": []any{hook("sessions hook --vendor=copilot-cli --event=userPromptTransformed")},
 			"preToolUse":            []any{hook("sessions hook --vendor=copilot-cli --event=preToolUse")},
@@ -191,8 +191,8 @@ func geminiCommands(soBin string) map[string][]string {
 		return hookCommand(soBin, "sessions hook --vendor=gemini --event="+event)
 	}
 	return map[string][]string{
-		"SessionStart": {command("SessionStart"), hookCommand(soBin, "graph refresh --detach")},
-		"SessionEnd":   {command("SessionEnd"), hookCommand(soBin, "sessions finalize --detach"), hookCommand(soBin, "graph refresh --detach")},
+		"SessionStart": {command("SessionStart")},
+		"SessionEnd":   {command("SessionEnd"), hookCommand(soBin, "sessions finalize --detach")},
 		"BeforeAgent":  {command("BeforeAgent")},
 		"AfterAgent":   {command("AfterAgent")},
 		"BeforeTool":   {command("BeforeTool")},

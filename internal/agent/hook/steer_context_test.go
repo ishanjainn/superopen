@@ -1010,6 +1010,53 @@ func writeHookSourceFile(t *testing.T, root string) {
 	}
 }
 
+func TestCapturePromptNudgesCaptureNotRecall(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	id := "capture-sess"
+	writeHookSession(t, root, id)
+	submit, err := json.Marshal(map[string]any{
+		"session_id": id, "cwd": root, "prompt": "remember this: login timeout is 30s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("claude-code", "UserPromptSubmit", submit)
+	if !ok || !strings.Contains(text, "memory capture") {
+		t.Fatalf("remember-this should inject capture, ok=%v text=%q", ok, text)
+	}
+	if strings.Contains(text, "memory recall") {
+		t.Fatalf("remember-this must not inject recall, text=%q", text)
+	}
+	grep, err := json.Marshal(map[string]any{
+		"tool_name": "Grep", "tool_input": map[string]any{"pattern": "timeout"},
+		"cwd": root, "session_id": id,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nudge, _, ok := steerTextFor("claude-code", "PreToolUse", grep)
+	if !ok || !strings.Contains(nudge, "memory capture") {
+		t.Fatalf("capture PreToolUse should nudge capture, ok=%v text=%q", ok, nudge)
+	}
+	if strings.Contains(nudge, "memory recall") {
+		t.Fatalf("capture PreToolUse must not inject recall, text=%q", nudge)
+	}
+
+	askID := "recall-sess"
+	writeHookSession(t, root, askID)
+	ask, err := json.Marshal(map[string]any{
+		"session_id": askID, "cwd": root, "prompt": "do you remember where we left the login timeout",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	askText, _, askOK := steerTextFor("claude-code", "UserPromptSubmit", ask)
+	if askOK && strings.Contains(askText, "memory capture") {
+		t.Fatalf("recall question must not inject capture, text=%q", askText)
+	}
+}
+
 func writeHookSession(t *testing.T, root, id string) {
 	t.Helper()
 	_ = os.MkdirAll(filepath.Join(root, ".so", "sessions", id), 0o755)

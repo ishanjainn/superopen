@@ -62,6 +62,19 @@ function isExploreTool(name: string): boolean {
   return n === "bash" || n === "shell" || n === "grep" || n === "glob" || n === "read" || n === "readfile";
 }
 
+function isEditTool(name: string): boolean {
+  const n = name.toLowerCase();
+  return (
+    n === "edit" ||
+    n === "write" ||
+    n === "multiedit" ||
+    n === "notebookedit" ||
+    n === "strreplace" ||
+    n === "str_replace" ||
+    n.includes("apply_patch")
+  );
+}
+
 function prependBashNudge(command: string, nudge: string): string {
   // ';' not '&&' — Windows PowerShell 5.1 rejects '&&'.
   return "echo " + JSON.stringify(shellSafeNudge(nudge)) + " ; " + command;
@@ -307,20 +320,35 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
 
     "tool.execute.after": async (input, output) => {
       const sid = rememberSid((input as { sessionID?: string })?.sessionID);
+      const tool = String((input as { tool?: string })?.tool || "");
       const result =
         typeof (output as { output?: unknown })?.output === "string"
           ? (output as { output: string }).output
           : JSON.stringify(output ?? {});
-      fire("tool.execute.after", {
-        type: "tool.execute.after",
-        cwd: directory,
-        session_id: sid,
-        sessionID: sid,
-        tool_name: (input as { tool?: string })?.tool,
-        tool_use_id: (input as { callID?: string })?.callID,
-        tool_input: (input as { args?: unknown })?.args,
-        tool_result: result,
-      });
+      const stdout = fire(
+        "tool.execute.after",
+        {
+          type: "tool.execute.after",
+          cwd: directory,
+          session_id: sid,
+          sessionID: sid,
+          tool_name: tool,
+          tool_use_id: (input as { callID?: string })?.callID,
+          tool_input: (input as { args?: unknown })?.args,
+          tool_result: result,
+          path:
+            (input as { args?: { path?: string; file_path?: string } })?.args?.path ||
+            (input as { args?: { path?: string; file_path?: string } })?.args?.file_path,
+        },
+        true
+      );
+      const nudge = additionalContext(stdout);
+      if (nudge && isEditTool(tool) && output && typeof output === "object") {
+        const out = output as { output?: unknown };
+        if (typeof out.output === "string") {
+          out.output = out.output + "\n" + nudge;
+        }
+      }
     },
 
     dispose: async () => {

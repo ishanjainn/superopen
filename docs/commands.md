@@ -23,7 +23,7 @@ Exit codes are stable: `0` ok, `1` error, `2` usage, `3` not found,
 | `so dev` | Start the web UI (`-d` detaches); binds current inited repo or last managed project |
 | `so projects` | List repositories registered with Superopen |
 | `so status` | Show active observability sessions |
-| `so gc` | Apply retention: delete old sessions and unpinned memories |
+| `so gc` | Apply retention: delete old sessions, harvest history, and unpinned memories |
 | `so version` | Print CLI version |
 
 ## so graph — [docs](graph.md)
@@ -37,7 +37,8 @@ artifact   layout      projects
 ```
 
 Defaults: compact `NODE`/`EDGE` text under a token budget; `TRUNCATED`
-suggests `snippet` or a narrower question. `--json` / `--full` are escape
+suggests `snippet` or a narrower question. `so graph impact` prints compact
+file rollups (`--files`, `--base main`). `--json` / `--full` are escape
 hatches. Cypher support is a read-only subset (`so graph cypher --help`).
 
 ## so memory — [docs](memory.md)

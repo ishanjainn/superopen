@@ -122,11 +122,12 @@ type State struct {
 	// MemoryIndexInjected gates the UserPromptSubmit SessionStartIndex
 	// so a personal question does not re-inject the title list every turn.
 	// SubagentSteerReminded caps SubagentStart the same way.
-	MemorySteerReminded   bool `json:"memory_steer_reminded,omitempty"`
-	MemoryDistillAsked    bool `json:"memory_distill_asked,omitempty"`
-	MemoryIndexInjected   bool `json:"memory_index_injected,omitempty"`
+	MemorySteerReminded    bool `json:"memory_steer_reminded,omitempty"`
+	CaptureSteerReminded   bool `json:"capture_steer_reminded,omitempty"`
+	MemoryDistillAsked     bool `json:"memory_distill_asked,omitempty"`
+	MemoryIndexInjected    bool `json:"memory_index_injected,omitempty"`
 	HarvestPendingInjected bool `json:"harvest_pending_injected,omitempty"`
-	SubagentSteerReminded bool `json:"subagent_steer_reminded,omitempty"`
+	SubagentSteerReminded  bool `json:"subagent_steer_reminded,omitempty"`
 
 	// WorkspaceRoute is "code", "memory", or "empty" from SessionStart
 	// (source files vs live diary rows). PromptKind is the current user

@@ -139,6 +139,16 @@
   background: transparent;
 }
 
+.memory-graph-caption {
+  position: absolute;
+  bottom: 10px;
+  left: 12px;
+  z-index: 5;
+  margin: 0;
+  font-size: 11px;
+  color: rgb(var(--color-neutral-500));
+}
+
 .memory-inspector {
   position: absolute;
   top: 12px;

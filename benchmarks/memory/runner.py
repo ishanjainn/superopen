@@ -100,8 +100,10 @@ def _session_text(session: Any) -> str:
                 content = turn.get("content") or turn.get("text") or ""
                 if isinstance(content, list):
                     content = " ".join(str(x) for x in content)
+                if not str(content).strip():
+                    continue
                 lines.append(f"{role}: {content}".strip())
-            else:
+            elif str(turn).strip():
                 lines.append(str(turn))
         return "\n".join(lines)
     return str(session or "")
@@ -178,8 +180,11 @@ def _flatten_longmemeval(data: Any, n: int) -> tuple[list[dict[str, Any]], list[
             sid = str(sids[j] if j < len(sids) else f"{qid}:s{j}")
             if sid in seen:
                 continue
+            text = _session_text(sess)
+            if not str(text).strip():
+                continue
             seen.add(sid)
-            docs.append({"id": sid, "text": _session_text(sess), "gold": [sid], "session": qid})
+            docs.append({"id": sid, "text": text, "gold": [sid], "session": qid})
         gold = row.get("answer_session_ids") or row.get("haystack_session_ids") or []
         if isinstance(gold, str):
             gold = [gold]
@@ -362,6 +367,7 @@ def _qa_llm_payload(
     model: str,
     rows: list[dict[str, Any]],
     stopped: str | None = None,
+    judge_usd: float = 0.0,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {
         "accuracy": (covered_strict / total) if total else None,
@@ -384,6 +390,7 @@ def _qa_llm_payload(
         "note": "locomo qa_n=20 is 16 scored (often all conv-26) + 4 empty-gold category-5; skipped_no_gold is not a spend stop",
         "store_frozen_per_question": True,
         "rows": rows,
+        "judge_usd": round(float(judge_usd), 6),
     }
     if stopped:
         out["stopped_on_spend"] = stopped
@@ -439,6 +446,7 @@ def _run_qa_llm(
     so_invoked_n = 0
     rows: list[dict[str, Any]] = []
     stopped: str | None = None
+    judge_usd = 0.0
     judge_cache = out / "judge_cache"
     frozen = _freeze_so(store)
     try:
@@ -489,6 +497,7 @@ def _run_qa_llm(
                     ledger,
                     judge_cache,
                 )
+                judge_usd += float(verdict.get("usd") or 0)
                 if verdict.get("hit") is not None:
                     judged += 1
                     hit_judge = bool(verdict["hit"])
@@ -509,6 +518,7 @@ def _run_qa_llm(
                     "cache_read_tokens": result.get("cache_read_tokens"),
                     "output_tokens": result.get("output_tokens"),
                     "cost_usd": usd,
+                    "judge_usd": verdict.get("usd") if not timed else 0.0,
                     "answer_gold": answer[:80],
                     "result_head": text[:240],
                     "stderr_head": str(result.get("stderr") or "")[:400],
@@ -539,6 +549,7 @@ def _run_qa_llm(
         model=str(getattr(args, "model", "") or ""),
         rows=rows,
         stopped=stopped,
+        judge_usd=judge_usd,
     )
 
 
@@ -618,7 +629,7 @@ def run_memory_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> d
             if rec.get("title"):
                 unique_titles.add(rec["title"])
         eid = so_adapter.embedder_id(so_bin, store, env=env)
-        st = so_adapter.memory_status(so_bin, store, env=env)
+        st = so_adapter.wait_embeddings(so_bin, store, env=env)
         results["embedder_id"] = eid
         results["ingest"] = {
             "store": str(store),

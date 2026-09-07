@@ -43,23 +43,24 @@ def _command_invokes_so(command: str) -> bool:
     return " memory " in lower or " graph " in lower or "memory" in lower or "graph" in lower
 
 
-def _so_from_obj(obj: Any) -> bool:
-    if isinstance(obj, dict):
-        name = str(obj.get("name") or obj.get("tool_name") or "").lower()
-        inp = obj.get("input") or obj.get("tool_input") or {}
-        cmd = ""
-        if isinstance(inp, dict):
-            cmd = str(inp.get("command") or inp.get("cmd") or "")
-        elif isinstance(inp, str):
-            cmd = inp
-        if name in {"bash", "shell"} and _command_invokes_so(cmd):
-            return True
-        if _command_invokes_so(str(obj.get("command") or "")):
-            return True
-        return any(_so_from_obj(v) for v in obj.values())
-    if isinstance(obj, list):
-        return any(_so_from_obj(v) for v in obj)
-    return False
+def _tool_name(obj: dict[str, Any]) -> str:
+    return str(obj.get("name") or obj.get("tool_name") or "").lower()
+
+
+def _tool_command(obj: dict[str, Any]) -> str:
+    inp = obj.get("input") or obj.get("tool_input") or {}
+    if isinstance(inp, dict):
+        return str(inp.get("command") or inp.get("cmd") or "")
+    if isinstance(inp, str):
+        return inp
+    return str(obj.get("command") or "")
+
+
+def _tool_path(obj: dict[str, Any]) -> str:
+    inp = obj.get("input") or obj.get("tool_input") or {}
+    if isinstance(inp, dict):
+        return str(inp.get("file_path") or inp.get("path") or inp.get("target_file") or "")
+    return ""
 
 
 def empty_usage() -> dict[str, Any]:
@@ -69,7 +70,50 @@ def empty_usage() -> dict[str, Any]:
         "cache_read_tokens": 0,
         "cache_creation_tokens": 0,
         "so_invoked": False,
+        "tool_calls": 0,
+        "graph_calls": 0,
+        "source_reads": 0,
+        "read_paths": [],
+        "read_after_bodies": False,
     }
+
+
+def _accumulate_tools(obj: Any, acc: dict[str, Any], *, saw_graph_body: list[bool]) -> None:
+    if isinstance(obj, dict):
+        typ = str(obj.get("type") or "").lower()
+        name = _tool_name(obj)
+        is_tool = typ in {"tool_use", "tool_call", "toolcall"} or (
+            name in {"bash", "shell", "read", "glob", "grep", "edit", "write"}
+            and ("input" in obj or "tool_input" in obj)
+        )
+        if is_tool:
+            acc["tool_calls"] += 1
+            cmd = _tool_command(obj)
+            path = _tool_path(obj)
+            if name in {"bash", "shell"} and _command_invokes_so(cmd):
+                acc["so_invoked"] = True
+                if " graph " in f" {cmd.lower()} ":
+                    acc["graph_calls"] += 1
+                    saw_graph_body[0] = True
+            if name in {"read", "glob"}:
+                acc["source_reads"] += 1
+                if path:
+                    acc["read_paths"].append(path)
+                if saw_graph_body[0]:
+                    acc["read_after_bodies"] = True
+        if _command_invokes_so(str(obj.get("command") or "")):
+            acc["so_invoked"] = True
+        for val in obj.values():
+            _accumulate_tools(val, acc, saw_graph_body=saw_graph_body)
+    elif isinstance(obj, list):
+        for item in obj:
+            _accumulate_tools(item, acc, saw_graph_body=saw_graph_body)
+
+
+def _so_from_obj(obj: Any) -> bool:
+    acc = empty_usage()
+    _accumulate_tools(obj, acc, saw_graph_body=[False])
+    return bool(acc["so_invoked"])
 
 
 def jsonl_sizes(claude_dir: Path) -> dict[str, int]:
@@ -86,6 +130,7 @@ def jsonl_sizes(claude_dir: Path) -> dict[str, int]:
 
 def usage_from_new_jsonl(claude_dir: Path, before: dict[str, int]) -> dict[str, Any]:
     acc = empty_usage()
+    saw_graph_body = [False]
     if not claude_dir.is_dir():
         return acc
     for path in claude_dir.rglob("*.jsonl"):
@@ -106,8 +151,7 @@ def usage_from_new_jsonl(claude_dir: Path, before: dict[str, int]) -> dict[str, 
             except json.JSONDecodeError:
                 continue
             _usage_from_obj(row, acc)
-            if _so_from_obj(row):
-                acc["so_invoked"] = True
+            _accumulate_tools(row, acc, saw_graph_body=saw_graph_body)
     return acc
 
 
@@ -155,6 +199,10 @@ def run_prompt(
         "cost_usd": data.get("total_cost_usd"),
         "turns": data.get("num_turns"),
         "so_invoked": bool(jsonl["so_invoked"]),
+        "tool_calls": int(jsonl.get("tool_calls") or 0),
+        "graph_calls": int(jsonl.get("graph_calls") or 0),
+        "source_reads": int(jsonl.get("source_reads") or 0),
+        "read_after_bodies": bool(jsonl.get("read_after_bodies")),
         "stderr": proc.stderr,
     }
 

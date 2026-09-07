@@ -603,12 +603,12 @@ func queryLooksProper(tok string) bool {
 func queryMentionsTests(question string, terms []string) bool {
 	for _, t := range terms {
 		switch t {
-		case "test", "tests", "testing", "spec", "specs", "fixture", "fixtures":
+		case "test", "tests", "testing", "spec", "specs", "fixture", "fixtures", "pytest", "conftest":
 			return true
 		}
 	}
 	q := strings.ToLower(question)
-	for _, w := range []string{" test ", " tests ", " spec ", " fixture "} {
+	for _, w := range []string{" test ", " tests ", " spec ", " fixture ", " pytest ", " conftest "} {
 		if strings.Contains(" "+q+" ", w) {
 			return true
 		}

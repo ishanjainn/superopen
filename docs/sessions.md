@@ -44,8 +44,9 @@ Output follows the axi.md conventions: TOON lists, definitive empty state
 ## Retention
 
 `so gc` applies retention: unpinned prompts and session rollups older than
-`SUPEROPEN_MEMORY_RETENTION_HOURS` (default 168) are deleted; transcripts use
-`SUPEROPEN_SESSION_RETENTION_HOURS`. Pins and teachings are never aged out.
+`SUPEROPEN_MEMORY_RETENTION_HOURS` (default 168) are deleted; transcripts and
+closed harvest history use `SUPEROPEN_SESSION_RETENTION_HOURS`. Pins, teachings,
+open harvest proposals, and pending harvest runs are never aged out.
 
 ## For contributors
 

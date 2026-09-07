@@ -5,18 +5,26 @@
   <a href="https://github.com/ishanjainn/superopen"><img src="./assets/superopen-banner.svg" width="100%" height="100%" alt="Superopen"/></a>
 </p>
 
-Superopen is not another coding agent. It builds the open source harness around
-Claude Code, Cursor, Codex, and similar agents so every coding session improves
-the next with less token waste and lower cost.
+Superopen is not another coding agent. It builds the open source harness around Claude Code, Cursor, Codex, and similar agents so every coding session improves the next with less token waste and lower cost.
 
-- **The harness watches, the graph answers.** Hooks capture each session while a
-  local Tree-sitter graph lets the agent query a scoped subgraph instead of
-  grepping file by file -> **fewer input tokens**
-- **Sessions become memory.** What one session learns is distilled into the same
-  SQLite store the graph lives in; the next session starts from a **≤350-token**
-  injected index instead of re-discovering your codebase.
-- **Memory compounds, cost drops.** Follow-up sessions skip redundant
-  exploration and re-explanation -> **lower cost per task**
+- It builds a Tree-sitter graph into SQLite — agents query a scoped subgraph instead of grepping files. No embeddings, no similarity search, no index to keep warm. The graph is a local so.db your agent reads via so graph query.
+- Session hooks run in the background so every turn is recorded to .so/sessions/. Follow-ups skip re-exploration because the context is already there.
+- Distill compresses what mattered into a ≤350-token index so the next session starts with signal, not noise (90.8% / 82% recall@10).
+- Harvest proposes playbook patches from the session with reusable guidance you apply only when you want it.
+- Nothing leaves your machine. The graph builds with Tree-sitter + SQLite. No LLM calls, no network, no server. The binary is the engine.
+
+**The numbers speak for themselves**. In our benchmarks, Claude Code with Superopen solves 4× more tasks correctly while cutting tokens, cost, and latency roughly in half:
+
+| Metric | Cold Claude Code | Claude Code with Superopen | Improvement |
+|---|---|---|---|
+| Correctness | 1 / 5 (20%) | **4 / 5 (80%)** | **+60 pts** |
+| Tokens | 19.1M | **9.6M** | **+50%** |
+| Cost | $1.52 | **$0.87** | **+43%** |
+| Tool calls | 81 | **44** | **+46%** |
+| API requests | 82 | **45** | **+45%** |
+| Wall-clock | 504s | **312s** | **+38%** |
+
+Source: [BENCHMARKS.md](BENCHMARKS.md)
 
 ## Getting Started
 
@@ -31,7 +39,7 @@ Then, in your Repository:
 so init         # or /so init in the agent chat          
 ```
 
-That's it. You get a `.so/` in that tree.
+That is the whole setup. You get a `.so/` in that tree.
 
 ```text
 .so/
@@ -40,43 +48,12 @@ That's it. You get a `.so/` in that tree.
   .gitignore
 ```
 
-From here
-1. coding agents steer themselves: structural questions go straight to the **graph** to reduce tokens spent in grepping.
-2. Hooks record every session in the background, finalizing transcripts into a session map plus relevant memory. 
-3. At session end, harvest proposes small
-improvements to your instruction files; nothing lands until you approve.
-
-```bash
-so graph build
-so graph refresh              # skip when unchanged, or when .so/ is missing; --force for full rebuild
-so graph search DataFlowingGate
-so graph query "How does DataFlowingGate gate the UI?"
-so graph architecture
-so graph impact DataFlowingGate
-```
-
-Session hooks refresh the graph in the background on SessionStart / SessionEnd
-(detached, fail-open) **only if the workspace already has `.so/`**. Builds are **local** (Tree-sitter + SQLite) — they do not
-invoke an LLM or the live coding agent.
-
-Default `so graph query` stdout is compact NODE/EDGE text plus `help[]` next steps. `--json` and `--full` are script escape hatches. That compact graph format is intentional; memory/sessions use AXI TOON instead.
-
-## Layout summary
-
-| Location | Purpose |
-|----------|---------|
-| User skill dirs | `/so` skill from `so install` |
-| User instruction surfaces | Graph-first durable guidance |
-| `<repo>/.so/sessions` | Session documents |
-| `<repo>/.so/db/so.db` | Shared DB (graph + memory) |
-| Config dir `projects.json` | Cross-repo index of Superopen usage |
-
-One `so` binary includes the native graph engine. There is no separate graph binary.
-
-Contributors: read [`AGENTS.md`](AGENTS.md) and the nested `AGENTS.md` in the area you edit; shared rules in [`.agents/rules/`](.agents/rules/). Repo-only — not what `so install` writes to customer projects.
-
-Benchmarks: [BENCHMARKS.md](BENCHMARKS.md). Offline smoke: `make bench-offline`.
-Manual full runs (Docker, writes `BENCHMARKS.md`): `.github/workflows/bench.yml`.
+## The Problem
+Every session, your coding agent starts from zero. It greps, opens files, follows imports, backtracks, tries again, rebuilding a mental map of the codebase it already navigated yesterday and threw away. That rediscovery burns most of a run's tokens, tool calls, and latency, and it is pure overhead:
+- **Repeated**: Every task pays the exploration cost again, from scratch.
+- **Discarded**: Whatever the agent figured out dies with the session.
+- **Unshared**: The next teammate (or your own next session) starts cold too.
+Humans onboard to a codebase once. Agents onboard every single time.
 
 ## Uninstall
 
@@ -94,8 +71,5 @@ Then remove the **binary** the same way you installed it:
 |------------------------|-------------------|
 | Homebrew (macOS / Linux) | `brew uninstall so` |
 | Windows `install.ps1` / curl installer | already gone (`so uninstall` deletes `~/.superopen`) |
-| Scoop / WinGet / Chocolatey | `scoop uninstall so` / `winget uninstall so` / `choco uninstall so` |
 
 Restart the coding agent so it drops in-memory hooks.
-
-Building from source (developers only): [CONTRIBUTING.md](CONTRIBUTING.md).

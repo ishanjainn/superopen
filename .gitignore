@@ -20,6 +20,7 @@ benchmarks/datasets/
 benchmarks/work/
 benchmarks/results/
 benchmarks/artifacts/
+benchmarks/.last-summary.json
 
 # Web build outputs (also in web/.gitignore)
 web/node_modules/

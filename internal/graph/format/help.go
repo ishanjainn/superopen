@@ -2,6 +2,7 @@ package format
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
 )
@@ -12,13 +13,45 @@ func HelpForQuery(result api.QueryResult) []string {
 	if len(result.Seeds) > 0 {
 		qn = result.Seeds[0].QualifiedName
 	}
+	var hints []string
 	if qn == "" {
-		return []string{
+		hints = []string{
 			"so graph search <name>",
 			"so graph snippet <qualified_name>",
 		}
+	} else {
+		hints = []string{fmt.Sprintf("so graph snippet %s", qn)}
 	}
-	return []string{fmt.Sprintf("so graph snippet %s", qn)}
+	if looksLikeImpactQuestion(result.Question) {
+		hints = append(hints, "so graph impact --files <path>")
+	}
+	return hints
+}
+
+func looksLikeImpactQuestion(q string) bool {
+	lower := strings.ToLower(q)
+	for _, needle := range []string{
+		"caller", "usage", "usages", "rename", "blast", "sibling",
+		"impact", "across codebase", "dependen", "who uses", "who calls",
+	} {
+		if strings.Contains(lower, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// HelpForImpact returns AXI next-step commands after a graph impact dump.
+func HelpForImpact(result api.ImpactResult) []string {
+	if len(result.ImpactedFiles) > 0 {
+		return []string{
+			fmt.Sprintf("so graph snippet <qn>  # then check %s", result.ImpactedFiles[0].Path),
+		}
+	}
+	if len(result.Impacted) > 0 && result.Impacted[0].QualifiedName != "" {
+		return []string{fmt.Sprintf("so graph snippet %s", result.Impacted[0].QualifiedName)}
+	}
+	return []string{"so graph impact --files <path>"}
 }
 
 // HelpForSearch returns AXI next-step commands after a graph search.

@@ -8,8 +8,8 @@ from typing import Any
 # Locomo small n=100 (category-stratified). Full uses the 300-item file for
 # retrieve; coding-agent QA still samples via --qa-n. LongMemEval-S English
 # n=50 is already the Superopen split. Compare uses the whole 6-question Django bank.
-SMALL = {"locomo": 100, "longmemeval": 50, "compare": 6}
-FULL = {"locomo": 300, "longmemeval": 50, "compare": 6}
+SMALL = {"locomo": 100, "longmemeval": 50, "compare": 6, "swe": 5}
+FULL = {"locomo": 300, "longmemeval": 50, "compare": 6, "swe": 50}
 
 MIN_LOCOMO = SMALL["locomo"]
 MIN_LME = SMALL["longmemeval"]
@@ -25,13 +25,14 @@ def apply_scale(args: Any) -> None:
     if getattr(args, "n", None) is None:
         args.n = table.get(split, table["locomo"])
     if not getattr(args, "qa_n", None):
-        # Full retrieve uses n=300; coding-agent QA stays a 20-item sample unless set.
-        if scale == "full" and split == "locomo":
+        if split == "locomo":
             args.qa_n = 20
         else:
             args.qa_n = int(args.n)
     if getattr(args, "compare_n", None) is None:
         args.compare_n = table["compare"]
+    if getattr(args, "swe_n", None) is None:
+        args.swe_n = table["swe"]
     args.scale = scale
     args.scale_sizes = dict(table)
 
@@ -79,16 +80,16 @@ def default_model(host: str, model: str) -> str:
 
 def require_agent_credentials(*, modes: list[str], phase: int, max_spend: float) -> None:
     """Fail fast before Docker/agent work when compare or phase-3 QA will run."""
-    need = "compare" in modes or ("memory" in modes and int(phase) >= 3)
+    need = "compare" in modes or "swe" in modes or ("memory" in modes and int(phase) >= 3)
     if not need:
         return
     key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     if not key:
         raise SystemExit(
-            "ANTHROPIC_API_KEY is required for compare and memory phase 3 "
+            "ANTHROPIC_API_KEY is required for compare, swe, and memory phase 3 "
             "(Claude Code sessions and the QA judge). Export it or `source .env` before running."
         )
     if max_spend <= 0:
         raise SystemExit(
-            "compare and memory phase 3 require --max-spend > 0 (USD cap for agent sessions)."
+            "compare, swe, and memory phase 3 require --max-spend > 0 (USD cap for agent sessions)."
         )

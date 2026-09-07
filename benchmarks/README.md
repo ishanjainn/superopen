@@ -14,7 +14,7 @@ must look like that product:
 - Bind-mount the locally built Superopen CLI (`--so-bin`); do not bake `so` into the image.
 - **No benchmark-only hacks** in `so` (no gold-id rankers, dataset packing, API pack-readers).
 - Superopen **modes** (`--mode`, `--scale`). Do not port another product's harness into `so`.
-- `--scale small` is a valid gate (LOCOMO 100 stratified / LME 50 / compare 6 / graph 12). `--scale full` is what you publish (LOCOMO retrieve n=300; QA still `--qa-n 20`).
+- `--scale small` is a valid gate (LOCOMO 100 stratified / LME 50 / compare 6 / graph 12 / SWE-bench 10). `--scale full` is what you publish (LOCOMO retrieve n=300; QA still `--qa-n 20`; SWE-bench n=50).
 
 ## Two ways to run
 
@@ -52,9 +52,9 @@ Default mode is `offline` — **harness smoke only**, not a Superopen score. Def
 | `latency` | yes — tiny fixture | no | — | `so memory search` timing on your hardware |
 | `contradict` | — | — | — | Go tests in `internal/memory/` (contradiction ranking semantics) |
 | `compare` **native** arm | **no** (stock agent) | **no** | OpenCode or Claude Code | Baseline: grep/read without Superopen |
-| `compare` **superopen** arm | yes — Django worktree | yes — `--vendor=opencode` or `claude-code` | same host + model | Natural product path before each session batch |
+| `compare` **superopen** arm | yes — per-question Django worktree | yes — `--vendor=opencode` or `claude-code` | same host + model | One `so init` seed, then copy `.so/` into a fresh worktree/HOME per question |
 
-Compare runs **identical prompts** on both arms. Only the superopen arm gets `so init` + `so install`; that is the native-vs-Superopen contrast, not a bug.
+Compare runs **identical prompts** on both arms. Only the superopen arm gets `so init` + `so install`; that is the native-vs-Superopen contrast, not a bug. Harness prompts never mention Superopen. `--compare-arms` / `--compare-baseline` resume one arm like SWE.
 
 ## Modes
 
@@ -67,10 +67,11 @@ Compare runs **identical prompts** on both arms. Only the superopen arm gets `so
 | `graph` | 12 graph-tool probes via `so graph *` on Django | no | yes | minutes after index |
 | `memory` | LOCOMO / LongMemEval recall@10 (+ optional phase 3 agent QA) | phase 2: no; phase 3: coding agent | no | phase 2: minutes; phase 3: spend-capped |
 | `compare` | Native vs Superopen: coverage, tokens, **token savings %** | host agent | yes | tens of minutes |
+| `swe` | Native vs Superopen on SWE-bench Verified (official grader) | host agent | per-issue checkout | tens of minutes |
 | `temporal` | Index size across 5 Django LTS tags | no | yes | longer (optional) |
-| `all` | Full suite including harness smoke | mixed | yes | longest |
+| `all` | Full suite including harness smoke and SWE-bench | mixed | yes | longest |
 
-`--max-spend 0` forbids LLM calls (`compare` and `memory --phase 3` skip). `all` with default `--phase 2` does not spend on LOCOMO QA; pass `--phase 3` to include it.
+`--max-spend 0` forbids LLM calls (`compare`, `swe`, and `memory --phase 3` skip). `--mode all` always runs memory phase 3 and `--swe-grade` so `BENCHMARKS.md` has no `pending` cells (needs `--max-spend > 0` and `ANTHROPIC_API_KEY`). Pass `--no-swe-grade` only if you want patches without official verdicts.
 
 ### Reproduce commands
 
@@ -85,8 +86,9 @@ Compare runs **identical prompts** on both arms. Only the superopen arm gets `so
 | `memory` (QA) | `python3 benchmarks/run.py --mode memory --phase 3 --split locomo --scale small --host claude-code --model claude-sonnet-5 --max-spend 15` |
 | `memory` (LME QA) | `python3 benchmarks/run.py --mode memory --phase 3 --split longmemeval --scale small --host claude-code --model claude-sonnet-5 --max-spend 15` |
 | `compare` | `python3 benchmarks/run.py --mode compare --scale small --host claude-code --model claude-sonnet-5 --max-spend 20` |
+| `swe` | `python3 benchmarks/run.py --mode swe --scale small --host claude-code --model claude-sonnet-5 --max-spend 50` |
 | `temporal` | `python3 benchmarks/run.py --mode temporal --repo django` |
-| `all` | `python3 benchmarks/run.py --mode all --repo django --phase 2 --max-spend 20` |
+| `all` | `python3 benchmarks/run.py --mode all --repo django --phase 2 --max-spend 70` |
 
 OpenCode: `--host opencode --model opencode/big-pickle`. Never `--host anthropic-api`.
 
@@ -98,8 +100,13 @@ Build `so` first if needed: `make build-native` or pass `--so-bin ./bin/so`. Pro
 python3 benchmarks/run.py --mode graph --so-bin ./bin/so
 ```
 
-The run prints `benchmarks.md: ./BENCHMARKS.md`. System, duration, total cost,
-and graph index sit in tables at the top; scores are Suite / Dataset / Metric / Score.
+The run prints `benchmarks.md: ./BENCHMARKS.md`. System, combined duration, and
+cost (native vs Superopen vs extras) sit at the top. **Results** is one section
+per suite, SWE-bench first. How-to-run lives only in this README.
+Missing suites are filled from `benchmarks/.last-summary.json` (gitignored) and
+optional `--fill-from` result dirs so a memory-only run does not wipe SWE rows.
+Pass `--no-fill` for a clean report. `--mode all` includes SWE and skips a
+duplicate Django `index` because `graph` already records `so init`.
 
 ### GitHub Action
 
@@ -107,7 +114,7 @@ and graph index sit in tables at the top; scores are Suite / Dataset / Metric / 
 Linux `so`, runs the same `benchmarks/run.py` with `--isolate docker`, and
 uploads `BENCHMARKS.md` as an artifact. It does not commit.
 
-Secrets: **`ANTHROPIC_API_KEY` required** for `compare` and memory `--phase 3`
+Secrets: **`ANTHROPIC_API_KEY` required** for `compare`, `swe`, and memory `--phase 3`
 (Claude Code billing + QA judge), plus `--max-spend > 0`. Optional `CLAUDE_CREDENTIALS_JSON`,
 `SUPEROPEN_LOCOMO_URL` / `SUPEROPEN_LME_URL` (https) for datasets that are not in
 the Actions cache.
@@ -136,9 +143,10 @@ Academic datasets are not redistributed. See [datasets/README.md](datasets/READM
 | LOCOMO (`locomo10.json`) | 300 | `memory --split locomo` |
 | LongMemEval-S (English subset) | 50 | `memory --split longmemeval` |
 | Django (pinned LTS tag) | — | `index`, `graph`, `compare`, `temporal` |
+| SWE-bench Verified | 5 small / 50 full | `swe` |
 | `fixtures/tiny/` | — | `latency` smoke |
 
 ## Artifacts
 
-Gitignored: `cache/`, `datasets/` (except README), `work/`. The published
+Gitignored: `cache/`, `datasets/` (except README), `work/`, `.last-summary.json`. The published
 artifact is repo-root `BENCHMARKS.md` only.

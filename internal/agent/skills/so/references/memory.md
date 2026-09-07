@@ -76,11 +76,9 @@ files named in the episode (`src=` / `path:`) when the question is about
 
 ## Write path
 
-Live turns do not load this file. After SessionEnd, Cursor marks distill pending
-for the next SessionStart and first prompt-submit (`DISTILL pending … live
-`--apply`, else `memory distill <id>`). Vendors with a one-shot CLI may run a
-headless worker that is **not** recorded as a session. Optional live write when
-this file is already loaded:
+When the user wants a fact stored for later (any wording), capture on this live
+turn. Do not run `--help`. Distill remains the post-session rollup (`DISTILL
+pending` → live `--brief` then `--apply`, or that session's one-shot CLI).
 
 ```bash
 __SO_BIN__ memory capture --kind knowledge --horizon medium --title "…" --text "…"

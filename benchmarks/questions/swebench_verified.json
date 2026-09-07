@@ -1,0 +1,258 @@
+{
+  "corpus": "princeton-nlp/SWE-bench_Verified",
+  "grader": "swebench==4.1.0",
+  "source": "princeton-nlp/SWE-bench_Verified",
+  "note": "--scale small runs 5 SWE-bench Verified instances (10 sessions: native + Superopen). --scale full runs 50 (28 named + 22 repo-stratified Verified fills).",
+  "instances": [
+    {
+      "id": "django-11532",
+      "instance_id": "django__django-11532",
+      "suite": "small"
+    },
+    {
+      "id": "django-16263",
+      "instance_id": "django__django-16263",
+      "suite": "small"
+    },
+    {
+      "id": "sphinx-9461",
+      "instance_id": "sphinx-doc__sphinx-9461",
+      "suite": "small"
+    },
+    {
+      "id": "django-11400",
+      "instance_id": "django__django-11400",
+      "suite": "small"
+    },
+    {
+      "id": "pylint-6386",
+      "instance_id": "pylint-dev__pylint-6386",
+      "suite": "small"
+    },
+    {
+      "id": "django-11885",
+      "instance_id": "django__django-11885",
+      "suite": "small"
+    },
+    {
+      "id": "pytest-5840",
+      "instance_id": "pytest-dev__pytest-5840",
+      "suite": "small"
+    },
+    {
+      "id": "sphinx-8548",
+      "instance_id": "sphinx-doc__sphinx-8548",
+      "suite": "small"
+    },
+    {
+      "id": "django-12406",
+      "instance_id": "django__django-12406",
+      "suite": "small"
+    },
+    {
+      "id": "django-16938",
+      "instance_id": "django__django-16938",
+      "suite": "small"
+    },
+    {
+      "id": "sphinx-10673",
+      "instance_id": "sphinx-doc__sphinx-10673",
+      "suite": "named"
+    },
+    {
+      "id": "django-11276",
+      "instance_id": "django__django-11276",
+      "suite": "named"
+    },
+    {
+      "id": "django-10554",
+      "instance_id": "django__django-10554",
+      "suite": "named"
+    },
+    {
+      "id": "django-11133",
+      "instance_id": "django__django-11133",
+      "suite": "named"
+    },
+    {
+      "id": "matplotlib-14623",
+      "instance_id": "matplotlib__matplotlib-14623",
+      "suite": "named"
+    },
+    {
+      "id": "matplotlib-25775",
+      "instance_id": "matplotlib__matplotlib-25775",
+      "suite": "named"
+    },
+    {
+      "id": "django-12741",
+      "instance_id": "django__django-12741",
+      "suite": "named"
+    },
+    {
+      "id": "sympy-19783",
+      "instance_id": "sympy__sympy-19783",
+      "suite": "named"
+    },
+    {
+      "id": "pylint-8898",
+      "instance_id": "pylint-dev__pylint-8898",
+      "suite": "named"
+    },
+    {
+      "id": "pylint-6528",
+      "instance_id": "pylint-dev__pylint-6528",
+      "suite": "named"
+    },
+    {
+      "id": "sklearn-12682",
+      "instance_id": "scikit-learn__scikit-learn-12682",
+      "suite": "named"
+    },
+    {
+      "id": "xarray-3993",
+      "instance_id": "pydata__xarray-3993",
+      "suite": "named"
+    },
+    {
+      "id": "xarray-3305",
+      "instance_id": "pydata__xarray-3305",
+      "suite": "named"
+    },
+    {
+      "id": "django-16315",
+      "instance_id": "django__django-16315",
+      "suite": "named"
+    },
+    {
+      "id": "django-16032",
+      "instance_id": "django__django-16032",
+      "suite": "named"
+    },
+    {
+      "id": "django-14011",
+      "instance_id": "django__django-14011",
+      "suite": "named"
+    },
+    {
+      "id": "sphinx-8120",
+      "instance_id": "sphinx-doc__sphinx-8120",
+      "suite": "named"
+    },
+    {
+      "id": "django-15103",
+      "instance_id": "django__django-15103",
+      "suite": "named"
+    },
+    {
+      "id": "django-10097",
+      "instance_id": "django__django-10097",
+      "suite": "fill"
+    },
+    {
+      "id": "sphinx-10323",
+      "instance_id": "sphinx-doc__sphinx-10323",
+      "suite": "fill"
+    },
+    {
+      "id": "pylint-4551",
+      "instance_id": "pylint-dev__pylint-4551",
+      "suite": "fill"
+    },
+    {
+      "id": "pytest-10051",
+      "instance_id": "pytest-dev__pytest-10051",
+      "suite": "fill"
+    },
+    {
+      "id": "matplotlib-13989",
+      "instance_id": "matplotlib__matplotlib-13989",
+      "suite": "fill"
+    },
+    {
+      "id": "sympy-11618",
+      "instance_id": "sympy__sympy-11618",
+      "suite": "fill"
+    },
+    {
+      "id": "sklearn-10297",
+      "instance_id": "scikit-learn__scikit-learn-10297",
+      "suite": "fill"
+    },
+    {
+      "id": "xarray-2905",
+      "instance_id": "pydata__xarray-2905",
+      "suite": "fill"
+    },
+    {
+      "id": "django-10880",
+      "instance_id": "django__django-10880",
+      "suite": "fill"
+    },
+    {
+      "id": "sphinx-10435",
+      "instance_id": "sphinx-doc__sphinx-10435",
+      "suite": "fill"
+    },
+    {
+      "id": "pylint-4604",
+      "instance_id": "pylint-dev__pylint-4604",
+      "suite": "fill"
+    },
+    {
+      "id": "pytest-10081",
+      "instance_id": "pytest-dev__pytest-10081",
+      "suite": "fill"
+    },
+    {
+      "id": "matplotlib-20488",
+      "instance_id": "matplotlib__matplotlib-20488",
+      "suite": "fill"
+    },
+    {
+      "id": "sympy-12096",
+      "instance_id": "sympy__sympy-12096",
+      "suite": "fill"
+    },
+    {
+      "id": "sklearn-10844",
+      "instance_id": "scikit-learn__scikit-learn-10844",
+      "suite": "fill"
+    },
+    {
+      "id": "xarray-3095",
+      "instance_id": "pydata__xarray-3095",
+      "suite": "fill"
+    },
+    {
+      "id": "django-10914",
+      "instance_id": "django__django-10914",
+      "suite": "fill"
+    },
+    {
+      "id": "sphinx-10449",
+      "instance_id": "sphinx-doc__sphinx-10449",
+      "suite": "fill"
+    },
+    {
+      "id": "pylint-4661",
+      "instance_id": "pylint-dev__pylint-4661",
+      "suite": "fill"
+    },
+    {
+      "id": "pytest-10356",
+      "instance_id": "pytest-dev__pytest-10356",
+      "suite": "fill"
+    },
+    {
+      "id": "matplotlib-20676",
+      "instance_id": "matplotlib__matplotlib-20676",
+      "suite": "fill"
+    },
+    {
+      "id": "sympy-12419",
+      "instance_id": "sympy__sympy-12419",
+      "suite": "fill"
+    }
+  ]
+}

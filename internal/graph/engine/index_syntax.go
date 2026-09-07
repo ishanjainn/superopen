@@ -146,6 +146,116 @@ func ParseSyntaxRepository(ctx context.Context, parser SyntaxParser, root, proje
 	return repository, nil
 }
 
+func parseSyntaxRepositoryFromProbe(ctx context.Context, parser SyntaxParser, root, project string, files []string, changes api.ChangeSet, workers int) (SyntaxRepository, int, error) {
+	if parser == nil {
+		return SyntaxRepository{}, 0, errors.New("syntax parser is required")
+	}
+	dirty := dirtyParsePaths(changes)
+	drop := dropAssemblePaths(changes)
+	fp := loadFingerprint(root)
+	var cached []cachedExtract
+	var toParse []string
+	for _, rel := range files {
+		key := filepath.ToSlash(rel)
+		if drop[key] {
+			continue
+		}
+		if dirty[key] {
+			toParse = append(toParse, rel)
+			continue
+		}
+		digest := fileDigestForCache(root, rel, fp)
+		got := loadExtractCache(root, digest)
+		if got == nil {
+			toParse = append(toParse, rel)
+			continue
+		}
+		restoreExtractBody(root, &got.File)
+		cached = append(cached, *got)
+	}
+	var parsed SyntaxRepository
+	var err error
+	if len(toParse) > 0 {
+		parsed, err = ParseSyntaxRepository(ctx, parser, root, project, toParse, nil, workers)
+		if err != nil {
+			return SyntaxRepository{}, 0, err
+		}
+		saveParsedExtracts(root, parsed)
+	}
+	if len(cached) == 0 {
+		return parsed, len(parsed.Files), nil
+	}
+	merged := SyntaxRepository{
+		Root:     root,
+		GoModule: readGoModulePath(root),
+		Coverage: api.Coverage{IndexMode: parserIndexMode(parser), RecordingStatus: "complete"},
+	}
+	if parsed.Coverage.IndexMode != "" {
+		merged.Coverage.IndexMode = parsed.Coverage.IndexMode
+	}
+	byPath := make(map[string]ParsedSyntaxFile, len(cached)+len(parsed.Files))
+	coverageByPath := map[string]api.CoverageRow{}
+	generationParts := make([]string, 0, len(files))
+	for _, item := range cached {
+		byPath[item.File.File.Path] = item.File
+		if item.Coverage != nil {
+			coverageByPath[item.File.File.Path] = *item.Coverage
+		}
+		if item.Generation != "" {
+			generationParts = append(generationParts, item.Generation)
+		} else {
+			generationParts = append(generationParts, item.File.File.Path+":"+item.File.File.SHA256)
+		}
+	}
+	for _, file := range parsed.Files {
+		byPath[file.File.Path] = file
+		generationParts = append(generationParts, file.File.Path+":"+file.File.SHA256)
+	}
+	for _, row := range parsed.Coverage.Rows {
+		coverageByPath[row.Path] = row
+	}
+	for _, rel := range files {
+		key := filepath.ToSlash(rel)
+		if file, ok := byPath[key]; ok {
+			merged.Files = append(merged.Files, file)
+		}
+	}
+	for _, row := range coverageByPath {
+		merged.Coverage.Rows = append(merged.Coverage.Rows, row)
+	}
+	sort.Slice(merged.Coverage.Rows, func(i, j int) bool {
+		if merged.Coverage.Rows[i].Path != merged.Coverage.Rows[j].Path {
+			return merged.Coverage.Rows[i].Path < merged.Coverage.Rows[j].Path
+		}
+		return merged.Coverage.Rows[i].Kind < merged.Coverage.Rows[j].Kind
+	})
+	sort.Strings(generationParts)
+	sum := sha256.Sum256([]byte(strings.Join(generationParts, "\n")))
+	merged.Generation = hex.EncodeToString(sum[:])
+	merged.Coverage.Generation = merged.Generation
+	now := time.Now().UTC()
+	merged.Coverage.RecordedAt = &now
+	merged.Coverage.HashRecordsComplete = len(merged.Files) > 0 || len(files) == 0
+	if len(merged.Coverage.Rows) == 0 {
+		merged.Coverage.Status = "complete"
+	} else {
+		merged.Coverage.Status = "partial"
+		merged.Coverage.RecordingStatus = "truncated"
+	}
+	return merged, len(parsed.Files), nil
+}
+
+func saveParsedExtracts(root string, repository SyntaxRepository) {
+	coverageByPath := map[string]*api.CoverageRow{}
+	for i := range repository.Coverage.Rows {
+		row := repository.Coverage.Rows[i]
+		coverageByPath[row.Path] = &repository.Coverage.Rows[i]
+	}
+	for _, file := range repository.Files {
+		saveExtractCache(root, file, coverageByPath[file.File.Path], file.File.Path+":"+file.File.SHA256)
+	}
+}
+
 func readGoModulePath(root string) string {
 	body, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {

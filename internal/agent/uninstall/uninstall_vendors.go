@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/ishanjainn/superopen/internal/agent/install"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/projects"
 )
@@ -134,6 +135,11 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 				errs = append(errs, e.Error())
 			}
 		}
+		if allowPaths, e := install.StripClaudeAllowlist(dryRun); e != nil {
+			errs = append(errs, e.Error())
+		} else {
+			removed = append(removed, allowPaths...)
+		}
 	case "codex":
 		// Codex stores the marketplace AS the plugin dest dir
 		// (see vendorDestRoot), so the directory removal above
@@ -181,6 +187,9 @@ func purgeShared(dryRun, keepData bool) (removed []string, errs []string) {
 	if !keepData {
 		if list, err := projects.List(); err == nil {
 			for _, p := range list {
+				if !dryRun && p.RepoRoot != "" {
+					_ = paths.RemoveRepoIgnore(p.RepoRoot)
+				}
 				if p.SoRoot == "" {
 					continue
 				}
@@ -189,6 +198,9 @@ func purgeShared(dryRun, keepData bool) (removed []string, errs []string) {
 			}
 		}
 		if wd, err := os.Getwd(); err == nil {
+			if !dryRun {
+				_ = paths.RemoveRepoIgnore(wd)
+			}
 			path, e := removePath(filepath.Join(wd, paths.DirName), dryRun)
 			appendPath(path, e)
 		}

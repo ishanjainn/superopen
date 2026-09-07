@@ -50,6 +50,20 @@ type Run struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// HistoryItem is a closed proposal or a skipped/failed run for the History tab.
+type HistoryItem struct {
+	ID        int64  `json:"id"`
+	SessionID string `json:"session_id,omitempty"`
+	Status    string `json:"status"`
+	Kind      string `json:"kind"`
+	Target    string `json:"target,omitempty"`
+	Title     string `json:"title"`
+	Reason    string `json:"reason,omitempty"`
+	Source    string `json:"source"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
 type Proposal struct {
 	ID         int64      `json:"id"`
 	SessionID  string     `json:"session_id,omitempty"`

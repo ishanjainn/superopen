@@ -13,10 +13,15 @@ product.
 3. This runner is **mode-gated** (`--mode`, `--scale`). Do not copy another
    product's ingest/grader into Superopen source.
 4. `--scale small` (default) is a **valid** gate (LOCOMO 100 stratified, LME 50,
-   compare 6, graph 12). `--scale full` publishes LOCOMO n=300 retrieve (QA stays `--qa-n 20`). Reject toy slices.
+   compare 6, graph 12, SWE-bench 5 issues / 10 sessions). `--scale full` publishes LOCOMO
+   n=300 retrieve (QA stays `--qa-n 20`) and SWE-bench n=50. Reject toy slices.
 
-See repo-root [BENCHMARKS.md](../BENCHMARKS.md). Every run overwrites that
-file. Harness work dirs are deleted afterwards. Manual CI: `.github/workflows/bench.yml`.
+See repo-root [BENCHMARKS.md](../BENCHMARKS.md). Every run writes that file.
+Suites not in the current `--mode` are filled from `benchmarks/.last-summary.json`
+unless `--no-fill`. Harness work dirs are deleted afterwards. Manual CI:
+`.github/workflows/bench.yml`. `--mode all` includes SWE, runs memory phase 3
+and `--swe-grade`, and skips a duplicate Django `index` (`graph` already records
+`so init`).
 
 ## Non-negotiables
 
@@ -27,7 +32,7 @@ file. Harness work dirs are deleted afterwards. Manual CI: `.github/workflows/be
    files only** into the arm HOME. `--isolate host` is weaker (isolated HOME on
    this machine). `--mode offline` does not use Docker.
 2. **Same prompt.** Identical question text across compare arms. Do not mention Superopen in the prompt.
-3. **Natural product.** Superopen arm is `so init` + `so install --vendor=<host>`. No trimmed hooks.
+3. **Natural product.** Superopen arm is `so init` + `so install --vendor=<host>`. No trimmed hooks. Compare uses a fresh worktree/HOME per question; `so init` runs once and `.so/` is copied.
 4. **Ephemeral work dirs.** Do not keep harness JSON. The report is `BENCHMARKS.md`.
 5. **Coding-agent hosts only.** `--host claude-code` or `--host opencode`.
 
@@ -39,18 +44,19 @@ file. Harness work dirs are deleted afterwards. Manual CI: `.github/workflows/be
 | `memory` | LOCOMO / LongMemEval retrieve (+ phase 3 coding-agent QA) |
 | `graph` | 12 graph-tool probes on Django |
 | `compare` | Native vs Superopen session (token savings headline) |
+| `swe` | Native vs Superopen on SWE-bench Verified instance IDs |
 | `contradict` | Rescue@10 + historical-verbatim |
 | `latency` | Hardware-local latency probe |
 | `index` | `so init` wall time + graph counts |
 | `temporal` | 5 Django LTS checkpoints |
-| `all` | Runs the full suite |
+| `all` | Runs the full suite, including SWE-bench |
 
 ## Scale
 
-| `--scale` | Locomo | LongMemEval | Compare | Graph |
-|-----------|--------|-------------|---------|-------|
-| `small` (default) | 100 QA, all sessions ingested, category-stratified | 50 | 6 | 12 |
-| `full` | 100 (same cap) | 50 | 6 | 12 |
+| `--scale` | Locomo | LongMemEval | Compare | Graph | SWE-bench |
+|-----------|--------|-------------|---------|-------|-----------|
+| `small` (default) | 100 QA, all sessions ingested, category-stratified | 50 | 6 | 12 | 5 issues / 10 sessions |
+| `full` | 100 (same cap) | 50 | 6 | 12 | 50 (28 named + 22 fills) |
 
 Locomo is capped at 100.
 
@@ -59,6 +65,7 @@ Locomo is capped at 100.
 ```bash
 python3 benchmarks/run.py --mode offline
 python3 benchmarks/run.py --mode compare --scale small --host claude-code --isolate docker --so-bin ./bin/so --max-spend 20
+python3 benchmarks/run.py --mode swe --scale small --host claude-code --isolate docker --so-bin ./bin/so --max-spend 50
 ./benchmarks/docker-run.sh --mode compare --scale small --host claude-code --max-spend 20
 ```
 

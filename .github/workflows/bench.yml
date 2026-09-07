@@ -16,6 +16,7 @@ on:
           - graph
           - memory
           - compare
+          - swe
           - product-small
           - all
       scale:
@@ -107,6 +108,7 @@ jobs:
             graph) MODE=graph ;;
             memory) MODE=memory ;;
             compare) MODE=compare ;;
+            swe) MODE=swe ;;
             product-small) MODE=contradict,latency,index,graph,memory ;;
             all) MODE=all ;;
             *)
@@ -117,7 +119,7 @@ jobs:
 
           need_key=0
           case "$SUITE" in
-            compare|all) need_key=1 ;;
+            compare|swe|all) need_key=1 ;;
           esac
           if [ "$PHASE" = 3 ] && { [ "$SUITE" = memory ] || [ "$SUITE" = product-small ] || [ "$SUITE" = all ]; }; then
             need_key=1

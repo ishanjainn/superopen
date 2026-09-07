@@ -21,6 +21,15 @@ def wrap_code_prompt(question: str) -> str:
     )
 
 
+def wrap_swe_prompt(problem_statement: str) -> str:
+    """Same issue text for native and Superopen SWE-bench arms. Do not mention Superopen."""
+    return (
+        "Fix this GitHub issue in the working tree. Do not commit. Leave the "
+        "fix as unstaged or staged edits in this checkout.\n\n"
+        + problem_statement.strip()
+    )
+
+
 def _haystack(text: str) -> str:
     return (text or "").lower()
 
@@ -82,6 +91,30 @@ def load_questions(path: Path) -> list[dict[str, Any]]:
     if not isinstance(questions, list) or not questions:
         raise ValueError(f"no questions in {path}")
     return questions
+
+
+def grade_gold_files(answer: str, gold_files: list[str]) -> dict[str, Any]:
+    blob = _haystack(answer)
+    paths = [str(p).strip() for p in gold_files if str(p).strip()]
+    bases = [p.rsplit("/", 1)[-1] for p in paths]
+    hits = []
+    for path in paths:
+        base = path.rsplit("/", 1)[-1]
+        aliases = {path}
+        if bases.count(base) == 1:
+            aliases.add(base)
+        if "/" in path:
+            aliases.add("/".join(path.split("/")[-2:]))
+        hit = any(alias.lower() in blob for alias in aliases if alias)
+        hits.append({"path": path, "hit": hit})
+    total = len(hits)
+    covered = sum(1 for h in hits if h["hit"])
+    return {
+        "covered": covered,
+        "total": total,
+        "coverage": (covered / total) if total else 0.0,
+        "files": hits,
+    }
 
 
 def graph_probe_grade(ok: bool, partial: bool = False) -> float:

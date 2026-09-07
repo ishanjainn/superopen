@@ -36,6 +36,13 @@ def _parse_status(stdout: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _graph_status(root: Path, env: dict[str, str], so_bin: str) -> dict[str, Any]:
+    proc = _so(["--json", "graph", "status"], root.resolve(), env, so_bin)
+    if proc.returncode != 0:
+        return {}
+    return _parse_status(proc.stdout or "")
+
+
 def _first_qualified_name(stdout: str) -> str | None:
     for line in (stdout or "").splitlines():
         line = line.strip()
@@ -52,11 +59,7 @@ def _first_qualified_name(stdout: str) -> str | None:
 
 
 def _probe_q1(root: Path, env: dict[str, str], so_bin: str) -> tuple[bool, bool, str]:
-    root = root.resolve()
-    proc = _so(["--json", "graph", "status"], root, env, so_bin)
-    if proc.returncode != 0:
-        return False, False, proc.stderr or proc.stdout
-    data = _parse_status(proc.stdout or "")
+    data = _graph_status(root, env, so_bin)
     ok = int(data.get("node_count") or 0) > 0 and int(data.get("edge_count") or 0) > 0
     return ok, False, json.dumps(data)[:500]
 
@@ -197,8 +200,7 @@ def run_index(so_bin: str, root: Path, env: dict[str, str], timeout: int) -> dic
         timeout=timeout,
     )
     elapsed = time.time() - start
-    status_proc = _so(["--json", "graph", "status"], root.resolve(), env, so_bin)
-    data = _parse_status(status_proc.stdout or "") if status_proc.returncode == 0 else {}
+    data = _graph_status(root, env, so_bin)
     return {
         "ok": proc.returncode == 0,
         "elapsed_sec": elapsed,
@@ -257,13 +259,8 @@ def run_temporal_mode(args: Any, out: Path, so_bin: str) -> dict[str, Any]:
             timeout=args.index_timeout,
         )
         elapsed = time.time() - start
-        ok, _, body = _probe_q1(worktree, env, so_bin)
-        try:
-            data = json.loads(body) if body.startswith("{") else {}
-            if isinstance(data.get("data"), dict):
-                data = data["data"]
-        except json.JSONDecodeError:
-            data = {}
+        data = _graph_status(worktree, env, so_bin)
+        ok = int(data.get("node_count") or 0) > 0 and int(data.get("edge_count") or 0) > 0
         rows.append(
             {
                 "tag": tag,

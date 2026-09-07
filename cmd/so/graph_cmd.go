@@ -10,7 +10,6 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph/buildpool"
 	"github.com/ishanjainn/superopen/internal/graph/client"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
-	"github.com/ishanjainn/superopen/internal/graph/watch"
 	"github.com/ishanjainn/superopen/internal/projects"
 )
 
@@ -21,11 +20,12 @@ func newGraphCommand() *cobra.Command {
 		Use:   "graph",
 		Short: "Build and query the native repository graph",
 	}
+	command.PersistentFlags().Bool("no-refresh", false, "Skip query-path graph freshness (CI)")
 	command.AddCommand(graphNativeCommands()...)
 	return command
 }
 
-func runGraphRefresh(cmd *cobra.Command, root string, force bool) error {
+func runGraphRefresh(cmd *cobra.Command, root string, force, fromProbe bool) error {
 	if skipIfUnmanaged(cmd, root) {
 		return nil
 	}
@@ -34,7 +34,7 @@ func runGraphRefresh(cmd *cobra.Command, root string, force bool) error {
 		return err
 	}
 	var result api.BuildResult
-	req := api.BuildRequest{RepoRoot: root, Mode: "full", Force: force, Incremental: !force}
+	req := api.BuildRequest{RepoRoot: root, Mode: "full", Force: force, Incremental: !force, FromProbe: fromProbe}
 	if err := c.Call(cmd.Context(), api.OpBuild, req, &result); err != nil {
 		return err
 	}
@@ -48,7 +48,7 @@ func runGraphRefresh(cmd *cobra.Command, root string, force bool) error {
 			fmt.Fprintln(cmd.OutOrStdout(), "graph refresh skipped: already in progress")
 		}, result)
 	}
-	watch.RecordSignature(root)
+	_ = engine.WriteFingerprint(cmd.Context(), root, nil)
 	_ = projects.TouchGraphRefresh(root)
 	return out().HumanOrJSON("graph_refresh", func() {
 		fmt.Fprintf(cmd.OutOrStdout(), "graph refresh: status=%s nodes=%d edges=%d\n", result.Status, result.NodeCount, result.EdgeCount)
@@ -75,14 +75,12 @@ func graphNativeCommands() []*cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			detach, _ := cmd.Flags().GetBool("detach")
 			force, _ := cmd.Flags().GetBool("force")
+			fromProbe, _ := cmd.Flags().GetBool("probe")
 			root, _ := hookRepoAndSession()
 			if skipIfUnmanaged(cmd, root) {
 				return nil
 			}
 			if detach {
-				// Silent on stdout: Claude attaches hook stdout as
-				// model-visible content. Observability still records
-				// via coding hooks; refresh just must not speak.
 				if engine.BuildBusy(root) || engine.BuildPoolFull() {
 					return nil
 				}
@@ -90,14 +88,18 @@ func graphNativeCommands() []*cobra.Command {
 				if force {
 					args = append(args, "--force")
 				}
+				if fromProbe {
+					args = append(args, "--probe")
+				}
 				cli.SpawnSO(root, args...)
 				return nil
 			}
-			return runGraphRefresh(cmd, root, force)
+			return runGraphRefresh(cmd, root, force, fromProbe)
 		},
 	}
 	refresh.Flags().Bool("detach", false, "Run refresh in a detached background process")
 	refresh.Flags().Bool("force", false, "Force a full rebuild")
+	refresh.Flags().Bool("probe", false, "Use the size+mtime fingerprint instead of hashing every file")
 
 	query := nativeGraphLeaf("query <question>", "Retrieve focused graph context", api.OpQuery, func(cmd *cobra.Command, args []string) any {
 		depth, _ := cmd.Flags().GetInt("depth")

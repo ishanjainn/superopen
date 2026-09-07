@@ -51,6 +51,9 @@ func TestInstallAllWritesSkill(t *testing.T) {
 			if !bytes.Contains(body, []byte("memory recall")) {
 				t.Fatalf("%s must include the memory recall Bash line", path)
 			}
+			if !bytes.Contains(body, []byte("memory capture")) {
+				t.Fatalf("%s must include the memory capture Bash line", path)
+			}
 			if bytes.Contains(body, []byte("memory search first")) {
 				t.Fatalf("%s description must not lead with memory search: %s", path, body[:400])
 			}

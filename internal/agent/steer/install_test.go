@@ -43,7 +43,7 @@ func TestInstallProjectCursorRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "ignore Superopen entirely") {
+	if !strings.Contains(string(body), "still run one graph query") {
 		t.Fatalf("missing gate: %s", body)
 	}
 	if !strings.Contains(string(body), "alwaysApply: true") {

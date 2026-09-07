@@ -6,6 +6,7 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/agent/config"
 	"github.com/ishanjainn/superopen/internal/agent/sessionstate"
+	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/session"
@@ -17,6 +18,7 @@ type Result struct {
 	MemoryHours        int      `json:"memory_hours"`
 	SessionsDeleted    []string `json:"sessions_deleted"`
 	MemoriesDeleted    int      `json:"memories_deleted"`
+	HarvestDeleted     int      `json:"harvest_deleted"`
 	SessionKeepForever bool     `json:"session_keep_forever"`
 	MemoryKeepForever  bool     `json:"memory_keep_forever"`
 }
@@ -80,6 +82,21 @@ func Sweep(root string) (Result, error) {
 		}
 		out.SessionsDeleted = deleted
 		sessionstate.GC(d)
+		hstore, herr := harvest.OpenRoot(root)
+		if herr == nil {
+			n, err := hstore.DeleteClosedForSessions(deleted)
+			if err != nil {
+				hstore.Close()
+				return out, err
+			}
+			out.HarvestDeleted += n
+			n, err = hstore.DeleteExpired(now.Add(-d))
+			hstore.Close()
+			if err != nil {
+				return out, err
+			}
+			out.HarvestDeleted += n
+		}
 	}
 	store, err := memory.OpenRoot(root)
 	if err != nil {

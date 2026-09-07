@@ -68,6 +68,16 @@ class HarnessTests(unittest.TestCase):
         self.assertIn("How does Django middleware work?", c)
         self.assertNotIn("Superopen", c)
         self.assertNotIn("graph query", c.lower())
+        self.assertNotIn("so init", c.lower())
+        self.assertNotIn("so install", c.lower())
+
+        from grade import wrap_swe_prompt
+
+        s = wrap_swe_prompt("Django admin inlines crash on save.")
+        self.assertIn("Django admin inlines crash on save.", s)
+        self.assertNotIn("Superopen", s)
+        self.assertNotIn("so graph", s.lower())
+        self.assertNotIn("so init", s.lower())
 
     def test_scale_minimums(self) -> None:
         from argparse import Namespace
@@ -79,6 +89,7 @@ class HarnessTests(unittest.TestCase):
         validate_sizes(small)
         self.assertEqual(small.n, 100)
         self.assertEqual(small.compare_n, 6)
+        self.assertEqual(small.swe_n, 5)
 
         full = Namespace(scale="full", split="locomo", n=None, qa_n=None, compare_n=None, compare_ids="")
         apply_scale(full)
@@ -101,6 +112,93 @@ class HarnessTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             require_coding_host("anthropic-api")
         self.assertEqual(default_model("claude-code", "opencode/big-pickle"), "claude-sonnet-5")
+
+    def test_sibling_compare_appended(self) -> None:
+        from argparse import Namespace
+
+        from compare import select_compare_questions
+        from grade import grade_gold_files, load_questions
+
+        questions = load_questions(BENCH / "questions" / "django.json")
+        ids = [q["id"] for q in questions]
+        self.assertIn("queryset-filter-rename", ids)
+        selected = select_compare_questions(
+            questions, Namespace(compare_n=6, compare_ids="")
+        )
+        self.assertEqual([q["id"] for q in selected[:6]], ids[:6])
+        self.assertEqual(selected[-1]["id"], "queryset-filter-rename")
+        self.assertEqual(selected[-1]["suite"], "sibling")
+        files = grade_gold_files(
+            "See django/db/models/query.py and manager.py",
+            selected[-1]["gold_files"],
+        )
+        self.assertEqual(files["covered"], 2)
+        self.assertEqual(files["total"], 3)
+
+    def test_parse_modes_all_includes_swe(self) -> None:
+        from run import parse_modes
+
+        self.assertEqual(
+            parse_modes("all"),
+            ["offline", "contradict", "latency", "graph", "memory", "compare", "temporal", "swe"],
+        )
+        self.assertNotIn("index", parse_modes("all"))
+        self.assertEqual(parse_modes("index,graph"), ["index", "graph"])
+        self.assertEqual(parse_modes("all,index")[-1], "index")
+
+    def test_resume_arms_and_merge(self) -> None:
+        from resume import merge_arm_rows, selected_arms
+
+        self.assertEqual(selected_arms("superopen"), {"superopen": True})
+        with self.assertRaises(RuntimeError):
+            selected_arms("none")
+        fresh = [{"arm": "superopen", "id": "a", "instance_id": "repo__a"}]
+        base = [{"arm": "native", "id": "a", "instance_id": "repo__a"}]
+        merged = merge_arm_rows(fresh, base)
+        self.assertEqual({(r["arm"], r["instance_id"]) for r in merged}, {("native", "repo__a"), ("superopen", "repo__a")})
+
+    def test_copy_so_store(self) -> None:
+        import tempfile
+
+        import isolate
+
+        tmp = Path(tempfile.mkdtemp())
+        src = tmp / "src"
+        dest = tmp / "dest"
+        (src / ".so").mkdir(parents=True)
+        (src / ".so" / "db").write_text("seed\n")
+        dest.mkdir()
+        isolate.copy_so_store(src, dest)
+        self.assertEqual((dest / ".so" / "db").read_text(), "seed\n")
+
+    def test_auto_fill_last_summary(self) -> None:
+        import tempfile
+        from unittest.mock import patch
+
+        import report
+
+        tmp = Path(tempfile.mkdtemp()) / ".last-summary.json"
+        tmp.write_text(
+            json.dumps(
+                {
+                    "swe": {
+                        "summary": {
+                            "n": 5,
+                            "graded": True,
+                            "native_resolved": 0,
+                            "superopen_resolved": 2,
+                            "superopen_tokens": 10,
+                        }
+                    }
+                }
+            )
+        )
+        with patch.object(report, "LAST_SUMMARY", tmp):
+            merged = report.merge_previous_suites(
+                {"compare": {"summary": {"superopen_coverage_avg": 1.0, "native_coverage_avg": 1.0}}}
+            )
+        self.assertEqual(merged["swe"]["summary"]["n"], 5)
+        self.assertEqual(merged["compare"]["summary"]["superopen_coverage_avg"], 1.0)
 
     def test_require_agent_credentials(self) -> None:
         import os
@@ -191,8 +289,11 @@ class HarnessTests(unittest.TestCase):
         text = root.read_text()
         self.assertIn("## System", text)
         self.assertIn("## Run", text)
-        self.assertIn("| Score |", text)
+        self.assertIn("## Results", text)
+        self.assertNotIn("Results at a glance", text)
         self.assertNotIn("Critical notice", text)
+        self.assertNotIn("Graft", text)
+        self.assertNotIn("Isolate", text)
 
     def test_report_writes_full_markdown(self) -> None:
         import tempfile
@@ -251,11 +352,51 @@ class HarnessTests(unittest.TestCase):
                     "superopen_cost_usd": 0.57,
                     "native_cache_read_tokens": 8_000_000,
                     "superopen_cache_read_tokens": 4_000_000,
+                    "native_wall_sec": 400,
+                    "superopen_wall_sec": 200,
                 },
                 "duration_sec": 900,
                 "rows": [
-                    {"arm": "native", "id": "orm", "cost_usd": 0.2},
-                    {"arm": "superopen", "id": "orm", "cost_usd": 0.1},
+                    {"arm": "native", "id": "orm", "cost_usd": 0.2, "wall_sec": 400},
+                    {"arm": "superopen", "id": "orm", "cost_usd": 0.1, "wall_sec": 200},
+                ],
+            },
+            "swe": {
+                "summary": {
+                    "n": 2,
+                    "graded": True,
+                    "native_resolved": 0,
+                    "superopen_resolved": 1,
+                    "native_tokens": 1000,
+                    "superopen_tokens": 500,
+                    "native_cost_usd": 0,
+                    "superopen_cost_usd": 0,
+                    "native_tool_calls": 10,
+                    "superopen_tool_calls": 7,
+                    "native_api_requests": 5,
+                    "superopen_api_requests": 4,
+                    "token_savings": "+50%",
+                    "cost_savings": "—",
+                    "tool_savings": "+30%",
+                    "request_savings": "+20%",
+                    "wall_savings": "—",
+                    "efficiency_over": "all_completed",
+                },
+                "rows": [
+                    {
+                        "arm": "native",
+                        "id": "django-1",
+                        "resolved": False,
+                        "input_tokens": 100,
+                        "tool_calls": 10,
+                    },
+                    {
+                        "arm": "superopen",
+                        "id": "django-1",
+                        "resolved": True,
+                        "input_tokens": 50,
+                        "tool_calls": 7,
+                    },
                 ],
             },
         }
@@ -264,28 +405,49 @@ class HarnessTests(unittest.TestCase):
         text = dest.read_text()
         self.assertIn("## System", text)
         self.assertIn("## Run", text)
+        self.assertIn("## Results at a glance", text)
+        self.assertIn("| Suite | Dataset (n) | Metric | Superopen | Compared with |", text)
+        self.assertIn("## Results", text)
+        self.assertIn("### SWE-bench", text)
         self.assertIn("Claude Code", text)
         self.assertIn("92.9%", text)
         self.assertIn("12/12", text)
+        self.assertIn("| **Superopen** (`so memory recall`)", text)
         self.assertNotIn("Critical notice", text)
+        self.assertNotIn("Graft", text)
+        self.assertNotIn("| Isolate |", text)
+        self.assertNotIn("Conversational memory", text)
+        self.assertNotIn("```bash", text)
+        self.assertIn("benchmarks/README.md", text)
         self.assertIn("QA accuracy", text)
         self.assertIn("recall@5", text)
         self.assertIn("Rescue@10", text)
         self.assertIn("historical-verbatim", text)
-        self.assertIn("index time", text)
+        self.assertIn("Index time", text)
         self.assertIn("| Duration |", text)
-        self.assertIn("| Total cost |", text)
-        self.assertIn("| Graph index |", text)
-        self.assertIn("| Score |", text)
+        self.assertIn("| Combined |", text)
+        self.assertIn("| Native | Superopen | Extras |", text)
         self.assertNotIn("| Internal |", text)
         self.assertIn("$0.57", text)
         self.assertIn("20m 34s", text)
         self.assertIn("2m 44s", text)
+        self.assertIn("6m 40s", text)
+        self.assertIn("3m 20s", text)
+        self.assertIn("10m 34s", text)
+        self.assertIn("<details>", text)
+        self.assertIn("<summary>Correctness over all instances</summary>", text)
+        self.assertNotIn("#### All instances", text)
+        self.assertNotIn("Where Superopen fixed", text)
+        self.assertNotIn("Where Superopen cut the cost", text)
         self.assertNotIn("Superopen fully beats", text)
         pending = render({"scale": "small", "host": "claude-code", "isolate": "docker"})
         self.assertIn("pending", pending)
         self.assertNotIn("not in this stamp", pending)
         self.assertIn("## System", pending)
+        self.assertIn("## Results at a glance", pending)
+        self.assertIn("### SWE-bench", pending)
+        self.assertNotIn("| Isolate |", pending)
+        self.assertNotIn("Graft", pending)
         self.assertNotIn("Critical notice", pending)
 
     def test_report_fill_from_missing_suites(self) -> None:
@@ -343,7 +505,10 @@ class HarnessTests(unittest.TestCase):
     def test_django_questions_json(self) -> None:
         path = BENCH / "questions" / "django.json"
         data = json.loads(path.read_text())
-        self.assertEqual(len(data["questions"]), 6)
+        bank = [q for q in data["questions"] if q.get("suite") != "sibling"]
+        sibling = [q for q in data["questions"] if q.get("suite") == "sibling"]
+        self.assertEqual(len(bank), 6)
+        self.assertEqual(len(sibling), 1)
 
     def test_dataset_readme_layout(self) -> None:
         from memory.fetch_datasets import ensure_readme, dataset_path

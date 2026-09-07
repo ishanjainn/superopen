@@ -20,8 +20,11 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if contains(first, "run `so init` once") {
 		t.Fatalf("block must not auto-init unmanaged repos: %s", first)
 	}
-	if !contains(first, "ignore Superopen entirely") {
-		t.Fatalf("block must gate unmanaged repos: %s", first)
+	if contains(first, "ignore Superopen entirely") {
+		t.Fatalf("block must still try one graph query when .so/ is missing: %s", first)
+	}
+	if !contains(first, "still run one graph query") {
+		t.Fatalf("block must try one graph query when .so/ is missing: %s", first)
 	}
 	if !contains(first, "Do not spawn Explore") {
 		t.Fatalf("block must close the Explore hole: %s", first)
@@ -44,11 +47,20 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if !contains(first, "BODIES") {
 		t.Fatalf("block must tell agents to stop on query BODIES: %s", first)
 	}
+	if !contains(first, "so graph impact") {
+		t.Fatalf("block must name graph impact for multi-file work: %s", first)
+	}
+	if !contains(first, "head or tail") {
+		t.Fatalf("block must forbid piping so through head/tail: %s", first)
+	}
 	if !contains(first, "so memory search") {
 		t.Fatalf("block must say search is a title index: %s", first)
 	}
 	if !contains(first, "memory recall") {
 		t.Fatalf("block must point prior-work at memory recall: %s", first)
+	}
+	if !contains(first, "memory capture") {
+		t.Fatalf("block must name memory capture when the user wants a fact stored: %s", first)
 	}
 	if !contains(first, "import ids") {
 		t.Fatalf("block must say import-looking titles are this workspace diary: %s", first)
@@ -77,7 +89,7 @@ func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 	if contains(SearchNudge(), "so graph search") || contains(ReadNudge(), "so graph search") {
 		t.Fatal("nudges must not list so graph search (spray menu)")
 	}
-	for _, n := range []string{SearchNudge(), ReadNudge(), MemoryNudge(), GraphStartLine(), MemoryStartLine(3), HookReminder(), MemoryHookReminder(), SnippetOverflowNudge(), QueryRepeatNudge()} {
+	for _, n := range []string{SearchNudge(), ReadNudge(), MemoryNudge(), CaptureNudge(), GraphStartLine(), MemoryStartLine(3), HookReminder(), MemoryHookReminder(), SnippetOverflowNudge(), QueryRepeatNudge()} {
 		if contains(n, "MANDATORY") {
 			t.Fatalf("hooks must not say MANDATORY: %s", n)
 		}
@@ -109,6 +121,9 @@ func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 	if !contains(MemoryNudge(), "MEMORY.md") || !contains(MemoryStartLine(2), "MEMORY.md") {
 		t.Fatal("memory steer must disambiguate host MEMORY.md")
 	}
+	if !contains(CaptureNudge(), "memory capture") || contains(CaptureNudge(), "memory recall") {
+		t.Fatal("capture nudge must point at capture, not recall")
+	}
 	if !contains(SearchNudge(), ".so/") || !contains(HookReminder(), ".so/") {
 		t.Fatal("search/reminder should tell agents not to Grep .so/")
 	}
@@ -139,14 +154,26 @@ func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 
 func TestCursorRuleIsShortGate(t *testing.T) {
 	rule := CursorRule()
-	if !contains(rule, "ignore Superopen entirely") {
-		t.Fatalf("missing gate: %s", rule)
+	if contains(rule, "ignore Superopen entirely") {
+		t.Fatalf("rule must still try one graph query when .so/ is missing: %s", rule)
+	}
+	if !contains(rule, "still run one graph query") {
+		t.Fatalf("rule must try one graph query when .so/ is missing: %s", rule)
+	}
+	if !contains(rule, "graph impact") {
+		t.Fatalf("rule must name graph impact for multi-file work: %s", rule)
+	}
+	if !contains(rule, "head or tail") {
+		t.Fatalf("rule must forbid piping so through head/tail: %s", rule)
 	}
 	if contains(rule, "memory_search") {
 		t.Fatalf("alwaysApply rule must not dump the memory playbook: %s", rule)
 	}
 	if !contains(rule, "memory recall") {
 		t.Fatalf("alwaysApply rule should point prior-work at memory recall: %s", rule)
+	}
+	if !contains(rule, "memory capture") {
+		t.Fatalf("alwaysApply rule should name memory capture when they want a fact stored: %s", rule)
 	}
 	if !contains(rule, "query") {
 		t.Fatalf("alwaysApply rule should mention query-first: %s", rule)

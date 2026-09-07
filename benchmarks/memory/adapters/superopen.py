@@ -5,10 +5,26 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
 import isolate
+
+# Match internal/memory/shield.go maxCaptureLen. Linux MAX_ARG_STRLEN is 131072,
+# so a single --text argv must stay under that even after rune clipping.
+_MAX_CAPTURE_RUNES = 100_000
+_MAX_ARGV_BYTES = 120_000
+
+
+def clip_capture_text(text: str) -> str:
+    runes = list(text)
+    if len(runes) > _MAX_CAPTURE_RUNES:
+        text = "".join(runes[:_MAX_CAPTURE_RUNES])
+    raw = text.encode("utf-8")
+    if len(raw) > _MAX_ARGV_BYTES:
+        text = raw[:_MAX_ARGV_BYTES].decode("utf-8", errors="ignore")
+    return text
 
 
 def _run(
@@ -42,7 +58,7 @@ def capture_episode(
         "--title",
         title,
         "--text",
-        text,
+        clip_capture_text(text),
         "--root",
         str(root),
     ]
@@ -203,6 +219,25 @@ def recall_pack_text(
         hid = h.get("id")
         titled.append(f"#{hid} {title}\n{body}".strip())
     return "\n\n".join(titled)
+
+
+def wait_embeddings(
+    so_bin: str,
+    root: Path,
+    env: dict[str, str] | None = None,
+    *,
+    timeout: float = 300.0,
+    poll: float = 1.0,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    st: dict[str, Any] = {}
+    while True:
+        st = memory_status(so_bin, root, env=env)
+        if int(st.get("embedding_pending") or 0) <= 0:
+            return st
+        if time.monotonic() >= deadline:
+            return st
+        time.sleep(poll)
 
 
 def memory_status(so_bin: str, root: Path, env: dict[str, str] | None = None) -> dict[str, Any]:

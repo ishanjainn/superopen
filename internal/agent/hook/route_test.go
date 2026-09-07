@@ -44,3 +44,24 @@ func TestClassifyPromptDoesNotStealSourceCounts(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyPromptCaptureVsRecall(t *testing.T) {
+	for _, p := range []string{
+		"remember this: login timeout is 30s",
+		"please remember this for later",
+		"don't forget we use jsonData for the Prometheus UID",
+		"save this",
+		"jot this down",
+		"keep this: never put credentials in jsonData",
+	} {
+		if got := classifyPrompt(p); got != routeCapture {
+			t.Errorf("classifyPrompt(%q)=%q want capture", p, got)
+		}
+	}
+	if got := classifyPrompt("do you remember where we left the login timeout"); got != routeMemory {
+		t.Errorf("question remember must stay recall, got %q", got)
+	}
+	if got := classifyPrompt("do you remember this timeout"); got != routeMemory {
+		t.Errorf("do you remember this must stay recall, got %q", got)
+	}
+}

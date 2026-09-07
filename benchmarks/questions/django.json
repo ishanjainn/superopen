@@ -56,6 +56,21 @@
         {"id": "register", "aliases": ["register", "admin.site", "ModelAdmin"]},
         {"id": "display", "aliases": ["list_display", "change_view", "changelist"]}
       ]
+    },
+    {
+      "id": "queryset-filter-rename",
+      "suite": "sibling",
+      "prompt": "You must rename django.db.models.query.QuerySet.filter to QuerySet.where (a public API rename). Which other production files under django/db/models/ must change besides query.py so managers and SQL still call the new name? List those file paths. Do not only name query.py or tests.",
+      "key_facts": [
+        {"id": "query", "aliases": ["django/db/models/query.py", "query.py", "QuerySet.filter"]},
+        {"id": "manager", "aliases": ["django/db/models/manager.py", "manager.py", "from_queryset"]},
+        {"id": "sql", "aliases": ["django/db/models/sql/query.py", "add_q", "sql/query.py"]}
+      ],
+      "gold_files": [
+        "django/db/models/query.py",
+        "django/db/models/manager.py",
+        "django/db/models/sql/query.py"
+      ]
     }
   ]
 }

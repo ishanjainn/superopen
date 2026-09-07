@@ -265,8 +265,11 @@ def _debug_compare(out: Path) -> dict[str, Any]:
             "Uncached input looks cheaper because Claude billed graph/tool payloads as cache_read. "
             "Count cache_read+output when judging whether Superopen made the agent cheaper."
         )
-    claude_md = out / "compare" / "arms" / "superopen" / "home" / ".claude" / "CLAUDE.md"
-    if claude_md.is_file():
+    claude_mds = list((out / "compare").glob("**/home/.claude/CLAUDE.md"))
+    if not claude_mds:
+        claude_mds = list((out / "compare").glob("**/CLAUDE.md"))
+    claude_md = claude_mds[0] if claude_mds else None
+    if claude_md and claude_md.is_file():
         n = len(claude_md.read_text())
         reasons.append(f"installed CLAUDE.md Superopen block {n} bytes (durable steer; should stay small).")
     ranked = sorted(so_rows, key=lambda r: int(r.get("cache_read_tokens") or 0), reverse=True)

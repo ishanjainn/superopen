@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ishanjainn/superopen/internal/cli"
+	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/memory"
 )
 
@@ -19,6 +20,9 @@ func cmdMemory() *cobra.Command {
 		Short: "Project diary over coding sessions (search, capture, teach, distill)",
 		Args:  cobra.ArbitraryArgs,
 		RunE:  runMemoryHome,
+		PersistentPreRun: func(*cobra.Command, []string) {
+			engine.SeedLinkedWorktree(repoRoot())
+		},
 	}
 	command.AddCommand(
 		memorySearchCmd(),

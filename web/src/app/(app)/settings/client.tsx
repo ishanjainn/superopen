@@ -206,10 +206,10 @@ export default function SettingsPage() {
           <section className="rounded border border-neutral-200 p-4">
             <h2 className="font-medium text-neutral-900">Retention</h2>
             <p className="mt-1 text-xs text-neutral-500">
-              Auto-delete old session transcripts and unpinned memories.
+              Auto-delete old session transcripts, closed harvest history, and unpinned memories.
               Hours, default 168 (7 days). 0 keeps that store forever.
-              Teachings, pins, and the code graph are never deleted by age.
-              Checkpoints live inside session folders.
+              Open harvest proposals, pending harvest runs, teachings, pins, and the code graph
+              are never deleted by age. Checkpoints live inside session folders.
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="block text-xs text-neutral-600">

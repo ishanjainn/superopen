@@ -61,6 +61,19 @@ function isExploreTool(name: string): boolean {
   return n === "bash" || n === "shell" || n === "grep" || n === "glob" || n === "read" || n === "readfile";
 }
 
+function isEditTool(name: string): boolean {
+  const n = name.toLowerCase();
+  return (
+    n === "edit" ||
+    n === "write" ||
+    n === "multiedit" ||
+    n === "notebookedit" ||
+    n === "strreplace" ||
+    n === "str_replace" ||
+    n.includes("apply_patch")
+  );
+}
+
 function prependBashNudge(command: string, nudge: string): string {
   return "echo " + JSON.stringify(shellSafeNudge(nudge)) + " ; " + command;
 }

@@ -48,6 +48,7 @@ from memory.runner import run_contradiction_mode, run_latency_mode, run_memory_m
 from spend import SpendLedger  # noqa: E402
 from debug import run_debug_mode  # noqa: E402
 from scale import apply_scale, default_model, require_agent_credentials, require_coding_host, validate_sizes  # noqa: E402
+from swe import run_swe_mode  # noqa: E402
 
 
 ALL_MODES = (
@@ -55,6 +56,7 @@ ALL_MODES = (
     "memory",
     "graph",
     "compare",
+    "swe",
     "contradict",
     "latency",
     "index",
@@ -78,7 +80,7 @@ def work_dir(*, keep: bool, out: str | None) -> Path:
     return Path(tempfile.mkdtemp(prefix="so-bench-", dir=str(BENCH / "work"))).resolve()
 
 
-PRODUCT_MODES = frozenset({"memory", "graph", "compare", "index", "temporal"})
+PRODUCT_MODES = frozenset({"memory", "graph", "compare", "swe", "index", "temporal"})
 
 
 def resolve_so_bin(path: str | None) -> str:
@@ -142,8 +144,28 @@ def run_index_mode(args: argparse.Namespace, out: Path, so_bin: str) -> dict:
 def parse_modes(raw: str) -> list[str]:
     modes = [m.strip() for m in raw.split(",") if m.strip()]
     if "all" in modes:
-        return ["offline", "contradict", "latency", "index", "graph", "memory", "compare", "temporal"]
+        expanded = [
+            "offline",
+            "contradict",
+            "latency",
+            "graph",
+            "memory",
+            "compare",
+            "temporal",
+            "swe",
+        ]
+        extra = [m for m in modes if m not in {"all", "debug"} and m not in expanded]
+        return expanded + extra
     return [m for m in modes if m != "debug"]
+
+
+def apply_all_defaults(args: Any, requested: list[str]) -> None:
+    """`--mode all` writes a complete BENCHMARKS.md: memory QA + official SWE grades."""
+    if "all" not in requested:
+        return
+    args.phase = 3
+    if not getattr(args, "no_swe_grade", False):
+        args.swe_grade = True
 
 
 def main() -> int:
@@ -172,6 +194,26 @@ def main() -> int:
     parser.add_argument("--qa-n", type=int, default=None, dest="qa_n", help="Memory QA sample size (default = --n)")
     parser.add_argument("--compare-n", type=int, default=None, dest="compare_n", help="Compare question cap (min 6)")
     parser.add_argument("--compare-ids", default="", dest="compare_ids", help="Comma-separated compare question ids")
+    parser.add_argument("--compare-arms", default="native,superopen", dest="compare_arms", help="Comma-separated compare arms to run (native,superopen)")
+    parser.add_argument("--compare-baseline", default="", dest="compare_baseline", help="Existing compare.json whose rows fill arms not in --compare-arms")
+    parser.add_argument("--swe-n", type=int, default=None, dest="swe_n", help="SWE-bench instance cap (small=5 issues / 10 sessions, full=50)")
+    parser.add_argument("--swe-ids", default="", dest="swe_ids", help="Comma-separated SWE-bench short ids or instance_ids")
+    parser.add_argument("--swe-grade", action="store_true", default=False, dest="swe_grade", help="Run official swebench 4.1.0 grader on collected patches")
+    parser.add_argument("--swe-arms", default="native,superopen", dest="swe_arms", help="Comma-separated SWE arms to run (native,superopen)")
+    parser.add_argument("--swe-baseline", default="", dest="swe_baseline", help="Existing swe.json whose rows fill arms not in --swe-arms")
+    parser.add_argument(
+        "--fill-from",
+        default="",
+        dest="fill_from",
+        help="Comma-separated result dirs whose missing suites fill BENCHMARKS.md",
+    )
+    parser.add_argument(
+        "--no-fill",
+        action="store_true",
+        default=False,
+        dest="no_fill",
+        help="Do not merge previous suite scores into BENCHMARKS.md",
+    )
     parser.add_argument("--debug", action="store_true", default=False, help=argparse.SUPPRESS)
     parser.add_argument(
         "--also-lme",
@@ -208,7 +250,7 @@ def main() -> int:
         "isolate": args.isolate if any(m in PRODUCT_MODES for m in modes) else "host",
         "so_bin": so_bin,
     }
-    from report import collect_machine
+    from report import collect_machine, merge_previous_suites, parse_fill_from, save_last_summary, write_benchmarks_md
 
     summary["machine"] = collect_machine()
     started = time.perf_counter()
@@ -218,6 +260,9 @@ def main() -> int:
 
     try:
         for mode in modes:
+            if mode == "index" and "graph" in modes and "index" not in requested:
+                print("=== mode index skipped; graph so init fills the index row ===", flush=True)
+                continue
             print(f"=== mode {mode} ===", flush=True)
             t0 = time.perf_counter()
             if mode == "offline":
@@ -241,6 +286,8 @@ def main() -> int:
                 summary["graph"] = run_graph_mode(args, out, so_bin)
             elif mode == "compare":
                 summary["compare"] = run_compare_mode(args, out, so_bin, ledger)
+            elif mode == "swe":
+                summary["swe"] = run_swe_mode(args, out, so_bin, ledger)
             elif mode == "contradict":
                 summary["contradict"] = run_contradiction_mode(out)
             elif mode == "latency":
@@ -264,11 +311,14 @@ def main() -> int:
         summary["duration_sec"] = time.perf_counter() - started
         summary["mode_duration_sec"] = {k: round(v, 3) for k, v in mode_duration.items()}
         summary["total_cost_usd"] = round(ledger.total_usd, 6)
-
-        from report import write_benchmarks_md
+        if not args.no_fill:
+            extras = parse_fill_from(args.fill_from)
+            summary = merge_previous_suites(summary, fill_from=extras)
 
         md = write_benchmarks_md(summary, dest=REPO / "BENCHMARKS.md")
         print(f"benchmarks.md: {md}", flush=True)
+        if not args.no_fill:
+            save_last_summary(summary)
         if keep:
             ledger.write(out / "spend.json")
             (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

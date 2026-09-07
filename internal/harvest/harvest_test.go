@@ -427,3 +427,118 @@ func TestGenerateSkipsWorkerFingerprint(t *testing.T) {
 		t.Fatalf("got %+v", res)
 	}
 }
+
+func TestListHistoryIncludesSkippedRunsAndClosedProposals(t *testing.T) {
+	root := testRepo(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.InsertRun("sess-skip", StatusSkipped, "", "nothing to add"); err != nil {
+		t.Fatal(err)
+	}
+	open, err := store.InsertProposal(Proposal{
+		SessionID: "sess-open", Status: StatusOpen, Kind: KindImprove, Target: "AGENTS.md",
+		Title: "keep me open", Reason: "still waiting",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, err := store.InsertProposal(Proposal{
+		SessionID: "sess-applied", Status: StatusApplied, Kind: KindImprove, Target: "AGENTS.md",
+		Title: "already applied", Reason: "done",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := store.ListHistory(time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawSkip, sawApplied, sawOpen bool
+	for _, it := range items {
+		if it.Source == "run" && it.Status == StatusSkipped && it.Title == "Nothing to change" {
+			sawSkip = true
+		}
+		if it.Source == "proposal" && it.ID == applied.ID {
+			sawApplied = true
+		}
+		if it.Source == "proposal" && it.ID == open.ID {
+			sawOpen = true
+		}
+	}
+	if !sawSkip || !sawApplied {
+		t.Fatalf("history missing skip or applied: %+v", items)
+	}
+	if sawOpen {
+		t.Fatal("open proposals must not appear in history")
+	}
+}
+
+func TestDeleteExpiredKeepsOpenAndPending(t *testing.T) {
+	root := testRepo(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	old := time.Now().UTC().Add(-10 * 24 * time.Hour).Format(time.RFC3339)
+	skipID, err := store.InsertRun("old-skip", StatusSkipped, "", "stale skip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`UPDATE harvest_runs SET created_at=?, updated_at=? WHERE id=?`, old, old, skipID); err != nil {
+		t.Fatal(err)
+	}
+	pendingID, err := store.InsertRun("still-pending", StatusPending, "", SkipAwaitLive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`UPDATE harvest_runs SET created_at=?, updated_at=? WHERE id=?`, old, old, pendingID); err != nil {
+		t.Fatal(err)
+	}
+	open, err := store.InsertProposal(Proposal{
+		SessionID: "open-sess", Status: StatusOpen, Kind: KindImprove, Target: "AGENTS.md",
+		Title: "open stays", Reason: "actionable", CreatedAt: old,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := store.InsertProposal(Proposal{
+		SessionID: "closed-sess", Status: StatusDeclined, Kind: KindImprove, Target: "AGENTS.md",
+		Title: "old declined", Reason: "nope", CreatedAt: old,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := store.DeleteExpired(time.Now().UTC().Add(-7 * 24 * time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n < 2 {
+		t.Fatalf("expected to delete skip+declined, deleted %d", n)
+	}
+	if _, err := store.GetProposal(open.ID); err != nil {
+		t.Fatal("open proposal must remain")
+	}
+	if _, err := store.GetProposal(closed.ID); err == nil {
+		t.Fatal("declined proposal should be gone")
+	}
+	items, err := store.ListHistory(time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range items {
+		if it.Source == "run" && it.SessionID == "old-skip" {
+			t.Fatal("expired skip should not be in history")
+		}
+	}
+	if _, ok := store.LatestRun(); !ok {
+		t.Fatal("pending run should still exist")
+	}
+	latest, ok := store.LatestRun()
+	if !ok || latest.SessionID != "still-pending" {
+		t.Fatalf("pending run must remain, latest=%+v", latest)
+	}
+}

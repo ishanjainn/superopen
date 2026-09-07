@@ -16,6 +16,7 @@ from typing import Any
 
 BENCH = Path(__file__).resolve().parent
 REPO = BENCH.parent
+LAST_SUMMARY = BENCH / ".last-summary.json"
 
 PENDING = "pending"
 
@@ -66,6 +67,7 @@ def load_stamp(stamp: Path) -> dict[str, Any]:
     siblings = {
         "graph": "graph.json",
         "compare": "compare.json",
+        "swe": "swe.json",
         "contradict": "contradiction.json",
         "latency": "latency.json",
         "index": "index.json",
@@ -93,8 +95,12 @@ def load_stamp(stamp: Path) -> dict[str, Any]:
 def _fill_key(dst: dict[str, Any], src: dict[str, Any], key: str) -> None:
     if dst.get(key):
         return
-    if src.get(key):
-        dst[key] = deepcopy(src[key])
+    val = src.get(key)
+    if not val:
+        return
+    if isinstance(val, dict) and val.get("skipped") and set(val) <= {"skipped"}:
+        return
+    dst[key] = deepcopy(val)
 
 
 def merge_stamps(primary: dict[str, Any], extras: list[dict[str, Any]]) -> dict[str, Any]:
@@ -109,10 +115,58 @@ def merge_stamps(primary: dict[str, Any], extras: list[dict[str, Any]]) -> dict[
                 out["memory"] = loc
         if not _memory_split(out, "longmemeval") and _memory_split(extra, "longmemeval"):
             out["memory_longmemeval"] = _memory_split(extra, "longmemeval")
-        for key in ("graph", "compare", "contradict", "latency", "index", "temporal"):
+        for key in ("graph", "compare", "swe", "contradict", "latency", "index", "temporal"):
             _fill_key(out, extra, key)
+        extra_modes = extra.get("mode_duration_sec")
+        if isinstance(extra_modes, dict):
+            dst_modes = out.get("mode_duration_sec")
+            if not isinstance(dst_modes, dict):
+                dst_modes = {}
+                out["mode_duration_sec"] = dst_modes
+            for name, sec in extra_modes.items():
+                if name not in dst_modes:
+                    dst_modes[name] = sec
+    modes = out.get("mode_duration_sec")
+    if isinstance(modes, dict) and modes:
+        try:
+            out["duration_sec"] = round(sum(float(v) for v in modes.values()), 3)
+        except (TypeError, ValueError):
+            pass
     out["_sources"] = [s for s in sources if s]
     return out
+
+
+def load_last_summary() -> dict[str, Any]:
+    if not LAST_SUMMARY.is_file():
+        return {}
+    try:
+        data = json.loads(LAST_SUMMARY.read_text())
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_last_summary(payload: dict[str, Any]) -> Path:
+    slim = deepcopy(payload)
+    slim.pop("_stamp", None)
+    LAST_SUMMARY.write_text(json.dumps(slim, indent=2) + "\n")
+    return LAST_SUMMARY
+
+
+def merge_previous_suites(
+    payload: dict[str, Any],
+    *,
+    fill_from: list[Path] | None = None,
+) -> dict[str, Any]:
+    extras: list[dict[str, Any]] = []
+    prev = load_last_summary()
+    if prev:
+        extras.append(prev)
+    for path in fill_from or []:
+        extras.append(load_stamp(path))
+    if not extras:
+        return payload
+    return merge_stamps(payload, extras)
 
 
 def _fmt_recall(block: dict[str, Any] | None, adapter: str = "superopen", k: int = 10) -> str:
@@ -334,6 +388,196 @@ def _fmt_compare_cache(cmp_: dict[str, Any]) -> str:
     return line
 
 
+def _swe_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    swe = payload.get("swe") or {}
+    if isinstance(swe, dict) and isinstance(swe.get("summary"), dict):
+        return swe
+    return {}
+
+
+def _fmt_swe_correctness(swe: dict[str, Any]) -> str:
+    summary = swe.get("summary") or {}
+    if not summary.get("graded"):
+        n = summary.get("n")
+        return f"pending official grader (n={n})" if n else PENDING
+    n = int(summary.get("n") or 0)
+    so_n = summary.get("superopen_resolved")
+    nat_n = summary.get("native_resolved")
+    if so_n is None:
+        return PENDING
+    so_pct = 100.0 * float(so_n) / n if n else 0.0
+    nat_pct = 100.0 * float(nat_n) / n if n and nat_n is not None else 0.0
+    return f"{int(so_n)} / {n} ({so_pct:.0f}%) vs native {int(nat_n)} / {n} ({nat_pct:.0f}%)"
+
+
+def _fmt_swe_metric(swe: dict[str, Any], native_key: str, so_key: str, savings_key: str, *, money: bool = False, seconds: bool = False) -> str:
+    summary = swe.get("summary") or {}
+    native = summary.get(native_key)
+    so_val = summary.get(so_key)
+    if so_val is None:
+        return PENDING
+    savings = summary.get(savings_key) or "—"
+    if money:
+        return f"{_fmt_usd(so_val) or PENDING} vs {_fmt_usd(native) or PENDING} native ({savings})"
+    if seconds:
+        return f"{float(so_val):.0f}s vs {float(native or 0):.0f}s native ({savings})"
+    return f"{int(so_val):,} vs {int(native or 0):,} native ({savings})"
+
+
+def _fmt_count_pct(hits: Any, n: int) -> str:
+    if hits is None or not n:
+        return PENDING
+    pct = 100.0 * float(hits) / n
+    return f"{int(hits)} / {n} ({pct:.0f}%)"
+
+
+def _fmt_compact_tokens(n: Any) -> str:
+    if n is None:
+        return PENDING
+    val = float(n)
+    if val >= 1_000_000:
+        return f"{val / 1_000_000:.1f}M"
+    if val >= 10_000:
+        return f"{val / 1_000:.0f}K"
+    return f"{int(val):,}"
+
+
+def _fmt_pts(so_n: Any, native_n: Any, n: int) -> str:
+    if so_n is None or native_n is None or not n:
+        return PENDING
+    delta = 100.0 * (float(so_n) - float(native_n)) / n
+    sign = "+" if delta >= 0 else ""
+    return f"{sign}{delta:.0f} pts"
+
+
+def _row_tokens(row: dict[str, Any]) -> float:
+    return (
+        float(row.get("input_tokens") or 0)
+        + float(row.get("output_tokens") or 0)
+        + float(row.get("cache_read_tokens") or 0)
+        + float(row.get("cache_creation_tokens") or 0)
+    )
+
+
+def _resolved_label(ok: Any, *, bold_pass: bool = False) -> str:
+    if ok is True:
+        return "**Passed**" if bold_pass else "Passed"
+    if ok is False:
+        return "Failed"
+    return "pending"
+
+
+def _instance_line(qid: str, nr: dict[str, Any], sr: dict[str, Any]) -> str:
+    n_tok = _row_tokens(nr)
+    s_tok = _row_tokens(sr)
+    n_tools = float(nr.get("tool_calls") or 0)
+    s_tools = float(sr.get("tool_calls") or 0)
+    tok_pct = f"{(s_tok / n_tok * 100):.0f}%" if n_tok else "—"
+    tool_pct = f"{(s_tools / n_tools * 100):.0f}%" if n_tools else "—"
+    return (
+        f"| `{qid}` | {_resolved_label(nr.get('resolved'))} | "
+        f"{_resolved_label(sr.get('resolved'), bold_pass=True)} | {tok_pct} | {tool_pct} |"
+    )
+
+
+def _swe_headline_table(swe: dict[str, Any]) -> str:
+    """Cold vs Superopen comparison table."""
+    summary = swe.get("summary") or {}
+    n = int(summary.get("n") or 0)
+    graded = bool(summary.get("graded"))
+    if graded:
+        nat_c = _fmt_count_pct(summary.get("native_resolved"), n)
+        so_c = f"**{_fmt_count_pct(summary.get('superopen_resolved'), n)}**"
+        pts = _fmt_pts(summary.get("superopen_resolved"), summary.get("native_resolved"), n)
+        corr_imp = f"**{pts}**" if pts != PENDING else PENDING
+    else:
+        nat_c = so_c = corr_imp = PENDING
+    nat_tok = _fmt_compact_tokens(summary.get("native_tokens"))
+    so_tok = _fmt_compact_tokens(summary.get("superopen_tokens"))
+    tok_imp = summary.get("token_savings") or "—"
+    nat_usd = _fmt_usd(summary.get("native_cost_usd")) or PENDING
+    so_usd = _fmt_usd(summary.get("superopen_cost_usd")) or PENDING
+    usd_imp = summary.get("cost_savings") or "—"
+    nat_tools = int(summary.get("native_tool_calls") or 0)
+    so_tools = int(summary.get("superopen_tool_calls") or 0)
+    tool_imp = summary.get("tool_savings") or "—"
+    nat_req = int(summary.get("native_api_requests") or 0)
+    so_req = int(summary.get("superopen_api_requests") or 0)
+    req_imp = summary.get("request_savings") or "—"
+    nat_wall = float(summary.get("native_wall_sec") or 0)
+    so_wall = float(summary.get("superopen_wall_sec") or 0)
+    wall_imp = summary.get("wall_savings") or "—"
+    if summary.get("superopen_tokens") is None:
+        return "pending"
+    return "\n".join(
+        [
+            "| Correctness & efficiency | Cold Claude Code | Claude Code with Superopen | Improvement |",
+            "|---|---|---|---|",
+            f"| Correctness | {nat_c} | {so_c} | {corr_imp} |",
+            f"| Tokens | {nat_tok} | **{so_tok}** | **{tok_imp}** |",
+            f"| Cost | {nat_usd} | **{so_usd}** | **{usd_imp}** |",
+            f"| Tool calls | {nat_tools:,} | **{so_tools:,}** | **{tool_imp}** |",
+            f"| API requests | {nat_req:,} | **{so_req:,}** | **{req_imp}** |",
+            f"| Wall-clock | {nat_wall:,.0f}s | **{so_wall:,.0f}s** | **{wall_imp}** |",
+        ]
+    )
+
+
+def _swe_efficiency_note(swe: dict[str, Any]) -> str:
+    summary = swe.get("summary") or {}
+    over = summary.get("efficiency_over") or "all_completed"
+    if over == "both_resolved":
+        return (
+            "Correctness is scored on every instance. Tokens, cost, tool calls, API requests "
+            "and wall-clock are over instances both arms resolved."
+        )
+    if not summary.get("graded"):
+        return (
+            "Correctness is scored on every instance (pending official grader until `--swe-grade` "
+            "succeeds). Efficiency rows are over all completed sessions until both arms have "
+            "resolved instances."
+        )
+    return (
+        "Correctness is scored on every instance. Efficiency rows are over all completed sessions "
+        "(no instance both arms resolved)."
+    )
+
+
+def _swe_instance_tables(swe: dict[str, Any]) -> str:
+    rows = swe.get("rows") or []
+    native = {r.get("id"): r for r in rows if r.get("arm") == "native"}
+    so_rows = {r.get("id"): r for r in rows if r.get("arm") == "superopen"}
+    header = [
+        "| SWE-bench instance | Cold Claude Code | Claude Code with Superopen | Token usage vs. cold | Tool usage vs. cold |",
+        "|---|---|---|---:|---:|",
+    ]
+    all_rows: list[str] = list(header)
+    seen_any = False
+    for qid, nr in native.items():
+        sr = so_rows.get(qid)
+        if not sr:
+            continue
+        all_rows.append(_instance_line(str(qid), nr, sr))
+        seen_any = True
+    parts = [_swe_headline_table(swe)]
+    if seen_any:
+        parts.append(
+            "\n".join(
+                [
+                    "<details>",
+                    "<summary>Correctness over all instances</summary>",
+                    "",
+                    _swe_efficiency_note(swe),
+                    "",
+                    "\n".join(all_rows),
+                    "",
+                    "</details>",
+                ]
+            )
+        )
+    return "\n\n".join(parts) if parts else "pending instance rows"
+
+
 def _fmt_contradict_metric(payload: dict[str, Any], key: str) -> str:
     c = payload.get("contradict") or {}
     if not c:
@@ -409,6 +653,12 @@ def _fmt_duration(sec: Any) -> str:
 
 
 def _fmt_run_duration(payload: dict[str, Any]) -> str:
+    modes = payload.get("mode_duration_sec") or {}
+    if isinstance(modes, dict) and modes:
+        try:
+            return _fmt_duration(sum(float(v) for v in modes.values()))
+        except (TypeError, ValueError):
+            pass
     sec = payload.get("duration_sec")
     if sec is None:
         return PENDING
@@ -420,6 +670,67 @@ def _fmt_run_duration_detail(payload: dict[str, Any]) -> str:
     if isinstance(modes, dict) and modes:
         return "; ".join(f"{k} {_fmt_duration(v)}" for k, v in modes.items())
     return "wall clock"
+
+
+def _run_duration_sec(payload: dict[str, Any]) -> float | None:
+    modes = payload.get("mode_duration_sec") or {}
+    if isinstance(modes, dict) and modes:
+        try:
+            return sum(float(v) for v in modes.values())
+        except (TypeError, ValueError):
+            pass
+    sec = payload.get("duration_sec")
+    try:
+        return float(sec) if sec is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _arm_wall_sec(block: dict[str, Any] | None, arm: str) -> float | None:
+    if not block:
+        return None
+    rows = [r for r in (block.get("rows") or []) if isinstance(r, dict) and r.get("arm") == arm]
+    row_walls = [float(r["wall_sec"]) for r in rows if r.get("wall_sec") is not None]
+    raw = (block.get("summary") or {}).get(f"{arm}_wall_sec")
+    if raw is not None:
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            val = None
+        else:
+            if row_walls or val > 0 or rows:
+                return val
+            return None
+    if row_walls:
+        return sum(row_walls)
+    return None
+
+
+def _duration_breakdown(
+    payload: dict[str, Any], cmp_: dict[str, Any], swe: dict[str, Any]
+) -> dict[str, float | None]:
+    combined_sec = _run_duration_sec(payload)
+    native = 0.0
+    superopen = 0.0
+    native_known = False
+    so_known = False
+    for block in (cmp_, swe):
+        n_wall = _arm_wall_sec(block, "native")
+        s_wall = _arm_wall_sec(block, "superopen")
+        if n_wall is not None:
+            native += n_wall
+            native_known = True
+        if s_wall is not None:
+            superopen += s_wall
+            so_known = True
+    extras: float | None = None
+    if combined_sec is not None and (native_known or so_known):
+        extras = max(0.0, combined_sec - native - superopen)
+    return {
+        "native": native if native_known else None,
+        "superopen": superopen if so_known else None,
+        "extras": extras,
+    }
 
 
 def _fmt_total_cost(payload: dict[str, Any]) -> str:
@@ -506,13 +817,196 @@ def collect_machine() -> dict[str, Any]:
     return info
 
 
+def _as_usd(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _cost_breakdown(
+    payload: dict[str, Any],
+    locomo: dict[str, Any],
+    lme: dict[str, Any],
+    cmp_: dict[str, Any],
+    swe: dict[str, Any],
+) -> dict[str, Any]:
+    native = 0.0
+    superopen = 0.0
+    extras = 0.0
+    parts: list[str] = []
+
+    if cmp_:
+        native += _as_usd((cmp_.get("summary") or {}).get("native_cost_usd"))
+        superopen += _as_usd((cmp_.get("summary") or {}).get("superopen_cost_usd"))
+    if swe:
+        native += _as_usd((swe.get("summary") or {}).get("native_cost_usd"))
+        superopen += _as_usd((swe.get("summary") or {}).get("superopen_cost_usd"))
+        if (swe.get("summary") or {}).get("graded"):
+            parts.append("SWE eval $0.00")
+
+    def _qa_costs(block: dict[str, Any], label: str) -> None:
+        nonlocal superopen, extras
+        qa = _qa_llm(block)
+        agent = sum(_as_usd(r.get("cost_usd")) for r in (qa.get("rows") or []) if isinstance(r, dict))
+        superopen += agent
+        judge = _as_usd(qa.get("judge_usd"))
+        if not judge:
+            judge = sum(_as_usd(r.get("judge_usd")) for r in (qa.get("rows") or []) if isinstance(r, dict))
+        ingest = _as_usd((block.get("ingest") or {}).get("llm_usd"))
+        extras += judge + ingest
+        if judge:
+            parts.append(f"{label} judge {_fmt_usd(judge)}")
+        if ingest:
+            parts.append(f"{label} ingest {_fmt_usd(ingest)}")
+
+    if locomo:
+        _qa_costs(locomo, "LOCOMO")
+    if lme:
+        _qa_costs(lme, "LME")
+
+    combined = native + superopen + extras
+    ledger = payload.get("total_cost_usd")
+    if ledger is not None:
+        led = _as_usd(ledger)
+        if led > combined + 0.0001:
+            extras += led - combined
+            combined = led
+            parts.append("other ledger")
+        elif combined == 0 and led:
+            combined = led
+    known = bool(native or superopen or extras or ledger is not None)
+    return {
+        "native": native,
+        "superopen": superopen,
+        "extras": extras,
+        "combined": combined,
+        "parts": parts,
+        "known": known,
+    }
+
+
+def _recall_sort_key(block: dict[str, Any], name: str, k: int = 10) -> float:
+    row = (block.get("adapters") or {}).get(name) or {}
+    try:
+        return float(row.get(f"recall_at_{k}"))
+    except (TypeError, ValueError):
+        return float("-inf")
+
+
+def _adapter_recall_cells(block: dict[str, Any], name: str) -> tuple[str, str]:
+    if name == "bow":
+        return _bow_row(block, 5), _bow_row(block, 10)
+    return _adapter_row(block, name, 5), _adapter_row(block, name, 10)
+
+
+def _adapter_table(block: dict[str, Any] | None) -> str:
+    block = block or {}
+    ingest = _fmt_ingest(block)
+    has_ingest = ingest != PENDING
+    systems = [
+        ("superopen", "**Superopen** (`so memory recall`)"),
+        ("bm25", "BM25"),
+        ("bow", "bow (bag-of-words)"),
+        ("rrf", "RRF"),
+    ]
+    rest = [row for row in systems if row[0] != "superopen"]
+    rest.sort(key=lambda row: _recall_sort_key(block, row[0]), reverse=True)
+    ordered = [systems[0], *rest]
+    if has_ingest:
+        lines = ["| System | recall@5 | recall@10 | Ingest cost |", "|---|---|---|---|"]
+    else:
+        lines = ["| System | recall@5 | recall@10 |", "|---|---|---|"]
+    for name, label in ordered:
+        r5, r10 = _adapter_recall_cells(block, name)
+        if name == "superopen" and r5 != PENDING:
+            r5 = f"**{r5}**"
+        if name == "superopen" and r10 != PENDING:
+            r10 = f"**{r10}**"
+        if has_ingest:
+            cost = ingest if name == "superopen" else "$0 (shared index)"
+            if name != "superopen" and r10 == PENDING:
+                cost = PENDING
+            lines.append(f"| {label} | {r5} | {r10} | {cost} |")
+        else:
+            lines.append(f"| {label} | {r5} | {r10} |")
+    return "\n".join(lines)
+
+
+def _memory_compared_with(block: dict[str, Any] | None) -> str:
+    block = block or {}
+    parts: list[str] = []
+    for name, label in (("bm25", "BM25"), ("rrf", "RRF"), ("bow", "bow")):
+        val = _bow_row(block, 10) if name == "bow" else _adapter_row(block, name, 10)
+        if val != PENDING:
+            parts.append(f"{label} {val}")
+    return ", ".join(parts) if parts else PENDING
+
+
+def _glance_swe_cells(swe: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    summary = swe.get("summary") or {}
+    n = summary.get("n")
+    dataset = f"Verified (n={n})" if n else "Verified"
+    if not swe or summary.get("superopen_tokens") is None:
+        return dataset, PENDING, f"native {PENDING}", PENDING, f"native {PENDING}"
+    if summary.get("graded"):
+        so_c = _fmt_count_pct(summary.get("superopen_resolved"), int(n or 0))
+        nat_c = _fmt_count_pct(summary.get("native_resolved"), int(n or 0))
+    else:
+        so_c = nat_c = PENDING
+    so_usd = _fmt_usd(summary.get("superopen_cost_usd")) or PENDING
+    nat_usd = _fmt_usd(summary.get("native_cost_usd")) or PENDING
+    return dataset, so_c, f"native {nat_c}", so_usd, f"native {nat_usd}"
+
+
+def _glance_table(
+    locomo: dict[str, Any],
+    lme: dict[str, Any],
+    cmp_: dict[str, Any],
+    swe: dict[str, Any],
+    graph_s: str,
+    django_tag: str,
+    locomo_n: Any,
+) -> str:
+    swe_ds, so_c, nat_c, so_usd, nat_usd = _glance_swe_cells(swe)
+    locomo_ds = f"LOCOMO (n={locomo_n})"
+    cov_s = (cmp_.get("summary") or {}).get("superopen_coverage_avg")
+    cov_n = (cmp_.get("summary") or {}).get("native_coverage_avg")
+    if cov_s is None:
+        sess_so, sess_nat = PENDING, f"native {PENDING}"
+    else:
+        sess_so = f"{float(cov_s):.2f}"
+        sess_nat = f"native {float(cov_n):.2f}" if cov_n is not None else "—"
+    so_sess_usd = _fmt_usd((cmp_.get("summary") or {}).get("superopen_cost_usd"))
+    nat_sess_usd = _fmt_usd((cmp_.get("summary") or {}).get("native_cost_usd"))
+    if so_sess_usd:
+        sess_usd = so_sess_usd
+        sess_usd_nat = f"native {nat_sess_usd}" if nat_sess_usd else "—"
+    else:
+        sess_usd, sess_usd_nat = PENDING, f"native {PENDING}"
+    return "\n".join(
+        [
+            "| Suite | Dataset (n) | Metric | Superopen | Compared with |",
+            "|---|---|---|---|---|",
+            f"| SWE-bench | {swe_ds} | Correctness | {so_c} | {nat_c} |",
+            f"| SWE-bench | {swe_ds} | Cost | {so_usd} | {nat_usd} |",
+            f"| Memory | {locomo_ds} | recall@10 | {_fmt_recall(locomo, k=10)} | {_memory_compared_with(locomo)} |",
+            f"| Memory | {locomo_ds} | QA accuracy | {_fmt_qa_short(locomo)} | — |",
+            f"| Memory | LongMemEval-S (50) | recall@10 | {_fmt_recall(lme, k=10)} | {_memory_compared_with(lme)} |",
+            f"| Memory | LongMemEval-S (50) | QA accuracy | {_fmt_qa_short(lme)} | — |",
+            f"| Graph | Django {django_tag} | 12-probe | {graph_s} | — |",
+            f"| Sessions | Django (6) | Key-fact coverage | {sess_so} | {sess_nat} |",
+            f"| Sessions | Django (6) | Cost | {sess_usd} | {sess_usd_nat} |",
+        ]
+    )
+
+
 def _system_table(payload: dict[str, Any]) -> str:
     machine = payload.get("machine") if isinstance(payload.get("machine"), dict) else {}
     if not machine:
         machine = collect_machine()
     host = payload.get("host") or "claude-code"
     model = payload.get("model") or "claude-sonnet-5"
-    isolate = payload.get("isolate") or "docker"
     scale = payload.get("scale") or "small"
     cpu = machine.get("cpu") or machine.get("machine") or "unknown"
     cores = machine.get("cpu_count") or "?"
@@ -526,57 +1020,54 @@ def _system_table(payload: dict[str, Any]) -> str:
     if os_name == "Darwin":
         os_line = f"macOS {release} (darwin)"
     pin = machine.get("claude_code") or "2.1.241"
-    isolate_line = (
-        f"{isolate} (`so-bench` image; host HOME not mounted)"
-        if isolate == "docker"
-        else f"{isolate} (isolated HOME on this machine)"
-    )
     return f"""| | |
 |---|---|
 | Machine | {hostname} · {cpu} · {cores}-core {arch} · {mem_s} |
 | OS | {os_line} |
-| Isolate | {isolate_line} |
-| Superopen | locally built CLI bind-mounted at `/usr/local/bin/so` |
 | Agent | Claude Code {pin} · `{model}` ({host}) |
-| Scale | {scale} (LOCOMO n=100, LME n=50, compare 6, graph 12) |"""
+| Scale | {scale} (LOCOMO n=100, LME n=50, compare 6, graph 12, SWE-bench 5/50 issues) |"""
+
+
+def _run_table(payload: dict[str, Any], costs: dict[str, Any]) -> str:
+    duration = _fmt_run_duration(payload)
+    detail = _fmt_run_duration_detail(payload)
+    if duration != PENDING and detail not in {PENDING, "wall clock"}:
+        duration = f"{duration} ({detail})"
+    walls = _duration_breakdown(payload, _compare_summary(payload), _swe_summary(payload))
+    native_dur = _fmt_duration(walls["native"]) if walls["native"] is not None else PENDING
+    so_dur = _fmt_duration(walls["superopen"]) if walls["superopen"] is not None else PENDING
+    extras_dur = _fmt_duration(walls["extras"]) if walls["extras"] is not None else PENDING
+    if costs.get("known"):
+        native = _fmt_usd(costs["native"]) or "$0.00"
+        so_usd = _fmt_usd(costs["superopen"]) or "$0.00"
+        combined = _fmt_usd(costs["combined"]) or "$0.00"
+        extras = _fmt_usd(costs["extras"]) or "$0.00"
+        if costs.get("parts"):
+            extras = f"{extras} ({'; '.join(costs['parts'])})"
+    else:
+        native = so_usd = extras = combined = PENDING
+    return f"""| Metric | Combined | Native | Superopen | Extras |
+|---|---|---|---|---|
+| Duration | {duration} | {native_dur} | {so_dur} | {extras_dur} |
+| Cost | {combined} | {native} | {so_usd} | {extras} |"""
 
 
 def render(payload: dict[str, Any]) -> str:
     locomo = _memory_split(payload, "locomo")
     lme = _memory_split(payload, "longmemeval")
     cmp_ = _compare_summary(payload)
+    swe = _swe_summary(payload)
     idx = _index_block(payload)
-    scale = payload.get("scale") or locomo.get("scale") or lme.get("scale") or "small"
-    host = payload.get("host") or (cmp_.get("host") if cmp_ else None) or "claude-code"
-    model = payload.get("model") or (cmp_.get("model") if cmp_ else None) or "claude-sonnet-5"
-    isolate = payload.get("isolate") or "docker"
     locomo_n = locomo.get("n") or payload.get("n") or 100
     locomo_scored = ((locomo.get("adapters") or {}).get("superopen") or {}).get("total")
     locomo_label = f"LOCOMO (n={locomo_n})"
     if locomo_scored:
         locomo_label = f"LOCOMO (n={locomo_n} asked, {locomo_scored} scored)"
 
-    locomo_r5 = _fmt_recall(locomo, k=5)
-    locomo_r10 = _fmt_recall(locomo, k=10)
-    locomo_bm5 = _adapter_row(locomo, "bm25", 5)
-    locomo_bm10 = _adapter_row(locomo, "bm25", 10)
-    locomo_bow5 = _bow_row(locomo, 5)
-    locomo_bow10 = _bow_row(locomo, 10)
-    locomo_rrf5 = _adapter_row(locomo, "rrf", 5)
-    locomo_rrf10 = _adapter_row(locomo, "rrf", 10)
     locomo_qa = _fmt_qa(locomo)
-    lme_r5 = _fmt_recall(lme, k=5)
-    lme_r10 = _fmt_recall(lme, k=10)
-    lme_bm5 = _adapter_row(lme, "bm25", 5)
-    lme_bm10 = _adapter_row(lme, "bm25", 10)
-    lme_bow5 = _bow_row(lme, 5)
-    lme_bow10 = _bow_row(lme, 10)
-    lme_rrf5 = _adapter_row(lme, "rrf", 5)
-    lme_rrf10 = _adapter_row(lme, "rrf", 10)
     lme_qa = _fmt_qa(lme)
     rescue = _fmt_contradict_metric(payload, "rescue_at_10")
     verbatim = _fmt_contradict_metric(payload, "historical_verbatim")
-    ingest_usd = _fmt_ingest(locomo) if locomo else _fmt_ingest(lme)
     graph_s = _graph_score(payload)
     graph_lat = _graph_p95(payload)
     locomo_store = _fmt_gold_store(locomo)
@@ -584,53 +1075,57 @@ def render(payload: dict[str, Any]) -> str:
     cov = _fmt_compare_coverage(cmp_)
     usd = _fmt_compare_usd(cmp_)
     cache = _fmt_compare_cache(cmp_)
+    swe_n = (swe.get("summary") or {}).get("n") or (swe.get("n") if swe else None)
+    swe_heading = f"### SWE-bench (n={swe_n})" if swe_n else "### SWE-bench"
+    swe_tables = _swe_instance_tables(swe) if swe else "pending"
     latency = _fmt_latency(payload)
-    run_duration = _fmt_run_duration(payload)
-    run_duration_detail = _fmt_run_duration_detail(payload)
-    total_cost = _fmt_total_cost(payload)
     index_time = _fmt_index_time(idx)
+    costs = _cost_breakdown(payload, locomo, lme, cmp_, swe)
 
     index_line = PENDING
     if idx:
-        nodes, edges, files = idx.get("nodes"), idx.get("edges"), idx.get("files")
-        elapsed = idx.get("elapsed_sec")
         bits = []
-        if nodes is not None:
-            bits.append(f"{int(nodes):,} nodes")
-        if edges is not None:
-            bits.append(f"{int(edges):,} edges")
-        if files is not None:
-            bits.append(f"{int(files):,} files")
+        if idx.get("nodes") is not None:
+            bits.append(f"{int(idx['nodes']):,} nodes")
+        if idx.get("edges") is not None:
+            bits.append(f"{int(idx['edges']):,} edges")
+        if idx.get("files") is not None:
+            bits.append(f"{int(idx['files']):,} files")
         if bits:
             index_line = ", ".join(bits)
 
+    def _int_cell(val: Any) -> str:
+        if val is None:
+            return "—"
+        try:
+            return f"{int(val):,}"
+        except (TypeError, ValueError):
+            return str(val)
+
     temporal = payload.get("temporal") or {}
     checkpoints = temporal.get("checkpoints") if isinstance(temporal, dict) else None
-    temporal_table = ""
     if checkpoints:
         rows = ["| Checkpoint | Nodes | Edges | Files | `so init` |", "|---|---:|---:|---:|---:|"]
         for row in checkpoints:
-            def _cell(key: str) -> str:
-                val = row.get(key)
-                return "—" if val is None else str(val)
-
             elapsed = row.get("elapsed_sec")
             elapsed_s = f"{float(elapsed):.0f}s" if elapsed is not None else "—"
             rows.append(
-                f"| {row.get('tag') or '?'} | {_cell('nodes')} | {_cell('edges')} | {_cell('files')} | {elapsed_s} |"
+                f"| {row.get('tag') or '?'} | {_int_cell(row.get('nodes'))} | "
+                f"{_int_cell(row.get('edges'))} | {_int_cell(row.get('files'))} | {elapsed_s} |"
             )
         temporal_table = "\n".join(rows)
     else:
         temporal_table = "pending"
 
     django_tag = idx.get("tag") or (payload.get("graph") or {}).get("tag") or "5.2.4"
-    django_ds = f"Django {django_tag}"
-    locomo_repro_n = locomo.get("n") or 100
     compare_dur = _fmt_duration((cmp_ or {}).get("duration_sec")) if cmp_ else PENDING
+    locomo_note = f"\n\n{locomo_store}" if locomo_store else ""
+    lme_note = f"\n\n{lme_store}" if lme_store else ""
+    glance = _glance_table(locomo, lme, cmp_, swe, graph_s, django_tag, locomo_n)
 
     md = f"""# Superopen Benchmarks
 
-Last updated: {_today()}. Generated by `python3 benchmarks/run.py`.
+Last updated: {_today()}. How to run: [benchmarks/README.md](benchmarks/README.md).
 
 ## System
 
@@ -638,131 +1133,66 @@ Last updated: {_today()}. Generated by `python3 benchmarks/run.py`.
 
 ## Run
 
-| Metric | Value | Detail |
-|---|---|---|
-| Duration | {run_duration} | {run_duration_detail} |
-| Total cost | {total_cost} | spend ledger |
-| Graph index | {index_time} | `so init`, $0 LLM |
+{_run_table(payload, costs)}
 
 ## Results at a glance
 
-| Suite | Dataset | Metric | Score |
-|---|---|---|---|
-| Graph | {django_ds} | index time | {index_time} |
-| Graph | {django_ds} | index size | {index_line} |
-| Graph | {django_ds} | 12-probe score | {graph_s} |
-| Graph | {django_ds} | probe latency | {graph_lat} |
-| Memory | {locomo_label} | QA accuracy | {locomo_qa} |
-| Memory | {locomo_label} | recall@10 | {locomo_r10} |
-| Memory | {locomo_label} | recall@5 | {locomo_r5} |
-| Memory | LongMemEval-S (50) | QA accuracy | {lme_qa} |
-| Memory | LongMemEval-S (50) | recall@10 | {lme_r10} |
-| Memory | LongMemEval-S (50) | recall@5 | {lme_r5} |
-| Memory | Contradiction | Rescue@10 | {rescue} |
-| Memory | Contradiction | historical-verbatim | {verbatim} |
-| Cost | memory ingest | USD | {ingest_usd} |
-| Cost | graph build | LLM credits | $0 |
-| Session | Django (6) | duration | {compare_dur} |
-| Session | Django (6) | key-fact coverage | {cov} |
-| Session | Django (6) | USD | {usd} |
-| Session | Django (6) | cache_read tokens | {cache} |
-| Latency | local fixture | `so memory search` | {latency} |
+{glance}
 
-## Datasets
+## Results
 
-| Dataset | What we score | Notes |
-|---|---|---|
-| LOCOMO (`locomo10.json`) | 100 category-stratified QA (small); 300 on `--scale full` | File has 300 items |
-| LongMemEval-S | 50 English questions | Haystack is not shrunk |
-| Django | tag `{django_tag}` | Graph probes + native vs Superopen sessions |
-| Contradiction | Rescue@10, historical-verbatim | Go tests in `internal/memory/` |
+{swe_heading}
 
-## Conversational memory
+{swe_tables}
 
-### LOCOMO
+### Memory
 
-| Adapter | recall@5 | recall@10 |
-|---|---|---|
-| Superopen (`so memory recall`) | {locomo_r5} | {locomo_r10} |
-| BM25 | {locomo_bm5} | {locomo_bm10} |
-| bow (bag-of-words) | {locomo_bow5} | {locomo_bow10} |
-| RRF | {locomo_rrf5} | {locomo_rrf10} |
+#### {locomo_label}
 
-QA accuracy: {locomo_qa}.
+{_adapter_table(locomo)}
 
-```bash
-python3 benchmarks/run.py --mode memory --phase 2 --split locomo --scale small --so-bin ./bin/so
-python3 benchmarks/run.py --mode memory --phase 3 --split locomo --scale small --qa-n 20 --host claude-code --model claude-sonnet-5 --max-spend 15 --so-bin ./bin/so
-```
+QA accuracy: {locomo_qa}.{locomo_note}
 
-Asked n={locomo_repro_n}. Items without a mappable gold episode id are not scored.
-{locomo_store}
+#### LongMemEval-S (50)
 
-### LongMemEval-S
+{_adapter_table(lme)}
 
-| Adapter | recall@5 | recall@10 |
-|---|---|---|
-| Superopen (`so memory recall`) | {lme_r5} | {lme_r10} |
-| BM25 | {lme_bm5} | {lme_bm10} |
-| bow (bag-of-words) | {lme_bow5} | {lme_bow10} |
-| RRF | {lme_rrf5} | {lme_rrf10} |
+QA accuracy: {lme_qa}.{lme_note}
 
-QA accuracy: {lme_qa}.
-{lme_store}
-
-```bash
-python3 benchmarks/run.py --mode memory --phase 2 --split longmemeval --scale small --so-bin ./bin/so
-python3 benchmarks/run.py --mode memory --phase 3 --split longmemeval --scale small --qa-n 20 --host claude-code --model claude-sonnet-5 --max-spend 15 --so-bin ./bin/so
-```
-
-### Contradiction
+#### Contradiction
 
 | Metric | Superopen |
 |---|---|
 | Rescue@10 | {rescue} |
 | historical-verbatim | {verbatim} |
 
-```bash
-python3 benchmarks/run.py --mode contradict
-```
+### Graph (Django {django_tag})
 
-## Code intelligence
+| Metric | Score |
+|---|---|
+| Index time | {index_time} |
+| Index size | {index_line} |
+| 12-probe score | {graph_s} |
+| Probe latency | {graph_lat} |
 
-### Graph-tools (Django, 12 probes)
+### Sessions (Django, 6)
 
-Score: **{graph_s}**. Probe latency: {graph_lat}. Index: {index_line}.
+| Metric | Score |
+|---|---|
+| Duration | {compare_dur} |
+| Key-fact coverage | {cov} |
+| USD | {usd} |
+| cache_read tokens | {cache} |
 
-```bash
-python3 benchmarks/run.py --mode graph --repo django --index-timeout 1800 --so-bin ./bin/so
-```
-
-### Native vs Superopen sessions (Django, 6)
-
-key-fact coverage: **{cov}**.
-
-USD: **{usd}**.
-
-cache_read: **{cache}**.
-
-```bash
-python3 benchmarks/run.py --mode compare --scale small --host claude-code --model claude-sonnet-5 --max-spend 20 --so-bin ./bin/so
-```
-
-## Temporal (Django LTS)
+### Temporal (Django LTS)
 
 {temporal_table}
 
-```bash
-python3 benchmarks/run.py --mode temporal --repo django --so-bin ./bin/so
-```
+### Latency
 
-## Latency
-
-{latency}
-
-```bash
-python3 benchmarks/run.py --mode latency --so-bin ./bin/so
-```
+| Metric | Score |
+|---|---|
+| `so memory search` | {latency} |
 """
     return md.rstrip() + "\n"
 

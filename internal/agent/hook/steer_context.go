@@ -226,6 +226,12 @@ func graphGate(payload []byte, vendor, kind, hookEvent string) (steerDecision, b
 	if route == routeEmpty {
 		return steerDecision{}, false
 	}
+	if route == routeCapture {
+		if !claimCaptureNudge(payload, vendor) {
+			return steerDecision{}, false
+		}
+		return steerDecision{text: steer.CaptureNudge(), hookEvent: hookEvent}, true
+	}
 	if route == routeMemory {
 		if !claimMemoryNudge(payload, vendor) {
 			return steerDecision{}, false
@@ -401,12 +407,15 @@ func promptSubmitText(payload []byte, vendor string) string {
 			kind = routeEmpty
 		}
 	}
-	if kind == routeCode || kind == routeMemory || kind == routeEmpty {
+	if kind == routeCode || kind == routeMemory || kind == routeCapture || kind == routeEmpty {
 		rememberPromptKind(payload, vendor, kind)
 	}
 	live := ""
 	if pending := pendingLiveWork(root); pending != "" && claimHarvestPending(payload, vendor) {
 		live = pending
+	}
+	if kind == routeCapture {
+		return harvest.JoinStart(steer.CaptureNudge(), live)
 	}
 	if kind != routeMemory {
 		return live
@@ -461,6 +470,12 @@ func claimMemoryNudge(payload []byte, vendor string) bool {
 	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
 		return &s.MemorySteerReminded
 	}, "last_memory_nudge")
+}
+
+func claimCaptureNudge(payload []byte, vendor string) bool {
+	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
+		return &s.CaptureSteerReminded
+	}, "last_capture_nudge")
 }
 
 func claimMemoryIndex(payload []byte, vendor string) bool {

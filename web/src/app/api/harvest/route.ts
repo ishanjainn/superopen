@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { projectIdFromRequest, runWithProjectAsync } from "@/lib/so/workspace";
-import { soJSON } from "@/lib/so/exec";
+import { soJSON, soJSONRows } from "@/lib/so/exec";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,21 +9,44 @@ type ListRow = {
   id?: number | string;
   session?: string;
   session_id?: string;
+  status?: string;
+  kind?: string;
+  target?: string;
+  title?: string;
+  reason?: string;
+  source?: string;
+  created_at?: string;
 };
 
 export async function GET(req: NextRequest) {
   const project = projectIdFromRequest(req);
   const session = req.nextUrl.searchParams.get("session") || "";
+  const history = ["1", "true", "yes"].includes(
+    (req.nextUrl.searchParams.get("history") || "").toLowerCase(),
+  );
   return runWithProjectAsync(project, async () => {
-    const list = await soJSON<ListRow[]>(["harvest", "list"]);
+    if (history) {
+      const list = await soJSON<ListRow>(["harvest", "list", "--history"]);
+      if (!list.ok) {
+        return NextResponse.json({ error: list.error, items: [] }, { status: 200 });
+      }
+      let rows = soJSONRows<ListRow>(list);
+      if (session) {
+        rows = rows.filter(
+          (row) => row.session === session || row.session_id === session,
+        );
+      }
+      return NextResponse.json({ items: rows });
+    }
+
+    const [list, hist] = await Promise.all([
+      soJSON<ListRow>(["harvest", "list"]),
+      soJSON<ListRow>(["harvest", "list", "--history"]),
+    ]);
     if (!list.ok) {
       return NextResponse.json({ error: list.error, items: [] }, { status: 200 });
     }
-    let rows: ListRow[] = Array.isArray(list.data)
-      ? list.data
-      : Array.isArray(list.items)
-        ? (list.items as ListRow[])
-        : [];
+    let rows: ListRow[] = soJSONRows<ListRow>(list);
     if (session) {
       rows = rows.filter(
         (row) => row.session === session || row.session_id === session,
@@ -36,6 +59,10 @@ export async function GET(req: NextRequest) {
       const show = await soJSON<unknown>(["harvest", "show", id]);
       if (show.ok && show.data) items.push(show.data);
     }
-    return NextResponse.json({ items });
+    const historyRows = hist.ok ? soJSONRows<ListRow>(hist) : [];
+    return NextResponse.json({
+      items,
+      latest: historyRows[0] ?? null,
+    });
   });
 }

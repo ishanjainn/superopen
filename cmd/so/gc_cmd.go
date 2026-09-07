@@ -14,12 +14,13 @@ func cmdGC() *cobra.Command {
 	var memoryHours int
 	cmd := &cobra.Command{
 		Use:   "gc",
-		Short: "Apply retention: delete old sessions and unpinned memories",
-		Long: `Delete session transcripts and unpinned memories older than the
+		Short: "Apply retention: delete old sessions, harvest history, and unpinned memories",
+		Long: `Delete session transcripts, closed harvest history, and unpinned memories older than the
 configured retention (hours; default 168 = 7 days). 0 keeps that store forever.
 
-Teachings, pins, and the code graph are never deleted by age.
-Checkpoints live inside session folders and go with the session.`,
+Open harvest proposals and pending harvest runs are kept. Teachings, pins, and
+the code graph are never deleted by age. Checkpoints live inside session folders
+and go with the session.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			settings, err := retention.LoadSettings()
 			if err != nil {
@@ -53,11 +54,11 @@ Checkpoints live inside session folders and go with the session.`,
 			result.SessionHours = settings.SessionHours
 			result.MemoryHours = settings.MemoryHours
 			return out().HumanOrJSON("gc", func() {
-				if len(result.SessionsDeleted) == 0 && result.MemoriesDeleted == 0 {
+				if len(result.SessionsDeleted) == 0 && result.MemoriesDeleted == 0 && result.HarvestDeleted == 0 {
 					fmt.Fprintln(cmd.OutOrStdout(), "0 expired")
 					return
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "sessions=%d memories=%d\n", len(result.SessionsDeleted), result.MemoriesDeleted)
+				fmt.Fprintf(cmd.OutOrStdout(), "sessions=%d memories=%d harvest=%d\n", len(result.SessionsDeleted), result.MemoriesDeleted, result.HarvestDeleted)
 			}, result)
 		},
 	}

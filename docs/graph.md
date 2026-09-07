@@ -26,7 +26,7 @@ SessionEnd (detached, fail-open) — only when the workspace already has `.so/`.
 | `so graph search <pattern>` | Find symbols by name (BM25 over FTS). |
 | `so graph snippet <qn>` | Read the source of a known symbol (files clip at ~500 lines). |
 | `so graph trace <symbol>` | Callers (`--direction incoming`), callees (`outgoing`), or both. |
-| `so graph impact <symbol\|change>` | Blast radius with risk classification. |
+| `so graph impact <symbol\|--files\|--base>` | Blast radius: callers, impls, siblings, co-change. Pre-finish check on a multi-file edit. |
 | `so graph architecture` | Languages, packages, routes, hotspots, clusters. |
 | `so graph schema` | Node labels, relationship types, property patterns. Run this first when scripting. |
 | `so graph cypher "<query>"` | Read-only Cypher subset. |

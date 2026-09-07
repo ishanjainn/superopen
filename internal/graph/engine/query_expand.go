@@ -15,6 +15,7 @@ import (
 const (
 	queryDefaultBudget  = 1200
 	queryCharsPerToken  = 3
+	queryBodyReserve    = 1200
 	queryHubDegreeFloor = 50
 	queryMaxNodeRows    = 16
 	queryMaxEdgeRows    = 16

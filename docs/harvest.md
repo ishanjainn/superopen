@@ -18,6 +18,7 @@ so harvest propose           # ingest JSON from stdin / --file
 so harvest skip <session>    # close pending with nothing to propose
 so harvest scan [session]    # SessionEnd: own one-shot CLI only
 so harvest list              # open proposals
+so harvest list --history    # closed proposals + skipped runs (session retention window)
 so harvest show <id>         # reason, evidence, unified diff
 so harvest review            # compact OPEN pack (load only when asked)
 so harvest apply <id>        # gated write to the live playbook

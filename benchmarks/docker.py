@@ -94,6 +94,10 @@ def assert_isolated(argv: list[str], home: Path | None = None) -> None:
 
 
 def build_image() -> None:
+    inspect = subprocess.run(["docker", "image", "inspect", IMAGE], capture_output=True, text=True)
+    if inspect.returncode == 0:
+        print(f"=== isolate docker: reusing image {IMAGE} ===", flush=True)
+        return
     cmd = [
         "docker",
         "build",

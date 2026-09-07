@@ -319,21 +319,23 @@ export default function MemoryPage() {
   const listItems = view === "skills" ? teachings : view === "moments" ? moments : knowledge;
 
   const empty = (data?.nodes.length ?? 0) === 0;
-  const counts = status.counts ?? {};
+  const savedCount = knowledge.length + teachings.length;
   const pending = status.pending_distill ?? [];
   const paused = Boolean(status.distill_paused);
-  const distillLine = paused ? "paused" : pending.length > 0 ? `${pending.length} pending` : "idle";
+  const distillLine = paused
+    ? "paused"
+    : pending.length > 0
+      ? `${pending.length} sessions waiting to summarize`
+      : "idle";
 
   return (
     <div className="memory-workspace">
       <FeaturePageHeader title="Memory" />
 
       <div className="memory-vitals">
-        <span><b>{n(counts.long)}</b> long</span>
-        <span><b>{n(counts.medium)}</b> medium</span>
-        <span><b>{n(counts.short)}</b> short</span>
-        <span><b>{n(counts.working)}</b> diary</span>
-        <span><b>{n(counts.tombstoned)}</b> faded</span>
+        <span><b>{n(savedCount)}</b> saved</span>
+        <span><b>{n(moments.length)}</b> recent</span>
+        <span><b>{distillLine}</b> distill</span>
       </div>
 
       <div className="memory-body-row">
@@ -361,13 +363,13 @@ export default function MemoryPage() {
             </div>
             <div className="memory-filters">
               <button type="button" className={view === "knowledge" ? "active" : ""} onClick={() => setView("knowledge")}>
-                Knowledge
+                Saved
               </button>
               <button type="button" className={view === "skills" ? "active" : ""} onClick={() => setView("skills")}>
                 Skills
               </button>
               <button type="button" className={view === "moments" ? "active" : ""} onClick={() => setView("moments")}>
-                Moments
+                Recent
               </button>
             </div>
             <div className="memory-scroll">
@@ -392,7 +394,7 @@ export default function MemoryPage() {
                 </section>
               ) : (
                 <section>
-                  <h2 className="memory-h">{view === "skills" ? "Skills" : view === "moments" ? "Moments" : "Knowledge"} · {listItems.length}</h2>
+                  <h2 className="memory-h">{view === "skills" ? "Skills" : view === "moments" ? "Recent" : "Saved"} · {listItems.length}</h2>
                   {listItems.length === 0 ? (
                     <p className="memory-group">None yet</p>
                   ) : (
@@ -476,20 +478,24 @@ export default function MemoryPage() {
               <div className="memory-empty">
                 <div>
                   <Sparkles className="mx-auto mb-3 size-6 text-neutral-400" />
-                  <p>No memories yet. Finalize a session or drop a teaching.</p>
+                  <p>No saved facts yet. Capture a note or drop a teaching.</p>
+                  <p className="memory-group">Graph shows saved facts, not the session log.</p>
                 </div>
               </div>
             ) : (
-              <StellarGraphScene
-                className="session-map"
-                data={data!}
-                highlightedIds={highlighted}
-                focusIds={highlighted}
-                showLabels
-                display={DEFAULT_GRAPH_DISPLAY}
-                onNodeClick={(node: GraphNode) => void inspect(node.id)}
-                onBackgroundClick={closeInspect}
-              />
+              <>
+                <StellarGraphScene
+                  className="session-map"
+                  data={data!}
+                  highlightedIds={highlighted}
+                  focusIds={highlighted}
+                  showLabels
+                  display={DEFAULT_GRAPH_DISPLAY}
+                  onNodeClick={(node: GraphNode) => void inspect(node.id)}
+                  onBackgroundClick={closeInspect}
+                />
+                <p className="memory-graph-caption">Graph shows saved facts, not the session log.</p>
+              </>
             )}
             {selected || inspectError ? (
               <aside className="memory-inspector">
@@ -535,12 +541,10 @@ export default function MemoryPage() {
           <section>
             <h2 className="memory-h">Distill</h2>
             <p className="memory-lifecycle">{distillLine}</p>
+            {pending.length > 0 ? (
+              <p className="memory-group">Will run on the next prompt.</p>
+            ) : null}
             <div className="memory-controls">
-              {pending.length > 0 ? (
-                <button type="button" disabled={busy !== ""} onClick={() => void act("/api/memory/distill", { action: "consolidate" })}>
-                  Retry pending
-                </button>
-              ) : null}
               <button
                 type="button"
                 disabled={busy !== ""}

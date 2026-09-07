@@ -264,6 +264,35 @@ func ArchitectureCompact(result api.ArchitectureResult) string {
 	return b.String()
 }
 
+func ImpactCompact(result api.ImpactResult) string {
+	var b strings.Builder
+	if result.Base != "" {
+		fmt.Fprintf(&b, "base: %s\n", result.Base)
+	}
+	if result.MergeBase != "" {
+		fmt.Fprintf(&b, "merge_base: %s\n", result.MergeBase)
+	}
+	if len(result.ChangedFiles) > 0 {
+		fmt.Fprintf(&b, "changed_files: %d\n", len(result.ChangedFiles))
+		for _, f := range result.ChangedFiles {
+			fmt.Fprintf(&b, "  %s\n", f)
+		}
+	}
+	fmt.Fprintf(&b, "impacted_files: %d\n", len(result.ImpactedFiles))
+	for _, f := range result.ImpactedFiles {
+		reason := strings.Join(f.Reasons, ",")
+		if reason == "" {
+			reason = "-"
+		}
+		fmt.Fprintf(&b, "  %s symbols=%d %s\n", f.Path, f.Symbols, reason)
+	}
+	fmt.Fprintf(&b, "impacted_symbols: %d\n", result.Total)
+	if result.Truncated {
+		b.WriteString("truncated: true\n")
+	}
+	return b.String()
+}
+
 // QueryAgentJSON is the default --json graph query payload: compact text plus
 // slim seeds. Full Node/Edge structs are omitted (default query output is text-only;
 // use --full for the complete QueryResult).

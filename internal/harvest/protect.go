@@ -8,7 +8,7 @@ import (
 const (
 	sentinelBegin = "<!-- BEGIN SUPEROPEN -->"
 	sentinelEnd   = "<!-- END SUPEROPEN -->"
-	skillTripwire = "If the `.so` directory is missing, stop."
+	skillTripwire = "If `.so/` is missing, still run **one** `graph query`."
 )
 
 func ProtectedPath(rel string) bool {
