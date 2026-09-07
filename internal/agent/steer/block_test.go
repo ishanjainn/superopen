@@ -1,6 +1,10 @@
 package steer
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ishanjainn/superopen/internal/paths"
+)
 
 func TestMergeBlockIdempotent(t *testing.T) {
 	first := MergeBlock("hello\n")
@@ -8,8 +12,11 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if first != second {
 		t.Fatalf("merge not idempotent:\n%s\n---\n%s", first, second)
 	}
-	if !containsAll(first, beginMarker, endMarker, "so graph query") {
-		t.Fatalf("missing markers/content: %s", first)
+	if !containsAll(first, beginMarker, endMarker) {
+		t.Fatalf("missing markers: %s", first)
+	}
+	if !paths.MentionsCommand(first, "graph query") {
+		t.Fatalf("missing graph query invocation: %s", first)
 	}
 	if contains(first, "so-verify") || contains(first, "so-scout") || contains(first, "so-auditor") {
 		t.Fatalf("always-on block must not name subagents: %s", first)
@@ -38,22 +45,22 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if !contains(first, "TRUNCATED") {
 		t.Fatalf("block must allow a follow-up query only after TRUNCATED: %s", first)
 	}
-	if contains(first, "so graph trace") || contains(first, "so graph search") {
+	if paths.MentionsCommand(first, "graph trace") || paths.MentionsCommand(first, "graph search") {
 		t.Fatalf("always-on block must not list trace/search as the default: %s", first)
 	}
-	if !contains(first, "so graph snippet") {
+	if !paths.MentionsCommand(first, "graph snippet") {
 		t.Fatalf("block must name snippet as overflow for a listed NODE: %s", first)
 	}
 	if !contains(first, "BODIES") {
 		t.Fatalf("block must tell agents to stop on query BODIES: %s", first)
 	}
-	if !contains(first, "so graph impact") {
+	if !paths.MentionsCommand(first, "graph impact") {
 		t.Fatalf("block must name graph impact for multi-file work: %s", first)
 	}
 	if !contains(first, "head or tail") {
-		t.Fatalf("block must forbid piping so through head/tail: %s", first)
+		t.Fatalf("block must forbid piping so through head or tail: %s", first)
 	}
-	if !contains(first, "so memory search") {
+	if !paths.MentionsCommand(first, "memory search") {
 		t.Fatalf("block must say search is a title index: %s", first)
 	}
 	if !contains(first, "memory recall") {
@@ -89,7 +96,7 @@ func TestMergeBlockIdempotent(t *testing.T) {
 }
 
 func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
-	if contains(SearchNudge(), "so graph search") || contains(ReadNudge(), "so graph search") {
+	if paths.MentionsCommand(SearchNudge(), "graph search") || paths.MentionsCommand(ReadNudge(), "graph search") {
 		t.Fatal("nudges must not list so graph search (spray menu)")
 	}
 	for _, n := range []string{SearchNudge(), ReadNudge(), MemoryNudge(), CaptureNudge(), GraphStartLine(), MemoryStartLine(3), HookReminder(), MemoryHookReminder(), SnippetOverflowNudge(), QueryRepeatNudge()} {
@@ -130,24 +137,24 @@ func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 	if !contains(SearchNudge(), ".so/") || !contains(HookReminder(), ".so/") {
 		t.Fatal("search/reminder should tell agents not to Grep .so/")
 	}
-	if contains(ReadNudge(), "so graph snippet") || contains(ReadNudge(), "so graph trace") {
+	if paths.MentionsCommand(ReadNudge(), "graph snippet") || paths.MentionsCommand(ReadNudge(), "graph trace") {
 		t.Fatal("read nudge must not list snippet/trace (spray menu)")
 	}
 	if ReadNudge() != SearchNudge() {
 		t.Fatal("read nudge should match search nudge (query only)")
 	}
 	overflow := SnippetOverflowNudge()
-	if !contains(overflow, "so graph snippet") {
+	if !paths.MentionsCommand(overflow, "graph snippet") {
 		t.Fatal("post-query overflow must name snippet")
 	}
-	if contains(overflow, "so graph search") || contains(overflow, "so graph trace") {
+	if paths.MentionsCommand(overflow, "graph search") || paths.MentionsCommand(overflow, "graph trace") {
 		t.Fatal("overflow must not spray search/trace")
 	}
 	if contains(overflow, "MANDATORY") || contains(overflow, `"`) || contains(overflow, "\n") {
 		t.Fatalf("overflow must be one line without quotes: %q", overflow)
 	}
 	repeat := QueryRepeatNudge()
-	if !contains(repeat, "so graph snippet") || !contains(repeat, "TRUNCATED") {
+	if !paths.MentionsCommand(repeat, "graph snippet") || !contains(repeat, "TRUNCATED") {
 		t.Fatalf("repeat-query overflow must name snippet and TRUNCATED: %q", repeat)
 	}
 	if contains(SearchNudge(), "Do not ls") == false {
