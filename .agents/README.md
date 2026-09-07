@@ -1,4 +1,4 @@
-# `.agents/` — shared agent config (this repo only)
+# `.agents/` shared agent config (this repo only)
 
 Contributor-facing rules and pointers. **Not** installed by `so install`.
 
@@ -26,7 +26,7 @@ This checkout has no `.cursor/rules` directory. Scoped rules live only in `.agen
 ## Other agents
 
 - **Claude Code / Codex:** read root `AGENTS.md` and the nested `AGENTS.md` for your working directory; optional: merge `.agents/rules/*.mdc` into project instructions.
-- **CI:** no automatic load — cite `AGENTS.md` in workflow docs if needed.
+- **CI:** no automatic load. Cite `AGENTS.md` in workflow docs if needed.
 
 ## End-user product
 

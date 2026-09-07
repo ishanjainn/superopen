@@ -20,19 +20,19 @@ must look like that product:
 
 Same harness, same locally built `so`, same `BENCHMARKS.md`. Pick one:
 
-**1. Python on this machine** — Claude Code runs in a per-arm container (`--isolate docker`). Developer HOME is never mounted.
+**1. Python on this machine.** Claude Code runs in a per-arm container (`--isolate docker`). Developer HOME is never mounted.
 
 ```bash
 python3 benchmarks/run.py --mode compare --scale small --host claude-code --isolate docker --so-bin ./bin/so
 ```
 
-**2. Docker for the whole harness** — the `so-bench` image runs `benchmarks/run.py`. Isolation is the container (`--isolate host` inside). Auth files are copied in; host HOME is not a volume.
+**2. Docker for the whole harness.** The `so-bench` image runs `benchmarks/run.py`. Isolation is the container (`--isolate host` inside). Auth files are copied in; host HOME is not a volume.
 
 ```bash
 ./benchmarks/docker-run.sh --mode compare --scale small --host claude-code --max-spend 20
 ```
 
-Default mode is `offline` — **harness smoke only**, not a Superopen score. Default scale is **small**. Use `--scale full` only after small clears the bar.
+Default mode is `offline`: **harness smoke only**, not a Superopen score. Default scale is **small**. Use `--scale full` only after small clears the bar.
 
 ## Harness smoke vs product benchmarks
 
@@ -45,14 +45,14 @@ Default mode is `offline` — **harness smoke only**, not a Superopen score. Def
 
 | Mode | `so init` | `so install` (plugin) | Agent host | Notes |
 |------|-----------|------------------------|------------|-------|
-| `index` | yes — Django worktree | no (graph CLI only) | — | Wall time + graph counts |
-| `graph` | yes — Django worktree | no | — | 12 probes via `so graph *` |
-| `temporal` | yes — 5 Django LTS tags | no | — | Index growth table |
-| `memory` | yes — per-run memory store | phase 3: yes | phase 3: Claude Code or OpenCode | Ingest via `so memory capture`; rank via `so --json memory recall`. Phase 3 is a **coding-agent session** (user question only). Extractive substring is debug. |
-| `latency` | yes — tiny fixture | no | — | `so memory search` timing on your hardware |
-| `contradict` | — | — | — | Go tests in `internal/memory/` (contradiction ranking semantics) |
+| `index` | yes (Django worktree) | no (graph CLI only) | - | Wall time + graph counts |
+| `graph` | yes (Django worktree) | no | - | 12 probes via `so graph *` |
+| `temporal` | yes (5 Django LTS tags) | no | - | Index growth table |
+| `memory` | yes (per-run memory store) | phase 3: yes | phase 3: Claude Code or OpenCode | Ingest via `so memory capture`; rank via `so --json memory recall`. Phase 3 is a **coding-agent session** (user question only). Extractive substring is debug. |
+| `latency` | yes (tiny fixture) | no | - | `so memory search` timing on your hardware |
+| `contradict` | - | - | - | Go tests in `internal/memory/` (contradiction ranking semantics) |
 | `compare` **native** arm | **no** (stock agent) | **no** | OpenCode or Claude Code | Baseline: grep/read without Superopen |
-| `compare` **superopen** arm | yes — per-question Django worktree | yes — `--vendor=opencode` or `claude-code` | same host + model | One `so init` seed, then copy `.so/` into a fresh worktree/HOME per question |
+| `compare` **superopen** arm | yes (per-question Django worktree) | yes (`--vendor=opencode` or `claude-code`) | same host + model | One `so init` seed, then copy `.so/` into a fresh worktree/HOME per question |
 
 Compare runs **identical prompts** on both arms. Only the superopen arm gets `so init` + `so install`; that is the native-vs-Superopen contrast, not a bug. Harness prompts never mention Superopen. `--compare-arms` / `--compare-baseline` resume one arm like SWE.
 
@@ -121,7 +121,7 @@ the Actions cache.
 
 ## Offline tests (`--mode offline`)
 
-Unit tests in `tests/test_harness.py`. **These do not exercise Superopen** — they verify the harness grader, baselines, and fixtures.
+Unit tests in `tests/test_harness.py`. **These do not exercise Superopen.** They verify the harness grader, baselines, and fixtures.
 
 | Test | What it checks | Est. duration |
 |------|----------------|---------------|
@@ -142,9 +142,9 @@ Academic datasets are not redistributed. See [datasets/README.md](datasets/READM
 |---------|---|---------|
 | LOCOMO (`locomo10.json`) | 300 | `memory --split locomo` |
 | LongMemEval-S (English subset) | 50 | `memory --split longmemeval` |
-| Django (pinned LTS tag) | — | `index`, `graph`, `compare`, `temporal` |
+| Django (pinned LTS tag) | - | `index`, `graph`, `compare`, `temporal` |
 | SWE-bench Verified | 5 small / 50 full | `swe` |
-| `fixtures/tiny/` | — | `latency` smoke |
+| `fixtures/tiny/` | - | `latency` smoke |
 
 ## Artifacts
 

@@ -1,6 +1,6 @@
 ---
 name: so
-description: "Use for any question about a codebase, its architecture, file relationships, or project content — treat source questions as graph query first. Also use for prior-work facts (so memory recall) and when the user wants a fact stored (so memory capture). Superopen is a CLI binary invoked with Bash, not an MCP tool. If .so/ is missing, run one graph query anyway (a linked worktree may seed from the parent). If that prints the unmanaged message, stop and do not so init unless the user explicitly asked."
+description: "Use for any question about a codebase, its architecture, file relationships, or project content. Treat source questions as graph query first. Also use for prior-work facts (so memory recall) and when the user wants a fact stored (so memory capture). Superopen is a CLI binary invoked with Bash, not an MCP tool. If .so/ is missing, run one graph query anyway (a linked worktree may seed from the parent). If that prints the unmanaged message, stop and do not so init unless the user explicitly asked."
 ---
 
 # Superopen (`/so`)

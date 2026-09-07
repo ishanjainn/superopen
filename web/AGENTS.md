@@ -1,6 +1,6 @@
 # UI (`so dev`)
 
-Next.js app — Sessions, Memory, Harvest, Graph map. Release bundle via `scripts/pack-web.sh`.
+Next.js app: Sessions, Memory, Harvest, Graph map. Release bundle via `scripts/pack-web.sh`.
 
 Parent index: [../AGENTS.md](../AGENTS.md). Memory API: [../internal/memory/AGENTS.md](../internal/memory/AGENTS.md).
 
@@ -20,7 +20,7 @@ cd web && npm ci --ignore-scripts && npm run dev   # hot reload
 | `src/lib/so/` | Exec helpers |
 | `src/map/` | Graph viz (Three.js) |
 
-Same `.so/db/so.db` as CLI — keep API shapes stable.
+Same `.so/db/so.db` as CLI. Keep API shapes stable.
 
 ## Tests
 

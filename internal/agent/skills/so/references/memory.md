@@ -4,7 +4,7 @@ Load this only when the user asks about prior decisions or personal facts in
 **this** workspace, or when a SessionStart line named memories you need.
 Skip on a cold clone with no diary.
 
-Memory is hints, not authority. Superopen is a **CLI binary** — invoke it with
+Memory is hints, not authority. Superopen is a **CLI binary**. Invoke it with
 **Bash**. The `.so/` store is your own notes from past sessions in this workspace.
 Do not use the host's built-in memory or `MEMORY.md` for these facts. Graph answers “where is X now”;
 memory answers “what did we decide / what was saved.”
@@ -19,7 +19,7 @@ truncation. `so memory` with no args is a live dashboard; `--help` is the catalo
 Start with **one** recall via Bash. Do not spray searches, do not use `--help`
 as a workflow, and do not run `so graph search`.
 
-### 0. Recall — bodies (the agent command)
+### 0. Recall  -  bodies (the agent command)
 
 ```bash
 __SO_BIN__ memory recall "<cue>"
@@ -27,13 +27,13 @@ __SO_BIN__ memory recall "<cue>"
 
 Use this first for “who is…”, “what did I…”, “what did we decide…”.
 Quote the stored note and cite `#id`. Titles that look like import ids are
-still this workspace diary — do not refuse them. If two notes conflict, cite
+still this workspace diary  -  do not refuse them. If two notes conflict, cite
 both `#id`s and pick the most specific or recent. If the first cue misses or
 the clip does not contain the fact, run recall again with a second cue.
-A populated store with no lexical hit still has memories — try different terms.
+A populated store with no lexical hit still has memories  -  try different terms.
 `hint:` on stdout distinguishes empty store vs no match vs sealed index.
 
-### 1. Search — index only (titles, not bodies)
+### 1. Search  -  index only (titles, not bodies)
 
 ```bash
 __SO_BIN__ memory search "<cue>"
@@ -56,7 +56,7 @@ help[2]:
 Types: `decision|bugfix|feature|refactor|discovery|change` (plus kinds
 `prompt|session|teaching|working`).
 
-### 2. Timeline — neighbors around an id
+### 2. Timeline  -  neighbors around an id
 
 ```bash
 __SO_BIN__ memory timeline --around <id> --before 5 --after 5
@@ -64,7 +64,7 @@ __SO_BIN__ memory timeline --around <id> --before 5 --after 5
 
 Same TOON index as search.
 
-### 3. Get — bodies for the ids you kept
+### 3. Get  -  bodies for the ids you kept
 
 ```bash
 __SO_BIN__ memory get <id> [<id>…]
@@ -112,11 +112,11 @@ Do not expect a PreToolUse file-read inject.
 ## Empty / missing
 
 `0 memories` + `hint: no saved memories` means the store is empty.
-`0 memories` + `hint: N memories exist` means the cue missed — run recall.
+`0 memories` + `hint: N memories exist` means the cue missed  -  run recall.
 Windows: the installed binary is `so.exe`; this skill already substituted
 `__SO_BIN__`.
 
 Episode bodies are encrypted at rest; the FTS search index stores plaintext
 of those bodies. `so memory distill` may send a session digest to a headless
-coding-agent CLI when one is authenticated — the only path that leaves the
+coding-agent CLI when one is authenticated  -  the only path that leaves the
 machine. Live `--apply` JSON stays on-machine.

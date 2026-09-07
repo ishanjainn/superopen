@@ -44,8 +44,8 @@ Parent index: [../../AGENTS.md](../../AGENTS.md)
 
 ## Build tags
 
-- `go test ./internal/graph/engine/` — portable stub path.
-- `make test-native` — `tsnative,sqlite_fts5` for full parser + FTS.
+- `go test ./internal/graph/engine/`: portable stub path.
+- `make test-native`: `tsnative,sqlite_fts5` for full parser + FTS.
 
 ## Tests
 
@@ -67,7 +67,7 @@ Maintainer-only CLIs (not in CI). Run from repo root with `SUPEROPEN_GRAPH_SOURC
 
 ## Change checklist
 
-- [ ] Query seeds use FTS + path File SQL — no `ORDER BY id LIMIT` sampling.
+- [ ] Query seeds use FTS + path File SQL, not `ORDER BY id LIMIT` sampling.
 - [ ] File nodes: seeds on **query** only; filtered from **`so graph search`**.
 - [ ] Default output stays compact text; slim agent JSON (no full `nodes[]`).
 - [ ] TRUNCATED suggests snippet or narrow; snippet for known symbols.

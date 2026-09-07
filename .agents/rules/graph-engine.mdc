@@ -1,5 +1,5 @@
 ---
-description: Graph engine — query, FTS, index pipeline
+description: Graph engine: query, FTS, index pipeline
 globs: internal/graph/**/*
 alwaysApply: false
 ---

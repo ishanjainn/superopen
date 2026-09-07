@@ -18,7 +18,7 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). Graph output: [../graph/AGENTS
 |-----|--------|
 | Stable exit codes | `internal/cli/cli.go` (0/1/2 + 3 not-found / 4 continuation) |
 | `--json` / `--full` | Root persistent flags; env `SO_JSON`, `SUPEROPEN_JSON` |
-| TOON lists | `cli.Rows()` — `kind[n]{cols}:` plus `count:` |
+| TOON lists | `cli.Rows()`: `kind[n]{cols}:` plus `count:` |
 | Content-first home | `so memory` (no-args dashboard); `so sessions` lists |
 | Definitive empty states | `0 memories` / `0 sessions` plus `help[]` |
 | Structured errors | stdout `error:` / `hint:` (JSON `{ok:false,code,error,hint}`) |
@@ -56,7 +56,7 @@ Wiring: `graph_cmd.go`, `graph_native_cli.go` → `internal/graph/client`.
 2. Update `internal/cli` and `format/*` if output shape changes.
 3. `go test ./internal/cli/ ./cmd/so/...`
 
-Dogfood: `sh scripts/install.sh`, then `so init` in **another** repo — [CONTRIBUTING.md](../../CONTRIBUTING.md).
+Dogfood: `sh scripts/install.sh`, then `so init` in **another** repo. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ## Change checklist
 

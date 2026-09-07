@@ -4,7 +4,7 @@ globs: internal/agent/**/*
 alwaysApply: false
 ---
 
-Read @internal/agent/AGENTS.md — contributor docs vs installed user skill.
+Read @internal/agent/AGENTS.md for contributor docs vs installed user skill.
 
 Do not re-enable ExploreAugment on Grep/Read without explicit product approval.
 `so sessions hook` stdout is host control JSON, never AXI TOON/`help[]`.
