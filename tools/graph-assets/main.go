@@ -1,6 +1,5 @@
 // Command graph-assets reproducibly compiles the pinned generated
 // Tree-sitter grammars into combined WASI parser modules. It is a development
-// tool and is not included in Superopen release archives.
 package main
 
 import (
