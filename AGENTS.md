@@ -22,11 +22,8 @@
 
 ## Shared rules (all agents)
 
-Scoped rules live in **[`.agents/rules/`](.agents/rules/)**. They are agent-agnostic (Cursor, Claude Code, Codex, etc.).
-
-- Always-on: [`.agents/rules/repo.mdc`](.agents/rules/repo.mdc)
-
-There is no repo-local `.cursor/rules` tree. Cursor still loads user-level `~/.cursor/rules` from `so install`. See [`.agents/README.md`](.agents/README.md) for layout.
+Project instructions live in this file and the nested `AGENTS.md` files listed above.
+There is no repo-local `.cursor/rules` tree. Cursor still loads user-level `~/.cursor/rules` from `so install`.
 
 ## Principles
 
