@@ -61,6 +61,47 @@ Every session, your coding agent starts from zero. It greps, opens files, follow
 
 Humans onboard to a codebase once. Agents onboard every single time.
 
+## See it in action
+
+After `so init`, agents ask these four surfaces instead of grepping and re-reading transcripts:
+
+```
+$ so graph query "how do session hooks steer Cursor?"
+Traversal: BFS depth=2 | Start: [emitSteerContext HookReminder] | 8 nodes
+NODE emitSteerContext [qn=internal.agent.hook.emitSteerContext src=internal/agent/hook/steer_context.go loc=L27-82]
+EDGE emitSteerContext --CALLS --> steerDecisionFor at=internal/agent/hook/steer_context.go:L28
+help[1]:
+  so graph snippet internal.agent.hook.emitSteerContext
+
+$ so memory recall "login timeout"
+hits: 1  anti_hits: 0  budget: 1500
+memories[1]{id,kind,title,tokens}:
+  42,knowledge,login timeout is 30s,18
+count: 1 of 1
+#42  medium  2026-09-07  login timeout is 30s
+Login timeout is 30s. Check the gateway before raising it.
+help[2]:
+  so memory get 42 --full
+  so memory timeline --around 42
+
+$ so memory distill --apply sess_abc
+applied sess_abc via live written=1 → #42
+
+$ so harvest list
+proposals[1]{id,status,kind,target,title,plus,minus}:
+  7,open,improve,AGENTS.md,prefer graph query before grep,12,0
+count: 1 of 1
+help[3]:
+  so harvest show <id>
+  so harvest apply <id>
+  so harvest decline <id>
+
+$ so harvest apply 7
+applied #7 improve AGENTS.md
+```
+
+`query` is the code map. `recall` is the project diary (cite `#id`). Distill compresses a finished session into knowledge (`--brief` then `--apply`, or `[]` if nothing durable). Harvest stages a playbook diff until you `apply`. More: [graph](docs/graph.md), [memory](docs/memory.md), [harvest](docs/harvest.md).
+
 ## Prerequisites
 
 | Requirement | Minimum | Check | Install |

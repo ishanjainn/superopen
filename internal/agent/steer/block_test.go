@@ -74,8 +74,11 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if !contains(first, "CLI binary") {
 		t.Fatalf("block must say so is a CLI binary: %s", first)
 	}
-	if !contains(first, "Bash") {
-		t.Fatalf("block must say invoke with Bash: %s", first)
+	if !contains(first, "shell") {
+		t.Fatalf("block must say invoke with the shell tool: %s", first)
+	}
+	if !contains(first, "PowerShell") {
+		t.Fatalf("block must name PowerShell for Windows hosts: %s", first)
 	}
 	if contains(first, "personal questions") {
 		t.Fatalf("block must not frame diary as personal/privacy: %s", first)
@@ -99,8 +102,8 @@ func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 		if contains(n, `"`) {
 			t.Fatalf("nudge must not contain double quotes (OpenCode/Pi echo): %q", n)
 		}
-		if !contains(n, "Bash") && !contains(n, "bash") {
-			t.Fatalf("nudge should say Bash: %s", n)
+		if !contains(n, "shell") {
+			t.Fatalf("nudge should say shell: %s", n)
 		}
 	}
 	if contains(SearchNudge(), "not an MCP") || contains(ReadNudge(), "not an MCP") || contains(MemoryNudge(), "not an MCP") {

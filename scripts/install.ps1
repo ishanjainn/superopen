@@ -111,7 +111,13 @@ if ($ScriptDir) {
         $Out = Join-Path $InstallDir 'so.exe'
         Push-Location $Root
         try {
-            go build -o $Out ./cmd/so
+            $hasCc = (Get-Command gcc -ErrorAction SilentlyContinue) -or (Get-Command clang -ErrorAction SilentlyContinue)
+            if ($hasCc) {
+                $env:CGO_ENABLED = '1'
+                go build -tags tsnative,sqlite_fts5 -o $Out ./cmd/so
+            } else {
+                go build -o $Out ./cmd/so
+            }
         } finally {
             Pop-Location
         }

@@ -43,7 +43,7 @@ OS-neutral: spawn `so` / `so.exe` with argv (never `shell: true`). Windows insta
 
 When `.so/` exists:
 
-1. **Codebase questions (repo has source):** `so graph query "<question>"` via Bash. Superopen has no MCP and must not grow one.
+1. **Codebase questions (repo has source):** `so graph query "<question>"` in the host shell tool. Superopen has no MCP and must not grow one.
 2. **Explore-tool nudge:** once per session (`SearchNudge` / `ReadNudge`) before a graph query; after a successful query, Grep stays silent, source Read gets a once-per-session snippet overflow, and a second `graph query` gets a once-per-session snippet overflow (re-query only if TRUNCATED). Skip when the prompt is personal/memory (`MemoryNudge` instead). Codex PreToolUse stays empty.
 3. **No ExploreAugment** on Grep/Read (`graphGate`)
 4. **Follow-ups:** if NODE/EDGE lines or attached BODIES answer, stop. Need another body: `so graph snippet` of a listed NODE. Do not list the tree to confirm Superopen. Grep/Read only for a literal the graph does not index. After TRUNCATED, narrow first. No search spray.
@@ -80,7 +80,7 @@ Benchmarks: [../../benchmarks/agent-graph-eval/AGENTS.md](../../benchmarks/agent
 
 - [ ] `skills/so/SKILL.md`: query-first tripwire unless intentional.
 - [ ] Memory only in `references/memory.md`. Harvest only in `references/harvest.md`.
-- [ ] Nudges: no MANDATORY; no `so graph search` in default hook text. CLI/Bash once in Block/skill.
+- [ ] Nudges: no MANDATORY; no `so graph search` in default hook text. CLI path once in Block/skill (shell tool, not Bash-only).
 - [ ] No ExploreAugment on live Grep/Read path.
 - [ ] `Block()` / `CursorRule()`: no `--json` in always-on block.
 - [ ] `plugins/*/hooks/hooks.json` synced with install tests.

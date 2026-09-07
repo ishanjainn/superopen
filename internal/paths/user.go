@@ -218,9 +218,10 @@ func LookPathSo() (string, error) {
 	return "", fmt.Errorf("%s binary not found on PATH", name)
 }
 
-// ResolveSoBin is the absolute so binary to paste into Bash, or "so"/"so.exe"
-// when this process is not the CLI (tests). Prefer the running executable so
-// hooks and SessionStart match `so install`, then SUPEROPEN_SO_BIN, then PATH name.
+// ResolveSoBin is the absolute so binary to paste into the host shell tool, or
+// "so"/"so.exe" when this process is not the CLI (tests). Prefer the running
+// executable so hooks and SessionStart match `so install`, then SUPEROPEN_SO_BIN,
+// then PATH name.
 func ResolveSoBin() string {
 	if exe, err := os.Executable(); err == nil && IsSoBinary(exe) {
 		if abs, err := filepath.Abs(exe); err == nil {

@@ -40,7 +40,7 @@ path_hint() {
 	persist_path
 }
 
-# Persist ~/.superopen/bin on PATH for new terminals (curl + local). The
+# Persist the install dir on PATH for new terminals (curl + local). The
 # running `sh scripts/install.sh` process cannot change the parent shell.
 persist_path() {
 	dir_expr='$HOME/.superopen/bin'
@@ -49,7 +49,7 @@ persist_path() {
 		dir_expr=$SUPEROPEN_INSTALL_DIR
 		marker=$SUPEROPEN_INSTALL_DIR
 	fi
-	for name in .zprofile .zshrc .bash_profile .bashrc; do
+	for name in .zprofile .zshrc .bash_profile .bashrc .profile; do
 		file="$HOME/$name"
 		if [ -f "$file" ] && grep -F "$marker" "$file" >/dev/null 2>&1; then
 			continue
@@ -61,6 +61,18 @@ persist_path() {
 		printf '\n# Superopen CLI\nexport PATH="%s:$PATH"\n' "$dir_expr" >> "$file"
 		info "Added $dir_expr to $file"
 	done
+	fish_file="$HOME/.config/fish/config.fish"
+	if command -v fish >/dev/null 2>&1 || [ -f "$fish_file" ]; then
+		mkdir -p "$HOME/.config/fish"
+		if [ ! -f "$fish_file" ] || ! grep -F "$marker" "$fish_file" >/dev/null 2>&1; then
+			if [ ! -f "$fish_file" ]; then
+				umask 022
+				: > "$fish_file"
+			fi
+			printf '\n# Superopen CLI\nfish_add_path "%s"\n' "$dir_expr" >> "$fish_file"
+			info "Added $dir_expr to $fish_file"
+		fi
+	fi
 	info "This terminal will not see so until PATH is reloaded. Run:"
 	info "  export PATH=\"$SUPEROPEN_INSTALL_DIR:\$PATH\""
 	info "or open a new terminal, then: so --help"

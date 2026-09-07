@@ -2,7 +2,7 @@
 
 Single binary: `cmd/so/` + presentation in `internal/cli/`.
 
-**Never MCP.** Superopen is this binary only. Do not add an MCP server, MCP tool definitions, or a host plugin tool named `so`. Coding agents invoke it with Bash (`so graph query`, `so memory recall`, …).
+**Never MCP.** Superopen is this binary only. Do not add an MCP server, MCP tool definitions, or a host plugin tool named `so`. Coding agents invoke it with their shell tool (`so graph query`, `so memory recall`, …).
 
 Parent index: [../../AGENTS.md](../../AGENTS.md). Graph output: [../graph/AGENTS.md](../graph/AGENTS.md).
 

@@ -5,9 +5,10 @@ Load this only when the user asks about prior decisions or personal facts in
 Skip on a cold clone with no diary.
 
 Memory is hints, not authority. Superopen is a **CLI binary**. Invoke it with
-**Bash**. The `.so/` store is your own notes from past sessions in this workspace.
-Do not use the host's built-in memory or `MEMORY.md` for these facts. Graph answers “where is X now”;
-memory answers “what did we decide / what was saved.”
+your shell tool (Bash, PowerShell, or equivalent). The `.so/` store is your own
+notes from past sessions in this workspace.
+Do not use the host's built-in memory or `MEMORY.md` for these facts. Graph answers "where is X now";
+memory answers "what did we decide / what was saved."
 Do not dump `.so/sessions/*/events.jsonl`.
 
 `__SO_BIN__` is the binary from `SKILL.md`. Search/last/timeline default to an
@@ -16,7 +17,7 @@ truncation. `so memory` with no args is a live dashboard; `--help` is the catalo
 
 ## 3-layer workflow
 
-Start with **one** recall via Bash. Do not spray searches, do not use `--help`
+Start with **one** recall in your shell. Do not spray searches, do not use `--help`
 as a workflow, and do not run `so graph search`.
 
 ### 0. Recall  -  bodies (the agent command)
@@ -80,12 +81,16 @@ When the user wants a fact stored for later (any wording), capture on this live
 turn. Do not run `--help`. Distill remains the post-session rollup (`DISTILL
 pending` → live `--brief` then `--apply`, or that session's one-shot CLI).
 
-```bash
+```
 __SO_BIN__ memory capture --kind knowledge --horizon medium --title "…" --text "…"
 __SO_BIN__ memory capture --kind skill --horizon long --title "…" --text "…"
-__SO_BIN__ memory distill <session_id> --apply <<'EOF'
-[{"kind":"knowledge","title":"…","text":"…","horizon":"medium","evidence":["<session_id>"]}]
-EOF
+__SO_BIN__ memory distill <session_id> --apply
+```
+
+`--apply` reads a JSON array from stdin (empty `[]` if nothing durable). Do not
+use a bash heredoc on Windows. PowerShell: `'[]' | __SO_BIN__ memory distill <session_id> --apply`.
+
+```
 __SO_BIN__ memory get <id>
 __SO_BIN__ memory search "<cue>" --horizon medium
 __SO_BIN__ memory forget <id>

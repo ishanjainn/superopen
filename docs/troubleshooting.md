@@ -17,7 +17,7 @@ The binary is installed, but your shell cannot find it.
 
 **curl installer (macOS / Linux)**
 
-`so` is written to `~/.superopen/bin`. The installer appends that directory to `.zprofile`, `.zshrc`, `.bash_profile`, and `.bashrc`. It cannot change the terminal you already have open.
+`so` is written to `~/.superopen/bin`. The installer appends that directory to `.zprofile`, `.zshrc`, `.bash_profile`, `.bashrc`, and `.profile` (and Fish `config.fish` when Fish is present). It cannot change the terminal you already have open.
 
 ```bash
 export PATH="$HOME/.superopen/bin:$PATH"
@@ -30,7 +30,7 @@ Or open a new terminal.
 
 `so.exe` is written to `%USERPROFILE%\.superopen\bin` and added to your user PATH. Open a new PowerShell window.
 
-If you built from a checkout with Go, run `sh scripts/install.sh` (or `powershell -File scripts/install.ps1`) so agents pin `~/.superopen/bin/so`, not `./bin/so`.
+If you built from a checkout with Go, run `sh scripts/install.sh` (or `powershell -File scripts/install.ps1`) so agents pin that install prefix, not `./bin/so`.
 
 ## PowerShell treats `/so init` as a path
 

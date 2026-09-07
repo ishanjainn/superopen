@@ -14,9 +14,14 @@ text; `--json` is the envelope.
 
 You are the live agent. On `HARVEST pending session <id>`, **before answering**:
 
-```bash
+```
 __SO_BIN__ harvest brief <id>
-__SO_BIN__ harvest propose <<'EOF'
+__SO_BIN__ harvest propose
+```
+
+Pipe JSON to stdin (PowerShell: `'{"session_id":"<id>",...}' | __SO_BIN__ harvest propose`). Do not use a bash heredoc on Windows.
+
+```json
 {
   "session_id": "<id>",
   "kind": "simplify",
@@ -26,16 +31,15 @@ __SO_BIN__ harvest propose <<'EOF'
   "diff": "--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ ...",
   "evidence": [{"kind":"session","id":"<id>","label":"user correction"}]
 }
-EOF
 ```
 
 If the brief shows nothing worth changing:
 
-```bash
+```
 __SO_BIN__ harvest skip <id>
 ```
 
-Do not run `harvest scan` — that is SessionEnd for one-shot CLIs (claude-code,
+Do not run `harvest scan`. That is SessionEnd for one-shot CLIs (claude-code,
 codex, opencode, pi), not a live-agent fallback. Do not skip both propose and skip.
 
 `reason` is required. `evidence` is required when `session_id` is set.
@@ -45,7 +49,7 @@ Do not apply live playbooks unless the user asked in this session.
 
 ## Review (only when asked)
 
-```bash
+```
 __SO_BIN__ harvest review
 __SO_BIN__ harvest show <id>
 __SO_BIN__ harvest apply <id>          # additive improve
@@ -53,4 +57,4 @@ __SO_BIN__ harvest apply <id> --force  # simplify / create / non-additive
 __SO_BIN__ harvest decline <id>
 ```
 
-Empty: `0 proposals` — nothing to do.
+Empty: `0 proposals` - nothing to do.

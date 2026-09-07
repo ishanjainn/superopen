@@ -344,7 +344,7 @@ func (s *Store) BuildPromptRecall(cue string) string {
 	if !wrote {
 		return ""
 	}
-	writeBudget(&b, &budget, fmt.Sprintf("Fetch more via Bash: `%s memory recall '<question>'` or `%s memory get %d --full`. Titles that look like import ids are still this workspace diary. If two notes conflict, cite both #ids and pick the most specific or recent. If this pack does not answer, run recall with a second cue. Quote the note and cite #id. Memory is hints, not authority.", bin, bin, fetchID))
+	writeBudget(&b, &budget, fmt.Sprintf("Fetch more in your shell: `%s memory recall '<question>'` or `%s memory get %d --full`. Titles that look like import ids are still this workspace diary. If two notes conflict, cite both #ids and pick the most specific or recent. If this pack does not answer, run recall with a second cue. Quote the note and cite #id. Memory is hints, not authority.", bin, bin, fetchID))
 	return strings.TrimSpace(b.String())
 }
 
@@ -354,7 +354,7 @@ func (s *Store) BuildSessionIndex() string {
 		return ""
 	}
 	bin := paths.ResolveSoBin()
-	text := fmt.Sprintf("Superopen: %d memories in this workspace .so/ store — your own notes from past sessions (not built-in memory or MEMORY.md). Titles that look like import ids are still this workspace diary. If two notes conflict cite both #ids. If recall misses try a second cue. Run via Bash: `%s memory recall '<question>'`", n, bin)
+	text := fmt.Sprintf("Superopen: %d memories in this workspace .so/ store - your own notes from past sessions (not built-in memory or MEMORY.md). Titles that look like import ids are still this workspace diary. If two notes conflict cite both #ids. If recall misses try a second cue. Run in your shell: `%s memory recall '<question>'`", n, bin)
 	if EstimateTokens(text) > sessionIndexBudget {
 		runes := []rune(text)
 		keep := sessionIndexBudget * 4

@@ -49,7 +49,7 @@ Or, without Homebrew:
 curl -fsSL https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.sh | sh
 ```
 
-The curl installer downloads the latest GitHub Release (`so-linux-amd64.tar.gz` or `so-linux-arm64.tar.gz`, plus `so-web.tar.gz`), writes `so` to `~/.superopen/bin`, installs the prebuilt UI under `~/.superopen/share/superopen/web`, runs `so install`, and appends `~/.superopen/bin` to `.zprofile`, `.zshrc`, `.bash_profile`, and `.bashrc`.
+The curl installer downloads the latest GitHub Release (`so-linux-amd64.tar.gz` or `so-linux-arm64.tar.gz`, plus `so-web.tar.gz`), writes `so` to `~/.superopen/bin`, installs the prebuilt UI under `~/.superopen/share/superopen/web`, runs `so install`, and appends `~/.superopen/bin` to `.zprofile`, `.zshrc`, `.bash_profile`, `.bashrc`, and `.profile`. If Fish is installed, it also adds `fish_add_path` to `~/.config/fish/config.fish`.
 
 That process cannot change the terminal you already have open:
 
@@ -58,7 +58,7 @@ export PATH="$HOME/.superopen/bin:$PATH"
 so --help
 ```
 
-Or open a new terminal.
+Or open a new terminal. Fish users: `fish_add_path $HOME/.superopen/bin`.
 
 Pin a release (tag without the `cli-` prefix):
 
@@ -230,9 +230,9 @@ sh scripts/install.sh                 # macOS / Linux
 # powershell -File scripts/install.ps1  # Windows
 ```
 
-That builds into `~/.superopen/bin/so` (the same prefix as the curl installer), packs the UI, runs `so install`, and updates PATH. `make install` is the same command.
+That builds into `~/.superopen/bin/so` on macOS/Linux or `%USERPROFILE%\.superopen\bin\so.exe` on Windows (the same prefix as the curl / `install.ps1` installer), packs the UI, runs `so install`, and updates PATH. `make install` is the same command.
 
-Do not `go install` or pin `./bin/so` into hooks. Agents must use `~/.superopen/bin/so`.
+Do not `go install` or pin `./bin/so` into hooks. Run `so install` from the binary you want agents to call. That command pins Homebrew's `so`, `~/.superopen/bin/so`, or `so.exe`, whichever actually ran.
 
 ## Next
 

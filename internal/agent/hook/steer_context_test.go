@@ -316,8 +316,8 @@ func TestSessionStartIndexGraphFirstNoBodies(t *testing.T) {
 		if !strings.Contains(text, "memory recall") {
 			t.Fatalf("%s %s: must give recall command: %q", tc.vendor, tc.event, text)
 		}
-		if !strings.Contains(text, "Bash") {
-			t.Fatalf("%s %s: must say run with Bash: %q", tc.vendor, tc.event, text)
+		if !strings.Contains(text, "shell") {
+			t.Fatalf("%s %s: must say run in your shell: %q", tc.vendor, tc.event, text)
 		}
 		if !strings.Contains(text, ".so/") && !strings.Contains(text, "MEMORY.md") {
 			t.Fatalf("%s %s: must name the workspace store: %q", tc.vendor, tc.event, text)

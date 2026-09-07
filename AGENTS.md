@@ -31,7 +31,7 @@ There is no repo-local `.cursor/rules` tree. Cursor still loads user-level `~/.c
 ## Principles
 
 1. **Effective, cheap, accurate** graph agent UX. See [internal/graph/AGENTS.md](internal/graph/AGENTS.md)
-2. **CLI only**: `so` is a Bash-invoked binary. There is no MCP server, no host plugin tool schema, and none will be added. Compact `NODE`/`EDGE` for `so graph *`; axi.md TOON/dashboards for memory and sessions. See [cmd/so/AGENTS.md](cmd/so/AGENTS.md)
+2. **CLI only**: `so` is a shell-invoked binary. There is no MCP server, no host plugin tool schema, and none will be added. Compact `NODE`/`EDGE` for `so graph *`; axi.md TOON/dashboards for memory and sessions. See [cmd/so/AGENTS.md](cmd/so/AGENTS.md)
 3. **Minimal diffs**: match local style
 4. **No vendor names** in product or contributor copy
 

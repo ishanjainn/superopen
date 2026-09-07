@@ -1,19 +1,19 @@
 ---
 name: so
-description: "Use for any question about a codebase, its architecture, file relationships, or project content. Treat source questions as graph query first. Also use for prior-work facts (so memory recall) and when the user wants a fact stored (so memory capture). Superopen is a CLI binary invoked with Bash, not an MCP tool. If .so/ is missing, run one graph query anyway (a linked worktree may seed from the parent). If that prints the unmanaged message, stop and do not so init unless the user explicitly asked."
+description: "Use for any question about a codebase, its architecture, file relationships, or project content. Treat source questions as graph query first. Also use for prior-work facts (so memory recall) and when the user wants a fact stored (so memory capture). Superopen is a CLI binary invoked with your shell tool (Bash, PowerShell, or equivalent), not an MCP tool. If .so/ is missing, run one graph query anyway (a linked worktree may seed from the parent). If that prints the unmanaged message, stop and do not so init unless the user explicitly asked."
 ---
 
 # Superopen (`/so`)
 
-Superopen is a **CLI binary**, not an MCP tool and not a host plugin tool. There is no `so` tool schema. Invoke it with **Bash** using this install-time absolute path:
+Superopen is a **CLI binary**, not an MCP tool and not a host plugin tool. There is no `so` tool schema. Copy-paste this install-time absolute path into your shell tool. On Windows that is PowerShell or cmd (`so.exe`); do not wrap the path in `bash -c`.
 
-```bash
+```
 __SO_BIN__
 ```
 
-If that path is missing, fall back to `$SUPEROPEN_SO_BIN` or `so` on `PATH`.
+If that path is missing, fall back to `$SUPEROPEN_SO_BIN` or `so` / `so.exe` on `PATH`.
 
-Never Grep `.so/` or installed skill/rule directories. Never pipe `so` through `head`/`tail`. If you spawn a Task/subagent, its prompt must say to run the same Bash line first (Explore children never see SessionStart).
+Never Grep `.so/` or installed skill/rule directories. Never pipe `so` through `head`/`tail`. If you spawn a Task/subagent, its prompt must say to run the same command line first (Explore children never see SessionStart).
 
 If `.so/` is missing, still run **one** `graph query`. If stdout is `not a Superopen repo; run so init`, stop. Do not `so init` unless the user explicitly asked. A linked git worktree of a managed parent seeds on that call.
 

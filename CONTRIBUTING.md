@@ -62,7 +62,7 @@ so init          # or /so init in a coding agent
 
 `make install` is the same as `sh scripts/install.sh`.
 
-Re-run the install script after CLI changes so `~/.superopen/bin/so` and
+Re-run the install script after CLI changes so the installed binary and
 agent-pinned paths stay in sync. Do not `go install` or pin `./bin/so` into
 hooks. That is a different prefix than production.
 
@@ -90,8 +90,8 @@ make test
 make smoke          # optional; writes a local .so/ under the current directory
 ```
 
-`./bin/so` is a compile artifact. Agents use `~/.superopen/bin/so` from the
-install script.
+`./bin/so` is a compile artifact. Agents use the binary `so install` pinned
+(Homebrew prefix, `~/.superopen/bin/so`, or `so.exe`).
 
 ### Web UI
 
