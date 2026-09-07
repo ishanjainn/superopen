@@ -1,115 +1,112 @@
 
-# Superopen
+<p align="center">
+  <a href="https://github.com/ishanjainn/superopen"><img src="./assets/brand-wordmark.png" width="50%" height="50%" alt="Superopen"/></a>
 
-One CLI to rule them all.
+  <a href="https://github.com/ishanjainn/superopen"><img src="./assets/superopen-banner.svg" width="100%" height="100%" alt="Superopen"/></a>
+</p>
 
-![Superopen Banner](https://raw.githubusercontent.com/ishanjainn/superopen/refs/heads/main/assets/superopen-banner.svg)
+Superopen is not another coding agent. It builds the open source harness around Claude Code, Cursor, Codex, and similar agents so every coding session improves the next with less token waste and lower cost.
 
-## Install (user-global, any directory)
+- It builds a Tree-sitter graph into SQLite. Agents query a scoped subgraph instead of grepping files. No embeddings, no similarity search, no index to keep warm. The graph is a local so.db your agent reads via so graph query.
+- Session hooks run in the background so every turn is recorded to .so/sessions/. Follow-ups skip re-exploration because the context is already there.
+- Distill compresses what mattered into a short index (at most about 350 tokens) so the next session starts with signal, not noise (90.8% / 82% recall@10).
+- Harvest proposes playbook patches from the session with reusable guidance you apply only when you want it.
 
-Works on **Linux, macOS, and Windows** across supported coding agents
-(Claude Code, Cursor, Codex, Gemini CLI, OpenCode, Copilot CLI, Pi).
+**The numbers speak for themselves**. In our benchmarks, Claude Code with Superopen solves **4 times more tasks correctly** while cutting tokens, cost, and latency roughly in half:
 
-```bash
-brew install ishanjainn/superopen/so   # or the curl/release installer
-so install                            # /so skill + hooks + guidance
-```
+| Metric | Cold Claude Code | Claude Code with Superopen | Improvement |
+|---|---|---|---|
+| Correctness | 1 / 5 (20%) | **4 / 5 (80%)** | **+60 pts** |
+| Tokens | 19.1M | **9.6M** | **+50%** |
+| Cost | $1.52 | **$0.87** | **+43%** |
+| Tool calls | 81 | **44** | **+46%** |
+| API requests | 82 | **45** | **+45%** |
+| Wall-clock | 504s | **312s** | **+38%** |
 
-The curl/`install.ps1` installer puts `so` in `~/.superopen/bin`, the prebuilt Sessions/Memory/Graph UI in `~/.superopen/share/superopen/web` (`so-web.tar.gz` from the GitHub Release, same as the CLI binary), and adds `bin` to PATH (new terminals; the current shell needs `export PATH="$HOME/.superopen/bin:$PATH"` or a new tab). Homebrew installs that same UI bundle under its prefix `share/superopen/web`. Neither path runs `npm install` / `next build` on your machine. `so dev` uses that prefix from any repo; it does not look up a Superopen git clone. Running the UI needs [Node.js](https://nodejs.org/) on PATH (`node server.js`); Homebrew installs Node as a dependency.
+Source: [BENCHMARKS.md](BENCHMARKS.md)
 
-`so install` writes into each agent’s **user** skill/plugin/config directories
-(OS-agnostic home / XDG / `%APPDATA%` / `%LOCALAPPDATA%`). It is not tied to
-the Superopen source repo (users never need that) and not tied to the current
-working tree. It installs:
+## Getting Started
 
-- the `/so` skill
-- observability hooks
-- durable graph-first guidance (user-level instruction surfaces)
-
-That wiring is **capability on this machine**. A repository is managed only after
-`so init` creates `.so/` in that tree. Opening other clones in a coding agent
-does not initialize them, does not write `.so/`, and does not expose Superopen
-hook context (so agents do not spend tokens on Superopen there).
-
-A teammate who never ran `so install` is unaffected: nothing Superopen-specific
-is required in git besides an optional `.so/.gitignore`. There are no git hooks.
-
-## Initialize a repository
-
-In a coding agent (after `so install`), or from a shell inside the repo:
+Full walkthrough: [docs/installation.md](docs/installation.md).
 
 ```bash
-so init          # or /so init in the agent (only when the user asks)
+brew install ishanjainn/superopen/so
+so install
 ```
 
-Defaults to the **repository root** (nearest existing `.so` or git top-level).
-Use `--root` / `SUPEROPEN_ROOT` for an explicit nested package graph.
+`so install` is user-global. It wires the `/so` skill, hooks, and graph-first guidance into every supported agent. It does not write files inside a repo. Add `--vendor=cursor` (or `claude-code`, `codex`, `gemini`, `opencode`, `copilot-cli`, `pi`) to install one agent only.
 
-Agents must **not** run `so init` just because `.so/` is missing.
+Then, in your repository:
 
-Creates:
+```bash
+so init         # or /so init in the agent chat
+```
+
+That is the whole setup. You get a `.so/` in that tree.
 
 ```text
 .so/
-  sessions/      # observability sessions (gitignored)
-  db/so.db       # shared Superopen SQLite store (gitignored)
+  sessions/     # session events, transcripts, checkpoints
+  db/so.db      # SQLite store: Graph + Memory
   .gitignore
 ```
 
-Registers the repo in the user-wide project index under the Superopen config
-dir (`~/.config/superopen` / `%APPDATA%\superopen`).
+## The Problem
 
-## Native graph (automatic for agents in inited repos)
+Every session, your coding agent starts from zero. It greps, opens files, follows imports, backtracks, tries again, rebuilding a mental map of the codebase it already navigated yesterday and threw away. That rediscovery burns most of a run's tokens, tool calls, and latency, and it is pure overhead:
 
-After install + init **in that repository**, coding agents are steered to use the graph for structural
-questions without the user saying `/so`. Repositories without `.so/` stay unmanaged.
+- **Repeated**: Every task pays the exploration cost again, from scratch.
+- **Discarded**: Whatever the agent figured out dies with the session.
+- **Unshared**: The next teammate (or your own next session) starts cold too.
 
-```bash
-so graph build
-so graph refresh              # skip when unchanged, or when .so/ is missing; --force for full rebuild
-so graph search DataFlowingGate
-so graph query "How does DataFlowingGate gate the UI?"
-so graph architecture
-so graph impact DataFlowingGate
+Humans onboard to a codebase once. Agents onboard every single time.
+
+## See it in action
+
+After `so init`, agents ask these four surfaces instead of grepping and re-reading transcripts:
+
+```
+$ so graph query "how do session hooks steer Cursor?"
+Traversal: BFS depth=2 | Start: [emitSteerContext HookReminder] | 8 nodes
+NODE emitSteerContext [qn=internal.agent.hook.emitSteerContext src=internal/agent/hook/steer_context.go loc=L27-82]
+EDGE emitSteerContext --CALLS --> steerDecisionFor at=internal/agent/hook/steer_context.go:L28
+help[1]:
+  so graph snippet internal.agent.hook.emitSteerContext
+
+$ so memory recall "login timeout"
+hits: 1  anti_hits: 0  budget: 1500
+memories[1]{id,kind,title,tokens}:
+  42,knowledge,login timeout is 30s,18
+count: 1 of 1
+#42  medium  2026-09-07  login timeout is 30s
+Login timeout is 30s. Check the gateway before raising it.
+help[2]:
+  so memory get 42 --full
+  so memory timeline --around 42
+
+$ so memory distill --apply sess_abc
+applied sess_abc via live written=1 → #42
+
+$ so harvest list
+proposals[1]{id,status,kind,target,title,plus,minus}:
+  7,open,improve,AGENTS.md,prefer graph query before grep,12,0
+count: 1 of 1
+help[3]:
+  so harvest show <id>
+  so harvest apply <id>
+  so harvest decline <id>
+
+$ so harvest apply 7
+applied #7 improve AGENTS.md
 ```
 
-Session hooks refresh the graph in the background on SessionStart / SessionEnd
-(detached, fail-open) **only if the workspace already has `.so/`**. Builds are **local** (Tree-sitter + SQLite) — they do not
-invoke an LLM or the live coding agent.
+`query` is the code map. `recall` is the project diary (cite `#id`). Distill compresses a finished session into knowledge (`--brief` then `--apply`, or `[]` if nothing durable). Harvest stages a playbook diff until you `apply`. More: [graph](docs/graph.md), [memory](docs/memory.md), [harvest](docs/harvest.md).
 
-Default `so graph query` stdout is compact NODE/EDGE text plus `help[]` next steps. `--json` and `--full` are script escape hatches. That graphify format is intentional; memory/sessions use AXI TOON instead.
+## Prerequisites
 
-## Sessions, memory, and UI
-
-```bash
-so sessions
-so sessions show <id>
-so sessions finalize <id>
-so memory
-so memory search "login bug"
-so memory get 12
-so memory capture --kind knowledge --horizon medium --title "…" --text "…"
-so projects                   # repos where Superopen has been used
-so dev                        # UI from any directory; binds the current inited repo or last managed project
-so dev -d                     # detached UI
-```
-
-`so dev` does not require cwd to be an inited repo: if this folder has no `.so/`, it uses the active
-(or most recently seen) Superopen-managed project. `so init` is still required once per repo you want managed.
-
-## Layout summary
-
-| Location | Purpose |
-|----------|---------|
-| User skill dirs | `/so` skill from `so install` |
-| User instruction surfaces | Graph-first durable guidance |
-| `<repo>/.so/sessions` | Session documents |
-| `<repo>/.so/db/so.db` | Shared DB (graph + memory) |
-| Config dir `projects.json` | Cross-repo index of Superopen usage |
-
-One `so` binary includes the native graph engine. There is no separate graph binary.
-
-Contributors: read [`AGENTS.md`](AGENTS.md) and the nested `AGENTS.md` in the area you edit; shared rules in [`.agents/rules/`](.agents/rules/). Repo-only — not what `so install` writes to customer projects.
+| Requirement | Minimum | Check | Install |
+|-------------|---------|-------|---------|
+| Node.js (for `so dev` only) | 20+ | `node --version` | [nodejs.org](https://nodejs.org) |
 
 ## Uninstall
 
@@ -127,8 +124,18 @@ Then remove the **binary** the same way you installed it:
 |------------------------|-------------------|
 | Homebrew (macOS / Linux) | `brew uninstall so` |
 | Windows `install.ps1` / curl installer | already gone (`so uninstall` deletes `~/.superopen`) |
-| Scoop / WinGet / Chocolatey | `scoop uninstall so` / `winget uninstall so` / `choco uninstall so` |
 
 Restart the coding agent so it drops in-memory hooks.
 
-Building from source (developers only): [CONTRIBUTING.md](CONTRIBUTING.md).
+## Learn more
+
+- [Installation](docs/installation.md) - binary, `so install`, `so init`, upgrade, uninstall
+- [Architecture](docs/architecture.md) - components, data flow, storage map
+- [Commands](docs/commands.md) - full `so` CLI reference
+- [Configuration](docs/configuration.md) - config file, env vars, flags, paths
+- [Graph](docs/graph.md) - build, query, trace, impact
+- [Sessions](docs/sessions.md) - how agent sessions are recorded
+- [Memory](docs/memory.md) - project diary over sessions
+- [Harvest](docs/harvest.md) - playbook patches gated on human apply
+- [Troubleshooting](docs/troubleshooting.md) - install, PATH, hooks, UI, stale graph
+- [Contributing](CONTRIBUTING.md) - local build from source

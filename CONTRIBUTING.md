@@ -5,7 +5,7 @@ reports, and integration feedback are all welcome.
 
 ## Before you start
 
-- Read the [README](README.md) for the Homebrew install and product overview.
+- Read the [README](README.md) and [installation guide](docs/installation.md) for the Homebrew / curl / Windows install.
 - Follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 - For a substantial change, open or discuss an issue first so maintainers can
   confirm the scope. Small documentation fixes can go straight to a pull
@@ -14,7 +14,7 @@ reports, and integration feedback are all welcome.
 ## Local build
 
 End users never clone this repo. They get a built `so` via Homebrew or the
-release installer in the [README](README.md).
+release installer. See [docs/installation.md](docs/installation.md).
 
 Local development uses **those same scripts**. The checkout is only the source
 to compile; the installed CLI lives in `~/.superopen/bin`, same as production
@@ -62,9 +62,9 @@ so init          # or /so init in a coding agent
 
 `make install` is the same as `sh scripts/install.sh`.
 
-Re-run the install script after CLI changes so `~/.superopen/bin/so` and
+Re-run the install script after CLI changes so the installed binary and
 agent-pinned paths stay in sync. Do not `go install` or pin `./bin/so` into
-hooks — that is a different prefix than production.
+hooks. That is a different prefix than production.
 
 ### Uninstall (production command)
 
@@ -90,8 +90,8 @@ make test
 make smoke          # optional; writes a local .so/ under the current directory
 ```
 
-`./bin/so` is a compile artifact. Agents use `~/.superopen/bin/so` from the
-install script.
+`./bin/so` is a compile artifact. Agents use the binary `so install` pinned
+(Homebrew prefix, `~/.superopen/bin/so`, or `so.exe`).
 
 ### Web UI
 

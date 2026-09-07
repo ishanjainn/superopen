@@ -1,5 +1,6 @@
-// Package generic provides a minimal hook adapter for additional coding agents
-// (Gemini CLI, OpenCode, Copilot CLI, Pi).
+// Package generic provides a minimal hook adapter for coding agents that
+// do not have a dedicated adapter (Gemini CLI, Copilot CLI, and any
+// unknown --vendor). OpenCode and Pi have dedicated adapters.
 package generic
 
 import (
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/agent/normalize"
+	"github.com/ishanjainn/superopen/internal/agent/pricing"
 )
 
 // Adapter implements normalize.Adapter for a named vendor.
@@ -73,12 +75,14 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 		})
 	case ev == "afteragent" || ev == "agentstop":
 		response := str(payload, "prompt_response", "response", "output", "text")
-		if prompt == "" && response == "" {
+		if prompt == "" && response == "" && !hasUsage(payload) {
 			return nil
 		}
-		return in.Emit.EmitLLMTurn(normalize.LLMTurn{
+		turn := normalize.LLMTurn{
 			SessionID: sid, Vendor: a.name, Model: model, Prompt: prompt, Response: response, EndedAt: now,
-		})
+		}
+		applyUsage(&turn, payload)
+		return in.Emit.EmitLLMTurn(turn)
 	case ev == "beforetool" || ev == "pretooluse" || ev == "aftertool" || ev == "posttooluse" || ev == "posttoolusefailure":
 		toolName := str(payload, "tool_name", "toolName", "tool")
 		toolID := str(payload, "tool_call_id", "toolCallId", "tool_use_id")
@@ -137,6 +141,91 @@ func hasError(value any) bool {
 		return true
 	}
 	return false
+}
+
+func hasUsage(m map[string]any) bool {
+	in, out, _, _ := usageFrom(m)
+	return in > 0 || out > 0
+}
+
+func applyUsage(turn *normalize.LLMTurn, payload map[string]any) {
+	inTok, outTok, cacheRead, cacheWrite := usageFrom(payload)
+	turn.InputTokens = inTok
+	turn.OutputTokens = outTok
+	turn.CacheReadTokens = cacheRead
+	turn.CacheCreationTokens = cacheWrite
+	turn.TotalTokens = inTok + outTok
+	if hostCost := floatFrom(payload, "cost", "cost_usd", "total_cost"); hostCost > 0 {
+		turn.CostUSD = hostCost
+	}
+	if rate := pricing.Lookup(turn.Model); rate.InputPer1M > 0 || rate.OutputPer1M > 0 {
+		turn.CostUSD = rate.Cost(inTok, outTok, cacheRead, cacheWrite)
+	}
+}
+
+func usageFrom(m map[string]any) (in, out, cacheRead, cacheWrite int64) {
+	in = intFrom(m, "input_tokens", "prompt_tokens")
+	out = intFrom(m, "output_tokens", "completion_tokens")
+	cacheRead = intFrom(m, "cache_read_tokens", "cached_tokens")
+	cacheWrite = intFrom(m, "cache_creation_tokens")
+	if u, ok := nestedMap(m, "usage"); ok {
+		if v := intFrom(u, "input_tokens", "prompt_tokens", "input"); v > 0 {
+			in = v
+		}
+		if v := intFrom(u, "output_tokens", "completion_tokens", "output"); v > 0 {
+			out = v
+		}
+		if v := intFrom(u, "cache_read_tokens", "cache_read_input_tokens", "cached_tokens"); v > 0 {
+			cacheRead = v
+		}
+		if v := intFrom(u, "cache_creation_tokens", "cache_creation_input_tokens", "cache_write"); v > 0 {
+			cacheWrite = v
+		}
+	}
+	return
+}
+
+func nestedMap(m map[string]any, key string) (map[string]any, bool) {
+	v, ok := m[key]
+	if !ok {
+		return nil, false
+	}
+	obj, ok := v.(map[string]any)
+	return obj, ok
+}
+
+func intFrom(m map[string]any, keys ...string) int64 {
+	for _, k := range keys {
+		switch v := m[k].(type) {
+		case float64:
+			return int64(v)
+		case int:
+			return int64(v)
+		case int64:
+			return v
+		case json.Number:
+			n, _ := v.Int64()
+			return n
+		}
+	}
+	return 0
+}
+
+func floatFrom(m map[string]any, keys ...string) float64 {
+	for _, k := range keys {
+		switch v := m[k].(type) {
+		case float64:
+			return v
+		case int:
+			return float64(v)
+		case int64:
+			return float64(v)
+		case json.Number:
+			n, _ := v.Float64()
+			return n
+		}
+	}
+	return 0
 }
 
 func str(m map[string]any, keys ...string) string {

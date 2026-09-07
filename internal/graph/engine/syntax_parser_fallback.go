@@ -108,7 +108,8 @@ func (s *fallbackParseSession) Close(ctx context.Context) error {
 func parserIndexMode(parser SyntaxParser) string {
 	switch parser.(type) {
 	case *fallbackSyntaxParser, *fallbackParseSession:
-		return "tree-sitter-native"
+		// Native grammars are a subset; WASM covers the rest.
+		return "tree-sitter-native+wasm"
 	default:
 		return "tree-sitter-wasm"
 	}

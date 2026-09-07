@@ -37,18 +37,37 @@ func IndexAllDevelopment(ctx context.Context, request api.BuildRequest, engineVe
 			return api.BuildResult{}, err
 		}
 	}
-	if !request.Force {
-		if !databaseExists(root) {
-			// First init has no prior generation; skip the SHA walk.
-		} else if unchanged, ok, err := tryUnchangedBuild(ctx, root, project, request.Exclude, started); err != nil {
-			return api.BuildResult{}, err
-		} else if ok {
-			return unchanged, nil
+	if !request.Force && databaseExists(root) {
+		if request.FromProbe {
+			unchanged, ok, err := tryUnchangedBuildFromProbe(ctx, root, project, request.Exclude, started)
+			if err != nil {
+				return api.BuildResult{}, err
+			}
+			if ok {
+				_ = WriteFingerprint(ctx, root, request.Exclude)
+				return unchanged, nil
+			}
+		} else {
+			unchanged, ok, err := tryUnchangedBuild(ctx, root, project, request.Exclude, started)
+			if err != nil {
+				return api.BuildResult{}, err
+			}
+			if ok {
+				_ = WriteFingerprint(ctx, root, request.Exclude)
+				return unchanged, nil
+			}
 		}
 	}
 	files, err := discoverTrackedFiles(ctx, root, request.Exclude)
 	if err != nil {
 		return api.BuildResult{}, err
+	}
+	var probeChanges *api.ChangeSet
+	if request.FromProbe && !request.Force {
+		planned, planErr := PlanIncrementalFromProbe(ctx, root, project, request.Exclude)
+		if planErr == nil && !planned.RequiresFull {
+			probeChanges = &planned
+		}
 	}
 	reportIndexProgress("Building native graph...")
 	grammars := grammarsForFiles(root, files, nil)
@@ -70,7 +89,15 @@ func IndexAllDevelopment(ctx context.Context, request api.BuildRequest, engineVe
 	workers := parseWorkerCount()
 	reportIndexProgress("parse 0/%d workers=%d", len(files), workers)
 	parseStarted := time.Now()
-	repository, err := ParseSyntaxRepository(ctx, parser, root, project, files, nil, workers)
+	var repository SyntaxRepository
+	if probeChanges != nil {
+		repository, _, err = parseSyntaxRepositoryFromProbe(ctx, parser, root, project, files, *probeChanges, workers)
+	} else {
+		repository, err = ParseSyntaxRepository(ctx, parser, root, project, files, nil, workers)
+		if err == nil {
+			saveParsedExtracts(root, repository)
+		}
+	}
 	if err != nil {
 		return api.BuildResult{}, err
 	}
@@ -122,10 +149,18 @@ func IndexAllDevelopment(ctx context.Context, request api.BuildRequest, engineVe
 		return api.BuildResult{}, fmt.Errorf("source revision changed: expected %s, found %s", request.ExpectedSource, revision)
 	}
 	var changes *api.ChangeSet
-	if request.Incremental {
-		planned, err := PlanIncremental(ctx, root, project, request.Exclude)
-		if err != nil {
-			return api.BuildResult{}, err
+	if probeChanges != nil {
+		changes = probeChanges
+	} else if request.Incremental {
+		var planned api.ChangeSet
+		var planErr error
+		if request.FromProbe {
+			planned, planErr = PlanIncrementalFromProbe(ctx, root, project, request.Exclude)
+		} else {
+			planned, planErr = PlanIncremental(ctx, root, project, request.Exclude)
+		}
+		if planErr != nil {
+			return api.BuildResult{}, planErr
 		}
 		changes = &planned
 	}
@@ -143,9 +178,46 @@ func IndexAllDevelopment(ctx context.Context, request api.BuildRequest, engineVe
 	if err != nil {
 		return api.BuildResult{}, err
 	}
-	return api.BuildResult{Status: "ok", Project: project, Database: database,
+	result := api.BuildResult{Status: "ok", Project: project, Database: database,
 		SourceRevision: revision, Generation: repository.Generation, NodeCount: nodeCount, EdgeCount: edgeCount,
-		FileCount: len(graph.files), Duration: time.Since(started), Coverage: summarizedCoverage(coverage, 100), Changes: changes}, nil
+		FileCount: len(graph.files), Duration: time.Since(started), Coverage: summarizedCoverage(coverage, 100), Changes: changes}
+	_ = WriteFingerprint(ctx, root, request.Exclude)
+	return result, nil
+}
+
+func tryUnchangedBuildFromProbe(ctx context.Context, root, project string, excludes []string, started time.Time) (api.BuildResult, bool, error) {
+	planned, err := PlanIncrementalFromProbe(ctx, root, project, excludes)
+	if err != nil {
+		return api.BuildResult{}, false, nil
+	}
+	if planned.RequiresFull || changeVolume(planned) > 0 {
+		return api.BuildResult{}, false, nil
+	}
+	paths, err := CachePaths(root)
+	if err != nil {
+		return api.BuildResult{}, false, err
+	}
+	store, err := OpenReadOnly(paths.Database)
+	if err != nil {
+		return api.BuildResult{}, false, nil
+	}
+	defer store.Close()
+	status, err := store.Status(ctx, project)
+	if err != nil || status.State == "missing" || status.NodeCount == 0 {
+		return api.BuildResult{}, false, nil
+	}
+	return api.BuildResult{
+		Status:         "unchanged",
+		Project:        project,
+		Database:       paths.Database,
+		SourceRevision: planned.SourceRevision,
+		Generation:     status.Generation,
+		NodeCount:      status.NodeCount,
+		EdgeCount:      status.EdgeCount,
+		FileCount:      status.FileCount,
+		Duration:       time.Since(started),
+		Changes:        &planned,
+	}, true, nil
 }
 
 func tryUnchangedBuild(ctx context.Context, root, project string, excludes []string, started time.Time) (api.BuildResult, bool, error) {

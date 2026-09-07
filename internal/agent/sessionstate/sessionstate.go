@@ -108,12 +108,32 @@ type State struct {
 	GraphSteerTerms    []string `json:"graph_steer_terms,omitempty"`
 	// StrictReadDenied is true after strict-mode first-Read deny this session.
 	StrictReadDenied bool `json:"strict_read_denied,omitempty"`
+	// SnippetOverflowReminded is true after the post-query Read overflow
+	// (snippet a listed NODE instead of reading whole modules) fired once.
+	SnippetOverflowReminded bool `json:"snippet_overflow_reminded,omitempty"`
+	// QueryRepeatReminded is true after the post-query overflow that
+	// asks the agent to snippet a listed NODE instead of running graph
+	// query again (unless the dump was TRUNCATED).
+	QueryRepeatReminded bool `json:"query_repeat_reminded,omitempty"`
 
 	// Memory pack is injected once per session (same token-economy rule as
 	// the graph reminder). MemoryDistillAsked keeps the live-agent rollup
 	// request to a single memory_capture even if SessionStart fires again.
-	MemorySteerReminded bool `json:"memory_steer_reminded,omitempty"`
-	MemoryDistillAsked  bool `json:"memory_distill_asked,omitempty"`
+	// MemoryIndexInjected gates the UserPromptSubmit SessionStartIndex
+	// so a personal question does not re-inject the title list every turn.
+	// SubagentSteerReminded caps SubagentStart the same way.
+	MemorySteerReminded    bool `json:"memory_steer_reminded,omitempty"`
+	CaptureSteerReminded   bool `json:"capture_steer_reminded,omitempty"`
+	MemoryDistillAsked     bool `json:"memory_distill_asked,omitempty"`
+	MemoryIndexInjected    bool `json:"memory_index_injected,omitempty"`
+	HarvestPendingInjected bool `json:"harvest_pending_injected,omitempty"`
+	SubagentSteerReminded  bool `json:"subagent_steer_reminded,omitempty"`
+
+	// WorkspaceRoute is "code", "memory", or "empty" from SessionStart
+	// (source files vs live diary rows). PromptKind is the current user
+	// prompt class, set on UserPromptSubmit, and wins over workspace shape.
+	WorkspaceRoute string `json:"workspace_route,omitempty"`
+	PromptKind     string `json:"prompt_kind,omitempty"`
 
 	// SessionRolledUp counters that Phase C's minimal mode emits on
 	// sessionEnd in lieu of per-event spans. Always safe to populate;
@@ -156,6 +176,10 @@ type State struct {
 	// detection (fallback). Cached so the session-root span and every
 	// follow-up span agree on the value.
 	TerminalType string `json:"terminal_type,omitempty"`
+	// TerminalChecked is true after DetectTerminalType has run for
+	// this session, even when the result was empty. Without it every
+	// PreToolUse would repeat the macOS process-tree walk (~12 `ps`).
+	TerminalChecked bool `json:"terminal_checked,omitempty"`
 
 	// TranscriptPath is the absolute path to the vendor's transcript
 	// JSONL (Claude Code's `transcript_path`). Cached so non-lifecycle

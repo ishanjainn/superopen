@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -46,7 +45,7 @@ func Install(repoRoot string, vendors []string, opts Options) (InstallReport, er
 	soBin := ""
 	if exe, err := os.Executable(); err == nil && paths.IsSoBinary(exe) {
 		soBin = exe
-	} else if look, err := exec.LookPath("so"); err == nil {
+	} else if look, err := paths.LookPathSo(); err == nil {
 		soBin = look
 	}
 	skillPaths, err := skills.InstallAll(soBin)
@@ -210,8 +209,8 @@ func hookBinaryAvailable(manifest, vendor string) bool {
 	}
 	bin := strings.TrimSpace(manifest[lineStart+1 : idx])
 	bin = strings.Trim(bin, "'\"")
-	if bin == "so" {
-		_, err := exec.LookPath(bin)
+	if bin == "so" || bin == "so.exe" {
+		_, err := paths.LookPathSo()
 		return err == nil
 	}
 	info, err := os.Stat(bin)

@@ -50,19 +50,7 @@ func resolveSoBin() (string, error) {
 			return exe, nil
 		}
 	}
-	name := "so"
-	if runtime.GOOS == "windows" {
-		name = "so.exe"
-	}
-	if p, err := exec.LookPath(name); err == nil {
-		return p, nil
-	}
-	if runtime.GOOS == "windows" {
-		if p, err := exec.LookPath("so"); err == nil {
-			return p, nil
-		}
-	}
-	return "", fmt.Errorf("%s binary not found on PATH", name)
+	return paths.LookPathSo()
 }
 
 func shellQuote(s string) string {

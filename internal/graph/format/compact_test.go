@@ -56,6 +56,45 @@ func TestHelpForQuery(t *testing.T) {
 	}
 }
 
+func TestHelpForQueryImpactShaped(t *testing.T) {
+	hints := format.HelpForQuery(api.QueryResult{
+		Question: "DNS_NAME usages across codebase",
+		Seeds: []api.RankedNode{{
+			Node: api.Node{Name: "DNS_NAME", QualifiedName: "django.core.mail.DNS_NAME"},
+		}},
+	})
+	joined := strings.Join(hints, "\n")
+	if !strings.Contains(joined, "graph impact") {
+		t.Fatalf("usage-shaped query should hint impact: %v", hints)
+	}
+}
+
+func TestImpactCompactFiles(t *testing.T) {
+	text := format.ImpactCompact(api.ImpactResult{
+		Base:  "main",
+		Total: 2,
+		ImpactedFiles: []api.ImpactedFile{
+			{Path: "pkg/dispatch.py", Symbols: 1, Reasons: []string{"caller"}},
+			{Path: "pkg/http.py", Symbols: 1, Reasons: []string{"impl"}},
+		},
+	})
+	if !strings.Contains(text, "impacted_files: 2") || !strings.Contains(text, "pkg/dispatch.py") {
+		t.Fatalf("%q", text)
+	}
+	if !strings.Contains(text, "caller") {
+		t.Fatalf("missing reason: %q", text)
+	}
+}
+
+func TestHelpForImpact(t *testing.T) {
+	hints := format.HelpForImpact(api.ImpactResult{
+		ImpactedFiles: []api.ImpactedFile{{Path: "pkg/dispatch.py"}},
+	})
+	if len(hints) != 1 || !strings.Contains(hints[0], "pkg/dispatch.py") {
+		t.Fatalf("hints=%v", hints)
+	}
+}
+
 func TestTraceCompactIncomingCallers(t *testing.T) {
 	caller := api.Node{Name: "useLeaf", QualifiedName: "b.useLeaf", Location: api.Location{File: "b.ts"}}
 	leaf := api.Node{Name: "leaf", QualifiedName: "a.leaf", Location: api.Location{File: "a.ts"}}
@@ -85,5 +124,24 @@ func TestHelpForSnippetDirections(t *testing.T) {
 	}
 	if len(hints) != 2 || !strings.Contains(hints[0], "incoming") || !strings.Contains(hints[1], "outgoing") {
 		t.Fatalf("hints=%v", hints)
+	}
+}
+
+func TestSnippetCompactEmitsSrc(t *testing.T) {
+	text := format.SnippetCompact(api.SnippetResult{
+		QualifiedName: "pkg.Foo.bar",
+		Name:          "bar",
+		Label:         "Method",
+		Location:      api.Location{File: "foo.go", StartLine: 1674, EndLine: 1682},
+		Code:          "func bar() {}\n",
+	})
+	if !strings.Contains(text, "file: foo.go") {
+		t.Fatalf("missing file: %q", text)
+	}
+	if !strings.Contains(text, "src=foo.go") {
+		t.Fatalf("missing src=: %q", text)
+	}
+	if !strings.Contains(text, "lines: 1674-1682") {
+		t.Fatalf("missing lines: %q", text)
 	}
 }

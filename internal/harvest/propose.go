@@ -67,7 +67,14 @@ func Propose(root string, in ProposeInput) (Proposal, error) {
 		if h, err := HashFile(root, in.Target); err == nil {
 			p.BaseHash = h
 		}
-		return store.InsertProposal(p)
+		out, err := store.InsertProposal(p)
+		if err != nil {
+			return out, err
+		}
+		if in.SessionID != "" {
+			_ = store.ResolvePending(in.SessionID, StatusProposed, "")
+		}
+		return out, nil
 	}
 	plus, minus := DiffStats(in.Diff)
 	p := Proposal{
@@ -96,8 +103,8 @@ func Propose(root string, in ProposeInput) (Proposal, error) {
 	if err != nil {
 		return out, err
 	}
-	if in.SessionID != "" && in.Provider != "" {
-		_, _ = store.InsertRun(in.SessionID, StatusProposed, in.Provider, "")
+	if in.SessionID != "" {
+		_ = store.ResolvePending(in.SessionID, StatusProposed, "")
 	}
 	return out, nil
 }

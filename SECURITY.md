@@ -10,12 +10,7 @@ not receive fixes or backports.
 
 Please do **not** open a public GitHub issue for a suspected vulnerability.
 
-Report it privately by either:
-
-1. Using GitHub's private vulnerability reporting form for this repository,
-   when it is available; or
-2. Emailing [security@superopen.dev](mailto:security@superopen.dev) with the
-   subject `Superopen security report`.
+Report it privately by using GitHub's private vulnerability reporting form for this repository.
 
 Include a clear description of the issue, affected components and versions,
 steps to reproduce or a proof of concept, likely impact, and any suggested

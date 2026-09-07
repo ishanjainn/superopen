@@ -4,7 +4,7 @@ Load this only when the task needs a recipe below. The stop-early loop in `SKILL
 answers most structural questions without it.
 
 `__SO_BIN__` is the binary path from `SKILL.md`. Graph commands default to
-compact `NODE` / `EDGE` text (graphify), not AXI TOON. `--json` is the full
+compact `NODE` / `EDGE` text, not AXI TOON. `--json` is the full
 envelope.
 
 ## Callers, callees, and paths
@@ -22,10 +22,11 @@ Depth above 3 rarely adds signal and costs tokens. Start at 1-2.
 
 ```bash
 __SO_BIN__ graph impact --base main          # blast radius of the current diff
+__SO_BIN__ graph impact --files <path>       # blast radius of a just-edited file
 __SO_BIN__ graph impact <symbol> [<symbol>]  # blast radius of named symbols
 ```
 
-Use this instead of tracing each changed symbol by hand.
+Use this as a pre-finish check on a multi-file change instead of tracing each symbol by hand.
 
 ## Cypher subset
 

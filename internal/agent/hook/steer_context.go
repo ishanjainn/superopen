@@ -1,7 +1,6 @@
 package hook
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,8 +11,6 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/agent/sessionstate"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
-	"github.com/ishanjainn/superopen/internal/graph/api"
-	"github.com/ishanjainn/superopen/internal/graph/client"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
@@ -21,20 +18,9 @@ import (
 )
 
 const (
-	// augmentHitLimit caps how many indexed symbols one augment carries.
-	augmentHitLimit = 5
-	// augmentSessionCap caps how many explore-tool augments a session
-	// receives. Past this the agent has either adopted the graph or
-	// decided not to, and repeating only spends the user's tokens.
-	augmentSessionCap = 3
-	// augmentTimeout bounds the embedded graph lookup so a cold or
-	// locked database can never stall the host's tool call.
-	augmentTimeout = 1500 * time.Millisecond
 	// augmentMinTermLen skips terms too short to rank meaningfully.
 	augmentMinTermLen = 3
 )
-
-var priorWorkCue = regexp.MustCompile(`(?i)last time|we decided|remember|what did we`)
 
 // emitSteerContext writes vendor-specific additionalContext when the event
 // supports it. Unknown protocols get no stdout (fail-open).
@@ -153,27 +139,26 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		}
 	case sessionEvent:
 		if ev == "SubagentStart" || ev == "subagentStart" {
-			// Explore subagents never see SessionStart; inject a one-line reminder.
-			return steerDecision{text: steer.HookReminder(), hookEvent: ev}, true
+			return subagentSteer(payload, vendor, ev)
 		}
 		if isSessionStartEvent(vendor, ev) {
-			if text := memorySessionIndexText(payload); text != "" {
+			if text := sessionStartText(payload, vendor); text != "" {
 				return steerDecision{text: text, hookEvent: ev}, true
 			}
 			return steerDecision{}, false
 		}
 		if isPromptSubmitEvent(vendor, ev) {
-			prompt := peekContext(payload).Prompt
-			if priorWorkCue.MatchString(prompt) {
-				if text := memorySessionIndexText(payload); text != "" {
-					return steerDecision{text: text, hookEvent: ev}, true
-				}
+			if text := promptSubmitText(payload, vendor); text != "" {
+				return steerDecision{text: text, hookEvent: ev}, true
 			}
 			return steerDecision{}, false
 		}
 		// Stop, SessionEnd, and other lifecycle events are observability-only.
 		return steerDecision{}, false
 	case toolEvent:
+		// Codex does not consume additionalContext / deny from PreToolUse
+		// the way Claude and Cursor do; emitting steer text would be dropped
+		// by the host. Session and prompt events still fire.
 		if vendor == "codex" {
 			return steerDecision{}, false
 		}
@@ -187,7 +172,34 @@ func graphGate(payload []byte, vendor, kind, hookEvent string) (steerDecision, b
 	if strings.HasPrefix(strings.ToLower(tool), "graph_") {
 		return steerDecision{}, false
 	}
+	cmd := bashCommandFromPayload(payload)
+	if commandLooksLikeSo(cmd) {
+		if bashLooksLikeGraphQuery(cmd) {
+			if engine.QueryStampFreshFor(stampRoot(payload), steerSessionID(payload)) {
+				if !claimQueryRepeat(payload, vendor) {
+					return steerDecision{}, false
+				}
+				return steerDecision{text: steer.QueryRepeatNudge(), hookEvent: hookEvent}, true
+			}
+			engine.RecordQueryStampFor(stampRoot(payload), steerSessionID(payload))
+		}
+		return steerDecision{}, false
+	}
 	gate := strings.ToLower(strings.TrimSpace(kind))
+	if isBashTool(tool) {
+		switch {
+		case bashLooksLikeSearch(cmd):
+			gate = "search"
+		case bashLooksLikeRead(cmd):
+			gate = "read"
+		case bashLooksLikeListing(cmd):
+			gate = "search"
+		default:
+			if gate == "search" || gate == "read" {
+				return steerDecision{}, false
+			}
+		}
+	}
 	if gate == "" {
 		switch {
 		case hookEvent == "beforeReadFile" || isReadTool(tool):
@@ -197,22 +209,57 @@ func graphGate(payload []byte, vendor, kind, hookEvent string) (steerDecision, b
 		default:
 			return steerDecision{}, false
 		}
-	} else if gate == "search" && tool != "" && !isSearchTool(tool) && !isReadTool(tool) {
+	} else if !isBashTool(tool) && gate == "search" && tool != "" && !isSearchTool(tool) && !isReadTool(tool) {
 		// Scoped matcher already filtered Claude; Cursor preToolUse is unscoped.
 		return steerDecision{}, false
-	} else if gate == "read" && tool != "" && !isReadTool(tool) && hookEvent != "beforeReadFile" {
+	} else if !isBashTool(tool) && gate == "read" && tool != "" && !isReadTool(tool) && hookEvent != "beforeReadFile" {
+		return steerDecision{}, false
+	}
+	if gate == "search" && isBashTool(tool) && !bashLooksLikeSearch(cmd) && !bashLooksLikeListing(cmd) {
+		return steerDecision{}, false
+	}
+	if isSkillDocRead(peekContext(payload).ToolPath) {
+		return steerDecision{}, false
+	}
+
+	route := promptRoute(payload, vendor)
+	if route == routeEmpty {
+		return steerDecision{}, false
+	}
+	if route == routeCapture {
+		if !claimCaptureNudge(payload, vendor) {
+			return steerDecision{}, false
+		}
+		return steerDecision{text: steer.CaptureNudge(), hookEvent: hookEvent}, true
+	}
+	if route == routeMemory {
+		if !claimMemoryNudge(payload, vendor) {
+			return steerDecision{}, false
+		}
+		return steerDecision{text: steer.MemoryNudge(), hookEvent: hookEvent}, true
+	}
+
+	if engine.QueryStampFreshFor(stampRoot(payload), steerSessionID(payload)) {
+		if gate == "read" && isSourceRead(payload, tool, hookEvent) {
+			if !claimSnippetOverflow(payload, vendor) {
+				return steerDecision{}, false
+			}
+			return steerDecision{text: steer.SnippetOverflowNudge(), hookEvent: hookEvent}, true
+		}
 		return steerDecision{}, false
 	}
 	switch gate {
 	case "search":
-		// Static MANDATORY one-liner only. Do not append ExploreAugment hit lists.
-		return steerDecision{text: steer.SearchNudge(), hookEvent: hookEvent}, true
-	case "read":
-		if isSkillDocRead(peekContext(payload).ToolPath) {
+		if !claimGraphNudge(payload, vendor) {
 			return steerDecision{}, false
 		}
+		return steerDecision{text: steer.SearchNudge(), hookEvent: hookEvent}, true
+	case "read":
 		if hookStrictEnabled() && claimStrictReadDeny(payload, vendor) && isSourceRead(payload, tool, hookEvent) {
 			return steerDecision{text: steer.ReadDenyReason(), hookEvent: hookEvent, deny: true}, true
+		}
+		if !claimGraphNudge(payload, vendor) {
+			return steerDecision{}, false
 		}
 		return steerDecision{text: steer.ReadNudge(), hookEvent: hookEvent}, true
 	default:
@@ -233,7 +280,7 @@ func hookStrictEnabled() bool {
 }
 
 func claimStrictReadDeny(payload []byte, vendor string) bool {
-	if engine.QueryStampFresh(graphRoot(payload)) {
+	if engine.QueryStampFreshFor(stampRoot(payload), steerSessionID(payload)) {
 		return false
 	}
 	sessionID := steerSessionID(payload)
@@ -289,6 +336,7 @@ func isSkillDocRead(path string) bool {
 }
 
 func isPromptSubmitEvent(vendor, ev string) bool {
+	lower := strings.ToLower(strings.TrimSpace(ev))
 	switch vendor {
 	case "claude-code", "codex":
 		return ev == "UserPromptSubmit"
@@ -296,8 +344,13 @@ func isPromptSubmitEvent(vendor, ev string) bool {
 		return ev == "beforeSubmitPrompt"
 	case "copilot-cli":
 		return ev == "userPromptSubmitted"
+	case "gemini":
+		return lower == "beforeagent"
+	case "pi":
+		return lower == "before_agent_start"
 	default:
-		return strings.EqualFold(ev, "UserPromptSubmit") || strings.EqualFold(ev, "beforeSubmitPrompt")
+		return strings.EqualFold(ev, "UserPromptSubmit") || strings.EqualFold(ev, "beforeSubmitPrompt") ||
+			lower == "beforeagent" || lower == "before_agent_start"
 	}
 }
 
@@ -309,13 +362,193 @@ func memoryCompactText(payload []byte) string {
 	return memory.CompactSnapshot(root, steerSessionID(payload))
 }
 
-func memorySessionIndexText(payload []byte) string {
-	root := graphRoot(payload)
+func sessionStartText(payload []byte, vendor string) string {
+	root := repoRoot(payload)
 	if root == "" {
 		return ""
 	}
+	route := workspaceRoute(root)
+	rememberWorkspaceRoute(payload, vendor, route)
+	var core string
+	switch route {
+	case routeCode:
+		core = steer.GraphStartLine()
+	case routeMemory:
+		if text := memory.SessionStartIndex(root); text != "" {
+			core = text
+		} else {
+			core = steer.MemoryStartLine(memory.CountLiveMemories(root))
+		}
+	default:
+		core = memory.SessionStartIndex(root)
+	}
+	extra := harvest.PendingSessionStartLine(root)
+	if extra == "" && route == routeCode {
+		extra = memory.PendingDistillLine(root)
+	}
+	return harvest.JoinStart(core, extra)
+}
+
+func promptSubmitText(payload []byte, vendor string) string {
+	root := repoRoot(payload)
+	prompt := peekContext(payload).Prompt
+	kind := classifyPrompt(prompt)
+	src := workspaceHasSource(root)
+	n := memory.CountLiveMemories(root)
+	if kind == routeCode && !src && n > 0 {
+		kind = routeMemory
+	}
+	if kind == "" {
+		if src {
+			kind = routeCode
+		} else if n > 0 {
+			kind = routeMemory
+		} else {
+			kind = routeEmpty
+		}
+	}
+	if kind == routeCode || kind == routeMemory || kind == routeCapture || kind == routeEmpty {
+		rememberPromptKind(payload, vendor, kind)
+	}
+	live := ""
+	if pending := pendingLiveWork(root); pending != "" && claimHarvestPending(payload, vendor) {
+		live = pending
+	}
+	if kind == routeCapture {
+		return harvest.JoinStart(steer.CaptureNudge(), live)
+	}
+	if kind != routeMemory {
+		return live
+	}
+	if root == "" {
+		return live
+	}
+	if pack := memory.PromptRecallPack(root, prompt); pack != "" {
+		return harvest.JoinStart(pack, live)
+	}
+	if !claimMemoryIndex(payload, vendor) {
+		return live
+	}
 	text := memory.SessionStartIndex(root)
-	return harvest.AttachSessionStart(text, root)
+	if text == "" {
+		return live
+	}
+	return harvest.JoinStart(text, live)
+}
+
+func pendingLiveWork(root string) string {
+	if root == "" {
+		return ""
+	}
+	if line := harvest.PendingSessionStartLine(root); line != "" {
+		return line
+	}
+	return memory.PendingDistillLine(root)
+}
+
+func subagentSteer(payload []byte, vendor, ev string) (steerDecision, bool) {
+	if !claimSubagentSteer(payload, vendor) {
+		return steerDecision{}, false
+	}
+	switch promptRoute(payload, vendor) {
+	case routeMemory:
+		return steerDecision{text: steer.MemoryHookReminder(), hookEvent: ev}, true
+	case routeEmpty:
+		return steerDecision{}, false
+	default:
+		return steerDecision{text: steer.HookReminder(), hookEvent: ev}, true
+	}
+}
+
+func claimGraphNudge(payload []byte, vendor string) bool {
+	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
+		return &s.GraphSteerReminded
+	}, "last_graph_nudge")
+}
+
+func claimMemoryNudge(payload []byte, vendor string) bool {
+	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
+		return &s.MemorySteerReminded
+	}, "last_memory_nudge")
+}
+
+func claimCaptureNudge(payload []byte, vendor string) bool {
+	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
+		return &s.CaptureSteerReminded
+	}, "last_capture_nudge")
+}
+
+func claimMemoryIndex(payload []byte, vendor string) bool {
+	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
+		return &s.MemoryIndexInjected
+	}, "last_memory_index")
+}
+
+func claimHarvestPending(payload []byte, vendor string) bool {
+	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
+		return &s.HarvestPendingInjected
+	}, "last_harvest_pending")
+}
+
+func claimSubagentSteer(payload []byte, vendor string) bool {
+	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
+		return &s.SubagentSteerReminded
+	}, "last_subagent_steer")
+}
+
+func claimSnippetOverflow(payload []byte, vendor string) bool {
+	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
+		return &s.SnippetOverflowReminded
+	}, "last_snippet_overflow")
+}
+
+func claimQueryRepeat(payload []byte, vendor string) bool {
+	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
+		return &s.QueryRepeatReminded
+	}, "last_query_repeat")
+}
+
+// claimSessionFlag is once-per-session when the host sent an id. Missing ids
+// used to fail open and spam every tool call; fall back to a repo-scoped
+// stamp under .so/db/ (same layout QueryStampFresh uses, including Docker /work).
+func claimSessionFlag(payload []byte, vendor string, flag func(*sessionstate.State) *bool, stampName string) bool {
+	sessionID := steerSessionID(payload)
+	if sessionID != "" {
+		state := sessionstate.Load(sessionID, vendor)
+		f := flag(state)
+		if *f {
+			return false
+		}
+		*f = true
+		sessionstate.Save(sessionID, vendor, state)
+		return true
+	}
+	return claimRootStamp(payload, stampName)
+}
+
+func claimRootStamp(payload []byte, name string) bool {
+	root := stampRoot(payload)
+	if root == "" {
+		return false
+	}
+	path := filepath.Join(paths.Resolve(root).DBDir, name)
+	if engine.QueryStampFreshAt(path) {
+		return false
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false
+	}
+	_ = os.WriteFile(path, []byte(fmt.Sprintf("%d\n", time.Now().Unix())), 0o644)
+	return true
+}
+
+// stampRoot prefers a graph database root, then any managed repo root, so
+// QueryStampFresh and nudge stamps still bind when cwd is Docker /work.
+func stampRoot(payload []byte) string {
+	if root := graphRoot(payload); root != "" {
+		return root
+	}
+	return repoRoot(payload)
 }
 
 func isSessionStartEvent(vendor, ev string) bool {
@@ -337,113 +570,6 @@ func isSessionStartEvent(vendor, ev string) bool {
 	default:
 		return false
 	}
-}
-
-// claimSessionReminder reports whether this session still owes the durable
-// graph-first reminder. Hosts fire session-level events once per prompt, so
-// repeating the same sentence every turn is pure context tax.
-func claimSessionReminder(payload []byte, vendor string) bool {
-	sessionID := steerSessionID(payload)
-	if sessionID == "" {
-		return true
-	}
-	state := sessionstate.Load(sessionID, vendor)
-	if state.GraphSteerReminded {
-		return false
-	}
-	state.GraphSteerReminded = true
-	sessionstate.Save(sessionID, vendor, state)
-	return true
-}
-
-// exploreAugment turns an imminent Grep/Glob/Read into graph context: it looks
-// the term up in the embedded graph and returns compact matches, or "" when
-// the tool carries no usable term, the repository has no graph, the term is
-// unindexed, or this session already spent its augment budget.
-func exploreAugment(payload []byte, vendor string) string {
-	tool := toolNameFromPayload(payload)
-	if !isExploreTool(tool) {
-		return ""
-	}
-	term := searchTermFromPayload(payload)
-	if term == "" {
-		return ""
-	}
-	root := graphRoot(payload)
-	if root == "" {
-		return ""
-	}
-
-	sessionID := steerSessionID(payload)
-	var state *sessionstate.State
-	if sessionID != "" {
-		state = sessionstate.Load(sessionID, vendor)
-		if state.GraphSteerCount >= augmentSessionCap {
-			return ""
-		}
-		for _, seen := range state.GraphSteerTerms {
-			if strings.EqualFold(seen, term) {
-				return ""
-			}
-		}
-	}
-
-	total, hits := searchGraphForTerm(root, term)
-	if len(hits) == 0 {
-		return ""
-	}
-	text := steer.ExploreAugment(term, total, hits)
-	if text == "" {
-		return ""
-	}
-	if state != nil {
-		state.GraphSteerCount++
-		state.GraphSteerTerms = append(state.GraphSteerTerms, term)
-		sessionstate.Save(sessionID, vendor, state)
-	}
-	return text
-}
-
-// searchGraphForTerm runs a bounded search against the embedded engine.
-// Every failure path returns no hits so the hook stays silent.
-func searchGraphForTerm(root, term string) (int, []steer.GraphHit) {
-	graphClient, err := client.Resolve()
-	if err != nil {
-		return 0, nil
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), augmentTimeout)
-	defer cancel()
-
-	var raw json.RawMessage
-	request := api.SearchRequest{RepoRoot: root, Query: term, Limit: augmentHitLimit}
-	if err := graphClient.Call(ctx, api.OpSearch, request, &raw); err != nil {
-		return 0, nil
-	}
-	var result api.SearchResult
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return 0, nil
-	}
-	matches := result.Matches
-	if len(matches) == 0 {
-		matches = result.Semantic
-	}
-	if len(matches) > augmentHitLimit {
-		matches = matches[:augmentHitLimit]
-	}
-	hits := make([]steer.GraphHit, 0, len(matches))
-	for _, match := range matches {
-		hits = append(hits, steer.GraphHit{
-			QualifiedName: match.QualifiedName,
-			Label:         match.Label,
-			File:          match.Location.File,
-			Lines:         lineSpan(match.Location.StartLine, match.Location.EndLine),
-		})
-	}
-	total := result.Page.Total
-	if total == 0 {
-		total = len(hits)
-	}
-	return total, hits
 }
 
 // managedFromPayload is true when the hook workspace already has .so/.
@@ -587,6 +713,29 @@ func bashLooksLikeSearch(cmd string) bool {
 	return false
 }
 
+func bashLooksLikeRead(cmd string) bool {
+	lower := strings.ToLower(strings.TrimSpace(cmd))
+	for _, tok := range []string{"cat ", "cat\t", "sed -n", "head ", "head\t", "tail ", "tail\t", "nl ", "less ", "more ", "awk ", "python -c", "python3 -c"} {
+		if strings.Contains(lower, tok) || strings.HasPrefix(lower, strings.TrimSpace(tok)) {
+			return true
+		}
+	}
+	return strings.HasPrefix(lower, "cat") && (len(lower) == 3 || lower[3] == ' ' || lower[3] == '\t')
+}
+
+func bashLooksLikeListing(cmd string) bool {
+	lower := strings.ToLower(strings.TrimSpace(cmd))
+	if strings.HasPrefix(lower, "ls") {
+		rest := strings.TrimPrefix(lower, "ls")
+		return rest == "" || rest[0] == ' ' || rest[0] == '\t' || rest[0] == '-'
+	}
+	return false
+}
+
+func bashLooksLikeGraphQuery(cmd string) bool {
+	return strings.Contains(strings.ToLower(cmd), "graph query")
+}
+
 // longestTerm picks the most selective identifier in a raw pattern.
 func longestTerm(raw string) string {
 	best := ""
@@ -618,14 +767,4 @@ func fileStem(raw string) string {
 		return ""
 	}
 	return raw
-}
-
-func lineSpan(start, end int) string {
-	if start <= 0 {
-		return "-"
-	}
-	if end <= 0 || end == start {
-		return fmt.Sprintf("%d", start)
-	}
-	return fmt.Sprintf("%d-%d", start, end)
 }

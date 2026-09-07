@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -14,9 +15,15 @@ const (
 	strictTTLEnv     = "SUPEROPEN_HOOK_STRICT_TTL"
 )
 
-// RecordQueryStamp marks that a graph query just oriented the agent for this repo.
+// RecordQueryStamp marks that a graph query just oriented this repo (no session).
 func RecordQueryStamp(repoRoot string) {
-	path := queryStampPath(repoRoot)
+	RecordQueryStampFor(repoRoot, "")
+}
+
+// RecordQueryStampFor marks that a graph query oriented one agent session.
+// Empty sessionID writes the repo-wide stamp used by sessionless hosts.
+func RecordQueryStampFor(repoRoot, sessionID string) {
+	path := queryStampPathFor(repoRoot, sessionID)
 	if path == "" {
 		return
 	}
@@ -26,13 +33,23 @@ func RecordQueryStamp(repoRoot string) {
 	_ = os.WriteFile(path, []byte(strconv.FormatInt(time.Now().Unix(), 10)+"\n"), 0o644)
 }
 
-// QueryStampFresh reports whether a graph query ran within the strict TTL.
+// QueryStampFresh reports whether a graph query ran within the strict TTL (repo-wide).
 func QueryStampFresh(repoRoot string) bool {
+	return QueryStampFreshFor(repoRoot, "")
+}
+
+// QueryStampFreshFor is true only for the given session. A session id does not
+// fall back to the repo-wide stamp — that leak silenced later chats for 30 minutes.
+func QueryStampFreshFor(repoRoot, sessionID string) bool {
 	if strings.TrimSpace(repoRoot) == "" {
 		return false
 	}
-	path := queryStampPath(repoRoot)
-	if path == "" {
+	return QueryStampFreshAt(queryStampPathFor(repoRoot, sessionID))
+}
+
+// QueryStampFreshAt is the same TTL check for any stamp file under .so/db/.
+func QueryStampFreshAt(path string) bool {
+	if strings.TrimSpace(path) == "" {
 		return false
 	}
 	info, err := os.Stat(path)
@@ -42,12 +59,35 @@ func QueryStampFresh(repoRoot string) bool {
 	return time.Since(info.ModTime()) < queryStampTTL()
 }
 
-func queryStampPath(repoRoot string) string {
+func queryStampPathFor(repoRoot, sessionID string) string {
 	paths, err := CachePaths(repoRoot)
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(paths.Root, queryStampName)
+	base := filepath.Join(paths.Root, queryStampName)
+	sid := sanitizeStampSession(sessionID)
+	if sid == "" {
+		return base
+	}
+	return base + "." + sid
+}
+
+func sanitizeStampSession(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range id {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	s := b.String()
+	if len(s) > 80 {
+		s = s[:80]
+	}
+	return s
 }
 
 func queryStampTTL() time.Duration {

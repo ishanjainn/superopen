@@ -10,6 +10,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
+	"github.com/ishanjainn/superopen/internal/paths"
 )
 
 func TestIsExploreToolExcludesShellAndListing(t *testing.T) {
@@ -22,6 +23,47 @@ func TestIsExploreToolExcludesShellAndListing(t *testing.T) {
 		if isExploreTool(name) {
 			t.Fatalf("%s should not be an explore tool", name)
 		}
+	}
+}
+
+func TestBashLooksLikeReadAndListing(t *testing.T) {
+	if !bashLooksLikeRead("sed -n '1,80p' django/db/models/query.py") {
+		t.Fatal("sed -n should count as a file read")
+	}
+	if !bashLooksLikeRead("python3 -c \"print(open('django/db/models/query.py').read())\"") {
+		t.Fatal("python3 -c should count as a file read")
+	}
+	if !bashLooksLikeListing("ls") || !bashLooksLikeListing("ls -la /work") {
+		t.Fatal("ls should count as a listing")
+	}
+	if bashLooksLikeRead("python3 manage.py test") || bashLooksLikeListing("git status") {
+		t.Fatal("unrelated commands must not match read/listing")
+	}
+	if !bashLooksLikeGraphQuery("/usr/local/bin/so graph query 'How does middleware work?'") {
+		t.Fatal("graph query should match")
+	}
+	if bashLooksLikeGraphQuery("/usr/local/bin/so graph snippet pkg.Foo.bar") {
+		t.Fatal("snippet must not look like graph query")
+	}
+}
+
+func TestBashCatPreToolUseEmitsGraphNudge(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "bash-cat")
+	writeHookSourceFile(t, root)
+	payload, err := json.Marshal(map[string]any{
+		"tool_name":  "Bash",
+		"tool_input": map[string]any{"command": "sed -n '1,80p' pkg/foo.go"},
+		"cwd":        root,
+		"session_id": "bash-cat",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", payload)
+	if !ok || !strings.Contains(d.text, "graph query") {
+		t.Fatalf("bash sed -n should get a graph nudge, ok=%v text=%q", ok, d.text)
 	}
 }
 
@@ -68,22 +110,6 @@ func TestSearchTermFromPayloadStripsRegexSyntax(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestExploreAugmentSilentForNonExploreTool(t *testing.T) {
-	payload := []byte(`{"tool_name":"Bash","tool_input":{"command":"ls -la"},"cwd":"/tmp"}`)
-	if got := exploreAugment(payload, "claude-code"); got != "" {
-		t.Fatalf("expected silence for Bash, got %q", got)
-	}
-}
-
-func TestExploreAugmentSilentWithoutGraph(t *testing.T) {
-	// t.TempDir has no .so database, so the hook must add nothing rather
-	// than emitting an unconditional reminder.
-	payload := []byte(`{"tool_name":"Grep","tool_input":{"pattern":"HandleRequest"},"cwd":"` + t.TempDir() + `"}`)
-	if got := exploreAugment(payload, "claude-code"); got != "" {
-		t.Fatalf("expected silence without a graph, got %q", got)
 	}
 }
 
@@ -160,24 +186,74 @@ func TestSessionStartHarvestOneLiner(t *testing.T) {
 		t.Fatal(err)
 	}
 	text, _, ok := steerTextFor("claude-code", "SessionStart", payload)
-	if !ok {
-		t.Fatal("expected SessionStart harvest line")
-	}
-	if !strings.HasPrefix(strings.TrimSpace(text), "Superopen: codebase questions") {
-		t.Fatalf("must stay graph-first: %q", text)
-	}
-	if !strings.Contains(text, "HARVEST") {
-		t.Fatalf("missing harvest: %q", text)
-	}
-	low := strings.ToLower(text)
-	if strings.Contains(low, "prefer simplify") || strings.Contains(low, "task-observer") {
-		t.Fatalf("must not dump harvest methodology: %q", text)
-	}
-	if memory.EstimateTokens(text) > 350 {
-		t.Fatalf("over token cap: %q", text)
+	if ok {
+		t.Fatalf("SessionStart must not inject harvest: %q", text)
 	}
 	if extra, _, ok := steerTextFor("claude-code", "Stop", payload); ok {
 		t.Fatalf("Stop must stay silent, got %q", extra)
+	}
+}
+
+func TestSessionStartPendingHarvestOneLiner(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "pending-session")
+	writeHookSourceFile(t, root)
+	store, err := harvest.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.InsertRun("old-cursor-sess", harvest.StatusPending, "", "await-live"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	payload, err := json.Marshal(map[string]any{
+		"session_id": "pending-session",
+		"cwd":        root,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("cursor", "sessionStart", payload)
+	if !ok || !strings.Contains(text, "HARVEST pending") || !paths.MentionsCommand(text, "harvest propose") {
+		t.Fatalf("pending harvest one-liner, got ok=%v %q", ok, text)
+	}
+	if strings.Contains(text, "review") {
+		t.Fatalf("must not inject OPEN review: %q", text)
+	}
+}
+
+func TestPromptSubmitPendingHarvestOnCodePrompt(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "code-harvest")
+	writeHookSourceFile(t, root)
+	store, err := harvest.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.InsertRun("old-cursor-sess", harvest.StatusPending, "", harvest.SkipAwaitLive); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	payload, err := json.Marshal(map[string]any{
+		"session_id": "code-harvest",
+		"cwd":        root,
+		"prompt":     "Where is the plugin's App plugin registered?",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("cursor", "beforeSubmitPrompt", payload)
+	if !ok || !strings.Contains(text, "HARVEST pending") || !paths.MentionsCommand(text, "harvest propose") {
+		t.Fatalf("code prompt must still inject live harvest, got ok=%v %q", ok, text)
+	}
+	if strings.Contains(text, "review") {
+		t.Fatalf("must not inject OPEN review: %q", text)
+	}
+	second, _, ok := steerTextFor("cursor", "beforeSubmitPrompt", payload)
+	if ok && strings.Contains(second, "HARVEST pending") {
+		t.Fatalf("second prompt-submit must not re-nag harvest: %q", second)
 	}
 }
 
@@ -235,11 +311,17 @@ func TestSessionStartIndexGraphFirstNoBodies(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s %s: expected SessionStart index", tc.vendor, tc.event)
 		}
-		if !strings.Contains(text, `so graph query "<question>"`) {
-			t.Fatalf("%s %s: first-line graph query missing: %q", tc.vendor, tc.event, text)
+		if !strings.Contains(text, "memories in this workspace") {
+			t.Fatalf("%s %s: must say memories exist: %q", tc.vendor, tc.event, text)
 		}
-		if !strings.HasPrefix(strings.TrimSpace(text), "Superopen: codebase questions") {
-			t.Fatalf("%s %s: must start graph-first, got %q", tc.vendor, tc.event, text)
+		if !strings.Contains(text, "memory recall") {
+			t.Fatalf("%s %s: must give recall command: %q", tc.vendor, tc.event, text)
+		}
+		if !strings.Contains(text, "shell") {
+			t.Fatalf("%s %s: must say run in your shell: %q", tc.vendor, tc.event, text)
+		}
+		if !strings.Contains(text, ".so/") && !strings.Contains(text, "MEMORY.md") {
+			t.Fatalf("%s %s: must name the workspace store: %q", tc.vendor, tc.event, text)
 		}
 		if strings.Contains(text, body) {
 			t.Fatalf("%s %s: must not inject episode bodies: %q", tc.vendor, tc.event, text)
@@ -247,15 +329,27 @@ func TestSessionStartIndexGraphFirstNoBodies(t *testing.T) {
 		if memory.EstimateTokens(text) > 350 {
 			t.Fatalf("%s %s: index %d tokens over 350: %q", tc.vendor, tc.event, memory.EstimateTokens(text), text)
 		}
-		if strings.Contains(text, "so memory search") {
-			t.Fatalf("%s %s: index must not CTA search: %q", tc.vendor, tc.event, text)
-		}
-	}
-	if text, _, ok := steerTextFor("claude-code", "UserPromptSubmit", payload); ok {
-		t.Fatalf("UserPromptSubmit must stay silent even with memories, got %q", text)
 	}
 	if _, _, ok := steerTextFor("codex", "PreToolUse", []byte(`{"tool_name":"Grep","tool_input":{"pattern":"HandleRequest"},"cwd":"`+root+`","session_id":"`+id+`"}`)); ok {
 		t.Fatal("Codex PreToolUse must stay silent")
+	}
+}
+
+func TestCodeRepoSessionStartIsGraphFirst(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "code-session")
+	writeHookSourceFile(t, root)
+	payload, err := json.Marshal(map[string]any{"session_id": "code-session", "cwd": root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("claude-code", "SessionStart", payload)
+	if !ok || !strings.Contains(text, "graph query") {
+		t.Fatalf("code repo SessionStart must be graph-first, got ok=%v text=%q", ok, text)
+	}
+	if strings.Contains(text, "memories in this workspace") {
+		t.Fatalf("code repo SessionStart must not preach memory: %q", text)
 	}
 }
 
@@ -263,6 +357,7 @@ func TestSubagentStartInjectsHookReminder(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
 	writeHookSession(t, root, "steer-subagent-session")
+	writeHookSourceFile(t, root)
 	payload, err := json.Marshal(map[string]any{
 		"session_id": "steer-subagent-session",
 		"cwd":        root,
@@ -277,12 +372,15 @@ func TestSubagentStartInjectsHookReminder(t *testing.T) {
 	if ev != "SubagentStart" {
 		t.Fatalf("hookEvent = %q, want SubagentStart", ev)
 	}
-	if !strings.Contains(text, "so graph query") {
+	if !paths.MentionsCommand(text, "graph query") {
 		t.Fatalf("SubagentStart text missing graph reminder: %q", text)
 	}
 	cursorText, cursorEv, cursorOK := steerTextFor("cursor", "subagentStart", payload)
-	if !cursorOK || cursorEv != "subagentStart" || !strings.Contains(cursorText, "so graph query") {
+	if !cursorOK || cursorEv != "subagentStart" || !paths.MentionsCommand(cursorText, "graph query") {
 		t.Fatalf("cursor subagentStart must inject the same reminder, got ok=%v ev=%q text=%q", cursorOK, cursorEv, cursorText)
+	}
+	if text, _, ok := steerTextFor("claude-code", "SubagentStart", payload); ok {
+		t.Fatalf("second SubagentStart in the same session must stay silent, got %q", text)
 	}
 }
 
@@ -306,10 +404,11 @@ func TestPreCompactInjectsWorkingSnapshotFailOpen(t *testing.T) {
 	}
 }
 
-func TestGrepPreToolUseEmitsMandatory(t *testing.T) {
+func TestGrepPreToolUseEmitsGraphNudge(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
 	writeHookSession(t, root, "grep-session")
+	writeHookSourceFile(t, root)
 	payload, err := json.Marshal(map[string]any{
 		"tool_name":  "Grep",
 		"tool_input": map[string]any{"pattern": "HandleRequest"},
@@ -320,8 +419,11 @@ func TestGrepPreToolUseEmitsMandatory(t *testing.T) {
 		t.Fatal(err)
 	}
 	text, _, ok := steerTextFor("claude-code", "PreToolUse", payload)
-	if !ok || !strings.Contains(text, "MANDATORY") {
-		t.Fatalf("grep should get a MANDATORY graph-first nudge, got %q", text)
+	if !ok || !paths.MentionsCommand(text, "graph query") {
+		t.Fatalf("grep should get a graph-first nudge, got %q", text)
+	}
+	if strings.Contains(text, "MANDATORY") {
+		t.Fatalf("grep nudge must not say MANDATORY, got %q", text)
 	}
 	if strings.Contains(text, "Superopen graph:") || strings.Contains(text, "hit(s) for") {
 		t.Fatalf("grep must not receive ExploreAugment hit lists, got %q", text)
@@ -335,6 +437,7 @@ func TestCursorPreToolUseGrepInfersSearch(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
 	writeHookSession(t, root, "grep-session")
+	writeHookSourceFile(t, root)
 	payload, err := json.Marshal(map[string]any{
 		"tool_name":  "Grep",
 		"tool_input": map[string]any{"pattern": "HandleRequest"},
@@ -345,8 +448,11 @@ func TestCursorPreToolUseGrepInfersSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	text, _, ok := steerTextFor("cursor", "preToolUse", payload)
-	if !ok || !strings.Contains(text, "MANDATORY") {
+	if !ok || !paths.MentionsCommand(text, "graph query") {
 		t.Fatalf("cursor Grep without --kind should get search nudge, got %q", text)
+	}
+	if strings.Contains(text, "MANDATORY") {
+		t.Fatalf("cursor nudge must not say MANDATORY, got %q", text)
 	}
 	if !strings.Contains(text, ".so/") {
 		t.Fatalf("nudge should mention .so/: %q", text)
@@ -376,6 +482,7 @@ func TestStrictDenyFirstReadOnce(t *testing.T) {
 	t.Setenv("SUPEROPEN_HOOK_STRICT", "1")
 	root := t.TempDir()
 	writeHookSession(t, root, "strict-session")
+	writeHookSourceFile(t, root)
 	payload, err := json.Marshal(map[string]any{
 		"tool_name":  "Read",
 		"tool_input": map[string]any{"file_path": filepath.Join(root, "internal", "api", "handler.go")},
@@ -393,8 +500,104 @@ func TestStrictDenyFirstReadOnce(t *testing.T) {
 	if !ok || second.deny {
 		t.Fatalf("second Read must nudge, not deny; ok=%v deny=%v text=%q", ok, second.deny, second.text)
 	}
-	if !strings.Contains(second.text, "MANDATORY") {
-		t.Fatalf("second Read should still carry MANDATORY, got %q", second.text)
+	if !paths.MentionsCommand(second.text, "graph query") {
+		t.Fatalf("second Read should still carry the graph nudge, got %q", second.text)
+	}
+	if strings.Contains(second.text, "MANDATORY") {
+		t.Fatalf("Read nudge must not say MANDATORY, got %q", second.text)
+	}
+}
+
+func TestQueryStampFreshReadOverflowsToSnippetOnce(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".so", "db"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".so", "db", "so.db"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeHookSession(t, root, "overflow-session")
+	writeHookSourceFile(t, root)
+	py := filepath.Join(root, "django", "db", "models", "query.py")
+	if err := os.MkdirAll(filepath.Dir(py), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(py, []byte("class QuerySet:\n    pass\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine.RecordQueryStampFor(root, "overflow-session")
+	readPayload, err := json.Marshal(map[string]any{
+		"tool_name":  "Read",
+		"tool_input": map[string]any{"file_path": py},
+		"cwd":        root,
+		"session_id": "overflow-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, ok := steerDecisionFor("claude-code", "PreToolUse", "read", readPayload)
+	if !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") {
+		t.Fatalf("after query, source Read must overflow to snippet once, got ok=%v deny=%v text=%q", ok, d.deny, d.text)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "read", readPayload); ok {
+		t.Fatal("snippet overflow must fire once per session")
+	}
+	grepPayload, err := json.Marshal(map[string]any{
+		"tool_name":  "Grep",
+		"tool_input": map[string]any{"pattern": "QuerySet"},
+		"cwd":        root,
+		"session_id": "overflow-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "search", grepPayload); ok {
+		t.Fatal("fresh query stamp must skip Grep/search nudges")
+	}
+}
+
+func TestQueryRepeatOverflowOnceAfterStamp(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".so", "db"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".so", "db", "so.db"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeHookSession(t, root, "repeat-session")
+	writeHookSourceFile(t, root)
+	queryPayload, err := json.Marshal(map[string]any{
+		"tool_name":  "Bash",
+		"tool_input": map[string]any{"command": "/usr/local/bin/so graph query 'How does middleware process a request?'"},
+		"cwd":        root,
+		"session_id": "repeat-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", queryPayload); ok {
+		t.Fatalf("first graph query must run without overflow, got %q", d.text)
+	}
+	d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", queryPayload)
+	if !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") || !strings.Contains(d.text, "TRUNCATED") {
+		t.Fatalf("second graph query must overflow to snippet (no deny), got ok=%v deny=%v text=%q", ok, d.deny, d.text)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "search", queryPayload); ok {
+		t.Fatal("query-repeat overflow must fire once per session")
+	}
+	snippetPayload, err := json.Marshal(map[string]any{
+		"tool_name":  "Bash",
+		"tool_input": map[string]any{"command": "/usr/local/bin/so graph snippet pkg.Site.register"},
+		"cwd":        root,
+		"session_id": "repeat-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "search", snippetPayload); ok {
+		t.Fatal("graph snippet after a query must stay silent")
 	}
 }
 
@@ -409,8 +612,9 @@ func TestStrictSkipDenyWhenQueryStampFresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeHookSession(t, root, "stamped-session")
-	engine.RecordQueryStamp(root)
-	payload, err := json.Marshal(map[string]any{
+	writeHookSourceFile(t, root)
+	engine.RecordQueryStampFor(root, "stamped-session")
+	readPayload, err := json.Marshal(map[string]any{
 		"tool_name":  "Read",
 		"tool_input": map[string]any{"file_path": filepath.Join(root, "internal", "api", "handler.go")},
 		"cwd":        root,
@@ -419,12 +623,24 @@ func TestStrictSkipDenyWhenQueryStampFresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, ok := steerDecisionFor("claude-code", "PreToolUse", "read", payload)
-	if !ok {
-		t.Fatal("expected a read nudge")
+	d, ok := steerDecisionFor("claude-code", "PreToolUse", "read", readPayload)
+	if !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") {
+		t.Fatalf("fresh stamp Read must overflow to snippet (no deny), got ok=%v deny=%v text=%q", ok, d.deny, d.text)
 	}
-	if d.deny {
-		t.Fatalf("fresh query stamp must skip deny, got %q", d.text)
+	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "read", readPayload); ok {
+		t.Fatal("snippet overflow must fire once per session")
+	}
+	grepPayload, err := json.Marshal(map[string]any{
+		"tool_name":  "Grep",
+		"tool_input": map[string]any{"pattern": "QuerySet"},
+		"cwd":        root,
+		"session_id": "stamped-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "search", grepPayload); ok {
+		t.Fatal("fresh query stamp must skip Grep/search nudges")
 	}
 }
 
@@ -433,6 +649,7 @@ func TestEvalDoesNotEnableHookStrict(t *testing.T) {
 	t.Setenv("SUPEROPEN_HOOK_STRICT", "")
 	root := t.TempDir()
 	writeHookSession(t, root, "nonstrict")
+	writeHookSourceFile(t, root)
 	payload, err := json.Marshal(map[string]any{
 		"tool_name":  "Read",
 		"tool_input": map[string]any{"file_path": filepath.Join(root, "internal", "api", "handler.go")},
@@ -501,12 +718,68 @@ func TestPriorWorkCueInjectsIndex(t *testing.T) {
 	if !ok || !strings.Contains(text, "JWT expiry") {
 		t.Fatalf("cue should inject index lines, got ok=%v text=%q", ok, text)
 	}
-	if strings.Contains(text, "UNIQUE_CUE_BODY") {
-		t.Fatalf("cue must not inject bodies: %q", text)
+	if !strings.Contains(text, "import ids") || !strings.Contains(text, "cite both") || !strings.Contains(text, "second cue") {
+		t.Fatalf("cue pack must include diary framing, got %q", text)
+	}
+	if !strings.Contains(text, "UNIQUE_CUE_BODY") {
+		t.Fatalf("cue should inject matching recalled body, got %q", text)
+	}
+	if !strings.Contains(text, "past sessions") {
+		t.Fatalf("cue pack must frame ownership, got %q", text)
+	}
+	if !strings.Contains(text, "--full") {
+		t.Fatalf("cue pack must point at memory get --full, got %q", text)
 	}
 	cursorText, _, cursorOK := steerTextFor("cursor", "beforeSubmitPrompt", payload)
-	if !cursorOK || !strings.Contains(cursorText, "JWT expiry") {
+	if !cursorOK || !strings.Contains(cursorText, "UNIQUE_CUE_BODY") {
 		t.Fatalf("cursor beforeSubmitPrompt cue failed: ok=%v text=%q", cursorOK, cursorText)
+	}
+	copilotText, _, copilotOK := steerTextFor("copilot-cli", "userPromptSubmitted", payload)
+	if !copilotOK || !strings.Contains(copilotText, "UNIQUE_CUE_BODY") {
+		t.Fatalf("copilot-cli userPromptSubmitted cue failed: ok=%v text=%q", copilotOK, copilotText)
+	}
+	codexText, _, codexOK := steerTextFor("codex", "UserPromptSubmit", payload)
+	if !codexOK || !strings.Contains(codexText, "UNIQUE_CUE_BODY") {
+		t.Fatalf("codex UserPromptSubmit cue failed: ok=%v text=%q", codexOK, codexText)
+	}
+	geminiText, _, geminiOK := steerTextFor("gemini", "BeforeAgent", payload)
+	if !geminiOK || !strings.Contains(geminiText, "UNIQUE_CUE_BODY") {
+		t.Fatalf("gemini BeforeAgent cue failed: ok=%v text=%q", geminiOK, geminiText)
+	}
+	piText, _, piOK := steerTextFor("pi", "before_agent_start", payload)
+	if !piOK || !strings.Contains(piText, "UNIQUE_CUE_BODY") {
+		t.Fatalf("pi before_agent_start cue failed: ok=%v text=%q", piOK, piText)
+	}
+	if text, _, ok := steerTextFor("opencode", "session.created", payload); ok && strings.Contains(text, "UNIQUE_CUE_BODY") {
+		t.Fatalf("opencode has no prompt-submit event; must not inject bodies on session.created, got %q", text)
+	}
+}
+
+func TestCodePromptDoesNotInjectMemoryPack(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "code-prompt")
+	writeHookSourceFile(t, root)
+	store, err := memory.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Capture(memory.CaptureInput{
+		Kind: memory.KindSession, Title: "JWT expiry is 15m", Text: "UNIQUE_CODE_PROMPT_BODY",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	payload, err := json.Marshal(map[string]any{
+		"session_id": "code-prompt",
+		"cwd":        root,
+		"prompt":     "how does dashboard provisioning work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text, _, ok := steerTextFor("claude-code", "UserPromptSubmit", payload); ok {
+		t.Fatalf("code prompt must not inject memory bodies, got %q", text)
 	}
 }
 
@@ -554,6 +827,7 @@ func TestOpenCodePiToolBeforeEmitsGraphNudge(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
 	writeHookSession(t, root, "oc-pi-session")
+	writeHookSourceFile(t, root)
 	payload, err := json.Marshal(map[string]any{
 		"session_id": "oc-pi-session",
 		"cwd":        root,
@@ -565,12 +839,24 @@ func TestOpenCodePiToolBeforeEmitsGraphNudge(t *testing.T) {
 	}
 	for _, vendor := range []string{"opencode", "pi"} {
 		text, _, ok := steerTextFor(vendor, "tool.execute.before", payload)
-		if !ok || !strings.Contains(text, "MANDATORY") || !strings.Contains(text, "so graph query") {
+		if !ok || !paths.MentionsCommand(text, "graph query") {
 			t.Fatalf("%s tool.execute.before should nudge graph query, ok=%v text=%q", vendor, ok, text)
 		}
+		if strings.Contains(text, "MANDATORY") || strings.Contains(text, `"`) {
+			t.Fatalf("%s nudge must be one line without MANDATORY or double quotes, got %q", vendor, text)
+		}
 	}
-	piStart, _, ok := steerTextFor("pi", "tool_execution_start", payload)
-	if !ok || !strings.Contains(piStart, "so graph query") {
+	piPayload, err := json.Marshal(map[string]any{
+		"session_id": "oc-pi-session-2",
+		"cwd":        root,
+		"tool_name":  "bash",
+		"command":    "grep Foo pkg",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	piStart, _, ok := steerTextFor("pi", "tool_execution_start", piPayload)
+	if !ok || !paths.MentionsCommand(piStart, "graph query") {
 		t.Fatalf("pi tool_execution_start should nudge, ok=%v text=%q", ok, piStart)
 	}
 }
@@ -613,8 +899,166 @@ func TestOpenCodePiGraphToolsNotNudged(t *testing.T) {
 	}
 }
 
+func TestMemoryPromptSkipsSearchNudge(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	id := "diary-qa"
+	writeHookSession(t, root, id)
+	store, err := memory.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Capture(memory.CaptureInput{
+		Kind: memory.KindSession, Title: "Caroline raced Tuesday", Text: "Caroline raced on Tuesday",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	submit, err := json.Marshal(map[string]any{
+		"session_id": id, "cwd": root, "prompt": "Who is Caroline?",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("claude-code", "UserPromptSubmit", submit)
+	if !ok || !strings.Contains(text, "memory recall") {
+		t.Fatalf("personal prompt should inject recall, ok=%v text=%q", ok, text)
+	}
+	if strings.Contains(text, "graph query") {
+		t.Fatalf("personal prompt must not mandate graph: %q", text)
+	}
+	grep, err := json.Marshal(map[string]any{
+		"tool_name": "Grep", "tool_input": map[string]any{"pattern": "Caroline"},
+		"cwd": root, "session_id": id,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nudge, _, ok := steerTextFor("claude-code", "PreToolUse", grep)
+	if !ok || !strings.Contains(nudge, "memory recall") {
+		t.Fatalf("memory prompt must not get SearchNudge, got ok=%v text=%q", ok, nudge)
+	}
+	if strings.Contains(nudge, "graph query") && !strings.Contains(nudge, "Skip Grep and graph query") {
+		t.Fatalf("memory PreToolUse must not mandate graph: %q", nudge)
+	}
+	second, _, ok := steerTextFor("claude-code", "UserPromptSubmit", submit)
+	if !ok || !strings.Contains(second, "Caroline raced") {
+		t.Fatalf("second UserPromptSubmit should re-inject matching bodies, ok=%v text=%q", ok, second)
+	}
+}
+
+func TestEmptyStorePreToolUseSilent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "empty-store")
+	payload, err := json.Marshal(map[string]any{
+		"tool_name": "Grep", "tool_input": map[string]any{"pattern": "Handler"},
+		"cwd": root, "session_id": "empty-store",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text, _, ok := steerTextFor("claude-code", "PreToolUse", payload); ok {
+		t.Fatalf("empty graph+memory must stay silent, got %q", text)
+	}
+}
+
+func TestSoBashSkipsNudge(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "so-bash")
+	writeHookSourceFile(t, root)
+	payload, err := json.Marshal(map[string]any{
+		"tool_name":  "Bash",
+		"tool_input": map[string]any{"command": "so graph query \"how does auth work\""},
+		"cwd":        root,
+		"session_id": "so-bash",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text, _, ok := steerTextFor("claude-code", "PreToolUse", payload); ok {
+		t.Fatalf("so Bash must not be nagged, got %q", text)
+	}
+}
+
+func TestEmptySessionIDUsesRootStampOnce(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "no-sid")
+	writeHookSourceFile(t, root)
+	payload, err := json.Marshal(map[string]any{
+		"tool_name":  "Grep",
+		"tool_input": map[string]any{"pattern": "HandleRequest"},
+		"cwd":        root,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("claude-code", "PreToolUse", payload)
+	if !ok || !paths.MentionsCommand(text, "graph query") {
+		t.Fatalf("first grep without session id should nudge, ok=%v text=%q", ok, text)
+	}
+	if text, _, ok := steerTextFor("claude-code", "PreToolUse", payload); ok {
+		t.Fatalf("second grep without session id must use the root stamp, got %q", text)
+	}
+}
+
+func writeHookSourceFile(t *testing.T, root string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCapturePromptNudgesCaptureNotRecall(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	id := "capture-sess"
+	writeHookSession(t, root, id)
+	submit, err := json.Marshal(map[string]any{
+		"session_id": id, "cwd": root, "prompt": "remember this: login timeout is 30s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("claude-code", "UserPromptSubmit", submit)
+	if !ok || !strings.Contains(text, "memory capture") {
+		t.Fatalf("remember-this should inject capture, ok=%v text=%q", ok, text)
+	}
+	if strings.Contains(text, "memory recall") {
+		t.Fatalf("remember-this must not inject recall, text=%q", text)
+	}
+	grep, err := json.Marshal(map[string]any{
+		"tool_name": "Grep", "tool_input": map[string]any{"pattern": "timeout"},
+		"cwd": root, "session_id": id,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nudge, _, ok := steerTextFor("claude-code", "PreToolUse", grep)
+	if !ok || !strings.Contains(nudge, "memory capture") {
+		t.Fatalf("capture PreToolUse should nudge capture, ok=%v text=%q", ok, nudge)
+	}
+	if strings.Contains(nudge, "memory recall") {
+		t.Fatalf("capture PreToolUse must not inject recall, text=%q", nudge)
+	}
+
+	askID := "recall-sess"
+	writeHookSession(t, root, askID)
+	ask, err := json.Marshal(map[string]any{
+		"session_id": askID, "cwd": root, "prompt": "do you remember where we left the login timeout",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	askText, _, askOK := steerTextFor("claude-code", "UserPromptSubmit", ask)
+	if askOK && strings.Contains(askText, "memory capture") {
+		t.Fatalf("recall question must not inject capture, text=%q", askText)
+	}
+}
+
 func writeHookSession(t *testing.T, root, id string) {
 	t.Helper()
-	// Best-effort ingest so pack has content; empty store still fail-opens.
 	_ = os.MkdirAll(filepath.Join(root, ".so", "sessions", id), 0o755)
 }

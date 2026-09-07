@@ -1,36 +1,37 @@
 ---
 name: so
-description: "Use for any question about a codebase, its architecture, file relationships, or project content — especially when .so/ exists, where the question should be treated as a Superopen graph query first. Native code graph with query, path, and snippet tools. If .so/ is missing, do not run so or so init unless the user explicitly asks."
+description: "Use for any question about a codebase, its architecture, file relationships, or project content. Treat source questions as graph query first. Also use for prior-work facts (so memory recall) and when the user wants a fact stored (so memory capture). Superopen is a CLI binary invoked with your shell tool (Bash, PowerShell, or equivalent), not an MCP tool. If .so/ is missing, run one graph query anyway (a linked worktree may seed from the parent). If that prints the unmanaged message, stop and do not so init unless the user explicitly asked."
 ---
 
 # Superopen (`/so`)
 
-**If the `.so` directory is missing, stop.** Do not run `so` and do not run `so init` unless the user explicitly asked to initialize this repo.
+Superopen is a **CLI binary**, not an MCP tool and not a host plugin tool. There is no `so` tool schema. Copy-paste this install-time absolute path into your shell tool. On Windows that is PowerShell or cmd (`so.exe`); do not wrap the path in `bash -c`.
 
-Never Grep `.so/` or installed skill/rule directories to find the graph. When `.so/` exists and the request is about the codebase, run `so graph query` before grepping the repository. If you spawn a Task/subagent, its prompt must say to run `so graph query` first (Explore children never see SessionStart).
-
-## Binary
-
-Prefer this absolute binary (set at `so install` time):
-
-```text
+```
 __SO_BIN__
 ```
 
-If that path is missing, fall back to `$SUPEROPEN_SO_BIN` or `so` on `PATH`.
+If that path is missing, fall back to `$SUPEROPEN_SO_BIN` or `so` / `so.exe` on `PATH`.
 
-## Fast path — existing graph
+Never Grep `.so/` or installed skill/rule directories. Never pipe `so` through `head`/`tail`. If you spawn a Task/subagent, its prompt must say to run the same command line first (Explore children never see SessionStart).
 
-When `.so/` exists and the request is about the codebase (how does X work, where is Y, callers, files, architecture — not an explicit rebuild): **run `so graph query "<question>"` immediately.** Do not detect. Do not spawn Explore/Agent. Do not grep first. The graph is already built — use it.
+If `.so/` is missing, still run **one** `graph query`. If stdout is `not a Superopen repo; run so init`, stop. Do not `so init` unless the user explicitly asked. A linked git worktree of a managed parent seeds on that call.
 
-```bash
-__SO_BIN__ graph query "<question>"
-```
+## Scenario table
 
-Answer from NODE/EDGE lines and their `src=` paths. Read those files to edit or debug specific lines. Grep only after query has oriented you, or for a literal string the graph does not index.
+| Situation | Command | Then |
+|-----------|---------|------|
+| Unknown location / how does X work | `__SO_BIN__ graph query "<question>"` | Stop if NODE/EDGE/BODIES answer |
+| Known symbol, need body | `__SO_BIN__ graph snippet "<qn>"` | Only a NODE already listed |
+| Callers | `__SO_BIN__ graph trace "<qn>"` | `--direction incoming` when you need callers |
+| Rename / signature / multi-file edit | `__SO_BIN__ graph impact --files <path>` or `--base main` | Check siblings before you finish; do not skip dependents |
+| Cold repo / architecture | `__SO_BIN__ graph architecture` | Stop; do not dump every hub |
+| Prior work / diary | `__SO_BIN__ memory recall "<question>"` | Quote `#id`; not graph query |
+| Persist a fact for later | `__SO_BIN__ memory capture --kind knowledge --horizon medium --title "…" --text "…"` | Intent, not a phrase; then stop |
+| Exhaustive literal | `__SO_BIN__ graph code-search "<pat>"` | Grep only if that file is unindexed |
 
-If a NODE line already names the symbol, use `so graph snippet "<qualified_name>"` for the body or `so graph trace "<qn>"` for callers/callees. After a truncated query, run `so graph snippet "<qn>"` from a NODE above or narrow the question — do not start a `so graph search` spray.
+One call then act. Do not re-query unless the dump said TRUNCATED. Do not Read a whole file whose body is already in BODIES. Do not list the tree to confirm Superopen.
 
-Do not initialize a repository because `.so/` is missing.
+If a hook line says `HARVEST pending`, you are the live agent: run `__SO_BIN__ harvest brief <id>` then `__SO_BIN__ harvest propose` (JSON on stdin, include `session_id`) **before answering**. If nothing to propose, run `__SO_BIN__ harvest skip <id>`. Same for `DISTILL pending` (`memory distill --brief <id>`, then `memory distill --apply <id>`; empty array if nothing durable). See `references/harvest.md`.
 
 Recipes (dead code, fan-in/out, routes): `references/query.md`. Prior-work memory: `references/memory.md`. Playbook harvest (on demand): `references/harvest.md`.

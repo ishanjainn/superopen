@@ -134,13 +134,18 @@ func ephemeral(repoRoot string) bool {
 	}
 	normalized := filepath.ToSlash(filepath.Clean(repoRoot))
 	for _, marker := range []string{
-		"/benchmarks/agent-graph-eval/work/",
 		"/.claude/plugins/cache/",
 		"/.cursor/projects/",
 	} {
 		if strings.Contains(normalized, marker) {
 			return true
 		}
+	}
+	if strings.TrimSpace(os.Getenv("SUPEROPEN_SCRATCH")) == "1" {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(repoRoot, ".superopen-scratch")); err == nil {
+		return true
 	}
 	return false
 }

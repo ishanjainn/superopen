@@ -47,6 +47,10 @@ func ResolveForVendor(vendor string) string {
 		return claudeCodeEmail()
 	case "codex":
 		return codexEmail()
+	case "cursor":
+		// Cursor stamps user_email on the hook payload; hook.go reads it.
+		// There is no durable local OAuth file for this lookup.
+		return ""
 	}
 	return ""
 }

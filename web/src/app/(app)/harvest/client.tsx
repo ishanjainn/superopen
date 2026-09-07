@@ -29,20 +29,38 @@ type Proposal = {
   plus?: number;
   minus?: number;
   evidence?: Evidence[];
+  source?: string;
+  created_at?: string;
 };
 
+type Tab = "open" | "history";
+
 export default function HarvestPage() {
+  const [tab, setTab] = useState<Tab>("open");
   const [items, setItems] = useState<Proposal[]>([]);
+  const [history, setHistory] = useState<Proposal[]>([]);
+  const [latest, setLatest] = useState<Proposal | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/harvest");
-      const body = (await res.json()) as { items?: Proposal[]; error?: string };
-      if (body.error) setError(body.error);
+      const [openRes, histRes] = await Promise.all([
+        fetch("/api/harvest"),
+        fetch("/api/harvest?history=1"),
+      ]);
+      const openBody = (await openRes.json()) as {
+        items?: Proposal[];
+        latest?: Proposal | null;
+        error?: string;
+      };
+      const histBody = (await histRes.json()) as { items?: Proposal[]; error?: string };
+      if (openBody.error) setError(openBody.error);
+      else if (histBody.error) setError(histBody.error);
       else setError("");
-      setItems(Array.isArray(body.items) ? body.items : []);
+      setItems(Array.isArray(openBody.items) ? openBody.items : []);
+      setLatest(openBody.latest ?? null);
+      setHistory(Array.isArray(histBody.items) ? histBody.items : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load harvest");
     }
@@ -75,34 +93,93 @@ export default function HarvestPage() {
     }
   }
 
+  const skippedEmpty =
+    items.length === 0 && (latest?.status === "skipped" || history[0]?.status === "skipped");
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <FeaturePageHeader title="Harvest" />
+      <div className="flex shrink-0 gap-2 border-b border-neutral-200 px-5 py-2">
+        <button
+          type="button"
+          className={tab === "open" ? "rounded-full bg-neutral-900 px-3 py-1 text-xs text-white" : "rounded-full border border-neutral-300 px-3 py-1 text-xs text-neutral-700"}
+          onClick={() => setTab("open")}
+        >
+          Open
+        </button>
+        <button
+          type="button"
+          className={tab === "history" ? "rounded-full bg-neutral-900 px-3 py-1 text-xs text-white" : "rounded-full border border-neutral-300 px-3 py-1 text-xs text-neutral-700"}
+          onClick={() => setTab("history")}
+        >
+          History
+        </button>
+      </div>
       <div className="min-h-0 flex-1 overflow-auto p-5">
         {error ? (
           <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
             {error}
           </div>
         ) : null}
-        {items.length === 0 ? (
+        {tab === "open" ? (
+          items.length === 0 ? (
+            <p className="text-sm text-neutral-500">
+              {skippedEmpty
+                ? "No patches waiting. Last review skipped — nothing to change."
+                : "No open playbook proposals."}
+            </p>
+          ) : (
+            <div className="mx-auto flex max-w-3xl flex-col gap-4">
+              {items.map((p) => (
+                <ProposalCard
+                  key={p.id}
+                  proposal={p}
+                  busy={busy === p.id}
+                  onApply={(force) => void act(p.id, "apply", force)}
+                  onDecline={() => void act(p.id, "decline")}
+                />
+              ))}
+            </div>
+          )
+        ) : history.length === 0 ? (
           <p className="text-sm text-neutral-500">
-            No open playbook proposals. Harvest runs after a session ends.
+            No harvest history in the session retention window (default 7 days).
           </p>
         ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-4">
-            {items.map((p) => (
-              <ProposalCard
-                key={p.id}
-                proposal={p}
-                busy={busy === p.id}
-                onApply={(force) => void act(p.id, "apply", force)}
-                onDecline={() => void act(p.id, "decline")}
-              />
+          <div className="mx-auto flex max-w-3xl flex-col gap-3">
+            <p className="text-xs text-neutral-500">
+              Closed reviews from the session retention window (default 7 days).
+            </p>
+            {history.map((p) => (
+              <HistoryCard key={`${p.source || "item"}-${p.id}`} item={p} />
             ))}
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+function HistoryCard({ item }: { item: Proposal }) {
+  return (
+    <article className="rounded-xl border border-neutral-200 bg-white px-4 py-3">
+      <header className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-sm text-neutral-800">{item.target || "session"}</span>
+        <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] uppercase tracking-wide text-neutral-600">
+          {item.status}
+        </span>
+        {item.kind ? (
+          <span className="rounded-full bg-neutral-50 px-2 py-0.5 text-[11px] text-neutral-500">
+            {item.kind}
+          </span>
+        ) : null}
+        {item.created_at ? (
+          <span className="ml-auto font-mono text-[11px] text-neutral-400">{item.created_at}</span>
+        ) : null}
+      </header>
+      <h2 className="mt-2 text-sm font-medium text-neutral-900">{item.title}</h2>
+      {item.reason ? <p className="mt-1 text-sm text-neutral-600">{item.reason}</p> : null}
+    </article>
   );
 }
 

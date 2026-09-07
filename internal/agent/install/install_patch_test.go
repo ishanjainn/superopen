@@ -94,6 +94,9 @@ func TestSessionEndFinalizeIsDetached(t *testing.T) {
 	if !strings.Contains(body, `"SubagentStart"`) || !strings.Contains(body, `--event=SubagentStart`) {
 		t.Fatalf("Claude must install SubagentStart (Explore hole); hooks.json:\n%s", body)
 	}
+	if strings.Contains(body, "graph refresh") {
+		t.Fatalf("vendor hooks must not spawn graph refresh; hooks.json:\n%s", body)
+	}
 	raw, err = marketplaceFS.ReadFile("marketplace/plugins/cursor/hooks/hooks.json")
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +104,9 @@ func TestSessionEndFinalizeIsDetached(t *testing.T) {
 	body = string(raw)
 	if !strings.Contains(body, `so sessions finalize --detach`) {
 		t.Fatalf("Cursor sessionEnd must detach finalize; hooks.json:\n%s", body)
+	}
+	if strings.Contains(body, "graph refresh") {
+		t.Fatalf("Cursor hooks must not spawn graph refresh; hooks.json:\n%s", body)
 	}
 }
 

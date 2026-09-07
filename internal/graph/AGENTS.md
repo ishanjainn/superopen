@@ -27,9 +27,9 @@ Parent index: [../../AGENTS.md](../../AGENTS.md)
 
 1. **Seeds:** FTS via `Search` (limit ~50), not `ORDER BY id LIMIT N` over callables. Do not File-prepend; BFS `DEFINES` from File would spray Variables.
 2. **Search vs query:** `so graph search` filters File/Folder/Module/Section and data-language Variables. Exported source consts stay searchable. Query uses the same FTS pool.
-3. **Expand:** Bounded BFS; hub skip for non-seed transit nodes.
+3. **Expand:** Bounded BFS; hub skip for non-seed transit nodes; per-hop neighbor cap (same-file / same-package / question-name overlap / CALLS first). Header counts listed nodes, not the raw walk.
 4. **Render:** NODE lines include `qn=` for callables; File NODE names use `dir/basename.go` when useful.
-5. **Budget:** `TRUNCATED` → `so graph snippet <qn>` or narrow the question. Do not lead with `--budget` or Cypher.
+5. **Budget:** `TRUNCATED` → narrow the question first; `so graph snippet <qn>` only for a NODE already listed. Query appends clipped Method/Function/Constructor bodies for **listed** NODE rows after NODE/EDGE, using leftover compact budget (including when TRUNCATED). 80-line cap, not Class/Module/File dumps. Do not lead with `--budget` or Cypher.
 
 ## Graph contracts (G)
 
@@ -44,8 +44,8 @@ Parent index: [../../AGENTS.md](../../AGENTS.md)
 
 ## Build tags
 
-- `go test ./internal/graph/engine/` — portable stub path.
-- `make test-native` — `tsnative,sqlite_fts5` for full parser + FTS.
+- `go test ./internal/graph/engine/`: portable stub path.
+- `make test-native`: `tsnative,sqlite_fts5` for full parser + FTS.
 
 ## Tests
 
@@ -67,7 +67,7 @@ Maintainer-only CLIs (not in CI). Run from repo root with `SUPEROPEN_GRAPH_SOURC
 
 ## Change checklist
 
-- [ ] Query seeds use FTS + path File SQL — no `ORDER BY id LIMIT` sampling.
+- [ ] Query seeds use FTS + path File SQL, not `ORDER BY id LIMIT` sampling.
 - [ ] File nodes: seeds on **query** only; filtered from **`so graph search`**.
 - [ ] Default output stays compact text; slim agent JSON (no full `nodes[]`).
 - [ ] TRUNCATED suggests snippet or narrow; snippet for known symbols.
@@ -76,4 +76,3 @@ Maintainer-only CLIs (not in CI). Run from repo root with `SUPEROPEN_GRAPH_SOURC
 
 **Anti-patterns:** RAM-load all nodes for seeds; JSON-first query default; hook-style hit lists in query output.
 
-Rules: [.agents/rules/graph-engine.mdc](../../.agents/rules/graph-engine.mdc)

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -78,7 +77,7 @@ func renderedSkillFiles(soBin string) ([]skillFile, error) {
 		}
 		out = append(out, skillFile{
 			relPath: rel,
-			body:    strings.ReplaceAll(string(body), soBinPlaceholder, soBin),
+			body:    strings.ReplaceAll(string(body), soBinPlaceholder, paths.QuoteForHook(soBin)),
 		})
 		return nil
 	})
@@ -94,7 +93,7 @@ func resolveSoBin() (string, error) {
 			return exe, nil
 		}
 	}
-	return exec.LookPath("so")
+	return paths.LookPathSo()
 }
 
 // RemoveAll deletes installed Superopen skill trees (best-effort).
@@ -113,21 +112,23 @@ func skillDirs() []string {
 	if err != nil {
 		return nil
 	}
+	codexHome, _ := paths.CodexHome()
 	dirs := []string{
 		filepath.Join(home, ".claude", "skills", skillName),
 		filepath.Join(home, ".cursor", "skills", skillName),
 		filepath.Join(home, ".agents", "skills", skillName),
-		filepath.Join(home, ".codex", "skills", skillName),
+		filepath.Join(codexHome, "skills", skillName),
 		filepath.Join(home, ".gemini", "skills", skillName),
 		filepath.Join(home, ".pi", "agent", "skills", skillName),
 	}
-	if cfg, err := paths.OpenCodeConfigDir(); err == nil && cfg != "" {
+	if cfg, err := paths.ClaudeConfigDir(); err == nil && cfg != "" {
 		dirs = append(dirs, filepath.Join(cfg, "skills", skillName))
 	}
-	if copilot := strings.TrimSpace(os.Getenv("COPILOT_HOME")); copilot != "" {
+	if oc, err := paths.OpenCodeConfigDir(); err == nil && oc != "" {
+		dirs = append(dirs, filepath.Join(oc, "skills", skillName))
+	}
+	if copilot, err := paths.CopilotHome(); err == nil && copilot != "" {
 		dirs = append(dirs, filepath.Join(copilot, "skills", skillName))
-	} else {
-		dirs = append(dirs, filepath.Join(home, ".copilot", "skills", skillName))
 	}
 	if runtime.GOOS == "windows" {
 		if local := os.Getenv("LOCALAPPDATA"); local != "" {

@@ -333,8 +333,8 @@ func TestMaybeDistillNoopsUnderTest(t *testing.T) {
 	}
 	t.Setenv("PATH", t.TempDir())
 	res := MaybeDistill(root, id, false)
-	if res.Skipped != "test" {
-		t.Fatalf("expected test skip, got %+v", res)
+	if !res.Pending || res.Skipped != "await-live" {
+		t.Fatalf("cursor session must await live, got %+v", res)
 	}
 	got := Distill(root, id)
 	if !got.Pending || got.Skipped != "no-auth" {
@@ -348,6 +348,53 @@ func TestMaybeDistillNoopsUnderTest(t *testing.T) {
 	}
 	if len(hits) != 0 {
 		t.Fatalf("distill must not invent knowledge: %+v", hits)
+	}
+}
+
+func TestMaybeDistillOncePerSession(t *testing.T) {
+	root := testRoot(t)
+	id := "sess-pending-once"
+	writeSession(t, root, id, []trace.Span{llmSpan("s1", "investigate the layout bloom")})
+	first := MaybeDistill(root, id, false)
+	if !first.Pending || first.Skipped != "await-live" {
+		t.Fatalf("first: %+v", first)
+	}
+	second := MaybeDistill(root, id, false)
+	if !second.Pending || second.Skipped != "await-live" {
+		t.Fatalf("second must stay await-live, got %+v", second)
+	}
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	n := 0
+	for _, pending := range store.PendingDistill() {
+		if pending == id {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("pending distill for %s: %d in %v", id, n, store.PendingDistill())
+	}
+}
+
+func TestMaybeDistillSkipsWorkerSession(t *testing.T) {
+	root := testRoot(t)
+	id := "worker-distill"
+	writeSession(t, root, id, []trace.Span{llmSpan("s1", "You write Superopen memory for a coding agent")})
+	store := session.NewStore(paths.Resolve(root))
+	if err := store.Start(session.Meta{
+		ID: id, Vendor: "claude-code", Model: "<synthetic>",
+		Title: "You write Superopen memory for a coding agent",
+		PromptPreview: "You write Superopen memory for a coding agent",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	res := MaybeDistill(root, id, false)
+	if res.Skipped != "worker-session" || res.Pending {
+		t.Fatalf("got %+v", res)
 	}
 }
 
@@ -979,14 +1026,59 @@ func TestSessionStartIndexEmptyAndCap(t *testing.T) {
 	}
 	store.Close()
 	text := SessionStartIndex(root)
-	if !strings.HasPrefix(text, "Superopen: codebase questions") {
-		t.Fatalf("graph-first prefix missing: %q", text)
+	if !strings.Contains(text, "memories in this workspace") {
+		t.Fatalf("must say memories exist: %q", text)
+	}
+	if !strings.Contains(text, "import ids") || !strings.Contains(text, "second cue") {
+		t.Fatalf("SessionStart must carry diary framing, got %q", text)
+	}
+	if !strings.Contains(text, "memory recall") {
+		t.Fatalf("must give recall command: %q", text)
+	}
+	if strings.Contains(text, "JWT expiry") || strings.Contains(text, "#") && strings.Contains(text, "15m") {
+		t.Fatalf("SessionStart must not dump uncued ids or titles: %q", text)
 	}
 	if strings.Contains(text, body) {
 		t.Fatalf("index leaked body: %q", text)
 	}
 	if EstimateTokens(text) > 350 {
 		t.Fatalf("index over budget: %d %q", EstimateTokens(text), text)
+	}
+}
+
+func TestPromptRecallPackInjectsMatchingBodies(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := "UNIQUE_PROMPT_PACK_BODY decided retry is three"
+	if _, err := store.Capture(CaptureInput{Kind: KindSession, Title: "auth retry decision", Text: body, Topic: ObservationDecision}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	text := PromptRecallPack(root, "what did we decide last time about retry")
+	if !strings.Contains(text, body) {
+		t.Fatalf("prompt pack must include matching body, got %q", text)
+	}
+	if !strings.Contains(text, "past sessions") {
+		t.Fatalf("prompt pack must frame ownership, got %q", text)
+	}
+	if !strings.Contains(text, "--full") {
+		t.Fatalf("prompt pack must point at get --full, got %q", text)
+	}
+	if !strings.Contains(text, "import ids") {
+		t.Fatalf("prompt pack must say import-looking titles are this workspace diary, got %q", text)
+	}
+	if !strings.Contains(text, "cite both") {
+		t.Fatalf("prompt pack must say to cite both conflicting notes, got %q", text)
+	}
+	if !strings.Contains(text, "second cue") {
+		t.Fatalf("prompt pack must say to recall with a second cue, got %q", text)
+	}
+	empty := testRoot(t)
+	if PromptRecallPack(empty, "what did we decide last time") != "" {
+		t.Fatal("empty store must not invent a pack")
 	}
 }
 
@@ -1092,8 +1184,8 @@ func TestDistillDoesNotInventLocalRollup(t *testing.T) {
 	}
 	t.Setenv("PATH", t.TempDir())
 	got := MaybeDistill(root, id, false)
-	if got.Skipped != "test" {
-		t.Fatalf("MaybeDistill under test must skip, got %+v", got)
+	if !got.Pending || got.Skipped != "await-live" {
+		t.Fatalf("MaybeDistill cursor must await live, got %+v", got)
 	}
 	res := Distill(root, id)
 	if res.Provider == "local" {
@@ -1284,7 +1376,7 @@ func TestFormatIndexLineTokenSuffix(t *testing.T) {
 	}
 }
 
-func TestSearchFallsBackToSessionTitles(t *testing.T) {
+func TestSearchDoesNotInventSessionTitles(t *testing.T) {
 	root := testRoot(t)
 	layout := paths.Resolve(root)
 	sess := session.NewStore(layout)
@@ -1303,8 +1395,8 @@ func TestSearchFallsBackToSessionTitles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(hits) == 0 {
-		t.Fatal("expected session.json title fallback")
+	if len(hits) != 0 {
+		t.Fatalf("zero-hit search must not invent session.json titles, got %#v", hits)
 	}
 	text := SessionStartIndex(root)
 	if strings.Contains(text, "dashboard layout") {
@@ -1338,8 +1430,33 @@ func TestLiveDistillInstructionOnPending(t *testing.T) {
 	}
 	store.Close()
 	text := SessionStartIndex(root)
-	if !strings.Contains(text, "sess-pending") || !strings.Contains(text, "so memory distill") {
+	if !strings.Contains(text, "sess-pending") || !paths.MentionsCommand(text, "memory distill --apply") {
 		t.Fatalf("expected pending distill line, got %q", text)
+	}
+	if !paths.MentionsCommand(text, "memory distill --brief") {
+		t.Fatalf("live distill must name brief: %q", text)
+	}
+	if strings.Contains(text, "memory distill sess-pending") && !strings.Contains(text, "--apply") {
+		t.Fatalf("must not fall back to headless distill: %q", text)
+	}
+}
+
+func TestSessionStartIndexPendingWithKnowledge(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Capture(CaptureInput{Kind: KindSession, Title: "refresh is 30s", Text: "dashboard refresh 30s not 5s", Horizon: HorizonLong}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkPending("sess-later"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	text := SessionStartIndex(root)
+	if !strings.Contains(text, "sess-later") || !strings.Contains(text, "DISTILL pending") {
+		t.Fatalf("pending distill must survive live memories, got %q", text)
 	}
 }
 
@@ -1354,8 +1471,82 @@ func TestSchemaVersionIsOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.SchemaVersion != "2" {
-		t.Fatalf("schema_version=%s want 2", st.SchemaVersion)
+	if st.SchemaVersion != "3" {
+		t.Fatalf("schema_version=%s want 3", st.SchemaVersion)
+	}
+}
+
+func TestFreshStoreHasNoRankingSeeds(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	got, err := store.meta("fts_keep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Fatalf("fts_keep should be absent on a fresh store, got %q", got)
+	}
+	if store.knobInt("fts_keep", ftsPrimaryKeep) != ftsPrimaryKeep {
+		t.Fatalf("search should fall through to constant %d", ftsPrimaryKeep)
+	}
+	if store.knobInt("dense_keep", denseComplement) != denseComplement {
+		t.Fatalf("dense_keep should fall through to constant %d", denseComplement)
+	}
+}
+
+func TestSchema3DropsSeededRankingKnobs(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.setMeta("schema_version", "2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetProfile("fts_keep", "7"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetProfile("dense_keep", "3"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	store, err = OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if got, _ := store.meta("fts_keep"); got != "" {
+		t.Fatalf("schema 2→3 must drop seeded fts_keep, got %q", got)
+	}
+	if got, _ := store.meta("dense_keep"); got != "" {
+		t.Fatalf("schema 2→3 must drop seeded dense_keep, got %q", got)
+	}
+	if store.knobInt("fts_keep", ftsPrimaryKeep) != ftsPrimaryKeep {
+		t.Fatalf("search should fall through to constant %d", ftsPrimaryKeep)
+	}
+}
+
+func TestSchema3KeepsExplicitRankingOverride(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetProfile("fts_keep", "7"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	store, err = OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if store.knobInt("fts_keep", ftsPrimaryKeep) != 7 {
+		t.Fatalf("explicit SetProfile after schema 3 must survive reopen, got %d", store.knobInt("fts_keep", ftsPrimaryKeep))
 	}
 }
 
@@ -1523,11 +1714,14 @@ func TestApplyDistillJSONWritesHorizon(t *testing.T) {
 		t.Fatalf("long skill missing: %+v %v", skills, err)
 	}
 	text := SessionStartIndex(root)
-	if !strings.Contains(text, "login timeout") {
-		t.Fatalf("index missing knowledge title: %q", text)
+	if !strings.Contains(text, "memories in this workspace") || !strings.Contains(text, "memory recall") {
+		t.Fatalf("index must point at recall, got %q", text)
 	}
 	if strings.Contains(text, "keep login timeout in sqlite") {
 		t.Fatalf("index leaked body: %q", text)
+	}
+	if strings.Contains(text, "login timeout is 30s") {
+		t.Fatalf("SessionStart must not dump uncued titles: %q", text)
 	}
 }
 
@@ -1586,8 +1780,11 @@ func TestSessionStartIndexOmitsPromptBodies(t *testing.T) {
 	if strings.Contains(text, "secret prompt body xyz") {
 		t.Fatalf("prompt leaked into index: %q", text)
 	}
-	if !strings.Contains(text, "auth cookies stay in sqlite") {
-		t.Fatalf("knowledge missing from index: %q", text)
+	if strings.Contains(text, "auth cookies stay in sqlite") {
+		t.Fatalf("SessionStart must not dump uncued titles: %q", text)
+	}
+	if !strings.Contains(text, "memories in this workspace") || !strings.Contains(text, "memory recall") {
+		t.Fatalf("index must point at recall, got %q", text)
 	}
 }
 
@@ -1626,8 +1823,11 @@ func TestPromoteLongSurvivesExpiry(t *testing.T) {
 		t.Fatalf("horizon=%s want long", got.Horizon)
 	}
 	text := SessionStartIndex(root)
-	if !strings.Contains(text, "sqlite cookies for auth") {
-		t.Fatalf("long knowledge missing from index: %q", text)
+	if !strings.Contains(text, "memories in this workspace") {
+		t.Fatalf("long knowledge store must still announce memories: %q", text)
+	}
+	if strings.Contains(text, "sqlite cookies for auth") {
+		t.Fatalf("SessionStart must not dump uncued titles: %q", text)
 	}
 }
 
@@ -1711,8 +1911,11 @@ func TestApplyDistillJSONForgetAndPromote(t *testing.T) {
 	if strings.Contains(text, "timeout is 5s") {
 		t.Fatalf("forgotten id still in index: %q", text)
 	}
-	if !strings.Contains(text, "use sqlite sessions") {
-		t.Fatalf("promoted long missing from index: %q", text)
+	if !strings.Contains(text, "memories in this workspace") {
+		t.Fatalf("store still has live knowledge: %q", text)
+	}
+	if strings.Contains(text, "use sqlite sessions") {
+		t.Fatalf("SessionStart must not dump uncued titles: %q", text)
 	}
 }
 
@@ -1799,5 +2002,677 @@ func TestApplyDistillJSONCollapsesNearDuplicateKnowledge(t *testing.T) {
 	}
 	if live != 1 {
 		t.Fatalf("expected a single live knowledge row, got %d (%v)", live, titlesOf(hits))
+	}
+}
+
+func TestCaptureDistinctSessionTitlesDoNotCollapse(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first, err := store.Capture(CaptureInput{
+		Kind: KindSession, Title: "Monday diary: login timeout",
+		Text: "we discussed login timeout and sqlite sessions for the web app",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.Capture(CaptureInput{
+		Kind: KindSession, Title: "Tuesday diary: login timeout",
+		Text: "we discussed login timeout and sqlite sessions for the web app",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == 0 || second.ID == 0 || first.ID == second.ID {
+		t.Fatalf("distinct diary days must store two episodes, got %d and %d", first.ID, second.ID)
+	}
+}
+
+func TestTeachingNearDuplicateStillCollapses(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	first, err := store.Capture(CaptureInput{
+		Kind: KindTeaching, Title: "keep timeout in sqlite",
+		Text: "the login timeout stays at thirty seconds in sqlite",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.Capture(CaptureInput{
+		Kind: KindTeaching, Title: "keep timeout in sqlite",
+		Text: "the login timeout stays at thirty seconds in sqlite",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("teaching near-dup should collapse onto %d, got %d", first.ID, second.ID)
+	}
+}
+
+func TestUpgradeHashStoreToBGE(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep, err := store.Capture(CaptureInput{Kind: KindSession, Title: "hash row", Text: "a stored hash embedding that must be wiped on upgrade"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors int
+	if err := store.db.QueryRow(`SELECT count(*) FROM memory_vectors`).Scan(&vectors); err != nil {
+		t.Fatal(err)
+	}
+	if vectors == 0 {
+		t.Fatal("expected a hash vector before upgrade")
+	}
+	db := paths.Resolve(root).Database
+	store.Close()
+
+	old := activeEmbedderID
+	activeEmbedderID = bgeEmbedderID
+	t.Cleanup(func() { activeEmbedderID = old })
+
+	upgraded, err := Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upgraded.Close()
+	got, err := upgraded.meta(metaEmbedder)
+	if err != nil || got != bgeEmbedderID {
+		t.Fatalf("embedder meta=%s err=%v want %s", got, err, bgeEmbedderID)
+	}
+	if err := upgraded.db.QueryRow(`SELECT count(*) FROM memory_vectors`).Scan(&vectors); err != nil {
+		t.Fatal(err)
+	}
+	if vectors != 0 {
+		t.Fatalf("upgrade must wipe hash vectors, still have %d", vectors)
+	}
+	var pending int
+	if err := upgraded.db.QueryRow(`SELECT embedding_pending FROM memory_episodes WHERE id=?`, ep.ID).Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+	if pending != 1 {
+		t.Fatalf("upgrade must mark embedding_pending, got %d", pending)
+	}
+}
+
+func TestFTSQueryUsesContentOR(t *testing.T) {
+	got := ftsQuery("What did Caroline say about the race yesterday?")
+	if !strings.Contains(got, " OR ") {
+		t.Fatalf("expected OR of content terms, got %q", got)
+	}
+	if strings.Contains(got, `"what"`) || strings.Contains(got, `"did"`) || strings.Contains(got, `"the"`) {
+		t.Fatalf("stopwords must not be required, got %q", got)
+	}
+	if !strings.Contains(got, "caroline") || !strings.Contains(got, "race") {
+		t.Fatalf("content words missing: %q", got)
+	}
+	if !strings.Contains(got, " OR ") {
+		t.Fatalf("proper name should boost as an OR group, got %q", got)
+	}
+}
+
+func TestFTSQuerySplitsPossessives(t *testing.T) {
+	got := ftsQuery("What is Caroline's identity?")
+	if strings.Contains(got, `"carolines"`) || strings.Contains(got, "carolines*") {
+		t.Fatalf("possessive must not concatenate 's: %q", got)
+	}
+	if !strings.Contains(got, "caroline") || !strings.Contains(got, "identity") {
+		t.Fatalf("want caroline and identity, got %q", got)
+	}
+}
+
+func TestFTSQueryPrefixesVerbsAndRequiresName(t *testing.T) {
+	got := ftsQuery("Where did Caroline move from 4 years ago?")
+	if !strings.Contains(got, "move*") {
+		t.Fatalf("verb should prefix-match moved/moving, got %q", got)
+	}
+	if !strings.Contains(got, "caroline") || !strings.Contains(got, " OR ") {
+		t.Fatalf("Caroline should still be in the query as a soft OR, got %q", got)
+	}
+}
+
+func TestSearchFindsWordOnlyInSealedBody(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	body := "the diary mentions ZXBODYONLYWORD once and never in the title"
+	ep, err := store.Capture(CaptureInput{Kind: KindSession, Title: "monday notes", Text: body})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := store.db.QueryRow(`SELECT text FROM memory_episodes WHERE id=?`, ep.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(stored, encPrefix) {
+		t.Fatalf("episodes.text must stay sealed, got %q", stored[:min(40, len(stored))])
+	}
+	hits, err := store.Search(SearchFilter{Query: "ZXBODYONLYWORD", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, h := range hits {
+		if h.ID == ep.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected body-only FTS hit, got %+v", titlesOf(hits))
+	}
+}
+
+func TestRecallFTSMatchesQueryNotExcludedKindName(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ep, err := store.Capture(CaptureInput{
+		Kind:  KindSession,
+		Title: "graduation notes",
+		Text:  "the diary mentions ZXRECALLWORD in the body and never the word prompt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := store.Recall("where is ZXRECALLWORD recorded", 1500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, h := range res.Hits {
+		if h.ID == ep.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("default recall must FTS-match the question, not excluded kind names; hits=%v", titlesOf(res.Hits))
+	}
+}
+
+func TestSearchLongQuestionMatchesBodyWord(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ep, err := store.Capture(CaptureInput{
+		Kind: KindSession, Title: "monday notes",
+		Text: "we booked the community fundraiser ZXCHARITYRACEWORD at the park",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits, err := store.Search(SearchFilter{
+		Query: "What did we note about ZXCHARITYRACEWORD in the diary yesterday?",
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, h := range hits {
+		if h.ID == ep.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("content-word FTS must match a long question, got %+v", titlesOf(hits))
+	}
+}
+
+func TestSearchFTSUnionOutsideRecencyWindow(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	old, err := store.Capture(CaptureInput{
+		Kind: KindSession, Title: "oldest diary", Text: "needle ZXOLDSESSIONWORD lives only here",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 800; i++ {
+		created := time.Now().UTC().Add(time.Duration(i+1) * time.Second).Format(time.RFC3339Nano)
+		uid := "fill-" + itoa(i)
+		if _, err := store.db.Exec(`
+INSERT INTO memory_episodes(uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,faded_at,last_accessed_at,community_id,centrality,tier,horizon,keep_until_session,never_decay,tags,fading,topic,facts,narrative,concepts,content_hash)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			uid, "", "", KindSession, SourceAgent, "later "+itoa(i), "unrelated later diary", "", "", 4,
+			0, 0, 1, created, created, created, "", "", "", "", 0, HorizonMedium, HorizonMedium, 0, 0, "", 0, "", "[]", "", "[]", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.db.Exec(`UPDATE memory_episodes SET created_at=? WHERE id=?`, "2020-01-01T00:00:00Z", old.ID); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := store.Search(SearchFilter{Query: "ZXOLDSESSIONWORD", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, h := range hits {
+		if h.ID == old.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("FTS must pull the old row outside the newest-800 window, got %+v", titlesOf(hits))
+	}
+}
+
+func TestRecallKeepsTwoLargeHits(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	big := strings.Repeat("login timeout stays in sqlite sessions. ", 200)
+	a, err := store.Capture(CaptureInput{Kind: KindSession, Title: "first long diary", Text: big + " ALPHAUNIQUE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := store.Capture(CaptureInput{Kind: KindSession, Title: "second long diary", Text: big + " BETAUNIQUE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := store.Recall("login timeout sqlite", 1500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[int64]bool{}
+	for _, h := range res.Hits {
+		ids[h.ID] = true
+		if h.Tokens > 1500 {
+			t.Fatalf("clipped hit still over budget: id=%d tokens=%d", h.ID, h.Tokens)
+		}
+	}
+	if !ids[a.ID] || !ids[b.ID] {
+		t.Fatalf("recall must keep both large sessions, hits=%d ids=%v want %d and %d", len(res.Hits), ids, a.ID, b.ID)
+	}
+}
+
+func TestClipAroundQueryKeepsTailFact(t *testing.T) {
+	head := strings.Repeat("padding words about weather and lunch. ", 80)
+	tail := "Caroline moved from Sweden four years ago."
+	got := clipAroundQuery(head+tail, "where did Caroline move from", 40)
+	if !strings.Contains(got, "Sweden") {
+		t.Fatalf("query-window clip dropped the tail fact: %q", got)
+	}
+	if strings.HasPrefix(got, "padding") && !strings.Contains(got, "Sweden") {
+		t.Fatalf("fell back to head clip: %q", got)
+	}
+}
+
+func TestClipAroundQueryAnchorsOnRareTerm(t *testing.T) {
+	head := strings.Repeat("Alex said hello to the team. ", 80)
+	tail := "We will use exponential backoff for the retry budget."
+	got := clipAroundQuery(head+tail, "Alex retry budget", 40)
+	if !strings.Contains(got, "retry budget") {
+		t.Fatalf("rarest term must keep the tail fact, got %q", got)
+	}
+	if strings.Contains(got, "said hello") && !strings.Contains(got, "retry") {
+		t.Fatalf("common name stole the window: %q", got)
+	}
+}
+
+func TestClipAroundQueryTwoWindows(t *testing.T) {
+	head := "Kickoff notes from Alex about staffing."
+	mid := strings.Repeat("padding filler words for the diary body. ", 80)
+	tail := "The retry budget is three with jitter."
+	got := clipAroundQuery(head+mid+tail, "Alex retry budget", 50)
+	if !strings.Contains(got, "Alex") {
+		t.Fatalf("first window should keep Alex, got %q", got)
+	}
+	if !strings.Contains(got, "retry budget") {
+		t.Fatalf("second window should keep the rare tail fact, got %q", got)
+	}
+}
+
+func TestClipAroundQueryKeepsHeadDate(t *testing.T) {
+	body := "DATE: 1:56 pm on 8 May, 2023\n" + strings.Repeat("padding about lunch and weather. ", 80) +
+		"Melanie: Yeah, I painted that lake sunrise last year! It's special to me.\n"
+	got := clipAroundQuery(body, "when did Melanie paint the lake sunrise", 40)
+	if !strings.Contains(got, "8 May, 2023") && !strings.Contains(got, "DATE:") {
+		t.Fatalf("clip must keep the head date line, got %q", got)
+	}
+	if !strings.Contains(got, "last year") && !strings.Contains(got, "sunrise") {
+		t.Fatalf("clip must still keep the query span, got %q", got)
+	}
+}
+
+func TestFormatIndexLineIncludesDate(t *testing.T) {
+	line := FormatIndexLine(Episode{ID: 3, Kind: KindSession, Title: "lake sunrise", CreatedAt: "2023-05-08T13:56:00Z"})
+	if !strings.Contains(line, "2023-05-08") {
+		t.Fatalf("index line should carry the episode date, got %q", line)
+	}
+}
+
+func TestTrimToBudgetFrontLoadsDeepHits(t *testing.T) {
+	var hits []Hit
+	body := strings.Repeat("session note about the auth retry decision. ", 80)
+	for i := 1; i <= 10; i++ {
+		hits = append(hits, Hit{Episode: Episode{ID: int64(i), Title: fmt.Sprintf("hit-%d", i), Text: body, Tokens: EstimateTokens(body)}})
+	}
+	got := trimToBudget(hits, 1500, "auth retry")
+	if len(got) != 10 {
+		t.Fatalf("recall must keep 10 ranked ids, got %d", len(got))
+	}
+	for i, h := range got {
+		if i < recallDeepHits {
+			if strings.TrimSpace(h.Text) == "" {
+				t.Fatalf("top hit %d must have a body", h.ID)
+			}
+			if h.Tokens > recallDeepTok+20 {
+				t.Fatalf("deep hit %d tokens=%d want around %d", h.ID, h.Tokens, recallDeepTok)
+			}
+		} else if strings.TrimSpace(h.Text) != "" {
+			t.Fatalf("index-only hit %d should drop the body, got %q", h.ID, h.Text)
+		}
+	}
+}
+
+func TestHelpForSearchPointsAtFullGet(t *testing.T) {
+	hits := []Hit{{Episode: Episode{ID: 7, Title: "x"}}}
+	help := HelpForSearch(hits)
+	joined := strings.Join(help, "\n")
+	if !strings.Contains(joined, "so memory get 7 --full") {
+		t.Fatalf("help must point at --full, got %q", joined)
+	}
+	if hint := ClippedBodyHint([]Hit{{Episode: Episode{ID: 7, Text: "…clipped…"}}}); !strings.Contains(hint, "--full") {
+		t.Fatalf("clip hint must name --full, got %q", hint)
+	}
+}
+
+func TestSelfEchoDropsQueryPromptKeepsKnowledge(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	q := "Where did Caroline move from 4 years ago?"
+	if _, err := store.Capture(CaptureInput{Kind: KindPrompt, Title: q, Text: q}); err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.Capture(CaptureInput{
+		Kind: KindSession, Title: "conv-26:session_3",
+		Text: "Caroline told Melanie she moved from Sweden about four years ago.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits, err := store.Search(SearchFilter{Query: q, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range hits {
+		if h.Kind == KindPrompt {
+			t.Fatalf("self-echo prompt ranked: %+v", h)
+		}
+	}
+	found := false
+	for _, h := range hits {
+		if h.ID == session.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("knowledge row missing, hits=%v", titlesOf(hits))
+	}
+}
+
+func TestDiaryOnlyStoreStillRecalls(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ep, err := store.Capture(CaptureInput{
+		Kind: KindPrompt, Title: "use JWT with 15m expiry",
+		Text: "Decision: cookies stay in sqlite, JWT expiry is 15 minutes.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits, err := store.Search(SearchFilter{Query: "JWT expiry", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, h := range hits {
+		if h.ID == ep.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("pre-distill diary must still rank, hits=%v", titlesOf(hits))
+	}
+}
+
+func TestEmptyHitHintDistinguishesSearchFromRecall(t *testing.T) {
+	search := EmptyHitHint(12, 12, false)
+	if !strings.Contains(search, "title") || !strings.Contains(search, "recall") {
+		t.Fatalf("search hint should send agents to recall: %q", search)
+	}
+	if strings.Contains(search, "search is titles only") && !strings.Contains(search, "recall returns bodies") {
+		t.Fatalf("search hint must not imply recall is titles-only: %q", search)
+	}
+	recall := EmptyRecallHint(12, 12, false)
+	if strings.Contains(recall, "titles only") {
+		t.Fatalf("recall hint must not say titles only: %q", recall)
+	}
+}
+
+func TestPassagesRankTailFact(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	head := strings.Repeat("padding about lunch weather and traffic. ", 200)
+	tail := "The studio is called SerenityYogaUniqueTail."
+	ep, err := store.Capture(CaptureInput{Kind: KindSession, Title: "long diary", Text: head + tail})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := store.db.QueryRow(`SELECT count(*) FROM memory_passages WHERE episode_id=?`, ep.ID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 {
+		t.Fatal("long episode must write passage vectors")
+	}
+	hits, err := store.Search(SearchFilter{Query: "SerenityYogaUniqueTail", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, h := range hits {
+		if h.ID == ep.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("tail fact should rank via passages, hits=%v", titlesOf(hits))
+	}
+}
+
+func TestRecallPrefersKnowledgeOverLivePrompt(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	q := "Where did Caroline move from?"
+	if _, err := store.Capture(CaptureInput{Kind: KindPrompt, Title: q, Text: q, SessionID: "live"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Capture(CaptureInput{
+		Kind: KindWorking, Title: q, Text: "Working snapshot: " + q, SessionID: "live",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	note, err := store.Capture(CaptureInput{
+		Kind:  KindSession,
+		Title: "caroline relocation",
+		Text:  "Caroline moved from Sweden four years ago.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := store.Recall(q, 1500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) == 0 {
+		t.Fatal("expected knowledge hit")
+	}
+	for _, h := range res.Hits {
+		if h.Kind == KindPrompt || h.Kind == KindWorking {
+			t.Fatalf("live prompt/working ranked in recall: %+v", h)
+		}
+	}
+	if res.Hits[0].ID != note.ID {
+		t.Fatalf("session note should rank first, got %q %s", res.Hits[0].Title, res.Hits[0].Kind)
+	}
+	pack := PromptRecallPack(root, q)
+	if !strings.Contains(pack, "Sweden") {
+		t.Fatalf("prompt pack should quote the note, got %q", pack)
+	}
+	if strings.Contains(pack, "Working snapshot") {
+		t.Fatalf("prompt pack leaked working copy: %q", pack)
+	}
+}
+
+func TestRecallDiaryWhenNoKnowledge(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ep, err := store.Capture(CaptureInput{
+		Kind: KindPrompt, Title: "use JWT with 15m expiry",
+		Text: "Decision: cookies stay in sqlite, JWT expiry is 15 minutes.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := store.Recall("JWT expiry", 1500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, h := range res.Hits {
+		if h.ID == ep.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("pre-distill diary must still recall, hits=%v", titlesOf(res.Hits))
+	}
+}
+
+func TestRecallDemotesHitsMissingProperName(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.Capture(CaptureInput{
+		Kind:  KindSession,
+		Title: "family move",
+		Text:  "Melanie said the family might move next year.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	named, err := store.Capture(CaptureInput{
+		Kind:  KindSession,
+		Title: "caroline relocation",
+		Text:  "Caroline moved from Sweden four years ago.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := store.Recall("Where did Caroline move from?", 1500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) == 0 {
+		t.Fatal("expected hits")
+	}
+	foundNamed := false
+	for i, h := range res.Hits {
+		if h.ID == named.ID {
+			foundNamed = true
+			if i > 2 {
+				t.Fatalf("named note should stay in the top hits, rank=%d", i)
+			}
+		}
+	}
+	if !foundNamed {
+		t.Fatalf("named note missing, hits=%v", titlesOf(res.Hits))
+	}
+	if res.Hits[0].ID != named.ID {
+		t.Fatalf("named origin should rank first, got %q", res.Hits[0].Title)
+	}
+}
+
+func TestRecallPrefixRanksMovedOriginOverUnrelatedMove(t *testing.T) {
+	root := testRoot(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.Capture(CaptureInput{
+		Kind:  KindSession,
+		Title: "peace after the move",
+		Text:  "Alex asked how family had been supportive during the move to a new apartment.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	origin, err := store.Capture(CaptureInput{
+		Kind:  KindSession,
+		Title: "alex relocation",
+		Text:  "Alex moved from Portugal four years ago and still mentions it.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := store.Recall("Where did Alex move from 4 years ago?", 1500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) == 0 || res.Hits[0].ID != origin.ID {
+		t.Fatalf("origin note should rank first, hits=%v", titlesOf(res.Hits))
 	}
 }

@@ -121,6 +121,9 @@ func TestInstallGeminiMergesSettingsAndUsesCurrentEvents(t *testing.T) {
 			t.Fatalf("missing current Gemini event %s", event)
 		}
 	}
+	if strings.Contains(string(body), "graph refresh") {
+		t.Fatalf("Gemini hooks must not spawn graph refresh: %s", body)
+	}
 	if _, ok := hooks["PreToolUse"]; ok {
 		t.Fatalf("obsolete Superopen event remains: %s", body)
 	}
@@ -147,6 +150,9 @@ func TestCopilotAgentStopDoesNotFinalize(t *testing.T) {
 	}
 	if strings.Contains(block, "sessions finalize") {
 		t.Fatalf("agentStop must not run sessions finalize:\n%s", block)
+	}
+	if strings.Contains(body, "graph refresh") {
+		t.Fatalf("Copilot hooks must not spawn graph refresh:\n%s", body)
 	}
 }
 

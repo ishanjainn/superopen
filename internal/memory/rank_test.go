@@ -163,3 +163,61 @@ func TestIsCompressibleDeniesPrompt(t *testing.T) {
 		t.Fatal("pins must not compress")
 	}
 }
+
+func TestBlendLexicalSemanticKeepsKeywordFront(t *testing.T) {
+	hits := []Hit{
+		{Episode: Episode{ID: 1, Title: "lex0"}},
+		{Episode: Episode{ID: 2, Title: "lex1"}},
+		{Episode: Episode{ID: 3, Title: "lex2"}},
+		{Episode: Episode{ID: 10, Title: "sem0"}},
+		{Episode: Episode{ID: 11, Title: "sem1"}},
+	}
+	fts := map[int64]int{1: 0, 2: 1, 3: 2}
+	cos := map[int64]int{10: 0, 11: 1, 1: 4}
+	got := blendLexicalSemantic(hits, fts, cos, 2, 1)
+	if len(got) < 3 || got[0].ID != 1 || got[1].ID != 2 || got[2].ID != 10 {
+		t.Fatalf("want lex,lex,sem front, got %+v", got)
+	}
+}
+
+func TestBlendKeepsDualLexicalSemanticNearScoreOrder(t *testing.T) {
+	var hits []Hit
+	fts := map[int64]int{}
+	cos := map[int64]int{}
+	for i := int64(1); i <= 8; i++ {
+		hits = append(hits, Hit{Episode: Episode{ID: i, Title: "core"}})
+		fts[i] = int(i - 1)
+		cos[i] = int(i - 1)
+	}
+	hits = append(hits, Hit{Episode: Episode{ID: 100, Title: "dense-only-a"}})
+	hits = append(hits, Hit{Episode: Episode{ID: 101, Title: "dense-only-b"}})
+	cos[100] = 0
+	cos[101] = 1
+	hits = append(hits, Hit{Episode: Episode{ID: 99, Title: "dual"}})
+	fts[99] = 12
+	cos[99] = 5
+	for i := int64(20); i < 40; i++ {
+		hits = append(hits, Hit{Episode: Episode{ID: i, Title: "lex-overflow"}})
+		fts[i] = int(i)
+	}
+	got := blendLexicalSemantic(hits, fts, cos, 8, 2)
+	pos := -1
+	overflowPos := -1
+	for i, h := range got {
+		if h.ID == 99 {
+			pos = i
+		}
+		if h.ID == 20 && overflowPos < 0 {
+			overflowPos = i
+		}
+	}
+	if pos < 0 {
+		t.Fatal("dual lexical+dense hit dropped")
+	}
+	if overflowPos >= 0 && pos > overflowPos {
+		t.Fatalf("dual match at %d buried after lexical overflow at %d", pos, overflowPos)
+	}
+	if pos > 12 {
+		t.Fatalf("dual match buried at position %d, want near score order", pos)
+	}
+}

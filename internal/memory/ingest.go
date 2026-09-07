@@ -246,8 +246,12 @@ func (s *Store) appendToolsTrailer(id int64, tools []string) error {
 		return nil
 	}
 	sealed := s.sealText(uid, plain+trailer)
-	_, err := s.db.Exec(`UPDATE memory_episodes SET text=?, updated_at=? WHERE id=?`, sealed, nowRFC(), id)
-	return err
+	if _, err := s.db.Exec(`UPDATE memory_episodes SET text=?, updated_at=? WHERE id=?`, sealed, nowRFC(), id); err != nil {
+		return err
+	}
+	var title, files, tool string
+	_ = s.db.QueryRow(`SELECT title, files, tool_name FROM memory_episodes WHERE id=?`, id).Scan(&title, &files, &tool)
+	return s.writeFTS(id, title, plain+trailer, files, tool)
 }
 
 func (s *Store) storeEpisode(ep Episode) (int64, bool, error) {
@@ -278,7 +282,7 @@ func (s *Store) storeEpisode(ep Episode) (int64, bool, error) {
 		ep.Tier = ep.Horizon
 	}
 	vec := EmbedText(ep.Title + "\n" + ep.Text)
-	if ep.Kind == KindTeaching || ep.Kind == KindSession {
+	if ep.Kind == KindTeaching {
 		if dup := s.nearDuplicate(vec, ep.Kind); dup > 0 {
 			_ = s.Reinforce(dup)
 			return dup, false, nil
@@ -288,7 +292,6 @@ func (s *Store) storeEpisode(ep Episode) (int64, bool, error) {
 	if err != nil || id == 0 {
 		return id, inserted, err
 	}
-	_ = s.writeShape(id, vec)
 	return id, inserted, err
 }
 

@@ -16,7 +16,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/graph/api"
 	"github.com/ishanjainn/superopen/internal/graph/client"
-	"github.com/ishanjainn/superopen/internal/graph/watch"
+	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/projects"
@@ -236,7 +236,7 @@ must query the graph first.`,
 			_ = memory.FetchModels()
 			report.Write(cmd.OutOrStdout())
 			if findWebDir("") == "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "note: web UI is not in %s; re-run sh scripts/install.sh (or brew) so so dev works from any repo.\n", expectedWebDir())
+				fmt.Fprintf(cmd.OutOrStdout(), "note: web UI is not in %s; reinstall Superopen (release tarball, brew, or install.ps1) so `so dev` works from any repo.\n", expectedWebDir())
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "Next: open your coding agent and run /so init in a repository.")
 			fmt.Fprintln(cmd.OutOrStdout(), "Restart the agent so it loads the new hooks.")
@@ -328,11 +328,8 @@ Pass --cursor-rules to also write this repo's .cursor/rules/superopen.mdc.`,
 			if err := layout.EnsureDirs(); err != nil {
 				return err
 			}
-			ignorePath := filepath.Join(layout.Root, ".gitignore")
-			if _, err := os.Stat(ignorePath); os.IsNotExist(err) {
-				if err := os.WriteFile(ignorePath, soGitignoreContents, 0o644); err != nil {
-					return err
-				}
+			if err := writeInitGitignores(root); err != nil {
+				return err
 			}
 			if cursorRules {
 				path, err := steer.InstallProjectCursorRule(root)
@@ -362,7 +359,7 @@ Pass --cursor-rules to also write this repo's .cursor/rules/superopen.mdc.`,
 			if err := client.Call(cmd.Context(), api.OpBuild, api.BuildRequest{RepoRoot: root, Mode: "full", Force: force}, &result); err != nil {
 				return err
 			}
-			watch.RecordSignature(root)
+			_ = engine.WriteFingerprint(cmd.Context(), root, nil)
 			_ = projects.TouchInit(root)
 			_ = projects.TouchGraphRefresh(root)
 			if result.Status != "" && result.Status != "ok" {
@@ -394,6 +391,3 @@ Pass --cursor-rules to also write this repo's .cursor/rules/superopen.mdc.`,
 }
 
 func cmdGraph() *cobra.Command { return newGraphCommand() }
-
-// soGitignoreContents is written to .so/.gitignore on first `so init`.
-var soGitignoreContents = []byte("# Superopen machine-local data (do not commit).\nsessions/\ndb/\nharvest/\n")

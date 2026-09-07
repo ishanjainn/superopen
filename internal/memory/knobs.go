@@ -6,23 +6,34 @@ import (
 )
 
 func (s *Store) ensureKnobs() error {
+	// Ranking knobs (rrf_k, fts_keep, …) are not seeded. Search falls
+	// through to the Go constants so a product default change takes
+	// effect without a store rewrite. memory_meta holds explicit
+	// SetProfile overrides only.
 	defaults := map[string]string{
-		"capture_floor":     "12",
-		"capture_cap":       "8000",
 		"stale_weight":      "0.5",
 		"supersede_window":  "10",
-		"lex_fusion":        "0.35",
-		"cosine_weight":     "0.6",
-		"centrality_weight": "0.4",
-		"shape_fusion":      "0.25",
 		"pin_weight":        "0.35",
 		"recall_budget":     "1500",
-		"edge_half_life":    "90",
 		"recency_half_life": "21",
-		"english_only":      "1",
 	}
 	for k, v := range defaults {
 		if _, err := s.db.Exec(`INSERT OR IGNORE INTO memory_meta(key, value) VALUES(?,?)`, k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var seededRankingKeys = []string{
+	"rrf_k", "fts_rrf", "dense_rrf", "dense_rrf_lexical",
+	"fts_candidates", "dense_candidates", "fts_keep", "dense_keep",
+	"capture_floor", "capture_cap", "edge_half_life",
+}
+
+func (s *Store) dropSeededRankingKnobs() error {
+	for _, k := range seededRankingKeys {
+		if _, err := s.db.Exec(`DELETE FROM memory_meta WHERE key=?`, k); err != nil {
 			return err
 		}
 	}

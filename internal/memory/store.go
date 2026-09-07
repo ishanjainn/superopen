@@ -47,7 +47,7 @@ const (
 	metaPending         = "pending_distill"
 	metaDistillPaused   = "distill_paused"
 	quantizationInt8    = "int8-unit"
-	memorySchemaVersion = "2"
+	memorySchemaVersion = "3"
 )
 
 const memoryDDL = `
@@ -109,23 +109,10 @@ CREATE TABLE IF NOT EXISTS memory_edges (
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_episodes_fts USING fts5(
   title, text, files, tool_name,
-  content='memory_episodes',
-  content_rowid='id',
   tokenize='unicode61 remove_diacritics 2'
 );
-CREATE TRIGGER IF NOT EXISTS memory_episodes_ai AFTER INSERT ON memory_episodes BEGIN
-  INSERT INTO memory_episodes_fts(rowid, title, text, files, tool_name)
-  VALUES (new.id, new.title, new.text, new.files, new.tool_name);
-END;
 CREATE TRIGGER IF NOT EXISTS memory_episodes_ad AFTER DELETE ON memory_episodes BEGIN
-  INSERT INTO memory_episodes_fts(memory_episodes_fts, rowid, title, text, files, tool_name)
-  VALUES ('delete', old.id, old.title, old.text, old.files, old.tool_name);
-END;
-CREATE TRIGGER IF NOT EXISTS memory_episodes_au AFTER UPDATE ON memory_episodes BEGIN
-  INSERT INTO memory_episodes_fts(memory_episodes_fts, rowid, title, text, files, tool_name)
-  VALUES ('delete', old.id, old.title, old.text, old.files, old.tool_name);
-  INSERT INTO memory_episodes_fts(rowid, title, text, files, tool_name)
-  VALUES (new.id, new.title, new.text, new.files, new.tool_name);
+  DELETE FROM memory_episodes_fts WHERE rowid = old.id;
 END;
 CREATE TABLE IF NOT EXISTS memory_topics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,6 +138,18 @@ CREATE TABLE IF NOT EXISTS memory_shapes (
   episode_id INTEGER PRIMARY KEY REFERENCES memory_episodes(id) ON DELETE CASCADE,
   blob BLOB NOT NULL
 );
+CREATE TABLE IF NOT EXISTS memory_passages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  episode_id INTEGER NOT NULL REFERENCES memory_episodes(id) ON DELETE CASCADE,
+  ord INTEGER NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  embedder_id TEXT NOT NULL,
+  dimensions INTEGER NOT NULL,
+  quantization TEXT NOT NULL,
+  vector BLOB NOT NULL,
+  UNIQUE(episode_id, ord)
+);
+CREATE INDEX IF NOT EXISTS memory_passages_episode ON memory_passages(episode_id);
 `
 
 type Store struct {
@@ -180,11 +179,11 @@ type Episode struct {
 	ValidFrom        string   `json:"valid_from,omitempty"`
 	ValidTo          string   `json:"valid_to,omitempty"`
 	CommunityID      string   `json:"community_id,omitempty"`
-	Centrality        float64 `json:"centrality,omitempty"`
-	Tier              string  `json:"tier,omitempty"`
-	Horizon           string  `json:"horizon,omitempty"`
-	KeepUntilSession  int     `json:"keep_until_session,omitempty"`
-	NeverDecay        bool    `json:"never_decay,omitempty"`
+	Centrality       float64  `json:"centrality,omitempty"`
+	Tier             string   `json:"tier,omitempty"`
+	Horizon          string   `json:"horizon,omitempty"`
+	KeepUntilSession int      `json:"keep_until_session,omitempty"`
+	NeverDecay       bool     `json:"never_decay,omitempty"`
 	Tags             string   `json:"tags,omitempty"`
 	Topic            string   `json:"topic,omitempty"`
 	Facts            []string `json:"facts,omitempty"`
@@ -236,51 +235,52 @@ type ActivityBucket struct {
 }
 
 type Status struct {
-	Episodes       int              `json:"episodes"`
-	Vectors        int              `json:"vectors"`
-	Edges          int              `json:"edges"`
-	Topics         int              `json:"topics"`
-	Teachings      int              `json:"teachings"`
-	Pins           int              `json:"pins"`
-	Faded          int              `json:"faded"`
-	Fading         int              `json:"fading"`
-	RolledUp       int              `json:"rolled_up"`
-	PendingDistill []string         `json:"pending_distill"`
-	DistillPaused  bool             `json:"distill_paused"`
-	EmbedderID     string           `json:"embedder_id"`
-	RolledUpPct    float64          `json:"rolled_up_pct"`
-	FadePct        float64          `json:"fade_pct"`
-	EdgeDensity    float64          `json:"edge_density"`
-	Coverage       float64          `json:"coverage"`
-	Live           int              `json:"live"`
-	Lifecycle      string           `json:"lifecycle"`
-	KnowledgePct   float64          `json:"knowledge_pct"`
-	Connected      float64          `json:"connected"`
-	CleanedPct     float64          `json:"cleaned_pct"`
-	Counts         MemoryCounts     `json:"counts"`
-	Activity       []ActivityBucket `json:"activity,omitempty"`
-	ActivityPeak   int              `json:"activity_peak"`
-	Economy        Economy          `json:"economy"`
-	SchemaVersion  string           `json:"schema_version"`
-	TopicsDetail   []Topic          `json:"topics_detail,omitempty"`
+	Episodes         int              `json:"episodes"`
+	Vectors          int              `json:"vectors"`
+	Edges            int              `json:"edges"`
+	Topics           int              `json:"topics"`
+	Teachings        int              `json:"teachings"`
+	Pins             int              `json:"pins"`
+	Faded            int              `json:"faded"`
+	Fading           int              `json:"fading"`
+	RolledUp         int              `json:"rolled_up"`
+	PendingDistill   []string         `json:"pending_distill"`
+	DistillPaused    bool             `json:"distill_paused"`
+	EmbedderID       string           `json:"embedder_id"`
+	EmbeddingPending int              `json:"embedding_pending"`
+	RolledUpPct      float64          `json:"rolled_up_pct"`
+	FadePct          float64          `json:"fade_pct"`
+	EdgeDensity      float64          `json:"edge_density"`
+	Coverage         float64          `json:"coverage"`
+	Live             int              `json:"live"`
+	Lifecycle        string           `json:"lifecycle"`
+	KnowledgePct     float64          `json:"knowledge_pct"`
+	Connected        float64          `json:"connected"`
+	CleanedPct       float64          `json:"cleaned_pct"`
+	Counts           MemoryCounts     `json:"counts"`
+	Activity         []ActivityBucket `json:"activity,omitempty"`
+	ActivityPeak     int              `json:"activity_peak"`
+	Economy          Economy          `json:"economy"`
+	SchemaVersion    string           `json:"schema_version"`
+	TopicsDetail     []Topic          `json:"topics_detail,omitempty"`
 }
 
 type CaptureInput struct {
-	SessionID    string
-	Kind         string
-	Source       string
-	Title        string
-	Text         string
-	Files        []string
-	ToolName     string
-	ContradictOf int64
-	Pin          bool
-	Topic        string
-	Facts        []string
-	Narrative    string
-	Concepts          []string
-	Horizon           string
-	KeepUntilSession  int
+	SessionID        string
+	Kind             string
+	Source           string
+	Title            string
+	Text             string
+	Files            []string
+	ToolName         string
+	ContradictOf     int64
+	Pin              bool
+	Topic            string
+	Facts            []string
+	Narrative        string
+	Concepts         []string
+	Horizon          string
+	KeepUntilSession int
 }
 
 func OpenRoot(root string) (*Store, error) {
@@ -348,14 +348,22 @@ func open(path string, busyMs int) (*Store, error) {
 		s.Close()
 		return nil, fmt.Errorf("initialize memory schema: %w", err)
 	}
+	priorSchema, _ := s.meta("schema_version")
 	if err := s.ensureKnobs(); err != nil {
 		s.Close()
 		return nil, err
+	}
+	if priorSchema == "" || priorSchema == "1" || priorSchema == "2" {
+		if err := s.dropSeededRankingKnobs(); err != nil {
+			s.Close()
+			return nil, err
+		}
 	}
 	if err := s.ensureKey(); err != nil {
 		s.Close()
 		return nil, err
 	}
+	EnsureEmbedWorker()
 	if err := s.ensureEmbedder(); err != nil {
 		s.Close()
 		return nil, err
@@ -365,6 +373,14 @@ func open(path string, busyMs int) (*Store, error) {
 		return nil, err
 	}
 	if err := s.ensureHorizonSchema(); err != nil {
+		s.Close()
+		return nil, err
+	}
+	if err := s.ensurePlaintextFTS(); err != nil {
+		s.Close()
+		return nil, err
+	}
+	if err := s.ensurePassagesSchema(); err != nil {
 		s.Close()
 		return nil, err
 	}
@@ -412,13 +428,32 @@ func (s *Store) Close() error {
 
 func (s *Store) ensureEmbedder() error {
 	existing, _ := s.meta(metaEmbedder)
+	want := CurrentEmbedder()
 	if existing == "" {
-		return s.setMeta(metaEmbedder, CurrentEmbedder())
+		return s.setMeta(metaEmbedder, want)
 	}
-	if existing != CurrentEmbedder() {
-		return fmt.Errorf("refuse mixed embedder generations: store %s process %s", existing, CurrentEmbedder())
+	if existing == want {
+		return nil
 	}
-	return nil
+	if existing == EmbedderID && want != EmbedderID {
+		return s.upgradeHashStore(want)
+	}
+	return fmt.Errorf("refuse mixed embedder generations: store %s process %s", existing, want)
+}
+
+func (s *Store) upgradeHashStore(want string) error {
+	var n int
+	_ = s.db.QueryRow(`SELECT count(*) FROM memory_vectors`).Scan(&n)
+	if _, err := s.db.Exec(`DELETE FROM memory_vectors`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE memory_episodes SET embedding_pending=1, updated_at=? WHERE faded=0`, nowRFC()); err != nil {
+		return err
+	}
+	if n > 0 && !testingBinary() {
+		fmt.Fprintf(os.Stderr, "so memory: discarded %d hash embeddings for BGE; run `so memory sleep` to re-embed pending rows\n", n)
+	}
+	return s.setMeta(metaEmbedder, want)
 }
 
 func (s *Store) meta(key string) (string, error) {
@@ -481,11 +516,17 @@ ON CONFLICT(uid) DO NOTHING`,
 		return 0, false, err
 	}
 	inserted := n > 0
+	if inserted {
+		_ = s.writeFTS(id, ep.Title, plain, files, ep.ToolName)
+	}
 	if embed && !isZero(vector) {
 		if err := s.writeVector(id, vector); err != nil {
 			return id, inserted, err
 		}
 		_, _ = s.db.Exec(`UPDATE memory_episodes SET embedding_pending=0, updated_at=? WHERE id=?`, now, id)
+		if inserted {
+			_ = s.writePassages(id, plain)
+		}
 	}
 	return id, inserted, nil
 }
@@ -587,6 +628,30 @@ func (s *Store) ClearPending(sessionID string) error {
 	return s.setMeta(metaPending, joinCSV(setKeys(set)))
 }
 
+func distillFailKey(sessionID string) string {
+	return "distill_fail_" + strings.TrimSpace(sessionID)
+}
+
+func (s *Store) DistillFailCount(sessionID string) int {
+	raw, _ := s.meta(distillFailKey(sessionID))
+	n := 0
+	for _, c := range raw {
+		if c >= '0' && c <= '9' {
+			n = n*10 + int(c-'0')
+		}
+	}
+	return n
+}
+
+func (s *Store) BumpDistillFail(sessionID string) {
+	n := s.DistillFailCount(sessionID) + 1
+	_ = s.setMeta(distillFailKey(sessionID), fmt.Sprintf("%d", n))
+}
+
+func (s *Store) ClearDistillFail(sessionID string) {
+	_ = s.setMeta(distillFailKey(sessionID), "")
+}
+
 func (s *Store) DistillPaused() bool {
 	v, _ := s.meta(metaDistillPaused)
 	return v == "1" || strings.EqualFold(v, "true")
@@ -619,6 +684,7 @@ func (s *Store) Status() (Status, error) {
 	st := Status{EmbedderID: CurrentEmbedder(), SchemaVersion: memorySchemaVersion, PendingDistill: s.PendingDistill(), DistillPaused: s.DistillPaused()}
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes`).Scan(&st.Episodes)
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_vectors`).Scan(&st.Vectors)
+	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE embedding_pending=1 AND faded=0`).Scan(&st.EmbeddingPending)
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_edges`).Scan(&st.Edges)
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_topics`).Scan(&st.Topics)
 	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes WHERE kind=?`, KindTeaching).Scan(&st.Teachings)

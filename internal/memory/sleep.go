@@ -47,7 +47,6 @@ func (s *Store) flushPendingEmbeddings() error {
 		if err := s.writeVector(ep.ID, vec); err != nil {
 			return err
 		}
-		_ = s.writeShape(ep.ID, vec)
 		_, _ = s.db.Exec(`UPDATE memory_episodes SET embedding_pending=0, updated_at=? WHERE id=?`, nowRFC(), ep.ID)
 	}
 	return nil

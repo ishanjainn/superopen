@@ -174,7 +174,7 @@ export const Hud = memo(function Hud({
     : [
         {
           prefix: "",
-          name: sessionMap.repo.root.split("/").pop() || "repo",
+          name: sessionMap.repo.root.replaceAll("\\", "/").split("/").pop() || "repo",
           path: sessionMap.repo.root,
           git: true,
           files: sessionMap.files.length,

@@ -206,6 +206,9 @@ func SnippetCompact(result api.SnippetResult) string {
 		fmt.Fprintf(&b, "label: %s\n", result.Label)
 	}
 	fmt.Fprintf(&b, "file: %s\n", result.Location.File)
+	if src := strings.TrimSpace(result.Location.File); src != "" {
+		fmt.Fprintf(&b, "src=%s\n", src)
+	}
 	fmt.Fprintf(&b, "lines: %s\n", lineRange(result.Location.StartLine, result.Location.EndLine))
 	fmt.Fprintf(&b, "callers: %d\n", result.Callers)
 	fmt.Fprintf(&b, "callees: %d\n", result.Callees)
@@ -257,6 +260,35 @@ func ArchitectureCompact(result api.ArchitectureResult) string {
 		}
 	} else {
 		b.WriteString("aspects_hint: pass aspects=[\"clusters\"] for Leiden clusters\n")
+	}
+	return b.String()
+}
+
+func ImpactCompact(result api.ImpactResult) string {
+	var b strings.Builder
+	if result.Base != "" {
+		fmt.Fprintf(&b, "base: %s\n", result.Base)
+	}
+	if result.MergeBase != "" {
+		fmt.Fprintf(&b, "merge_base: %s\n", result.MergeBase)
+	}
+	if len(result.ChangedFiles) > 0 {
+		fmt.Fprintf(&b, "changed_files: %d\n", len(result.ChangedFiles))
+		for _, f := range result.ChangedFiles {
+			fmt.Fprintf(&b, "  %s\n", f)
+		}
+	}
+	fmt.Fprintf(&b, "impacted_files: %d\n", len(result.ImpactedFiles))
+	for _, f := range result.ImpactedFiles {
+		reason := strings.Join(f.Reasons, ",")
+		if reason == "" {
+			reason = "-"
+		}
+		fmt.Fprintf(&b, "  %s symbols=%d %s\n", f.Path, f.Symbols, reason)
+	}
+	fmt.Fprintf(&b, "impacted_symbols: %d\n", result.Total)
+	if result.Truncated {
+		b.WriteString("truncated: true\n")
 	}
 	return b.String()
 }

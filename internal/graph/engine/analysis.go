@@ -473,25 +473,21 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 	maxChars := budget * queryCharsPerToken
 
 	terms := queryTerms(req.Question, req.Terms)
-	candidates, err := s.querySeedCandidates(ctx, req.Project, req.Question, terms)
+	overlap := queryOverlapTerms(req.Question, req.Terms)
+	candidates, degrees, err := s.querySeedCandidates(ctx, req.Project, req.Question, terms)
 	if err != nil {
 		return api.QueryResult{}, err
 	}
-	seeded := scoreQuerySeeds(candidates, terms)
+	seeded := scoreQuerySeeds(candidates, terms, req.Question)
 	if len(seeded.seeds) == 0 {
 		return api.QueryResult{
-			Text:   "No matching nodes found.",
-			Budget: api.Budget{RequestedTokens: budget, ReturnedTokens: 1, Truncated: false},
+			Text:     "No matching nodes found.",
+			Question: req.Question,
+			Budget:   api.Budget{RequestedTokens: budget, ReturnedTokens: 1, Truncated: false},
 		}, nil
 	}
 
-	communityByID, _ := s.communityLabelByNodeID(ctx, req.Project)
-	degrees, err := s.nodeDegrees(ctx, req.Project)
-	if err != nil {
-		return api.QueryResult{}, err
-	}
-
-	result := api.QueryResult{Seeds: seeded.seeds}
+	result := api.QueryResult{Seeds: seeded.seeds, Question: req.Question}
 	seenEdges := map[int64]bool{}
 	nodesByID := map[int64]queryNodeHit{}
 	seedOrder := make([]int64, 0, len(seeded.seeds))
@@ -516,35 +512,66 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 		expand = expand[:seedMaxK]
 	}
 
-	edgeLines, err := s.queryExpandBFS(ctx, expand, seedIDs, depth, degrees, nodesByID, seenEdges, &result.Edges)
+	edgeLines, err := s.queryExpandBFS(ctx, expand, seedIDs, depth, degrees, nodesByID, seenEdges, &result.Edges, overlap)
 	if err != nil {
 		return api.QueryResult{}, err
 	}
 
-	orderedNodes := orderQueryNodes(seedOrder, nodesByID)
+	orderedAll := fileRoundRobinNodes(s.spliceWideTypeMethods(ctx, orderQueryNodes(seedOrder, nodesByID, overlap), overlap))
+	orderedNodes := orderedAll
+	foundNodes := len(orderedAll)
+	capN := queryRowCap()
+	rowCapped := foundNodes > capN
+	if rowCapped {
+		orderedNodes = orderedNodes[:capN]
+	}
+	if len(edgeLines) > capN {
+		edgeLines = edgeLines[:capN]
+		rowCapped = true
+	}
+	if len(result.Edges) > capN {
+		result.Edges = result.Edges[:capN]
+		rowCapped = true
+	}
 	result.Nodes = result.Nodes[:0]
 	for _, hit := range orderedNodes {
 		result.Nodes = append(result.Nodes, hit.node)
 	}
 
-	var body strings.Builder
-	for _, hit := range orderedNodes {
-		body.WriteString(formatQueryNodeLine(hit, communityByID))
-	}
+	var edgeBody strings.Builder
 	for _, line := range edgeLines {
-		body.WriteString(line)
-		body.WriteByte('\n')
+		edgeBody.WriteString(line)
+		edgeBody.WriteByte('\n')
 	}
 
-	header := fmt.Sprintf("Traversal: BFS depth=%d | Start: %v | %d nodes found\n\n", depth, seedLabels, len(orderedNodes))
-	output, truncated := applyQueryBudget(header, body.String(), len(seedOrder), orderedNodes, communityByID, budget, maxChars)
+	header := fmt.Sprintf("Traversal: BFS depth=%d | Start: %v | %d nodes\n\n", depth, seedLabels, len(orderedNodes))
+	nodeBody := queryNodeBodyFit(orderedNodes, header, edgeBody.String(), maxChars)
+	output, truncated := applyQueryBudget(header, nodeBody, edgeBody.String(), len(seedOrder), orderedNodes, budget, maxChars, foundNodes)
+	if rowCapped && !strings.Contains(output, "TRUNCATED") {
+		output = fmt.Sprintf(
+			"[!] TRUNCATED: showing %d of %d listed ids (row cap %d). Narrow the question. `so graph snippet <qn>` for a listed id.\n\n%s",
+			len(orderedNodes), foundNodes, capN, output,
+		)
+	}
+	bodyChars := maxChars - len(output)
+	if bodyChars < 0 {
+		bodyChars = 0
+	}
+	if truncated || rowCapped {
+		bodyChars += queryBodyReserve
+	}
+	if bodyChars > 0 {
+		if bodies := s.appendQueryBodies(ctx, req.Project, pickQueryAttachNodes(orderedNodes), bodyChars); bodies != "" {
+			output += bodies
+		}
+	}
 
 	result.Text = output
 	result.Budget.RequestedTokens = budget
 	result.Budget.ReturnedTokens = (len(output) + queryCharsPerToken - 1) / queryCharsPerToken
-	result.Budget.Truncated = truncated
-	result.Page.Total = len(result.Nodes)
-	result.Page.Truncated = truncated
+	result.Budget.Truncated = truncated || rowCapped
+	result.Page.Total = foundNodes
+	result.Page.Truncated = truncated || rowCapped
 	return result, nil
 }
 
@@ -813,12 +840,16 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 		return api.SnippetResult{}, errors.New("snippet path escapes repository")
 	}
 	fileOrModule := matched != nil && (matched.Label == "File" || matched.Label == "Module")
+	maxSpan := 80
+	if fileOrModule {
+		maxSpan = 500
+	}
 	missingFileSpan := fileOrModule && matched.Location.EndLine <= matched.Location.StartLine
 	if start <= 0 {
 		start = 1
 	}
 	if missingFileSpan {
-		end = start + 500
+		end = start + maxSpan
 	} else if end < start {
 		end = start
 	}
@@ -832,8 +863,8 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 	}
 	end += contextLines
 	clipped := false
-	if !missingFileSpan && end-start > 500 {
-		end = start + 500
+	if !missingFileSpan && end-start > maxSpan {
+		end = start + maxSpan
 		clipped = true
 	}
 	handle, err := os.Open(abs)
@@ -1685,62 +1716,6 @@ func countBy(ctx context.Context, db *sql.DB, query string, args ...any) (map[st
 		result[name] = count
 	}
 	return result, rows.Err()
-}
-
-func (s *Store) Impact(ctx context.Context, req api.ImpactRequest) (api.ImpactResult, error) {
-	if req.Project == "" {
-		req.Project, _ = s.defaultProject(ctx)
-	}
-	seeds := append([]string(nil), req.Symbols...)
-	for _, file := range req.Files {
-		rows, err := s.db.QueryContext(ctx, `SELECT qualified_name FROM nodes WHERE project=? AND file_path=? ORDER BY qualified_name`, req.Project, filepath.ToSlash(file))
-		if err != nil {
-			return api.ImpactResult{}, err
-		}
-		for rows.Next() {
-			var qn string
-			if err := rows.Scan(&qn); err != nil {
-				rows.Close()
-				return api.ImpactResult{}, err
-			}
-			seeds = append(seeds, qn)
-		}
-		_ = rows.Close()
-	}
-	result := api.ImpactResult{ImpactedModules: map[string]int{}}
-	seen := map[int64]bool{}
-	for _, seed := range seeds {
-		trace, err := s.Trace(ctx, api.TraceRequest{
-			Project: req.Project, Start: seed, Direction: "incoming", EdgeTypes: req.EdgeTypes,
-			Depth: req.Depth, Limit: req.Limit,
-		})
-		if err != nil {
-			continue
-		}
-		for _, path := range trace.Paths {
-			if len(path) < 2 {
-				continue
-			}
-			step := path[len(path)-1]
-			if seen[step.Node.ID] {
-				continue
-			}
-			seen[step.Node.ID] = true
-			result.Impacted = append(result.Impacted, api.ImpactedNode{Node: step.Node, Hop: step.Hop})
-			module := filepath.Dir(step.Node.Location.File)
-			result.ImpactedModules[module]++
-		}
-		result.Truncated = result.Truncated || trace.Truncated
-	}
-	sort.Slice(result.Impacted, func(i, j int) bool {
-		if result.Impacted[i].Hop != result.Impacted[j].Hop {
-			return result.Impacted[i].Hop < result.Impacted[j].Hop
-		}
-		return result.Impacted[i].QualifiedName < result.Impacted[j].QualifiedName
-	})
-	result.Total = len(result.Impacted)
-	result.Coverage, _ = s.Coverage(ctx, api.CoverageRequest{Project: req.Project})
-	return result, nil
 }
 
 func (s *Store) defaultProject(ctx context.Context) (string, error) {

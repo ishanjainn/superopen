@@ -31,6 +31,7 @@ class ReleaseTests(unittest.TestCase):
         expected = {
             "admin-pr-management.yml",
             "admin-pr-summary.yml",
+            "bench.yml",
             "ci-automation.yml",
             "ci-cli.yml",
             "ci-cross-platform.yml",

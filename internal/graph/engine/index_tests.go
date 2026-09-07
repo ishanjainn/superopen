@@ -52,7 +52,7 @@ func isTestPath(path string) bool {
 			return true
 		}
 	}
-	if strings.HasPrefix(base, "test_") || strings.Contains(path, ".test.ts") || strings.Contains(path, ".spec.ts") ||
+	if strings.HasPrefix(base, "test_") || base == "conftest.py" || strings.Contains(path, ".test.ts") || strings.Contains(path, ".spec.ts") ||
 		strings.Contains(path, ".test.js") || strings.Contains(path, ".spec.js") ||
 		strings.Contains(path, "/__tests__/") || strings.Contains(path, "/tests/") || strings.Contains(path, "/test/") || strings.Contains(path, "/spec/") {
 		return true

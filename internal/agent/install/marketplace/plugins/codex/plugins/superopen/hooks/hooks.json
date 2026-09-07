@@ -8,11 +8,6 @@
             "type": "command",
             "command": "so sessions hook --vendor=codex --event=SessionStart",
             "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "so graph refresh --detach",
-            "timeout": 15
           }
         ]
       }
@@ -64,11 +59,6 @@
             "type": "command",
             "command": "so sessions refresh",
             "timeout": 30
-          },
-          {
-            "type": "command",
-            "command": "so graph refresh --detach",
-            "timeout": 15
           }
         ]
       }

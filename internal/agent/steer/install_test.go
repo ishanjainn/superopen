@@ -7,6 +7,28 @@ import (
 	"testing"
 )
 
+func TestDurableTargetsWritesClaudeConfigDir(t *testing.T) {
+	home := t.TempDir()
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	t.Setenv("HOME", home)
+	got := durableTargets(home)
+	wantHome := filepath.Join(home, ".claude", "CLAUDE.md")
+	wantCfg := filepath.Join(cfg, "CLAUDE.md")
+	var haveHome, haveCfg bool
+	for _, p := range got {
+		if p == wantHome {
+			haveHome = true
+		}
+		if p == wantCfg {
+			haveCfg = true
+		}
+	}
+	if !haveHome || !haveCfg {
+		t.Fatalf("durableTargets missing Claude paths: home=%v cfg=%v got=%v", haveHome, haveCfg, got)
+	}
+}
+
 func TestInstallProjectCursorRule(t *testing.T) {
 	root := t.TempDir()
 	path, err := InstallProjectCursorRule(root)
@@ -21,7 +43,7 @@ func TestInstallProjectCursorRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "ignore Superopen entirely") {
+	if !strings.Contains(string(body), "still run one graph query") {
 		t.Fatalf("missing gate: %s", body)
 	}
 	if !strings.Contains(string(body), "alwaysApply: true") {

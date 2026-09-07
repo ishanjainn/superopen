@@ -149,6 +149,13 @@ function FilterRow({
   );
 }
 
+function quoteForShell(value: string): string {
+  if (value !== "" && !/[\s'"\\$`]/.test(value)) {
+    return value;
+  }
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 function GraphNotIndexed({
   repo,
   repoRoot,
@@ -160,7 +167,7 @@ function GraphNotIndexed({
 }) {
   const [copied, setCopied] = useState(false);
   const command = repoRoot
-    ? `cd ${repoRoot} && so graph build`
+    ? `cd ${quoteForShell(repoRoot)} && so graph build`
     : "so graph build";
 
   const copy = async () => {

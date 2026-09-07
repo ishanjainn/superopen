@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ishanjainn/superopen/internal/agent/skills"
@@ -41,6 +42,24 @@ func TestInstallAllWritesSkill(t *testing.T) {
 			}
 			if !bytes.Contains(body, []byte("graph query first")) {
 				t.Fatalf("%s description must treat codebase questions as graph query first", path)
+			}
+			if !bytes.Contains(body, []byte("CLI binary")) {
+				t.Fatalf("%s must say so is a CLI binary", path)
+			}
+			if !bytes.Contains(body, []byte("not an MCP")) {
+				t.Fatalf("%s must say so is not an MCP tool", path)
+			}
+			if !bytes.Contains(body, []byte("memory recall")) {
+				t.Fatalf("%s must include the memory recall command", path)
+			}
+			if !bytes.Contains(body, []byte("memory capture")) {
+				t.Fatalf("%s must include the memory capture command", path)
+			}
+			if !bytes.Contains(body, []byte("shell tool")) {
+				t.Fatalf("%s must say invoke with the shell tool", path)
+			}
+			if !bytes.Contains(body, []byte("PowerShell")) {
+				t.Fatalf("%s must name PowerShell for Windows hosts", path)
 			}
 			if bytes.Contains(body, []byte("memory search first")) {
 				t.Fatalf("%s description must not lead with memory search: %s", path, body[:400])
@@ -119,5 +138,34 @@ func TestMemoryReferenceIsTOON(t *testing.T) {
 	}
 	if bytes.Contains(raw, []byte("MEM #")) {
 		t.Fatal("memory.md must not document MEM # lines")
+	}
+}
+
+func TestInstallAllHonorsAgentConfigDirs(t *testing.T) {
+	home := t.TempDir()
+	claudeCfg := filepath.Join(home, "claude-cfg")
+	codexHome := filepath.Join(home, "codex-home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	t.Setenv("CLAUDE_CONFIG_DIR", claudeCfg)
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("COPILOT_HOME", filepath.Join(home, "copilot-home"))
+
+	written, err := skills.InstallAll("/usr/local/bin/so")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		filepath.Join(claudeCfg, "skills", "so", "SKILL.md"),
+		filepath.Join(codexHome, "skills", "so", "SKILL.md"),
+		filepath.Join(home, "copilot-home", "skills", "so", "SKILL.md"),
+	}
+	joined := strings.Join(written, "\n")
+	for _, path := range want {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("missing skill at %s (written:\n%s)", path, joined)
+		}
 	}
 }

@@ -133,6 +133,7 @@ type BuildRequest struct {
 	Mode           string   `json:"mode,omitempty"`
 	Force          bool     `json:"force,omitempty"`
 	Incremental    bool     `json:"incremental,omitempty"`
+	FromProbe      bool     `json:"from_probe,omitempty"`
 	Exclude        []string `json:"exclude,omitempty"`
 	TokenBudget    int      `json:"token_budget,omitempty"`
 	ExpectedSource string   `json:"expected_source_revision,omitempty"`
@@ -295,6 +296,7 @@ type QueryRequest struct {
 
 type QueryResult struct {
 	Text      string       `json:"text"`
+	Question  string       `json:"question,omitempty"`
 	Seeds     []RankedNode `json:"seeds,omitempty"`
 	Nodes     []Node       `json:"nodes,omitempty"`
 	Edges     []Edge       `json:"edges,omitempty"`
@@ -518,7 +520,14 @@ type ImpactRequest struct {
 
 type ImpactedNode struct {
 	Node
-	Hop int `json:"hop"`
+	Hop    int    `json:"hop"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type ImpactedFile struct {
+	Path    string   `json:"path"`
+	Symbols int      `json:"symbols"`
+	Reasons []string `json:"reasons,omitempty"`
 }
 
 type ImpactResult struct {
@@ -526,6 +535,7 @@ type ImpactResult struct {
 	MergeBase       string         `json:"merge_base,omitempty"`
 	ChangedFiles    []string       `json:"changed_files,omitempty"`
 	Impacted        []ImpactedNode `json:"impacted"`
+	ImpactedFiles   []ImpactedFile `json:"impacted_files,omitempty"`
 	ImpactedModules map[string]int `json:"impacted_modules"`
 	Total           int            `json:"impacted_total"`
 	Truncated       bool           `json:"truncated"`

@@ -115,10 +115,17 @@ func installVendor(vendor string, dryRun bool) ([]string, error) {
 		return nil, walkErr
 	}
 
-	if !dryRun && vendor == "claude-code" {
-		if err := enableClaudeCodePlugin(); err != nil {
-			fmt.Fprintf(os.Stderr, "so install: could not register Claude Code plugin via `claude` CLI: %v\n", err)
-			fmt.Fprintf(os.Stderr, "so install: hooks were still written to %s - in Claude Code run: /plugin marketplace add <path-to-superopen>/plugins then /plugin install superopen@superopen\n", dest)
+	if vendor == "claude-code" {
+		allowPaths, allowErr := installClaudeAllowlist(soBin, dryRun)
+		written = append(written, allowPaths...)
+		if allowErr != nil {
+			return written, allowErr
+		}
+		if !dryRun {
+			if err := enableClaudeCodePlugin(); err != nil {
+				fmt.Fprintf(os.Stderr, "so install: could not register Claude Code plugin via `claude` CLI: %v\n", err)
+				fmt.Fprintf(os.Stderr, "so install: hooks were still written to %s - in Claude Code run: /plugin marketplace add <path-to-superopen>/plugins then /plugin install superopen@superopen\n", dest)
+			}
 		}
 	}
 	if !dryRun && vendor == "codex" {

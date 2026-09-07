@@ -148,7 +148,7 @@ func resolveLocalUser() string {
 	return ""
 }
 
-// resolveTerminalType detects the IDE / terminal that HOSTS the agent
+// DetectTerminalType detects the IDE / terminal that HOSTS the agent
 // - not the agent itself. `terminal.type` mirrors Claude Code's standard
 // attribute (https://code.claude.com/docs/en/monitoring-usage#standard-attributes)
 // and is supposed to identify the SHELL/IDE in which the agent runs
@@ -159,7 +159,7 @@ func resolveLocalUser() string {
 //
 // Detection order: most-specific host signal → terminal-program fallback.
 // Returns "" if we can't tell - the attribute is then omitted entirely.
-func resolveTerminalType() string {
+func DetectTerminalType() string {
 	// Cursor IDE: set by Cursor's editor process. CURSOR_TRACE_ID is
 	// only set inside Cursor's hook runner; the other CURSOR_* envs
 	// (CURSOR_AGENT, CURSOR_WORKSPACE_LABEL, CURSOR_EXTENSION_HOST_ROLE)
@@ -416,11 +416,6 @@ func NewEmitter(_ context.Context, cfg *config.Resolved, vendor string, extraAtt
 	if hn, err := os.Hostname(); err == nil && hn != "" {
 		extra["host.name"] = hn
 	}
-	if t := resolveTerminalType(); t != "" {
-		// Matches Claude Code's standard attribute so a multi-vendor
-		// fleet's `terminal.type` filter has consistent values.
-		extra["terminal.type"] = t
-	}
 	// Caller-supplied attributes win; this lets hook.go layer in
 	// session-scoped values without us having to reach back into
 	// sessionstate from the exporter package (which would create a
@@ -434,6 +429,9 @@ func NewEmitter(_ context.Context, cfg *config.Resolved, vendor string, extraAtt
 			extra[k] = v
 		}
 	}
+	// terminal.type is resolved once per session in hook.go and
+	// passed in extraAttrs. Do not walk the process tree here: on
+	// macOS that is up to 12 `ps` invocations on every hook.
 
 	// D5: stamp the CLI version on every span as a resource attribute
 	// so operations can correlate behaviour with the binary that
@@ -489,9 +487,11 @@ func NewEmitter(_ context.Context, cfg *config.Resolved, vendor string, extraAtt
 		// our behalf. Coding-agent content capture is governed by the
 		// per-adapter handlers obeying cfg.CodingContentCapture.
 		DisableCaptureMessageContent: true,
-		// The hook subcommand is short-lived; batch span processor is
-		// fine - sdk/go calls Shutdown which forces a flush.
-		DisableBatch:   false,
+		// Each hook is a new process that lives well under 5s. The
+		// batch processor's 5s schedule delay never fires, so spans
+		// only flush on Shutdown; SimpleSpanProcessor writes them as
+		// they end and makes that Shutdown a no-wait close.
+		DisableBatch:   true,
 		TraceExporters: traceExporters,
 		// All coding-agent spans for a given session share a
 		// deterministic TraceID (and the session-root span gets a

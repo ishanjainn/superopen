@@ -2,13 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
+	"github.com/ishanjainn/superopen/internal/agent/headless"
 	"github.com/ishanjainn/superopen/internal/agent/hook"
 	"github.com/ishanjainn/superopen/internal/checkpoint"
 	"github.com/ishanjainn/superopen/internal/cli"
@@ -259,6 +262,13 @@ func finalizeSession(root, requestedID string, out *cli.Out) error {
 		_ = session.NewStore(paths).Delete(id)
 		return nil
 	}
+	unlock, ok := claimSessionFinalize(root, id)
+	if !ok {
+		return nil
+	}
+	if unlock != nil {
+		defer unlock()
+	}
 	store := session.NewStore(paths)
 	if existing, existingErr := store.Get(id); existingErr == nil && existing.Status == session.StatusEnded && existing.EndedAt != nil {
 		latest := time.Time{}
@@ -400,6 +410,41 @@ func demoSession(root string) error {
 	}
 	fmt.Printf("Demo session %s created\n", id)
 	return nil
+}
+
+// claimSessionFinalize single-flights SessionEnd finalize for one session.
+// Hosts register both `sessions hook` (which spawns finalize) and
+// `sessions finalize --detach`; Cursor may also fire sessionEnd more than once.
+// The loser returns ok=false and must skip harvest/distill.
+func claimSessionFinalize(root, id string) (unlock func(), ok bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return func() {}, true
+	}
+	_ = paths.Resolve(root).EnsureDirs()
+	unlock, err := headless.TryLock(headless.LockPath(root, "finalize."+lockToken(id)))
+	if err == nil {
+		return unlock, true
+	}
+	if errors.Is(err, headless.ErrBusy) {
+		return nil, false
+	}
+	return func() {}, true
+}
+
+func lockToken(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' || r == '.' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	if b.Len() == 0 {
+		return "session"
+	}
+	return b.String()
 }
 
 func cmdStatus() *cobra.Command {

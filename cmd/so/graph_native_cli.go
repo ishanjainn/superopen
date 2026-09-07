@@ -69,11 +69,13 @@ func graphNativeReadCommands() []*cobra.Command {
 	layout.Flags().Int("max-nodes", 5000, "Node budget (highest degree first)")
 	impact := nativeGraphLeaf("impact [symbol...]", "Analyze change or symbol impact", api.OpImpact, func(cmd *cobra.Command, args []string) any {
 		base, _ := cmd.Flags().GetString("base")
+		files, _ := cmd.Flags().GetStringSlice("files")
 		depth, _ := cmd.Flags().GetInt("depth")
-		return api.ImpactRequest{RepoRoot: repoRoot(), Base: base, Symbols: args, Depth: depth}
+		return api.ImpactRequest{RepoRoot: repoRoot(), Base: base, Symbols: args, Files: files, Depth: depth}
 	})
 	impact.Args = cobra.ArbitraryArgs
-	impact.Flags().String("base", "", "Git base revision")
+	impact.Flags().String("base", "", "Git base revision (seeds symbols on changed lines)")
+	impact.Flags().StringSlice("files", nil, "Source files to analyze (whole file)")
 	impact.Flags().Int("depth", 3, "Maximum impact depth")
 	coverage := nativeGraphLeaf("coverage", "Show indexing coverage and missed files", api.OpCoverage, func(*cobra.Command, []string) any { return api.CoverageRequest{RepoRoot: repoRoot()} })
 	projects := nativeGraphLeaf("projects", "List indexed graph projects", api.OpProjects, func(*cobra.Command, []string) any { return api.StatusRequest{RepoRoot: repoRoot()} })
@@ -99,14 +101,19 @@ func nativeArtifactLeaf(use string, operation api.Operation) *cobra.Command {
 
 func nativeGraphLeaf(use, short string, operation api.Operation, params func(*cobra.Command, []string) any) *cobra.Command {
 	return &cobra.Command{Use: use, Short: short, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		root := repoRoot()
 		if operation == api.OpBuild {
-			root := repoRoot()
 			if len(args) == 1 {
 				root = args[0]
 			}
-			if skipIfUnmanaged(cmd, root) {
-				return nil
-			}
+		}
+		if skipIfUnmanaged(cmd, root) {
+			return nil
+		}
+		stale := ""
+		switch operation {
+		case api.OpQuery, api.OpSearch, api.OpSnippet, api.OpTrace, api.OpImpact, api.OpArchitecture, api.OpCodeSearch, api.OpCypher:
+			stale = ensureFreshGraph(cmd, root)
 		}
 		client, err := client.Resolve()
 		if err != nil {
@@ -121,6 +128,7 @@ func nativeGraphLeaf(use, short string, operation api.Operation, params func(*co
 			if err := json.Unmarshal(result, &query); err != nil {
 				return err
 			}
+			query.Text = applyStale(stale, query.Text)
 			payload := any(query)
 			if !out().Flags.Full {
 				payload = format.QueryAgentJSON(query)
@@ -139,13 +147,26 @@ func nativeGraphLeaf(use, short string, operation api.Operation, params func(*co
 		}
 		out().Next(graphHelp(operation, result)...)
 		return out().HumanOrJSON("graph_"+strings.ReplaceAll(string(operation), "_", "-"), func() {
-			text := compactGraphText(operation, result)
+			text := applyStale(stale, compactGraphText(operation, result))
 			fmt.Fprint(cmd.OutOrStdout(), text)
 			if !strings.HasSuffix(text, "\n") {
 				fmt.Fprintln(cmd.OutOrStdout())
 			}
 		}, display)
 	}}
+}
+
+func applyStale(stale, text string) string {
+	if stale == "" {
+		return text
+	}
+	if strings.HasPrefix(strings.TrimSpace(text), stale) {
+		return text
+	}
+	if strings.TrimSpace(text) == "" {
+		return stale + "\n"
+	}
+	return stale + "\n" + text
 }
 
 func graphHelp(operation api.Operation, result json.RawMessage) []string {
@@ -164,6 +185,11 @@ func graphHelp(operation api.Operation, result json.RawMessage) []string {
 		var snippet api.SnippetResult
 		if json.Unmarshal(result, &snippet) == nil {
 			return format.HelpForSnippet(snippet)
+		}
+	case api.OpImpact:
+		var impact api.ImpactResult
+		if json.Unmarshal(result, &impact) == nil {
+			return format.HelpForImpact(impact)
 		}
 	}
 	return nil
@@ -190,6 +216,11 @@ func compactGraphText(operation api.Operation, result json.RawMessage) string {
 		var architecture api.ArchitectureResult
 		if json.Unmarshal(result, &architecture) == nil {
 			return format.ArchitectureCompact(architecture)
+		}
+	case api.OpImpact:
+		var impact api.ImpactResult
+		if json.Unmarshal(result, &impact) == nil {
+			return format.ImpactCompact(impact)
 		}
 	}
 	var pretty any

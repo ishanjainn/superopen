@@ -43,4 +43,3 @@ make test-web
 
 `.github/workflows/ci-cli.yml`, `ci-web.yml`
 
-Rules: [.agents/rules/tests.mdc](../.agents/rules/tests.mdc)

@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,10 +11,11 @@ import (
 )
 
 const (
-	packBudget     = 800
-	nextPackBudget = 350
-	searchDumpEst  = 8000
-	packTimeout    = 1500 * time.Millisecond
+	packBudget       = 800
+	nextPackBudget   = 350
+	promptPackBudget = 450
+	searchDumpEst    = 8000
+	packTimeout      = 1500 * time.Millisecond
 )
 
 type Pack struct {
@@ -200,9 +200,73 @@ func (s *Store) WorkingSnapshot(sessionID string) string {
 
 const sessionIndexBudget = 350
 
-// SessionStartIndex is the one allowed memory inject: a graph-first ID table,
-// fail-open, skip if empty. Bodies stay out. When a session is pending distill,
-// append LiveDistillInstruction (still fail-open).
+// LiveMemoryCount is faded non-tool, non-prompt rows on knowledge horizons
+// (KindSession diary captures included). KindPrompt is never knowledge (M3).
+func (s *Store) LiveMemoryCount() int {
+	var n int
+	_ = s.db.QueryRow(`SELECT count(*) FROM memory_episodes
+WHERE faded=0 AND kind NOT IN (?, ?) AND horizon IN (?, ?, ?)`,
+		KindTool, KindPrompt, HorizonShort, HorizonMedium, HorizonLong).Scan(&n)
+	return n
+}
+
+// CountLiveMemories is fail-open for hooks.
+func CountLiveMemories(root string) int {
+	store, err := OpenQuick(paths.Resolve(root).Database)
+	if err != nil {
+		return 0
+	}
+	defer store.Close()
+	return store.LiveMemoryCount()
+}
+
+// FTSDocCount is how many plaintext FTS rows exist (0 if missing).
+func (s *Store) FTSDocCount() int {
+	var n int
+	if err := s.db.QueryRow(`SELECT count(*) FROM memory_episodes_fts`).Scan(&n); err != nil {
+		return 0
+	}
+	return n
+}
+
+// IndexSealed reports a leftover ciphertext FTS (search cannot see bodies).
+func (s *Store) IndexSealed() bool {
+	return s.ftsLooksSealed()
+}
+
+// EmptyHitHint distinguishes empty store vs no match vs sealed FTS (AXI hint:).
+func EmptyHitHint(live, fts int, sealed bool) string {
+	if live <= 0 {
+		return "no saved memories in this store"
+	}
+	if sealed {
+		return fmt.Sprintf("%d memories exist but the lexical index is sealed; run so memory recall", live)
+	}
+	if fts <= 0 {
+		return fmt.Sprintf("%d memories exist but the lexical index is empty; run so memory recall", live)
+	}
+	return fmt.Sprintf("no match for this cue; %d memories exist — search is a title index; so memory recall returns bodies", live)
+}
+
+// EmptyRecallHint is the empty-hit line for so memory recall (which prints bodies).
+func EmptyRecallHint(live, fts int, sealed bool) string {
+	if live <= 0 {
+		return "no saved memories in this store"
+	}
+	if sealed {
+		return fmt.Sprintf("%d memories exist but the lexical index is sealed; try different terms", live)
+	}
+	if fts <= 0 {
+		return fmt.Sprintf("%d memories exist but the lexical index is empty; try different terms", live)
+	}
+	return fmt.Sprintf("no match for this cue; %d memories exist — try different terms", live)
+}
+
+// SessionStartIndex is the SessionStart inject: when live memories exist,
+// say how many and give the Bash recall command. Fail-open, no bodies and
+// no uncued #id list (there is no question yet). Prompt-submit uses
+// PromptRecallPack for matching bodies. Empty store stays silent except a
+// pending distill one-liner.
 func SessionStartIndex(root string) string {
 	store, err := OpenQuick(paths.Resolve(root).Database)
 	if err != nil {
@@ -214,49 +278,83 @@ func SessionStartIndex(root string) string {
 	if len(pending) == 0 {
 		return text
 	}
-	inst := LiveDistillInstruction(pending[0])
+	line := LiveDistillInstruction(pending[0])
 	if strings.TrimSpace(text) == "" {
-		return inst
+		return line
 	}
-	combined := strings.TrimSpace(text + "\n" + inst)
-	if EstimateTokens(combined) <= sessionIndexBudget {
-		return combined
-	}
-	return text
+	return strings.TrimSpace(text + "\n" + line)
 }
 
-func (s *Store) BuildSessionIndex() string {
-	live, err := s.LiveKnowledge(12)
+// PromptRecallPack is the UserPromptSubmit inject for a prior-work / personal
+// cue: matching recalled bodies from this workspace store, framed as the user's
+// own notes. Empty when recall has no hits (caller may fall back to the
+// pointer-only index). Fail-open.
+func PromptRecallPack(root, cue string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), packTimeout)
+	defer cancel()
+	store, err := OpenQuick(paths.Resolve(root).Database)
 	if err != nil {
-		live = nil
-	}
-	var hits []Hit
-	for _, ep := range live {
-		hits = append(hits, Hit{Episode: ep})
-	}
-	if len(hits) == 0 {
 		return ""
 	}
+	defer store.Close()
+	if err := store.Ping(ctx); err != nil {
+		return ""
+	}
+	return store.BuildPromptRecall(cue)
+}
+
+func (s *Store) BuildPromptRecall(cue string) string {
+	cue = strings.TrimSpace(cue)
+	if cue == "" {
+		return ""
+	}
+	res, err := s.Recall(cue, promptPackBudget)
+	if err != nil || len(res.Hits) == 0 {
+		return ""
+	}
+	bin := paths.ResolveSoBin()
 	var b strings.Builder
-	budget := sessionIndexBudget
-	header := `Superopen: codebase questions → so graph query "<question>" first. Prior-work index only:`
+	budget := promptPackBudget
+	header := fmt.Sprintf("Superopen: matching notes from your past sessions in this workspace .so/ store (not built-in memory or MEMORY.md). Quote them and cite #id when answering.")
 	if !writeBudget(&b, &budget, header) {
-		return ""
+		return strings.TrimSpace(header)
 	}
-	for _, hit := range hits {
-		if hit.Kind == KindTool || hit.Kind == KindPrompt || hit.Horizon == HorizonWorking {
+	wrote := false
+	fetchID := int64(0)
+	for _, hit := range res.Hits {
+		if hit.Kind == KindTool || hit.Kind == KindPrompt || hit.Kind == KindWorking {
 			continue
 		}
 		line := FormatIndexLine(hit.Episode)
-		if strings.Contains(line, hit.Text) && hit.Text != "" && hit.Text != hit.Title {
-			line = FormatIndexLine(Episode{ID: hit.ID, Kind: hit.Kind, Horizon: hit.Horizon, Topic: hit.Topic, Title: hit.Title, Tokens: hit.Tokens})
+		body := strings.TrimSpace(hit.Text)
+		if body != "" {
+			// Several short query windows beat one 350-token diary: the
+			// answer is often in hit 2–3 (Sweden in a later session).
+			body = clipAroundQuery(body, cue, 120)
+			line = line + "\n" + body
 		}
 		if !writeBudget(&b, &budget, line) {
 			break
 		}
+		if fetchID == 0 {
+			fetchID = hit.ID
+		}
+		wrote = true
 	}
-	writeBudget(&b, &budget, "Fetch: so memory get <id> [id…]. Then so graph query to verify. Hints, not authority.")
-	text := strings.TrimSpace(b.String())
+	if !wrote {
+		return ""
+	}
+	writeBudget(&b, &budget, fmt.Sprintf("Fetch more in your shell: `%s memory recall '<question>'` or `%s memory get %d --full`. Titles that look like import ids are still this workspace diary. If two notes conflict, cite both #ids and pick the most specific or recent. If this pack does not answer, run recall with a second cue. Quote the note and cite #id. Memory is hints, not authority.", bin, bin, fetchID))
+	return strings.TrimSpace(b.String())
+}
+
+func (s *Store) BuildSessionIndex() string {
+	n := s.LiveMemoryCount()
+	if n <= 0 {
+		return ""
+	}
+	bin := paths.ResolveSoBin()
+	text := fmt.Sprintf("Superopen: %d memories in this workspace .so/ store - your own notes from past sessions (not built-in memory or MEMORY.md). Titles that look like import ids are still this workspace diary. If two notes conflict cite both #ids. If recall misses try a second cue. Run in your shell: `%s memory recall '<question>'`", n, bin)
 	if EstimateTokens(text) > sessionIndexBudget {
 		runes := []rune(text)
 		keep := sessionIndexBudget * 4
@@ -265,59 +363,16 @@ func (s *Store) BuildSessionIndex() string {
 		}
 		text = strings.TrimSpace(string(runes[:keep]))
 	}
-	if text != "" {
-		saved := searchDumpEst - EstimateTokens(text)
-		if saved < 0 {
-			saved = 0
-		}
-		_ = s.RecordPack(EstimateTokens(text), saved)
+	saved := searchDumpEst - EstimateTokens(text)
+	if saved < 0 {
+		saved = 0
 	}
+	_ = s.RecordPack(EstimateTokens(text), saved)
 	return text
 }
 
-func (s *Store) sessionTitleHits(limit int) []Hit {
-	if limit <= 0 {
-		limit = 8
-	}
-	root := filepath.Dir(filepath.Dir(filepath.Dir(s.path)))
-	if root == "" || root == "." {
-		return nil
-	}
-	entries, err := session.NewStore(paths.Resolve(root)).List()
-	if err != nil || len(entries) == 0 {
-		return nil
-	}
-	if len(entries) > limit {
-		entries = entries[:limit]
-	}
-	hits := make([]Hit, 0, len(entries))
-	for _, meta := range entries {
-		title := strings.TrimSpace(meta.Title)
-		if title == "" {
-			title = strings.TrimSpace(meta.PromptPreview)
-		}
-		if title == "" {
-			continue
-		}
-		ep := Episode{
-			Kind:      KindSession,
-			Source:    SourceSpan,
-			SessionID: meta.ID,
-			Title:     firstLine(title, 80),
-			Text:      firstLine(meta.PromptPreview, 160),
-			CreatedAt: meta.StartedAt.UTC().Format(time.RFC3339Nano),
-		}
-		hits = append(hits, Hit{Episode: ep, Snippet: firstLine(title, 140)})
-	}
-	return hits
-}
-
 func compactLine(ep Episode) string {
-	t := firstLine(ep.Title, 72)
-	if t == "" {
-		t = firstLine(ep.Text, 72)
-	}
-	return t
+	return displayTitle(ep, 72)
 }
 
 func writeBudget(b *strings.Builder, budget *int, line string) bool {

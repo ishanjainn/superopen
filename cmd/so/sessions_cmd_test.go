@@ -272,3 +272,23 @@ func TestSessionsHookHiddenFromAXICatalog(t *testing.T) {
 		t.Fatal("expected unknown command for so coding")
 	}
 }
+
+func TestClaimSessionFinalizeSingleFlight(t *testing.T) {
+	root := t.TempDir()
+	if err := paths.Resolve(root).EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	unlock, ok := claimSessionFinalize(root, "sess-1")
+	if !ok || unlock == nil {
+		t.Fatal("first claim must succeed")
+	}
+	defer unlock()
+	if _, ok := claimSessionFinalize(root, "sess-1"); ok {
+		t.Fatal("second claim for the same session must skip")
+	}
+	unlock2, ok := claimSessionFinalize(root, "sess-2")
+	if !ok {
+		t.Fatal("a different session must not block")
+	}
+	unlock2()
+}

@@ -81,8 +81,9 @@ func durableTargets(home string) []string {
 	codexHome, _ := paths.CodexHome()
 	opencode, _ := paths.OpenCodeConfigDir()
 	copilot, _ := paths.CopilotHome()
+	homeClaude := filepath.Join(home, ".claude", "CLAUDE.md")
 	out := []string{
-		filepath.Join(home, ".claude", "CLAUDE.md"),
+		homeClaude,
 		filepath.Join(codexHome, "AGENTS.md"),
 		filepath.Join(home, ".agents", "AGENTS.md"),
 		filepath.Join(home, ".gemini", "GEMINI.md"),
@@ -90,10 +91,30 @@ func durableTargets(home string) []string {
 		filepath.Join(copilot, "AGENTS.md"),
 		filepath.Join(home, ".pi", "agent", "AGENTS.md"),
 	}
+	if cfg, err := paths.ClaudeConfigDir(); err == nil {
+		extra := filepath.Join(cfg, "CLAUDE.md")
+		if filepath.Clean(extra) != filepath.Clean(homeClaude) {
+			out = append(out, extra)
+		}
+	}
 	if runtime.GOOS == "windows" {
 		if local := os.Getenv("LOCALAPPDATA"); local != "" {
 			out = append(out, filepath.Join(local, "claude", "CLAUDE.md"))
 		}
+	}
+	return uniquePaths(out)
+}
+
+func uniquePaths(in []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		key := filepath.Clean(p)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, p)
 	}
 	return out
 }

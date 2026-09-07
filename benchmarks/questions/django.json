@@ -1,0 +1,76 @@
+{
+  "corpus": "django/django",
+  "instruction": "identical prompt for every arm; no mention of Superopen or graph tools",
+  "questions": [
+    {
+      "id": "orm-queryset",
+      "prompt": "How does Django's ORM build and evaluate a QuerySet?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["django/db/models", "query.py", "QuerySet"]},
+        {"id": "lazy", "aliases": ["lazy", "deferred", "iterator"]},
+        {"id": "sql", "aliases": ["SQL", "compiler", "as_sql"]},
+        {"id": "filter", "aliases": ["filter", "where", "Q("]}
+      ]
+    },
+    {
+      "id": "middleware",
+      "prompt": "How does Django middleware process a request and response?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["django/middleware", "MiddlewareMixin", "get_response"]},
+        {"id": "chain", "aliases": ["middleware", "process_request", "process_response"]},
+        {"id": "handler", "aliases": ["handler", "HttpResponse", "request"]}
+      ]
+    },
+    {
+      "id": "migrations",
+      "prompt": "How does Django apply database migrations?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["django/db/migrations", "MigrationExecutor", "migrate"]},
+        {"id": "plan", "aliases": ["migration", "executor", "apply"]},
+        {"id": "state", "aliases": ["ProjectState", "state", "schema"]}
+      ]
+    },
+    {
+      "id": "urls",
+      "prompt": "How does Django resolve a URL to a view?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["django/urls", "URLResolver", "path", "re_path"]},
+        {"id": "resolve", "aliases": ["resolve", "resolver", "match"]},
+        {"id": "view", "aliases": ["view", "callback", "HttpRequest"]}
+      ]
+    },
+    {
+      "id": "forms",
+      "prompt": "How does Django validate and clean form data?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["django/forms", "BaseForm", "Form"]},
+        {"id": "clean", "aliases": ["clean", "is_valid", "full_clean"]},
+        {"id": "errors", "aliases": ["errors", "ValidationError", "cleaned_data"]}
+      ]
+    },
+    {
+      "id": "admin",
+      "prompt": "How does the Django admin register and display models?",
+      "key_facts": [
+        {"id": "pkg", "aliases": ["django/contrib/admin", "ModelAdmin", "site.register"]},
+        {"id": "register", "aliases": ["register", "admin.site", "ModelAdmin"]},
+        {"id": "display", "aliases": ["list_display", "change_view", "changelist"]}
+      ]
+    },
+    {
+      "id": "queryset-filter-rename",
+      "suite": "sibling",
+      "prompt": "You must rename django.db.models.query.QuerySet.filter to QuerySet.where (a public API rename). Which other production files under django/db/models/ must change besides query.py so managers and SQL still call the new name? List those file paths. Do not only name query.py or tests.",
+      "key_facts": [
+        {"id": "query", "aliases": ["django/db/models/query.py", "query.py", "QuerySet.filter"]},
+        {"id": "manager", "aliases": ["django/db/models/manager.py", "manager.py", "from_queryset"]},
+        {"id": "sql", "aliases": ["django/db/models/sql/query.py", "add_q", "sql/query.py"]}
+      ],
+      "gold_files": [
+        "django/db/models/query.py",
+        "django/db/models/manager.py",
+        "django/db/models/sql/query.py"
+      ]
+    }
+  ]
+}

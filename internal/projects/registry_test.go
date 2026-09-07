@@ -240,3 +240,33 @@ func TestResolveDevRoot(t *testing.T) {
 		t.Fatalf("cwd managed: %s", got)
 	}
 }
+
+func TestEligibleScratchIsIntrinsic(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(wd, "testdata", "eligible-"+filepath.Base(t.Name()))
+	t.Cleanup(func() { _ = os.RemoveAll(workspace) })
+	gitRepo := filepath.Join(workspace, "benchmarks")
+	if err := os.MkdirAll(filepath.Join(gitRepo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !projects.Eligible(gitRepo) {
+		t.Fatal("a directory named benchmarks must remain eligible; scratch is not name-based")
+	}
+	marker := filepath.Join(gitRepo, ".superopen-scratch")
+	if err := os.WriteFile(marker, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if projects.Eligible(gitRepo) {
+		t.Fatal(".superopen-scratch must mark the tree as scratch")
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SUPEROPEN_SCRATCH", "1")
+	if projects.Eligible(gitRepo) {
+		t.Fatal("SUPEROPEN_SCRATCH=1 must mark the tree as scratch")
+	}
+}

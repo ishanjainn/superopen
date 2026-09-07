@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	teachChunkTokens = 256
-	teachOverlapTok  = 48
+	teachChunkTokens = 192
+	teachOverlapTok  = 64
 )
 
 var teachSuffixes = map[string]bool{

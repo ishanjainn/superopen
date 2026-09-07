@@ -39,6 +39,7 @@ func TestVendorHomeOverrides(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("CODEX_HOME", filepath.Join(root, "codex"))
 	t.Setenv("COPILOT_HOME", filepath.Join(root, "copilot"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "claude-cfg"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "data"))
 
@@ -49,6 +50,7 @@ func TestVendorHomeOverrides(t *testing.T) {
 	}{
 		{"codex", paths.CodexHome, filepath.Join(root, "codex")},
 		{"copilot", paths.CopilotHome, filepath.Join(root, "copilot")},
+		{"claude config", paths.ClaudeConfigDir, filepath.Join(root, "claude-cfg")},
 		{"opencode config", paths.OpenCodeConfigDir, filepath.Join(root, "config", "opencode")},
 		{"opencode data", paths.OpenCodeDataDir, filepath.Join(root, "data", "opencode")},
 	}
@@ -101,5 +103,17 @@ func TestQuoteAndShellPath(t *testing.T) {
 	}
 	if !paths.IsSoBinary("so") || !paths.IsSoBinary("so.exe") {
 		t.Fatal("IsSoBinary")
+	}
+}
+
+func TestMentionsCommand(t *testing.T) {
+	if !paths.MentionsCommand("`so harvest propose`", "harvest propose") {
+		t.Fatal("unix so")
+	}
+	if !paths.MentionsCommand("`so.exe harvest propose`", "harvest propose") {
+		t.Fatal("windows so.exe")
+	}
+	if paths.MentionsCommand("`so harvest list`", "harvest propose") {
+		t.Fatal("substring must not match a different subcommand")
 	}
 }

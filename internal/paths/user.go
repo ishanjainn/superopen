@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -69,6 +70,19 @@ func CodexMarketplaceDir() (string, error) {
 	return filepath.Join(base, "codex-marketplace"), nil
 }
 
+// ClaudeConfigDir returns Claude Code's user config root. CLAUDE_CONFIG_DIR
+// is authoritative when set; otherwise Claude uses ~/.claude.
+func ClaudeConfigDir() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); configured != "" {
+		return filepath.Clean(configured), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home directory: %w", err)
+	}
+	return filepath.Join(home, ".claude"), nil
+}
+
 // CodexHome returns the host's Codex configuration root. CODEX_HOME is
 // authoritative when set; otherwise Codex uses ~/.codex on every platform.
 func CodexHome() (string, error) {
@@ -97,9 +111,16 @@ func CopilotHome() (string, error) {
 
 // OpenCodeConfigDir returns OpenCode's global configuration directory.
 // OpenCode documents ~/.config/opencode and honors XDG_CONFIG_HOME.
+// Native Windows uses %APPDATA%\opencode unless XDG_CONFIG_HOME is set
+// (WSL and Git-Bash users who export XDG still follow the Unix branch).
 func OpenCodeConfigDir() (string, error) {
 	if configured := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); configured != "" {
 		return filepath.Join(configured, "opencode"), nil
+	}
+	if runtime.GOOS == "windows" {
+		if cfg, err := os.UserConfigDir(); err == nil && cfg != "" {
+			return filepath.Join(cfg, "opencode"), nil
+		}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -177,4 +198,51 @@ func EscapeJSONString(s string) string {
 func IsSoBinary(path string) bool {
 	base := strings.ToLower(filepath.Base(path))
 	return base == "so" || base == "so.exe"
+}
+
+// LookPathSo finds so or so.exe on PATH. On Windows it tries so.exe first
+// then so, matching PATHEXT-aware lookup without depending on it.
+func LookPathSo() (string, error) {
+	name := "so"
+	if runtime.GOOS == "windows" {
+		name = "so.exe"
+	}
+	if p, err := exec.LookPath(name); err == nil {
+		return p, nil
+	}
+	if runtime.GOOS == "windows" {
+		if p, err := exec.LookPath("so"); err == nil {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("%s binary not found on PATH", name)
+}
+
+// MentionsCommand reports whether s includes a so or so.exe invocation of sub.
+func MentionsCommand(s, sub string) bool {
+	sub = strings.TrimSpace(sub)
+	if sub == "" {
+		return false
+	}
+	return strings.Contains(s, "so "+sub) || strings.Contains(s, "so.exe "+sub)
+}
+
+// ResolveSoBin is the absolute so binary to paste into the host shell tool, or
+// "so"/"so.exe" when this process is not the CLI (tests). Prefer the running
+// executable so hooks and SessionStart match `so install`, then SUPEROPEN_SO_BIN,
+// then PATH name.
+func ResolveSoBin() string {
+	if exe, err := os.Executable(); err == nil && IsSoBinary(exe) {
+		if abs, err := filepath.Abs(exe); err == nil {
+			return QuoteForHook(abs)
+		}
+		return QuoteForHook(exe)
+	}
+	if v := strings.TrimSpace(os.Getenv("SUPEROPEN_SO_BIN")); v != "" {
+		return QuoteForHook(v)
+	}
+	if runtime.GOOS == "windows" {
+		return "so.exe"
+	}
+	return "so"
 }
