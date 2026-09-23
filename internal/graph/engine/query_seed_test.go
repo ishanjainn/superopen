@@ -116,6 +116,129 @@ func TestScoreQuerySeedsDemotesPropertyNameCollision(t *testing.T) {
 	}
 }
 
+func TestScoreQuerySeedsSkipsDecoratorAndPrefersProjectPrefix(t *testing.T) {
+	deco := seedCandidate{node: api.Node{
+		Label: "Decorator", Name: "classmethod", QualifiedName: "<decorator:classmethod>",
+	}}
+	js := seedCandidate{node: api.Node{
+		Label: "Function", Name: "property",
+		QualifiedName: "sphinx.themes.basic.static.underscore-1.13.1.property",
+		Location:      api.Location{File: "sphinx/themes/basic/static/underscore-1.13.1.js"},
+	}, degree: 40}
+	doc := seedCandidate{node: api.Node{
+		Label: "Class", Name: "PropertyDocumenter",
+		QualifiedName: "sphinx.ext.autodoc.PropertyDocumenter",
+		Location:      api.Location{File: "sphinx/ext/autodoc/__init__.py"},
+	}}
+	q := "classmethod property documentation autodoc"
+	got := scoreQuerySeeds([]seedCandidate{deco, js, doc}, queryTerms(q, nil), q)
+	if len(got.seeds) == 0 || got.seeds[0].Name != "PropertyDocumenter" {
+		t.Fatalf("project prefix should lead, seeds=%v", seedNames(got.seeds))
+	}
+	for _, seed := range got.seeds {
+		if strings.HasPrefix(seed.QualifiedName, "<") || strings.Contains(seed.Location.File, "/static/") {
+			t.Fatalf("synthetic decorator and vendored property must not seed, seeds=%v", seedNames(got.seeds))
+		}
+	}
+}
+
+func TestScoreQuerySeedsClaimsDirectorySegment(t *testing.T) {
+	exact := seedCandidate{node: api.Node{
+		Label: "Function", Name: "classmethod", QualifiedName: "pkg.classmethod",
+		Location: api.Location{File: "pkg/other.py"},
+	}}
+	helper := seedCandidate{node: api.Node{
+		Label: "Function", Name: "setup", QualifiedName: "sphinx.ext.autodoc.setup",
+		Location: api.Location{File: "sphinx/ext/autodoc/__init__.py"},
+	}}
+	q := "classmethod property documentation autodoc"
+	got := scoreQuerySeeds([]seedCandidate{exact, helper}, queryTerms(q, nil), q)
+	found := false
+	for _, seed := range got.seeds {
+		if strings.Contains(seed.Location.File, "/autodoc/") {
+			found = true
+		}
+		if seed.Name == "test_doesnotexist_class" {
+			t.Fatal("path claim must be a whole segment")
+		}
+	}
+	if !found {
+		t.Fatalf("directory autodoc should claim a seed, seeds=%v", seedNames(got.seeds))
+	}
+	if queryTermEqualsPathSegment("tests/test_class.py", "class") || queryTermEqualsPathSegment("classic/foo.py", "class") {
+		t.Fatal("class must not match a longer path segment")
+	}
+	if !queryTermEqualsPathSegment("sphinx/ext/autodoc/__init__.py", "autodoc") {
+		t.Fatal("autodoc should match the directory segment")
+	}
+}
+
+func TestScoreQuerySeedsKeepsVendoredWhenQuestionNamesIt(t *testing.T) {
+	js := seedCandidate{node: api.Node{
+		Label: "Function", Name: "property",
+		QualifiedName: "themes.property",
+		Location:      api.Location{File: "themes/static/underscore.js"},
+	}}
+	q := "How does the property function in static underscore work"
+	got := scoreQuerySeeds([]seedCandidate{js}, queryTerms(q, nil), q)
+	if len(got.seeds) == 0 || got.seeds[0].Name != "property" {
+		t.Fatalf("naming the static directory should keep that file, seeds=%v", seedNames(got.seeds))
+	}
+}
+
+func TestScoreQuerySeedsSkipsTestDirectoryClaim(t *testing.T) {
+	count := seedCandidate{node: api.Node{
+		Label: "Class", Name: "Count", QualifiedName: "django.db.models.aggregates.Count",
+		Location: api.Location{File: "django/db/models/aggregates.py"},
+	}}
+	testFn := seedCandidate{node: api.Node{
+		Label: "Method", Name: "test_q_annotation",
+		QualifiedName: "tests.queries.test_query.TestQueryNoModel.test_q_annotation",
+		Location:      api.Location{File: "tests/queries/test_query.py"},
+	}}
+	q := "where is Count annotation stripped for count queries"
+	got := scoreQuerySeeds([]seedCandidate{count, testFn}, queryTerms(q, nil), q)
+	if len(got.seeds) == 0 || got.seeds[0].Name != "Count" {
+		t.Fatalf("Count should lead, seeds=%v", seedNames(got.seeds))
+	}
+	for _, seed := range got.seeds {
+		if seed.Name == "test_q_annotation" {
+			t.Fatalf("a queries directory must not seed a test, seeds=%v", seedNames(got.seeds))
+		}
+	}
+}
+
+func TestScoreQuerySeedsKeepsTestWhenQuestionSaysPytest(t *testing.T) {
+	testFn := seedCandidate{node: api.Node{
+		Label: "Function", Name: "test_q_annotation",
+		QualifiedName: "tests.queries.test_query.TestQueryNoModel.test_q_annotation",
+		Location:      api.Location{File: "tests/queries/test_query.py"},
+	}}
+	q := "how does pytest run test_q_annotation"
+	got := scoreQuerySeeds([]seedCandidate{testFn}, queryTerms(q, nil), q)
+	for _, seed := range got.seeds {
+		if seed.Name == "test_q_annotation" {
+			return
+		}
+	}
+	t.Fatalf("a pytest question should seed the test, seeds=%v", seedNames(got.seeds))
+}
+
+func TestOmitUnmentionedTestsDropsTestFromScreen(t *testing.T) {
+	count := queryNodeHit{node: api.Node{Name: "Count", Location: api.Location{File: "django/db/models/aggregates.py"}}, seed: true}
+	testFn := queryNodeHit{node: api.Node{Name: "test_q_annotation", Location: api.Location{File: "tests/queries/test_query.py"}}, seed: true}
+	q := "where is Count annotation stripped for count queries"
+	got := omitUnmentionedTests([]queryNodeHit{count, testFn}, q, queryTerms(q, nil))
+	if len(got) != 1 || got[0].node.Name != "Count" {
+		t.Fatalf("test must leave the first screen, got %d", len(got))
+	}
+	pytest := "how does pytest run test_q_annotation"
+	kept := omitUnmentionedTests([]queryNodeHit{count, testFn}, pytest, queryTerms(pytest, nil))
+	if len(kept) != 2 {
+		t.Fatalf("pytest question should keep the test on screen, got %d", len(kept))
+	}
+}
+
 func seedNames(seeds []api.RankedNode) []string {
 	out := make([]string, 0, len(seeds))
 	for _, s := range seeds {

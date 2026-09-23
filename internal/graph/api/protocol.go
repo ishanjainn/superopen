@@ -388,7 +388,10 @@ type SnippetResult struct {
 	Status        string   `json:"status,omitempty"`
 	Message       string   `json:"message,omitempty"`
 	Suggestions   []Node   `json:"suggestions,omitempty"`
+	DirectCallees []Node   `json:"direct_callees,omitempty"`
 	Clipped       bool     `json:"clipped,omitempty"`
+	OmittedStart  int      `json:"omitted_start,omitempty"`
+	OmittedEnd    int      `json:"omitted_end,omitempty"`
 }
 
 type ArchitectureRequest struct {

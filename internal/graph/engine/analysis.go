@@ -458,6 +458,52 @@ func visitedQualifiedNames(paths [][]api.TraceStep, starts []api.Node) map[strin
 	return result
 }
 
+func (s *Store) queryCallerText(ctx context.Context, seeds []api.RankedNode) (string, error) {
+	var b strings.Builder
+	remaining := queryRowCap()
+	for _, seed := range seeds {
+		if isSyntheticQueryNode(seed.Node) {
+			continue
+		}
+		neighbors, err := s.neighbors(ctx, seed.Node, "incoming", []string{"CALLS", "USAGE", "CONFIGURES"}, 100)
+		if err != nil {
+			return "", err
+		}
+		var rows []neighbor
+		for _, next := range neighbors {
+			if isSyntheticQueryNode(next.node) {
+				continue
+			}
+			rows = append(rows, next)
+		}
+		shown := rows
+		extra := 0
+		if len(shown) > remaining {
+			extra = len(shown) - remaining
+			shown = shown[:remaining]
+		}
+		qn := strings.TrimSpace(seed.QualifiedName)
+		if qn == "" {
+			qn = seed.Name
+		}
+		fmt.Fprintf(&b, "callers of %s: %d  (cols: qn file)\n", qn, len(rows))
+		for _, row := range shown {
+			fmt.Fprintf(&b, "  %s %s\n", row.node.QualifiedName, row.node.Location.File)
+		}
+		if extra > 0 {
+			fmt.Fprintf(&b, "%d more. so graph trace %s --direction incoming\n", extra, qn)
+		}
+		remaining -= len(shown)
+		if remaining <= 0 {
+			break
+		}
+	}
+	if b.Len() == 0 {
+		return "No matching nodes found.\n", nil
+	}
+	return b.String(), nil
+}
+
 func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResult, error) {
 	if req.Project == "" {
 		req.Project, _ = s.defaultProject(ctx)
@@ -488,14 +534,29 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 	}
 
 	result := api.QueryResult{Seeds: seeded.seeds, Question: req.Question}
+	if queryAsksForCallers(req.Question) {
+		targets := seeded.primary
+		if len(targets) == 0 {
+			targets = seeded.seeds
+		}
+		output, err := s.queryCallerText(ctx, targets)
+		if err != nil {
+			return api.QueryResult{}, err
+		}
+		for _, seed := range targets {
+			result.Nodes = append(result.Nodes, seed.Node)
+		}
+		result.Text = output
+		result.Budget.RequestedTokens = budget
+		result.Budget.ReturnedTokens = (len(output) + queryCharsPerToken - 1) / queryCharsPerToken
+		return result, nil
+	}
 	seenEdges := map[int64]bool{}
 	nodesByID := map[int64]queryNodeHit{}
 	seedOrder := make([]int64, 0, len(seeded.seeds))
-	seedLabels := make([]string, 0, len(seeded.seeds))
 	seedIDs := map[int64]bool{}
 	for _, seed := range seeded.seeds {
 		seedOrder = append(seedOrder, seed.ID)
-		seedLabels = append(seedLabels, queryNodeDisplayName(seed.Node))
 		seedIDs[seed.ID] = true
 		nodesByID[seed.ID] = queryNodeHit{node: seed.Node, hop: 0, seed: true, deg: degrees[seed.ID]}
 		result.Nodes = append(result.Nodes, seed.Node)
@@ -538,40 +599,29 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 		result.Nodes = append(result.Nodes, hit.node)
 	}
 
-	var edgeBody strings.Builder
-	for _, line := range edgeLines {
-		edgeBody.WriteString(line)
-		edgeBody.WriteByte('\n')
+	screen := omitUnmentionedTests(screenQueryNodes(orderedAll), req.Question, terms)
+	other := foundNodes - len(screen)
+	if other < 0 {
+		other = 0
 	}
-
-	header := fmt.Sprintf("Traversal: BFS depth=%d | Start: %v | %d nodes\n\n", depth, seedLabels, len(orderedNodes))
-	nodeBody := queryNodeBodyFit(orderedNodes, header, edgeBody.String(), maxChars)
-	output, truncated := applyQueryBudget(header, nodeBody, edgeBody.String(), len(seedOrder), orderedNodes, budget, maxChars, foundNodes)
-	if rowCapped && !strings.Contains(output, "TRUNCATED") {
-		output = fmt.Sprintf(
-			"[!] TRUNCATED: showing %d of %d listed ids (row cap %d). Narrow the question. `so graph snippet <qn>` for a listed id.\n\n%s",
-			len(orderedNodes), foundNodes, capN, output,
-		)
+	output := renderSeedQueryText(screen, other)
+	if also := s.sameNameLines(ctx, req.Project, screen); also != "" {
+		output += also
 	}
-	bodyChars := maxChars - len(output)
-	if bodyChars < 0 {
-		bodyChars = 0
+	bodyChars := maxChars
+	if bodyChars < queryBodyReserve {
+		bodyChars = queryBodyReserve
 	}
-	if truncated || rowCapped {
-		bodyChars += queryBodyReserve
-	}
-	if bodyChars > 0 {
-		if bodies := s.appendQueryBodies(ctx, req.Project, pickQueryAttachNodes(orderedNodes), bodyChars); bodies != "" {
-			output += bodies
-		}
+	if bodies := s.appendQueryBodies(ctx, req.Project, pickQueryAttachNodes(screen), bodyChars); bodies != "" {
+		output += bodies
 	}
 
 	result.Text = output
 	result.Budget.RequestedTokens = budget
 	result.Budget.ReturnedTokens = (len(output) + queryCharsPerToken - 1) / queryCharsPerToken
-	result.Budget.Truncated = truncated || rowCapped
+	result.Budget.Truncated = rowCapped || len(output) > maxChars
 	result.Page.Total = foundNodes
-	result.Page.Truncated = truncated || rowCapped
+	result.Page.Truncated = rowCapped
 	return result, nil
 }
 
@@ -793,7 +843,7 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 			return api.SnippetResult{}, err
 		}
 		if len(nodes) == 0 {
-			return api.SnippetResult{}, fmt.Errorf("symbol not found: %s", identity)
+			return api.SnippetResult{}, s.symbolNotFound(ctx, req.Project, identity)
 		}
 		picked, leftovers, amb := resolveGraphIdentity(identity, nodes)
 		if amb || picked == nil {
@@ -806,6 +856,15 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 		matched = picked
 		file = matched.Location.File
 		start, end = matched.Location.StartLine, matched.Location.EndLine
+		if req.StartLine > 0 {
+			start = req.StartLine
+			if matched.Location.StartLine > 0 && start < matched.Location.StartLine {
+				start = matched.Location.StartLine
+			}
+			if matched.Location.EndLine > 0 && start > matched.Location.EndLine {
+				start = matched.Location.EndLine
+			}
+		}
 		snippetLeftovers = leftovers
 	} else if file != "" {
 		node, err := s.findFileOrCallable(ctx, req.Project, file)
@@ -892,9 +951,17 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 		return api.SnippetResult{}, err
 	}
 	coverage, _ := s.Coverage(ctx, api.CoverageRequest{Project: req.Project, Paths: []string{file}})
+	shownEnd := start
+	if len(lines) > 0 {
+		shownEnd = start + len(lines) - 1
+	}
 	result := api.SnippetResult{
-		Location: api.Location{File: file, StartLine: start, EndLine: start + len(lines) - 1},
+		Location: api.Location{File: file, StartLine: start, EndLine: shownEnd},
 		Language: "go", Code: strings.Join(lines, "\n"), Coverage: coverage, Clipped: clipped,
+	}
+	if matched != nil && clipped && matched.Location.EndLine > shownEnd {
+		result.OmittedStart = shownEnd + 1
+		result.OmittedEnd = matched.Location.EndLine
 	}
 	if matched != nil {
 		result.QualifiedName = matched.QualifiedName
@@ -903,8 +970,180 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 		result.Suggestions = snippetLeftovers
 		_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM edges WHERE project=? AND target_id=? AND type='CALLS'`, req.Project, matched.ID).Scan(&result.Callers)
 		_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM edges WHERE project=? AND source_id=? AND type='CALLS'`, req.Project, matched.ID).Scan(&result.Callees)
+		if clipped {
+			result.DirectCallees, _ = s.directCallees(ctx, req.Project, matched.ID, matched.Location.File, 8)
+		}
 	}
 	return result, nil
+}
+
+func (s *Store) symbolNotFound(ctx context.Context, project, identity string) error {
+	msg := "symbol not found: " + identity
+	nearby, err := s.snippetNearby(ctx, project, identity, 8)
+	if err != nil || len(nearby) == 0 {
+		return fmt.Errorf("%s", msg)
+	}
+	var b strings.Builder
+	b.WriteString(msg)
+	b.WriteString("\nnearby:")
+	for _, node := range nearby {
+		fmt.Fprintf(&b, "\n  %s %s", node.QualifiedName, node.Location.File)
+	}
+	return fmt.Errorf("%s", b.String())
+}
+
+func (s *Store) snippetNearby(ctx context.Context, project, identity string, limit int) ([]api.Node, error) {
+	identity = strings.TrimSpace(identity)
+	last := identity
+	if i := strings.LastIndex(identity, "."); i >= 0 {
+		last = identity[i+1:]
+	}
+	last = strings.TrimSpace(last)
+	if last == "" || last == identity || limit <= 0 {
+		return nil, nil
+	}
+	query := `SELECT ` + nodeColumns + ` FROM nodes WHERE name=?`
+	args := []any{last}
+	if project != "" {
+		query += ` AND project=?`
+		args = append(args, project)
+	}
+	query += ` ORDER BY qualified_name LIMIT ?`
+	args = append(args, limit)
+	return s.scanFindNodes(ctx, query, args...)
+}
+
+func (s *Store) directCallees(ctx context.Context, project string, sourceID int64, sourceFile string, limit int) ([]api.Node, error) {
+	if sourceID == 0 || limit <= 0 {
+		return nil, nil
+	}
+	query := `SELECT ` + nodeColumns + ` FROM nodes WHERE id IN (
+		SELECT target_id FROM edges WHERE project=? AND source_id=? AND type='CALLS'
+	) ORDER BY qualified_name`
+	nodes, err := s.scanFindNodes(ctx, query, project, sourceID)
+	if err != nil || len(nodes) == 0 {
+		return nil, err
+	}
+	sourceFile = filepath.ToSlash(sourceFile)
+	kept := make([]api.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if isSyntheticQueryFile(node.Location.File) {
+			continue
+		}
+		kept = append(kept, node)
+	}
+	sort.SliceStable(kept, func(i, j int) bool {
+		si, sj := calleeFileRank(kept[i].Location.File, sourceFile), calleeFileRank(kept[j].Location.File, sourceFile)
+		if si != sj {
+			return si < sj
+		}
+		return kept[i].QualifiedName < kept[j].QualifiedName
+	})
+	if len(kept) > limit {
+		kept = kept[:limit]
+	}
+	return kept, nil
+}
+
+func calleeFileRank(file, sourceFile string) int {
+	file = filepath.ToSlash(file)
+	if sourceFile != "" && file == sourceFile {
+		return 0
+	}
+	return 1
+}
+
+func (s *Store) sameNameLines(ctx context.Context, project string, screen []queryNodeHit) string {
+	const fetch = 64
+	const show = 8
+	shown := map[string]struct{}{}
+	type named struct {
+		name string
+		file string
+	}
+	var seeds []named
+	seenName := map[string]struct{}{}
+	for _, hit := range screen {
+		if !queryAttachableLabel(hit.node.Label) {
+			continue
+		}
+		qn := strings.TrimSpace(hit.node.QualifiedName)
+		if qn == "" {
+			continue
+		}
+		shown[qn] = struct{}{}
+		name := strings.TrimSpace(hit.node.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seenName[name]; ok {
+			continue
+		}
+		seenName[name] = struct{}{}
+		seeds = append(seeds, named{name: name, file: hit.node.Location.File})
+	}
+	if len(seeds) == 0 {
+		return ""
+	}
+	var lines []string
+	seenLine := map[string]struct{}{}
+	for _, seed := range seeds {
+		if len(lines) >= show {
+			break
+		}
+		nearby, err := s.snippetNearby(ctx, project, "x."+seed.name, fetch)
+		if err != nil {
+			continue
+		}
+		dir := filepath.ToSlash(filepath.Dir(seed.file))
+		sort.SliceStable(nearby, func(i, j int) bool {
+			di, dj := sameNameRank(nearby[i].Location.File, dir), sameNameRank(nearby[j].Location.File, dir)
+			if di != dj {
+				return di < dj
+			}
+			return nearby[i].QualifiedName < nearby[j].QualifiedName
+		})
+		for _, node := range nearby {
+			if len(lines) >= show {
+				break
+			}
+			qn := strings.TrimSpace(node.QualifiedName)
+			if qn == "" {
+				continue
+			}
+			if _, ok := shown[qn]; ok {
+				continue
+			}
+			if isTestPath(node.Location.File) {
+				continue
+			}
+			line := qn + " " + node.Location.File
+			if _, ok := seenLine[line]; ok {
+				continue
+			}
+			seenLine[line] = struct{}{}
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("also: (cols: qn file)\n")
+	for _, line := range lines {
+		b.WriteString("  ")
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func sameNameRank(file, dir string) int {
+	file = filepath.ToSlash(file)
+	if dir != "" && dir != "." && filepath.ToSlash(filepath.Dir(file)) == dir {
+		return 0
+	}
+	return 1
 }
 
 func (s *Store) findFileOrCallable(ctx context.Context, project, file string) (*api.Node, error) {

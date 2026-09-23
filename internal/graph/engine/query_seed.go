@@ -185,7 +185,7 @@ func (s *Store) querySeedCandidates(ctx context.Context, project, question strin
 				return nil, nil, err
 			}
 			for _, node := range exact {
-				if seen[node.ID] || isSyntheticQueryFile(node.Location.File) {
+				if seen[node.ID] || isSyntheticQueryNode(node) {
 					continue
 				}
 				seen[node.ID] = true
@@ -233,6 +233,17 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string, question string
 	if len(candidates) == 0 || len(terms) == 0 {
 		return querySeedResult{}
 	}
+	kept := candidates[:0:0]
+	for _, cand := range candidates {
+		if isSyntheticQueryNode(cand.node) {
+			continue
+		}
+		kept = append(kept, cand)
+	}
+	candidates = kept
+	if len(candidates) == 0 {
+		return querySeedResult{}
+	}
 	normTerms := make([]string, 0, len(terms))
 	seenTerm := map[string]struct{}{}
 	for _, t := range terms {
@@ -274,6 +285,16 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string, question string
 		labelTokens := strings.Join(searchTokens(cand.node.Name), " ")
 		qnLower := strings.ToLower(cand.node.QualifiedName)
 		source := strings.ToLower(cand.node.Location.File)
+		// Test files and vendored trees lose to project source. The factor
+		// applies to the term claim as well as the ranked score, or a
+		// penalized exact name still wins bestSeedByTerm and gets appended.
+		nodePenalty := 1.0
+		if queryNodeLooksLikeTest(cand.node) && !queryMentionsTests(question, terms) {
+			nodePenalty *= 0.05
+		}
+		if seg := queryVendoredSegment(source); seg != "" && !queryMentionsTerm(question, terms, seg) {
+			nodePenalty *= 0.05
+		}
 		score := 0.0
 		if joined != "" {
 			if joined == normLabel || joined == bareLabel || joined == labelTokens || joined == qnLower || strings.HasSuffix(qnLower, "."+joined) {
@@ -306,10 +327,15 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string, question string
 			tierValue := 0.0
 			substrValue := 0.0
 			sourceValue := 0.0
+			// A lowercase word is a name prefix only at 6+ characters
+			// (property → PropertyDocumenter). Shorter words stay
+			// substring-only so "build" does not prefix-seed Building.
+			namePrefix := strings.HasPrefix(normLabel, t) || strings.HasPrefix(bareLabel, t)
+			prefixHit := (idents[t] && namePrefix) || (len(t) >= 6 && namePrefix)
 			if t == normLabel || t == bareLabel {
 				tierValue = exactMatchBonus * w
 				matched++
-			} else if idents[t] && (strings.HasPrefix(normLabel, t) || strings.HasPrefix(bareLabel, t)) {
+			} else if prefixHit {
 				tierValue = prefixMatchBonus * w
 				matched++
 			} else if strings.Contains(normLabel, t) || strings.Contains(qnLower, t) {
@@ -326,24 +352,33 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string, question string
 			singleton := 0.0
 			if t == normLabel || t == bareLabel || t == labelTokens || strings.HasSuffix(qnLower, "."+t) {
 				singleton = exactMatchBonus * 10 * w
-			} else if idents[t] && (strings.HasPrefix(normLabel, t) || strings.HasPrefix(bareLabel, t) || strings.HasPrefix(labelTokens, t)) {
+			} else if prefixHit || (idents[t] && strings.HasPrefix(labelTokens, t)) {
 				singleton = prefixMatchBonus * 10 * w
 			}
 			singleton += tierValue + sourceValue
+			// A directory name or file stem can claim its term. A raw
+			// substring cannot (class → test_*_class, classic/foo.py).
+			pathExact := len(t) >= 4 && queryTermEqualsPathSegment(source, t)
 			// Substring-only matches must not claim a term (class → test_*_class).
 			// Weak labels (Property, Attribute, Module) must not claim a
 			// bare word unless the question used a dotted qualifier —
 			// otherwise a field named after a package steals the seed.
-			if singleton > 0 && (tierValue > 0 || strings.HasSuffix(qnLower, "."+t) || t == labelTokens) {
+			if singleton > 0 && (tierValue > 0 || strings.HasSuffix(qnLower, "."+t) || t == labelTokens || pathExact) {
 				if queryWeakLabel(cand.node.Label) && !hasDotted {
 					continue
 				}
+				// A directory term must not appoint a test. The score penalty
+				// still applies, but bestByTerm would append the test anyway.
+				if queryNodeLooksLikeTest(cand.node) && !queryMentionsTests(question, terms) {
+					continue
+				}
 				cur, ok := bestByTerm[t]
-				better := !ok || singleton > cur.score ||
-					(singleton == cur.score && cand.degree > cur.cand.degree) ||
-					(singleton == cur.score && cand.degree == cur.cand.degree && len(cand.node.Name) < len(cur.cand.node.Name))
+				claim := singleton * nodePenalty
+				better := !ok || claim > cur.score ||
+					(claim == cur.score && cand.degree > cur.cand.degree) ||
+					(claim == cur.score && cand.degree == cur.cand.degree && len(cand.node.Name) < len(cur.cand.node.Name))
 				if better {
-					bestByTerm[t] = scored{cand: cand, score: singleton}
+					bestByTerm[t] = scored{cand: cand, score: claim}
 				}
 			}
 		}
@@ -378,8 +413,8 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string, question string
 				score *= 0.02
 			}
 		}
-		if score > 0 && queryNodeLooksLikeTest(cand.node) && !queryMentionsTests(question, terms) {
-			score *= 0.05
+		if score > 0 && nodePenalty != 1 {
+			score *= nodePenalty
 		}
 		if score > 0 {
 			ranked = append(ranked, scored{cand: cand, score: score})
@@ -598,6 +633,75 @@ func queryLooksProper(tok string) bool {
 	}
 	// CamelCase, initial-cap identifiers, or ALLCAPS acronyms of length >= 3.
 	return upper >= 2 || (unicode.IsUpper([]rune(tok)[0]) && lower > 0)
+}
+
+// queryVendoredSegments are dependency and build trees. A project package
+// named staticfiles does not match static.
+var queryVendoredSegments = []string{"static", "vendor", "third_party", "node_modules", "dist"}
+
+func queryVendoredSegment(path string) string {
+	p := strings.ToLower(strings.ReplaceAll(path, "\\", "/"))
+	if p == "" {
+		return ""
+	}
+	for _, part := range strings.Split(p, "/") {
+		for _, seg := range queryVendoredSegments {
+			if part == seg {
+				return seg
+			}
+		}
+	}
+	return ""
+}
+
+func queryMentionsTerm(question string, terms []string, token string) bool {
+	token = strings.ToLower(token)
+	for _, t := range terms {
+		if t == token {
+			return true
+		}
+	}
+	return strings.Contains(" "+strings.ToLower(question)+" ", " "+token+" ")
+}
+
+// queryTermEqualsPathSegment is true when term is a whole directory name
+// or a file stem. It is not a substring of a longer segment.
+func queryTermEqualsPathSegment(path, term string) bool {
+	if len(term) < 4 || path == "" {
+		return false
+	}
+	p := strings.ToLower(strings.ReplaceAll(path, "\\", "/"))
+	for _, part := range strings.Split(p, "/") {
+		if part == "" || part == "." || part == ".." {
+			continue
+		}
+		if part == term {
+			return true
+		}
+		stem := part
+		if dot := strings.LastIndex(part, "."); dot > 0 {
+			stem = part[:dot]
+		}
+		if stem == term {
+			return true
+		}
+	}
+	return false
+}
+
+// queryAsksForCallers is true for a caller question. A bare "caller"
+// (caller id) is not one. "calls" stays a stopword and is not this signal.
+func queryAsksForCallers(question string) bool {
+	q := strings.ToLower(question)
+	if strings.Contains(q, "who calls") || strings.Contains(q, "what calls") || strings.Contains(q, "called by") || strings.Contains(q, "caller of") {
+		return true
+	}
+	for _, tok := range queryWordToken.FindAllString(q, -1) {
+		if tok == "callers" {
+			return true
+		}
+	}
+	return false
 }
 
 func queryMentionsTests(question string, terms []string) bool {

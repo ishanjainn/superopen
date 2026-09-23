@@ -55,10 +55,11 @@ func hubThreshold(degrees map[int64]int) int {
 }
 
 type queryNodeHit struct {
-	node api.Node
-	hop  int
-	seed bool
-	deg  int
+	node   api.Node
+	hop    int
+	seed   bool
+	screen bool
+	deg    int
 }
 
 func (s *Store) queryExpandBFS(
@@ -223,6 +224,14 @@ func queryNameOverlap(n api.Node, terms []string) int {
 	return score
 }
 
+func isSyntheticQueryNode(n api.Node) bool {
+	qn := strings.TrimSpace(n.QualifiedName)
+	if strings.HasPrefix(qn, "<") {
+		return true
+	}
+	return isSyntheticQueryFile(n.Location.File)
+}
+
 func isSyntheticQueryFile(path string) bool {
 	p := strings.ToLower(strings.ReplaceAll(path, "\\", "/"))
 	if p == "" {
@@ -348,10 +357,10 @@ func queryWideType(n api.Node) bool {
 	}
 }
 
-// spliceWideTypeMethods keeps seed Class/Module rows, then fills remaining
-// NODE slots with same-file methods so snippet stays within the 80-line cap
-// instead of pointing at a 1700-line class. The 16-row cap still happens
-// after this reorder so hub queries keep their TRUNCATED signal.
+// spliceWideTypeMethods keeps seed Class/Module rows, then adds same-file
+// methods the question actually names so snippet stays within the 80-line cap
+// instead of pointing at a 1700-line class. Methods with no name overlap stay
+// off the first screen. The 16-row cap still applies to result.Nodes.
 func (s *Store) spliceWideTypeMethods(ctx context.Context, ordered []queryNodeHit, terms []string) []queryNodeHit {
 	if len(ordered) == 0 {
 		return ordered
@@ -366,6 +375,7 @@ func (s *Store) spliceWideTypeMethods(ctx context.Context, ordered []queryNodeHi
 		if seen[hit.node.ID] {
 			continue
 		}
+		hit.screen = true
 		out = append(out, hit)
 		seen[hit.node.ID] = true
 		if queryWideType(hit.node) {
@@ -378,6 +388,10 @@ func (s *Store) spliceWideTypeMethods(ctx context.Context, ordered []queryNodeHi
 			break
 		}
 		for _, m := range s.wideTypeMethods(ctx, owner.node, seen, remain, terms) {
+			if queryNameOverlap(m.node, terms) <= 0 {
+				continue
+			}
+			m.screen = true
 			out = append(out, m)
 			seen[m.node.ID] = true
 		}
@@ -444,6 +458,56 @@ func (s *Store) wideTypeMethods(ctx context.Context, owner api.Node, seen map[in
 		cand = cand[:limit]
 	}
 	return cand
+}
+
+// screenQueryNodes is the first answer: seeds, plus same-file methods of a
+// wide seed class. BFS neighbors stay on result.Nodes and off this list.
+// omitUnmentionedTests drops test nodes from the first screen. The capped
+// Nodes page is unchanged. A question that names tests keeps them.
+func omitUnmentionedTests(screen []queryNodeHit, question string, terms []string) []queryNodeHit {
+	if queryMentionsTests(question, terms) || len(screen) == 0 {
+		return screen
+	}
+	n := 0
+	for _, hit := range screen {
+		if queryNodeLooksLikeTest(hit.node) {
+			continue
+		}
+		screen[n] = hit
+		n++
+	}
+	return screen[:n]
+}
+
+func screenQueryNodes(ordered []queryNodeHit) []queryNodeHit {
+	seen := map[int64]bool{}
+	out := make([]queryNodeHit, 0, len(ordered))
+	for _, hit := range ordered {
+		if !hit.seed && !hit.screen {
+			continue
+		}
+		if hit.node.ID != 0 {
+			if seen[hit.node.ID] {
+				continue
+			}
+			seen[hit.node.ID] = true
+		}
+		out = append(out, hit)
+	}
+	return out
+}
+
+// renderSeedQueryText prints seeds before any source bodies. The other-nodes
+// line names snippet and trace so a caller that cuts the tail still sees them.
+func renderSeedQueryText(screen []queryNodeHit, other int) string {
+	var b strings.Builder
+	for _, hit := range screen {
+		b.WriteString(formatQueryNodeLine(hit))
+	}
+	if other > 0 {
+		fmt.Fprintf(&b, "%d other nodes. `so graph snippet <qn>` for a NODE already shown. `so graph trace <qn> --direction incoming` for callers. `so graph trace <qn>` for callees.\n", other)
+	}
+	return b.String()
 }
 
 func queryNodeLoc(node api.Node) string {

@@ -254,18 +254,21 @@ def summarize_swe(native: list[dict[str, Any]], so_rows: list[dict[str, Any]]) -
     native_res = sum(1 for r in native if r.get("resolved") is True)
     so_res = sum(1 for r in so_rows if r.get("resolved") is True)
     graded = all(r.get("resolved") is not None for r in native + so_rows) and bool(native or so_rows)
-    eff_n, eff_s = _both_resolved(native, so_rows)
-    if not eff_n:
-        eff_n, eff_s = native, so_rows
-    return {
+    eff_n, eff_s = native, so_rows
+    both_n, both_s = _both_resolved(native, so_rows)
+
+    def _tokens(rows: list[dict[str, Any]]) -> int:
+        return int(_sum(rows, "input_tokens") + _sum(rows, "output_tokens") + _sum(rows, "cache_read_tokens") + _sum(rows, "cache_creation_tokens"))
+
+    summary = {
         "n": n,
         "graded": graded,
         "native_resolved": native_res if graded else None,
         "superopen_resolved": so_res if graded else None,
         "native_resolved_pct": (native_res / n) if graded and n else None,
         "superopen_resolved_pct": (so_res / n) if graded and n else None,
-        "native_tokens": int(_sum(eff_n, "input_tokens") + _sum(eff_n, "output_tokens") + _sum(eff_n, "cache_read_tokens") + _sum(eff_n, "cache_creation_tokens")),
-        "superopen_tokens": int(_sum(eff_s, "input_tokens") + _sum(eff_s, "output_tokens") + _sum(eff_s, "cache_read_tokens") + _sum(eff_s, "cache_creation_tokens")),
+        "native_tokens": _tokens(eff_n),
+        "superopen_tokens": _tokens(eff_s),
         "native_cost_usd": _sum(eff_n, "cost_usd"),
         "superopen_cost_usd": _sum(eff_s, "cost_usd"),
         "native_tool_calls": int(_sum(eff_n, "tool_calls")),
@@ -274,8 +277,15 @@ def summarize_swe(native: list[dict[str, Any]], so_rows: list[dict[str, Any]]) -
         "superopen_api_requests": int(_sum(eff_s, "turns")),
         "native_wall_sec": _sum(eff_n, "wall_sec"),
         "superopen_wall_sec": _sum(eff_s, "wall_sec"),
-        "efficiency_over": "both_resolved" if _both_resolved(native, so_rows)[0] else "all_completed",
+        "efficiency_over": "all_completed",
+        "both_resolved_n": len(both_n),
     }
+    if both_n:
+        summary["both_resolved_native_tokens"] = _tokens(both_n)
+        summary["both_resolved_superopen_tokens"] = _tokens(both_s)
+        summary["both_resolved_native_cost_usd"] = _sum(both_n, "cost_usd")
+        summary["both_resolved_superopen_cost_usd"] = _sum(both_s, "cost_usd")
+    return summary
 
 
 def swebench_python() -> str:
@@ -554,8 +564,34 @@ def run_swe_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> dict
             row.update(extra)
             rows.append(row)
             predictions[arm_name].append(prediction_row(instance_id, f"{args.model}-{arm_name}", patch))
-            (work / instance_id / arm_name / "patch.diff").parent.mkdir(parents=True, exist_ok=True)
-            (work / instance_id / arm_name / "patch.diff").write_text(patch)
+            arm_dir = work / instance_id / arm_name
+            arm_dir.mkdir(parents=True, exist_ok=True)
+            (arm_dir / "patch.diff").write_text(patch)
+            # Kept so a later read of this work dir can explain a miss without
+            # re-running the agent. Session jsonl stays under arms/<arm>/.claude.
+            (arm_dir / "agent.json").write_text(
+                json.dumps(
+                    {
+                        "ok": metrics.get("ok"),
+                        "result": metrics.get("result") or "",
+                        "stderr": metrics.get("stderr") or "",
+                        "turns": metrics.get("turns") or 0,
+                        "cost_usd": cost,
+                        "wall_sec": wall,
+                        "so_invoked": bool(metrics.get("so_invoked")),
+                        "tool_calls": metrics.get("tool_calls", 0),
+                        "graph_calls": metrics.get("graph_calls", 0),
+                        "source_reads": metrics.get("source_reads", 0),
+                        "read_after_bodies": bool(metrics.get("read_after_bodies")),
+                        "input_tokens": metrics.get("input_tokens", 0),
+                        "cache_read_tokens": metrics.get("cache_read_tokens", 0),
+                        "cache_creation_tokens": metrics.get("cache_creation_tokens", 0),
+                        "output_tokens": metrics.get("output_tokens", 0),
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
 
     rows = merge_swe_rows(rows, baseline)
 
