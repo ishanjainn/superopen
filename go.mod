@@ -7,7 +7,7 @@ require (
 	github.com/ishanjainn/superopen/sdk/go v0.0.0
 	github.com/joelspadin/tree-sitter-devicetree v0.14.1
 	github.com/klauspost/compress v1.19.2
-	github.com/mattn/go-sqlite3 v1.14.50
+	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/spf13/cobra v1.9.1
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/tree-sitter-grammars/tree-sitter-kconfig v1.3.0
