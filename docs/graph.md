@@ -18,8 +18,11 @@ so graph projects  # every indexed project on this machine
 Graph reads (`query`, `search`, `snippet`, …) probe for unindexed edits and
 spawn an incremental `so graph refresh --probe` when the workspace already
 has `.so/`. Session hooks do not spawn graph refresh. Skip the check with
-`so graph --no-refresh` (CI). If the wait times out, the answer is prefixed
-with `[!] graph stale: edit not indexed yet`.
+`so graph --no-refresh` or `SUPEROPEN_NO_REFRESH=1` (CI). Set
+`SUPEROPEN_REFRESH=hash` when size and mtime can match after a content change.
+If the index is still behind, the answer starts with
+`[!] graph stale: edit not indexed yet`. When 12 or fewer files are dirty, the
+next lines name them and say they are absent from the answer.
 
 At most `SUPEROPEN_BUILD_SLOTS` builds run at once (default 2; `0` is
 unlimited). If refresh says `pool_full`, wait or raise the cap.
@@ -34,7 +37,7 @@ The walker also skips generated trees such as `vendor/` and `node_modules/`,
 and binary suffixes such as `.wasm`. Symlinks that leave the repository are
 not indexed.
 
-`.so/` is listed in `.so/.gitignore` so it is not committed.
+`.so/.gitignore` ignores `sessions/`, `db/`, and `harvest/`.
 
 ## Asking questions
 
@@ -42,7 +45,7 @@ not indexed.
 |---------|---------|
 | `so graph query "<question>"` | Plain-language question to a ranked subgraph. Default answer surface. |
 | `so graph search <pattern>` | Find symbols by name (BM25 over FTS). |
-| `so graph snippet <qn>` | Read the source of a known symbol (files clip at about 500 lines). |
+| `so graph snippet <qn>` | Read the source of a known symbol. Symbols clip around 80 lines. Files and modules clip around 500. `--from <line>` continues a clipped read. |
 | `so graph trace <symbol>` | Callers (`--direction incoming`), callees (`outgoing`), or both. |
 | `so graph impact <symbol\|--files\|--base>` | Blast radius: callers, impls, siblings, co-change. Run this before you finish a multi-file edit. |
 | `so graph architecture` | Languages, packages, routes, hotspots, clusters. |
@@ -69,6 +72,12 @@ help[]:
   results exceed either limit the header says
   `TRUNCATED: showing N of M listed nodes (R reachable)` and suggests
   `snippet` or a narrower question. It never silently drops the answer.
+- The first screen prefers project source. Test files, and paths under
+  `vendor`, `node_modules`, `dist`, `third_party`, or `static`, stay off that
+  screen unless the question names them. A wide class attaches only methods
+  the question names. Extra nodes are a count plus `snippet` / `trace` hints.
+- A clipped snippet prints `omitted: L<start>-<end>`, a follow-up
+  `so graph snippet <qn> --from <start>`, and direct callees when it has them.
 - `qn=` qualified names feed `snippet` / `trace`.
 - `--json` / `--full` are script escape hatches. Agent piping relies on the
   default shape.

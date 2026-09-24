@@ -115,7 +115,11 @@ func nativeGraphLeaf(use, short string, operation api.Operation, params func(*co
 		stale := ""
 		switch operation {
 		case api.OpQuery, api.OpSearch, api.OpSnippet, api.OpTrace, api.OpImpact, api.OpArchitecture, api.OpCodeSearch, api.OpCypher:
-			stale = ensureFreshGraph(cmd, root)
+			var freshErr error
+			stale, freshErr = ensureFreshGraph(cmd, root)
+			if freshErr != nil {
+				return freshErr
+			}
 		}
 		client, err := client.Resolve()
 		if err != nil {

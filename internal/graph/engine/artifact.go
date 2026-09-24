@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
+	"github.com/ishanjainn/superopen/internal/scope"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -204,6 +206,19 @@ func ImportArtifact(ctx context.Context, repoRoot, artifactPath string) (Artifac
 		if err != nil {
 			return err
 		}
+		sc, scErr := scope.Current(canonicalRoot)
+		if scErr != nil {
+			_ = store.Close()
+			return scErr
+		}
+		if err := rebindGraphScope(ctx, store.db.DB, sc); err != nil {
+			_ = store.Close()
+			return err
+		}
+		store.scope = sc
+		store.db.tenant = sc.TenantID
+		store.db.principal = sc.PrincipalID
+		store.db.project = sc.ProjectID
 		_, updateErr := store.db.ExecContext(ctx, `UPDATE projects SET root_path=? WHERE name=?`, canonicalRoot, manifest.Project)
 		if updateErr == nil {
 			updateErr = store.Seal(ctx)
@@ -217,4 +232,22 @@ func ImportArtifact(ctx context.Context, repoRoot, artifactPath string) (Artifac
 		return ArtifactManifest{}, "", fmt.Errorf("import graph artifact: %w", err)
 	}
 	return manifest, live, nil
+}
+
+func rebindGraphScope(ctx context.Context, db *sql.DB, sc scope.Scope) error {
+	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	defer db.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+	tables := []string{
+		"projects", "file_hashes", "nodes", "edges", "project_summaries", "lsp_surface",
+		"index_coverage", "index_coverage_meta", "node_vectors", "token_vectors",
+		"unresolved_relationships", "communities", "community_nodes",
+	}
+	for _, table := range tables {
+		if _, err := db.ExecContext(ctx, `UPDATE `+table+` SET tenant_id=?, scope_project_id=?`, sc.TenantID, sc.ProjectID); err != nil {
+			return fmt.Errorf("rebind %s: %w", table, err)
+		}
+	}
+	return nil
 }

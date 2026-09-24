@@ -108,11 +108,15 @@ This is user-global. It does not write files inside a repository. It installs:
 - observability hooks
 - durable graph-first guidance
 
-Default: every supported agent. Limit to one:
+In a terminal, `so install` with no `--vendor` lists every agent and waits. Press Enter, or type `all`, to install all of them. Type list numbers separated by spaces or commas to install a subset. Add another later with `so install --vendor <id>`.
+
+The curl installer and `install.ps1` are not interactive. They install every agent. The same happens when stdout is not a terminal (CI, scripts).
+
+To skip the prompt:
 
 ```bash
 so install --vendor=cursor
-# any id from the table below
+# any id from the table below, or repeat --vendor
 ```
 
 Stricter graph-first gate (denies the first in-repo source Read once per session):

@@ -239,6 +239,31 @@ func TestOmitUnmentionedTestsDropsTestFromScreen(t *testing.T) {
 	}
 }
 
+func TestFillEmptyScreenListsRealSymbol(t *testing.T) {
+	testFn := queryNodeHit{node: api.Node{Name: "test_widget", Location: api.Location{File: "tests/test_widget.py"}}, seed: true}
+	real := queryNodeHit{node: api.Node{Name: "isstaticmethod", QualifiedName: "app.util.inspect.isstaticmethod", Location: api.Location{File: "app/util/inspect.py"}}}
+	q := "where is isstaticmethod defined"
+	if queryNodeLooksLikeTest(real.node) {
+		t.Fatal("a source function whose name contains test, in a module named inspect, is not a test")
+	}
+	screen := omitUnmentionedTests([]queryNodeHit{testFn, real}, q, queryTerms(q, nil))
+	if len(screen) != 1 || screen[0].node.Name != "isstaticmethod" {
+		t.Fatalf("source function must stay on screen, got %+v", screen)
+	}
+	screen = omitUnmentionedTests([]queryNodeHit{testFn}, q, queryTerms(q, nil))
+	if len(screen) != 0 {
+		t.Fatalf("a test-only screen should be empty, got %d", len(screen))
+	}
+	got := fillEmptyScreen([]queryNodeHit{testFn, real}, q, queryTerms(q, nil))
+	if len(got) != 1 || got[0].node.Name != "isstaticmethod" {
+		t.Fatalf("empty screen should list the source function, got %+v", got)
+	}
+	onlyTests := fillEmptyScreen([]queryNodeHit{testFn}, q, queryTerms(q, nil))
+	if len(onlyTests) != 1 || onlyTests[0].node.Name != "test_widget" {
+		t.Fatalf("a test-only match should still list a node, got %+v", onlyTests)
+	}
+}
+
 func seedNames(seeds []api.RankedNode) []string {
 	out := make([]string, 0, len(seeds))
 	for _, s := range seeds {

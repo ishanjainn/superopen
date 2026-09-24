@@ -35,8 +35,24 @@ type Proposal = {
 
 type Tab = "open" | "history";
 
+type JevDecision = {
+  enabled?: boolean;
+  session_id?: string;
+  task?: string;
+  correction?: string;
+  choice?: string;
+  evidence?: number;
+  correction_prob?: number;
+  promote?: boolean;
+  memory_title?: string;
+  memory_text?: string;
+  note?: string;
+};
+
 export default function HarvestPage() {
   const [tab, setTab] = useState<Tab>("open");
+  const [jevOn, setJevOn] = useState(false);
+  const [jev, setJev] = useState<JevDecision | null>(null);
   const [items, setItems] = useState<Proposal[]>([]);
   const [history, setHistory] = useState<Proposal[]>([]);
   const [latest, setLatest] = useState<Proposal | null>(null);
@@ -45,6 +61,17 @@ export default function HarvestPage() {
 
   const load = useCallback(async () => {
     try {
+      const settingsRes = await fetch("/api/settings/jev");
+      const settings = (await settingsRes.json()) as { enabled?: boolean };
+      const enabled = Boolean(settings.enabled);
+      setJevOn(enabled);
+      if (enabled) {
+        const jevRes = await fetch("/api/harvest/jev");
+        const body = (await jevRes.json()) as JevDecision & { error?: string };
+        setJev(body);
+        setError(body.error || "");
+        return;
+      }
       const [openRes, histRes] = await Promise.all([
         fetch("/api/harvest"),
         fetch("/api/harvest?history=1"),
@@ -99,6 +126,13 @@ export default function HarvestPage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <FeaturePageHeader title="Harvest" />
+      {jevOn ? (
+        <div className="min-h-0 flex-1 overflow-auto p-5">
+          {error ? <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
+          <JevPanel decision={jev} />
+        </div>
+      ) : (
+      <>
       <div className="flex shrink-0 gap-2 border-b border-neutral-200 px-5 py-2">
         <button
           type="button"
@@ -156,7 +190,48 @@ export default function HarvestPage() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
+  );
+}
+
+function JevPanel({ decision }: { decision: JevDecision | null }) {
+  if (!decision || (!decision.choice && decision.note)) {
+    return <p className="text-sm text-neutral-500">{decision?.note || "No finished session yet."}</p>;
+  }
+  const pct = Math.round((decision.correction_prob || 0) * 100);
+  return (
+    <article className="mx-auto max-w-3xl rounded-xl border border-neutral-200 bg-white px-4 py-4">
+      <header className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] uppercase tracking-wide text-neutral-600">
+          {decision.promote ? "stored" : "discarded"}
+        </span>
+        <span className="text-sm text-neutral-800">{decision.choice || "no choice"}</span>
+        {decision.session_id ? (
+          <Link href={`/sessions/${encodeURIComponent(decision.session_id)}`} className="ml-auto font-mono text-[11px] text-neutral-500 hover:text-neutral-800">
+            {decision.session_id}
+          </Link>
+        ) : null}
+      </header>
+      <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+        <div>
+          <dt className="text-xs text-neutral-500">Choice</dt>
+          <dd>{decision.choice || "none"}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-neutral-500">Evidence</dt>
+          <dd>{(decision.evidence ?? 0).toFixed(1)} / 4</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-neutral-500">Correction</dt>
+          <dd>{pct}%</dd>
+        </div>
+      </dl>
+      {decision.task ? <p className="mt-3 text-sm text-neutral-800">{decision.task}</p> : null}
+      {decision.correction ? <p className="mt-2 text-sm text-neutral-600">{decision.correction}</p> : null}
+      {decision.memory_text ? <p className="mt-3 text-sm text-neutral-700">{decision.memory_text}</p> : null}
+    </article>
   );
 }
 

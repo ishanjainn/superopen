@@ -12,14 +12,14 @@ text; `--json` is the envelope.
 
 ## Live agent
 
-You are the live agent. On `HARVEST pending session <id>`, **before answering**:
+You are the live agent. On `HARVEST pending session <id>`, **before answering**. The current user message is a note for this turn (`memory capture`). It is not a playbook diff for that session. If the session has nothing to change, skip it.
 
 ```
 __SO_BIN__ harvest brief <id>
 __SO_BIN__ harvest propose
 ```
 
-Pipe JSON to stdin (PowerShell: `'{"session_id":"<id>",...}' | __SO_BIN__ harvest propose`). Do not use a bash heredoc on Windows.
+Pipe JSON to stdin (PowerShell: `'{"session_id":"<id>",...}' | __SO_BIN__ harvest propose`). Do not write a file. Do not shell-redirect into a path. Do not use a bash heredoc on Windows.
 
 ```json
 {
@@ -34,6 +34,8 @@ Pipe JSON to stdin (PowerShell: `'{"session_id":"<id>",...}' | __SO_BIN__ harves
   "memory_text": "stored only when this proposal is applied"
 }
 ```
+
+Kind `memory` with `memory_text` and no diff stores that text on apply and does not edit a file. Omit `target` in that case. Other kinds still need `target`.
 
 If the brief shows nothing worth changing:
 

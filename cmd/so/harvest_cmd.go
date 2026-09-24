@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -32,6 +33,8 @@ func cmdHarvest() *cobra.Command {
 		harvestApplyCmd(),
 		harvestDeclineCmd(),
 		harvestReviewCmd(),
+		harvestJevCmd(),
+		harvestJevSettingsCmd(),
 	)
 	return cmd
 }
@@ -221,7 +224,7 @@ func harvestListCmd() *cobra.Command {
 
 func listHarvestHistory(_ *cobra.Command, store *harvest.Store) error {
 	cutoff := time.Now().UTC().Add(-config.HoursDuration(config.DefaultRetentionHours))
-	if settings, err := retention.LoadSettings(); err == nil {
+	if settings, err := retention.LoadSettings(repoRoot()); err == nil {
 		if d := config.HoursDuration(settings.SessionHours); d > 0 {
 			cutoff = time.Now().UTC().Add(-d)
 		} else {
@@ -360,4 +363,77 @@ func harvestReviewCmd() *cobra.Command {
 			}, items)
 		},
 	}
+}
+
+func harvestJevCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "jev",
+		Short: "Evaluate the latest finished session with Jev and store or skip the memory candidate",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			root := repoRoot()
+			if err := failIfUnmanaged(root); err != nil {
+				return err
+			}
+			decision, err := harvest.EvaluateJev(root)
+			if err != nil {
+				return err
+			}
+			return out().HumanOrJSON("harvest_jev", func() {
+				if decision.Note != "" && decision.Choice == "" {
+					fmt.Fprintln(cmd.OutOrStdout(), decision.Note)
+					return
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s evidence=%.1f correction=%.0f%% session=%s\n",
+					decision.Choice, decision.Evidence, decision.CorrectionProb*100, decision.SessionID)
+			}, decision)
+		},
+	}
+}
+
+func harvestJevSettingsCmd() *cobra.Command {
+	var write bool
+	cmd := &cobra.Command{
+		Use:   "jev-settings",
+		Short: "Show or save the Jev harvest switch and API key",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if write {
+				raw, err := io.ReadAll(os.Stdin)
+				if err != nil {
+					return err
+				}
+				var body struct {
+					Enabled bool   `json:"enabled"`
+					APIKey  string `json:"api_key"`
+				}
+				if err := json.Unmarshal(raw, &body); err != nil {
+					return err
+				}
+				updates := map[string]string{}
+				if body.Enabled {
+					updates["SUPEROPEN_HARVEST_JEV"] = "1"
+				} else {
+					updates["SUPEROPEN_HARVEST_JEV"] = ""
+				}
+				if strings.TrimSpace(body.APIKey) != "" {
+					updates["TYPESAFE_API_KEY"] = strings.TrimSpace(body.APIKey)
+				}
+				if _, err := config.Save(updates); err != nil {
+					return err
+				}
+			}
+			enabled, _ := config.Get("SUPEROPEN_HARVEST_JEV")
+			_, keySet := config.Get("TYPESAFE_API_KEY")
+			on := enabled == "1" || strings.EqualFold(enabled, "true") || strings.EqualFold(enabled, "on")
+			status := map[string]any{"enabled": on, "key_set": keySet}
+			return out().HumanOrJSON("harvest_jev_settings", func() {
+				if on {
+					fmt.Fprintln(cmd.OutOrStdout(), "jev harvest on")
+				} else {
+					fmt.Fprintln(cmd.OutOrStdout(), "jev harvest off")
+				}
+			}, status)
+		},
+	}
+	cmd.Flags().BoolVar(&write, "write", false, "Read {enabled, api_key} JSON from stdin and save it")
+	return cmd
 }

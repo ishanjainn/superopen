@@ -3,7 +3,18 @@ package config
 import (
 	"testing"
 	"time"
+
+	"github.com/ishanjainn/superopen/internal/scope"
 )
+
+func testScope(t *testing.T) scope.Scope {
+	t.Helper()
+	sc, err := scope.Current(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sc
+}
 
 func TestLoadIgnoresNetworkTelemetryEnvironment(t *testing.T) {
 	t.Setenv("SUPEROPEN_OTLP_ENDPOINT", "https://example.invalid")
@@ -11,7 +22,7 @@ func TestLoadIgnoresNetworkTelemetryEnvironment(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_HEADERS", "authorization=secret")
 	t.Setenv("SUPEROPEN_API_KEY", "secret")
 
-	cfg, err := Load(nil)
+	cfg, err := Load(testScope(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +33,7 @@ func TestLoadIgnoresNetworkTelemetryEnvironment(t *testing.T) {
 
 func TestLoadIgnoresRemovedContentCaptureSetting(t *testing.T) {
 	t.Setenv("SUPEROPEN_CODING_CONTENT_CAPTURE", "minimal")
-	cfg, err := Load(nil)
+	cfg, err := Load(testScope(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +46,7 @@ func TestLoadRetentionHoursDefaultAndZero(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv(EnvSessionRetentionHours, "")
 	t.Setenv(EnvMemoryRetentionHours, "")
-	cfg, err := Load(nil)
+	cfg, err := Load(testScope(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +56,7 @@ func TestLoadRetentionHoursDefaultAndZero(t *testing.T) {
 
 	t.Setenv(EnvSessionRetentionHours, "0")
 	t.Setenv(EnvMemoryRetentionHours, "48")
-	cfg, err = Load(nil)
+	cfg, err = Load(testScope(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

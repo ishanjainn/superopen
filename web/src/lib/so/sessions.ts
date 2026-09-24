@@ -906,7 +906,7 @@ export function listSessionsPage(
 }
 
 export function getSessionDetail(id: string, projectFilter = "") {
-  const projects = projectsForFilter(projectFilter || "all");
+  const projects = projectsForFilter(projectFilter || "");
   const candidates =
     projects.length > 0
       ? projects

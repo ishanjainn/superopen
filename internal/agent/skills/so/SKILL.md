@@ -32,6 +32,6 @@ If `.so/` is missing, still run **one** `graph query`. If stdout is `not a Super
 
 One call then act. Do not re-query unless the dump said TRUNCATED. Do not Read a whole file whose body is already in BODIES. Do not list the tree to confirm Superopen.
 
-If a hook line says `HARVEST pending`, you are the live agent: run `__SO_BIN__ harvest brief <id>` then `__SO_BIN__ harvest propose` (JSON on stdin, include `session_id`) **before answering**. If nothing to propose, run `__SO_BIN__ harvest skip <id>`. Same for `DISTILL pending` (`memory distill --brief <id>`, then `memory distill --apply <id>`; empty array if nothing durable). See `references/harvest.md`.
+If a hook line says `HARVEST pending`, you are the live agent: run `__SO_BIN__ harvest brief <id>` then `__SO_BIN__ harvest propose` (JSON on stdin, include `session_id`) **before answering**. If that session has nothing to change, run `__SO_BIN__ harvest skip <id>`. The current user message is a memory capture, not a playbook diff for that session. Do not write a file. Same for `DISTILL pending` (`memory distill --brief <id>`, then `memory distill --apply <id>`; empty array if nothing durable). See `references/harvest.md`.
 
 Recipes (dead code, fan-in/out, routes): `references/query.md`. Prior-work memory: `references/memory.md`. Playbook harvest (on demand): `references/harvest.md`.

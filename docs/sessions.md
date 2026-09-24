@@ -26,6 +26,7 @@ Observability for coding-agent sessions. Installed hooks record what happened.
 | `so sessions tokens [<id>]` | Token and cost totals |
 | `so sessions checkpoint` | Manage restorable checkpoints under `.so/sessions/<id>/checkpoints/` |
 | `so sessions demo` | Synthetic session for UI testing |
+| `so scan` | Detection rules over those tool calls. See [scan.md](scan.md). |
 
 Output uses TOON lists, a definitive empty state (`0 sessions`) with `help[]`,
 and a `--json` envelope when asked.

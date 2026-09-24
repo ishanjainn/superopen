@@ -721,7 +721,10 @@ func queryMentionsTests(question string, terms []string) bool {
 }
 
 func queryNodeLooksLikeTest(n api.Node) bool {
-	if isTestPath(n.Location.File) || isTestFunctionName(n.Name) || isTestQualifiedName(n.QualifiedName) {
+	// Path and function name only. The registry tie-break matches substrings
+	// inside any qualified name, so a module called inspect or a function
+	// called isstaticmethod would leave the first screen empty.
+	if isTestPath(n.Location.File) || isTestFunctionName(n.Name) {
 		return true
 	}
 	if n.Properties != nil {

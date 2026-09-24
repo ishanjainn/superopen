@@ -31,6 +31,8 @@ The file is `KEY=VALUE` lines, mode `0600`. Comments start with `#`. Unknown key
 | `SUPEROPEN_SESSION_RETENTION_HOURS` | `168` (7 days) | Age after which session transcripts and closed harvest history are deleted. `0` keeps them forever. |
 | `SUPEROPEN_MEMORY_RETENTION_HOURS` | `168` | Age after which unpinned prompts and session rollups are deleted. `0` keeps them forever. Teachings, pins, and `never_decay` rows are never deleted by age. |
 | `SUPEROPEN_HOOK_STRICT` | unset | `1` / `true` / `on`: deny the first in-repo source Read once per session (same as `so install --strict`). |
+| `SUPEROPEN_HARVEST_JEV` | unset | `1`: Harvest decisions run in the UI through Jev. Coding agents are not asked to propose. |
+| `TYPESAFE_API_KEY` | unset | Key for `https://api.typesafe.ai/v1/systemone`. Required when Jev harvest is on. |
 | `SUPEROPEN_BUILD_SLOTS` | `2` | How many graph builds may run at once across repos. `0` means unlimited. |
 | `SUPEROPEN_CODING_REPO_ALLOWLIST` | unset | Optional allow-list consumed by hook adapters. Empty means no extra filter. |
 | `SUPEROPEN_ENVIRONMENT` | `default` | Local telemetry resource attribute. |
@@ -68,7 +70,7 @@ Exit codes stay stable: `0` ok, `1` error, `2` usage, `3` not found, `4` continu
 
 | Flag | Meaning |
 |------|---------|
-| `--vendor` | One agent id, or `all` (the default). Ids: `claude-code`, `cursor`, `codex`, `gemini`, `opencode`, `copilot-cli`, `pi`, `antigravity`, `cline`, `dsh`, `devin`, `factory`, `grok`, `hermes`, `kimi`, `kiro`, `muse`, `omp`, `openclaw`, `openhands`, `prime`, `qwen`, `senpi`, `vscode`. Paths: [installation](installation.md). |
+| `--vendor` | One agent id. Repeat to install several. Omit it in a terminal and `so install` asks; Enter installs every agent. Omit it in a script and every agent is installed. Ids: `claude-code`, `cursor`, `codex`, `gemini`, `opencode`, `copilot-cli`, `pi`, `antigravity`, `cline`, `dsh`, `devin`, `factory`, `grok`, `hermes`, `kimi`, `kiro`, `muse`, `omp`, `openclaw`, `openhands`, `prime`, `qwen`, `senpi`, `vscode`. Paths: [installation](installation.md). |
 | `--strict` | Deny the first in-repo source Read once per session. |
 
 **`so init`** (per repository)
@@ -99,6 +101,8 @@ These are not stored in `config.env` (except where noted above). Set them in the
 | `SUPEROPEN_SO_BIN` | Absolute path to `so` when `PATH` does not have it. The installed skill also pins the path from `so install`. |
 | `SUPEROPEN_WEB_DIR` | Override UI sources for `so dev --hot`. Release installs do not need this. |
 | `SUPEROPEN_GRAPH_QUERY_MAX_ROWS` | NODE/EDGE row cap for `so graph query` (default `16`). |
+| `SUPEROPEN_NO_REFRESH` | `1` or `true`: skip query-path graph freshness (same as `so graph --no-refresh`). |
+| `SUPEROPEN_REFRESH` | `hash`: compare file bytes even when size and mtime match. Default compares size and mtime. |
 | `SUPEROPEN_HEADLESS` | Set to `1` by distill/harvest workers so they are not recorded as sessions. |
 | `SUPEROPEN_GRAPH_SOURCE` | Maintainer-only: engine source tree for `tools/` asset CLIs. |
 | `SUPEROPEN_INSTALL_DIR` | curl / `install.ps1` target (default `~/.superopen/bin`). |
@@ -124,6 +128,7 @@ Installer notes: `scripts/install.sh` and `scripts/install.ps1` also honor those
   db/so.db      # SQLite: graph tables and memory tables
   db/so.db.key  # AES key for sealed memory episode bodies (mode 0600)
   harvest/      # staged playbook proposals
+  guards/       # optional *.rule.yaml for `so scan` (not gitignored)
 ```
 
 **Per machine**
@@ -152,9 +157,9 @@ Defaults (see [graph](graph.md)):
 - Compact `NODE` / `EDGE` text
 - Token budget about 1200
 - At most 16 NODE rows and 16 EDGE rows unless `SUPEROPEN_GRAPH_QUERY_MAX_ROWS` is set
-- File/Module snippets clip at about 500 lines
+- Symbol snippets clip around 80 lines. File and Module snippets clip around 500 lines. A clipped snippet prints `omitted:` and `so graph snippet <qn> --from <line>`.
 
-`so graph --no-refresh` skips the query-path freshness check (CI). Session
+`so graph --no-refresh` and `SUPEROPEN_NO_REFRESH=1` skip the query-path freshness check (CI). `SUPEROPEN_REFRESH=hash` hashes file bytes when size and mtime still match. Session
 hooks do not spawn `so graph refresh`; reads probe and refresh on demand.
 
 Concurrent builds: `SUPEROPEN_BUILD_SLOTS` (default 2). Status `pool_full` means wait or raise the cap.

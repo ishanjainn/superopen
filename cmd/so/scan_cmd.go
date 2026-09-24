@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 
@@ -14,7 +13,6 @@ import (
 
 func cmdScan() *cobra.Command {
 	var rulesDir, minSeverity, sessionID, failOn string
-	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:          "scan",
 		Short:        "Run detection rules over recorded tool calls",
@@ -42,18 +40,19 @@ func cmdScan() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if jsonOut {
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				if err := enc.Encode(found); err != nil {
-					return err
+			if found == nil {
+				found = []guards.Finding{}
+			}
+			if err := out().HumanOrJSON("scan", func() {
+				if len(found) == 0 {
+					fmt.Fprintln(cmd.OutOrStdout(), "no findings")
+					return
 				}
-			} else if len(found) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "no findings")
-			} else {
 				for _, f := range found {
 					fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", f.Severity, f.RuleID, f.SessionID, f.Reason)
 				}
+			}, found); err != nil {
+				return err
 			}
 			if failRank >= 0 && guards.CountAtOrAbove(found, failRank) > 0 {
 				return fmt.Errorf("scan: %d finding(s) at or above %s", guards.CountAtOrAbove(found, failRank), failOn)
@@ -65,7 +64,6 @@ func cmdScan() *cobra.Command {
 	cmd.Flags().StringVar(&minSeverity, "min-severity", "", "Drop findings below this severity")
 	cmd.Flags().StringVar(&sessionID, "session", "", "Scan one session id")
 	cmd.Flags().StringVar(&failOn, "fail-on", "", "Exit with an error when a finding is at or above this severity")
-	cmd.Flags().BoolVar(&jsonOut, "json", false, "Print findings as JSON")
 	return cmd
 }
 

@@ -9,6 +9,9 @@ import (
 // PendingSessionStartLine is at most one pending-generate pointer.
 // OPEN review stays on-demand (`so harvest review`), never SessionStart.
 func PendingSessionStartLine(root string) string {
+	if JevMode() {
+		return ""
+	}
 	store, err := OpenRoot(root)
 	if err != nil {
 		return ""
@@ -28,7 +31,7 @@ func LiveHarvestInstruction(sessionID string) string {
 		return ""
 	}
 	bin := paths.ResolveSoBin()
-	return "HARVEST pending session " + sessionID + " — you are the live agent: before answering, `" + bin + " harvest brief " + sessionID + "` then `" + bin + " harvest propose` (JSON stdin, session_id=" + sessionID + "). If nothing to propose, `" + bin + " harvest skip " + sessionID + "`."
+	return "HARVEST pending session " + sessionID + " — you are the live agent: before answering, `" + bin + " harvest brief " + sessionID + "` then `" + bin + " harvest propose` (JSON on stdin, session_id=" + sessionID + "). If that session has nothing to change, `" + bin + " harvest skip " + sessionID + "`. The current user message is a note for this turn (`" + bin + " memory capture`). It is not a playbook diff for this session. Do not write a file. Pipe JSON to propose."
 }
 
 func estTokens(s string) int {

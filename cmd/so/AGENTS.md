@@ -42,7 +42,8 @@ Do not revert to JSON-first without explicit product decision.
 so init | install | uninstall | dev | projects | gc | status
 so graph build | refresh | query | search | snippet | trace | …
 so memory | search | get | capture | forget | …
-so harvest inventory | propose | scan | list | show | apply | decline | review
+so harvest inventory | propose | scan | list | show | apply | decline | review | jev | jev-settings
+so scan
 so sessions | show | finalize | …
 
 Hidden (host argv, not user-facing): so sessions hook

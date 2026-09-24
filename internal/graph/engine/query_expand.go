@@ -479,6 +479,35 @@ func omitUnmentionedTests(screen []queryNodeHit, question string, terms []string
 	return screen[:n]
 }
 
+// fillEmptyScreen lists nodes when the first screen was emptied. A broad
+// question can match only tests, or only neighbors that were not seeds.
+// The footer then says to snippet a node that was never printed.
+func fillEmptyScreen(ordered []queryNodeHit, question string, terms []string) []queryNodeHit {
+	if len(ordered) == 0 {
+		return nil
+	}
+	capN := queryRowCap()
+	var primary, tests []queryNodeHit
+	mentionTests := queryMentionsTests(question, terms)
+	for _, hit := range ordered {
+		if !mentionTests && queryNodeLooksLikeTest(hit.node) {
+			tests = append(tests, hit)
+			continue
+		}
+		primary = append(primary, hit)
+		if len(primary) >= capN {
+			break
+		}
+	}
+	if len(primary) > 0 {
+		return primary
+	}
+	if len(tests) > capN {
+		tests = tests[:capN]
+	}
+	return tests
+}
+
 func screenQueryNodes(ordered []queryNodeHit) []queryNodeHit {
 	seen := map[int64]bool{}
 	out := make([]queryNodeHit, 0, len(ordered))

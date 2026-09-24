@@ -24,11 +24,13 @@ const (
 var memoryCue = regexp.MustCompile(`(?i)(?:last time|we decided|remember|what did we|who(?:'s|\s+is|\s+was|\s+were)\b|what\s+did\s+i\b|when\s+did\s+i\b|where\s+did\s+i\b|where\s+do\s+i\b|what\s+(?:is|was)\s+my\b|what\s+degree|i\s+graduate|graduated|\bmy\s+(?:degree|school|birthday|family|parents|job|hometown|commute|playlist|occupation)\b|how\s+long\b.{0,48}(?:commute|drive|trip|travel)|how\s+many\b.{0,40}(?:\bdo\s+i\b|\bdid\s+i\b|\bi\s+have\b|\bi've\b)|where\s+(?:did|do)\s+i\s+(?:buy|bought|get|got|shop)|what\s+did\s+i\s+(?:name|buy|get))`)
 
 // Store-phrase nudge only. Questions like "do you remember" stay recall.
-var captureCue = regexp.MustCompile(`(?i)(?:remember\s+this|remember\s+for\s+later|don'?t\s+forget|save\s+this|jot\s+this|keep\s+this)`)
+var captureCue = regexp.MustCompile(`(?i)(?:remember\s+this|remember\s+for\s+later|don'?t\s+forget|save\s+this|jot\s+this|keep\s+this|contributor\s+notes|belongs\s+in\s+the\s+notes)`)
 
 var captureQuestion = regexp.MustCompile(`(?i)(?:do\s+you\s+remember|did\s+you\s+remember|can\s+you\s+remember|could\s+you\s+remember|would\s+you\s+remember)`)
 
-var codeCue = regexp.MustCompile(`(?i)(?:\.(?:go|py|ts|tsx|js|jsx|rs|java|rb|php|c|h|cc|cpp|cs|kt|swift)\b|\b(?:function|class|method|module|package|import|export|caller|callee|queryset|endpoint|handler|middleware|architecture|codebase|refactor|implement|stacktrace|traceback|orm|migration|migrations|admin|signal|signals|manage\.py|django-admin)\b|\b(?:src|pkg|internal|lib)/|\bwhere is\b|\bhow does\b|\bwho calls\b|\bcallers of\b)`)
+var codeCue = regexp.MustCompile(`(?i)(?:\.(?:go|py|ts|tsx|js|jsx|rs|java|rb|php|c|h|cc|cpp|cs|kt|swift)\b|\b(?:module|package|import|export|caller|callee|queryset|endpoint|handler|middleware|architecture|codebase|refactor|implement|stacktrace|traceback|orm|migration|migrations|admin|signal|signals|manage\.py|django-admin)\b|\b(?:src|pkg|internal|lib)/|\bwhere is\b|\bhow does\b|\bwho calls\b|\bcallers of\b)`)
+
+var weakDecl = regexp.MustCompile(`(?i)\b(?:function|class|method)\b`)
 
 var sourceExt = map[string]struct{}{
 	".go": {}, ".py": {}, ".ts": {}, ".tsx": {}, ".js": {}, ".jsx": {},
@@ -51,15 +53,17 @@ func classifyPrompt(prompt string) string {
 	if isCapturePrompt(p) {
 		return routeCapture
 	}
-	code := codeCue.MatchString(p)
-	mem := memoryCue.MatchString(p)
-	if code {
+	if codeCue.MatchString(p) {
 		return routeCode
 	}
-	if mem {
+	if memoryCue.MatchString(p) {
 		return routeMemory
 	}
 	return ""
+}
+
+func weakDeclOnly(prompt string) bool {
+	return weakDecl.MatchString(prompt) && !codeCue.MatchString(prompt)
 }
 
 func isCapturePrompt(prompt string) bool {
@@ -146,7 +150,7 @@ func promptRoute(payload []byte, vendor string) string {
 	sessionID := steerSessionID(payload)
 	if sessionID != "" {
 		state := sessionstate.Load(sessionID, vendor)
-		if state.PromptKind == routeMemory || state.PromptKind == routeCode || state.PromptKind == routeCapture {
+		if state.PromptKind == routeMemory || state.PromptKind == routeCode || state.PromptKind == routeCapture || state.PromptKind == routeEmpty {
 			return state.PromptKind
 		}
 		if state.WorkspaceRoute == routeMemory || state.WorkspaceRoute == routeCode || state.WorkspaceRoute == routeEmpty {
@@ -197,7 +201,7 @@ func bashCommandFromPayload(payload []byte) string {
 }
 
 var soVerb = map[string]struct{}{
-	"graph": {}, "memory": {}, "sessions": {}, "init": {}, "harvest": {}, "scan": {}, "forward": {},
+	"graph": {}, "memory": {}, "sessions": {}, "init": {}, "harvest": {}, "scan": {},
 	"status": {}, "gc": {}, "install": {}, "uninstall": {}, "dev": {},
 	"projects": {},
 }

@@ -45,9 +45,9 @@ func graphNoRefresh(cmd *cobra.Command) bool {
 // context ends. --no-refresh and SUPEROPEN_NO_REFRESH skip both.
 const readRefreshSlotWait = 3 * time.Minute
 
-func ensureFreshGraph(cmd *cobra.Command, root string) string {
+func ensureFreshGraph(cmd *cobra.Command, root string) (string, error) {
 	if graphNoRefresh(cmd) || !paths.Managed(root) {
-		return ""
+		return "", nil
 	}
 	ctx := cmd.Context()
 	if ctx == nil {
@@ -55,19 +55,20 @@ func ensureFreshGraph(cmd *cobra.Command, root string) string {
 	}
 	dirty, err := engine.ProbeDirty(ctx, root, nil)
 	if err != nil || !dirty {
-		return ""
+		return "", nil
 	}
-	if err := refreshGraphForRead(ctx, root); err == nil {
-		dirty, err = engine.ProbeDirty(ctx, root, nil)
-		if err == nil && !dirty {
-			return ""
-		}
+	if err := refreshGraphForRead(ctx, root); err != nil {
+		return "", err
+	}
+	dirty, err = engine.ProbeDirty(ctx, root, nil)
+	if err == nil && !dirty {
+		return "", nil
 	}
 	changes, planErr := engine.PlanIncrementalFromProbe(ctx, root, "", nil)
 	if planErr != nil {
-		return engine.GraphStaleHeader
+		return engine.GraphStaleHeader, nil
 	}
-	return engine.StaleHeader(changes)
+	return engine.StaleHeader(changes), nil
 }
 
 // refreshGraphForRead indexes root before a graph read. A build already

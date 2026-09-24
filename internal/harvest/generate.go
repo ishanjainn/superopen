@@ -12,6 +12,7 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/agent/headless"
 	"github.com/ishanjainn/superopen/internal/cli"
+	"github.com/ishanjainn/superopen/internal/scope"
 	"github.com/ishanjainn/superopen/internal/session"
 )
 
@@ -58,6 +59,9 @@ func MaybeGenerate(root, sessionID string) GenerateResult {
 	if store, err := OpenRoot(root); err == nil {
 		_, _ = store.InsertRun(sessionID, StatusPending, "", "detached")
 		_ = store.Close()
+	}
+	if strings.TrimSpace(os.Getenv("SUPEROPEN_TENANT")) == "" {
+		_ = os.Setenv("SUPEROPEN_TENANT", scope.DefaultTenant)
 	}
 	cli.SpawnSO(root, "--root", root, "harvest", "scan", sessionID)
 	res.Skipped = "detached"
@@ -245,6 +249,7 @@ func buildPrompt(root, sessionID string, store *Store) (string, error) {
 	digest := session.Digest(root, sessionID)
 	var b strings.Builder
 	b.WriteString("You propose playbook patches for Superopen harvest. Output JSON only: an array of objects with keys kind,target,title,reason,issue,suggestion,diff,evidence,memory_title,memory_text.\n")
+	b.WriteString("The current user message is a note for this turn (memory capture). It is not evidence for a playbook diff on this session. If this session has nothing to change, the caller runs harvest skip. Pipe the JSON array to so harvest propose on stdin. Do not write a file. Do not shell-redirect into a path.\n")
 	b.WriteString("kind is improve|create|simplify|principle|memory. Prefer simplify/delete of unused or duplicate rules. Max 3 proposals.\n")
 	b.WriteString("Each proposal needs a concrete reason and evidence (session/memory/graph ids that exist). Do not restate graph-first, Superopen sentinel, or memory contracts.\n")
 	b.WriteString("diff must be a unified diff against the named target. Do not edit files. Do not dump full playbook bodies.\n")

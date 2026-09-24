@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/scope"
 	_ "modernc.org/sqlite"
 )
 
@@ -58,6 +59,8 @@ CREATE TABLE IF NOT EXISTS memory_meta (
 );
 CREATE TABLE IF NOT EXISTS memory_episodes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
   uid TEXT NOT NULL UNIQUE,
   session_id TEXT NOT NULL DEFAULT '',
   span_id TEXT NOT NULL DEFAULT '',
@@ -133,7 +136,8 @@ CREATE TABLE IF NOT EXISTS memory_economy (
 CREATE INDEX IF NOT EXISTS memory_episodes_session ON memory_episodes(session_id, created_at);
 CREATE INDEX IF NOT EXISTS memory_episodes_kind ON memory_episodes(kind, created_at);
 CREATE INDEX IF NOT EXISTS memory_episodes_topic ON memory_episodes(topic, created_at);
-CREATE UNIQUE INDEX IF NOT EXISTS memory_episodes_content_hash ON memory_episodes(content_hash) WHERE content_hash != '';
+CREATE UNIQUE INDEX IF NOT EXISTS memory_episodes_content_hash ON memory_episodes(tenant_id, principal_id, content_hash) WHERE content_hash != '';
+CREATE INDEX IF NOT EXISTS memory_episodes_scope ON memory_episodes(tenant_id, principal_id, created_at);
 CREATE TABLE IF NOT EXISTS memory_shapes (
   episode_id INTEGER PRIMARY KEY REFERENCES memory_episodes(id) ON DELETE CASCADE,
   blob BLOB NOT NULL
@@ -153,9 +157,10 @@ CREATE INDEX IF NOT EXISTS memory_passages_episode ON memory_passages(episode_id
 `
 
 type Store struct {
-	db   *sql.DB
-	path string
-	key  []byte
+	db    *personalDB
+	path  string
+	key   []byte
+	scope scope.Scope
 }
 
 type Episode struct {
@@ -291,7 +296,22 @@ func OpenRoot(root string) (*Store, error) {
 	if err := layout.EnsureDirs(); err != nil {
 		return nil, err
 	}
-	return Open(layout.Database)
+	if err := paths.ResetStaleStore(layout); err != nil {
+		return nil, err
+	}
+	store, err := Open(layout.Database)
+	if err != nil {
+		return nil, err
+	}
+	if err := scope.Check(layout.Scope); err != nil {
+		store.Close()
+		return nil, err
+	}
+	store.scope = layout.Scope
+	store.db.tenant = layout.Scope.TenantID
+	store.db.principal = layout.Scope.PrincipalID
+	store.db.project = layout.Scope.ProjectID
+	return store, nil
 }
 
 // HasEpisodes is true when this repository's store already has at least one
@@ -330,7 +350,12 @@ func open(path string, busyMs int) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db, path: path}
+	sc, err := scope.Current(filepath.Dir(path))
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	s := &Store{db: &personalDB{DB: db, tenant: sc.TenantID, principal: sc.PrincipalID, project: sc.ProjectID}, path: path, scope: sc}
 	pragmas := []string{
 		"PRAGMA foreign_keys = ON",
 		fmt.Sprintf("PRAGMA busy_timeout = %d", busyMs),
@@ -348,16 +373,9 @@ func open(path string, busyMs int) (*Store, error) {
 		s.Close()
 		return nil, fmt.Errorf("initialize memory schema: %w", err)
 	}
-	priorSchema, _ := s.meta("schema_version")
-	if err := s.ensureKnobs(); err != nil {
+	if err := s.seedKnobs(); err != nil {
 		s.Close()
 		return nil, err
-	}
-	if priorSchema == "" || priorSchema == "1" || priorSchema == "2" {
-		if err := s.dropSeededRankingKnobs(); err != nil {
-			s.Close()
-			return nil, err
-		}
 	}
 	if err := s.ensureKey(); err != nil {
 		s.Close()
@@ -372,51 +390,12 @@ func open(path string, busyMs int) (*Store, error) {
 		s.Close()
 		return nil, err
 	}
-	if err := s.ensureHorizonSchema(); err != nil {
-		s.Close()
-		return nil, err
-	}
-	if err := s.ensurePlaintextFTS(); err != nil {
-		s.Close()
-		return nil, err
-	}
 	if err := s.ensurePassagesSchema(); err != nil {
 		s.Close()
 		return nil, err
 	}
 	_ = s.setMeta("schema_version", memorySchemaVersion)
 	return s, nil
-}
-
-func (s *Store) ensureHorizonSchema() error {
-	cols, err := s.tableColumns("memory_episodes")
-	if err != nil {
-		return err
-	}
-	if cols["horizon"] && cols["keep_until_session"] {
-		return nil
-	}
-	drops := []string{
-		`DROP TRIGGER IF EXISTS memory_episodes_ai`,
-		`DROP TRIGGER IF EXISTS memory_episodes_ad`,
-		`DROP TRIGGER IF EXISTS memory_episodes_au`,
-		`DROP TABLE IF EXISTS memory_episodes_fts`,
-		`DROP TABLE IF EXISTS memory_vectors`,
-		`DROP TABLE IF EXISTS memory_shapes`,
-		`DROP TABLE IF EXISTS memory_edges`,
-		`DROP TABLE IF EXISTS memory_topics`,
-		`DROP TABLE IF EXISTS memory_episodes`,
-	}
-	for _, q := range drops {
-		if _, err := s.db.Exec(q); err != nil {
-			return err
-		}
-	}
-	if _, err := s.db.Exec(memoryDDL); err != nil {
-		return err
-	}
-	_, _ = s.db.Exec(`INSERT OR IGNORE INTO memory_economy(id, packs_served, tokens_injected, fallback_searches, tokens_saved, updated_at) VALUES(1,0,0,0,0,?)`, nowRFC())
-	return nil
 }
 
 func (s *Store) Close() error {
@@ -489,10 +468,10 @@ func (s *Store) upsertEpisode(ep Episode, vector Vector, embed bool) (int64, boo
 	facts := marshalStringList(ep.Facts)
 	concepts := marshalStringList(ep.Concepts)
 	res, err := s.db.Exec(`
-INSERT INTO memory_episodes(uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,faded_at,last_accessed_at,community_id,centrality,tier,horizon,keep_until_session,never_decay,tags,fading,topic,facts,narrative,concepts,content_hash)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+INSERT INTO memory_episodes(tenant_id,principal_id,uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,faded_at,last_accessed_at,community_id,centrality,tier,horizon,keep_until_session,never_decay,tags,fading,topic,facts,narrative,concepts,content_hash)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(uid) DO NOTHING`,
-		ep.UID, ep.SessionID, ep.SpanID, ep.Kind, ep.Source, ep.Title, stored, files, ep.ToolName,
+		s.scope.TenantID, s.scope.PrincipalID, ep.UID, ep.SessionID, ep.SpanID, ep.Kind, ep.Source, ep.Title, stored, files, ep.ToolName,
 		ep.Tokens, boolInt(ep.Pinned), boolInt(ep.Faded), pending, ep.CreatedAt, ep.UpdatedAt, ep.ValidFrom, ep.ValidTo, "", "",
 		ep.CommunityID, ep.Centrality, ep.Tier, ep.Horizon, ep.KeepUntilSession, boolInt(ep.NeverDecay), ep.Tags, boolInt(ep.Fading),
 		ep.Topic, facts, ep.Narrative, concepts, ep.ContentHash)
@@ -974,7 +953,7 @@ func (s *Store) backfillTags() error {
 }
 
 func (s *Store) tableColumns(table string) (map[string]bool, error) {
-	return pragmaColumns(s.db, table)
+	return pragmaColumns(s.db.DB, table)
 }
 
 func marshalStringList(in []string) string {

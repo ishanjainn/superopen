@@ -31,7 +31,7 @@ func (s *Store) BuildFresh(ctx context.Context, fn func(*Builder) error) error {
 		_ = tx.Rollback()
 		return fmt.Errorf("create fts table: %w", err)
 	}
-	b := &Builder{tx: tx, insertOnly: true}
+	b := &Builder{tx: tx, insertOnly: true, tenant: s.scope.TenantID, projectID: s.scope.ProjectID}
 	dumpStarted := time.Now()
 	buildErr := fn(b)
 	if buildErr == nil {
@@ -62,7 +62,7 @@ func (b *Builder) putNodeInsert(n api.Node, props string) (int64, error) {
 	id := b.nextNodeID
 	file := filepath.ToSlash(n.Location.File)
 	b.nodeBatch = append(b.nodeBatch, []any{
-		id, n.Project, n.Label, n.Name, n.QualifiedName,
+		id, b.tenant, b.projectID, n.Project, n.Label, n.Name, n.QualifiedName,
 		file, n.Location.StartLine, n.Location.StartColumn,
 		n.Location.EndLine, n.Location.EndColumn, props,
 	})
@@ -76,7 +76,7 @@ func (b *Builder) putNodeInsert(n api.Node, props string) (int64, error) {
 }
 
 func (b *Builder) queueEdgeInsert(project string, sourceID, targetID int64, edgeType, props, evidence, localName string) (int64, error) {
-	b.edgeBatch = append(b.edgeBatch, []any{project, sourceID, targetID, edgeType, props, evidence, localName})
+	b.edgeBatch = append(b.edgeBatch, []any{b.tenant, b.projectID, project, sourceID, targetID, edgeType, props, evidence, localName})
 	if len(b.edgeBatch) >= dumpInsertBatch {
 		return 0, b.flushEdgeBatch()
 	}
@@ -91,7 +91,7 @@ func (b *Builder) flushInsertBatches() error {
 }
 
 func (b *Builder) flushNodeBatch() error {
-	if err := execInsertBatch(b.tx, `INSERT INTO nodes(id,project,label,name,qualified_name,file_path,start_line,start_column,end_line,end_column,properties) VALUES`, 11, b.nodeBatch); err != nil {
+	if err := execInsertBatch(b.tx, `INSERT INTO nodes(id,tenant_id,scope_project_id,project,label,name,qualified_name,file_path,start_line,start_column,end_line,end_column,properties) VALUES`, 13, b.nodeBatch); err != nil {
 		return err
 	}
 	b.nodeBatch = b.nodeBatch[:0]
@@ -103,7 +103,7 @@ func (b *Builder) flushNodeBatch() error {
 }
 
 func (b *Builder) flushEdgeBatch() error {
-	if err := execInsertBatch(b.tx, `INSERT INTO edges(project,source_id,target_id,type,properties,evidence,local_name) VALUES`, 7, b.edgeBatch); err != nil {
+	if err := execInsertBatch(b.tx, `INSERT INTO edges(tenant_id,scope_project_id,project,source_id,target_id,type,properties,evidence,local_name) VALUES`, 9, b.edgeBatch); err != nil {
 		return err
 	}
 	b.edgeBatch = b.edgeBatch[:0]

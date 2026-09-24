@@ -419,7 +419,9 @@ func promptSubmitText(payload []byte, vendor string) string {
 		kind = routeMemory
 	}
 	if kind == "" {
-		if src {
+		if weakDeclOnly(prompt) {
+			kind = routeEmpty
+		} else if src {
 			kind = routeCode
 		} else if n > 0 {
 			kind = routeMemory

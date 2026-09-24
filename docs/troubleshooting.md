@@ -90,6 +90,7 @@ incremental `so graph refresh --probe` when the workspace already has `.so/`.
 Session hooks do not refresh the graph. On a large repo the query may wait a
 couple of seconds, then prefix the answer with
 `[!] graph stale: edit not indexed yet` if the index is still behind.
+When 12 or fewer files are dirty, the following lines name them.
 
 ```bash
 so graph refresh          # incremental
@@ -97,7 +98,7 @@ so graph build --force    # full rebuild
 so graph status           # build state
 ```
 
-Skip query-path refresh with `so graph --no-refresh`.
+Skip query-path refresh with `so graph --no-refresh` or `SUPEROPEN_NO_REFRESH=1`.
 
 If refresh prints `build pool full`, another repo is building. Default pool size is 2. Set `SUPEROPEN_BUILD_SLOTS` (use `0` for unlimited). See [configuration](configuration.md).
 
@@ -117,7 +118,7 @@ Do not pipe `so` through `head` or `tail`. That hides `TRUNCATED` and `help[]`.
 
 Discovery skips `vendor/`, `node_modules/`, and similar generated trees, plus binary suffixes such as `.wasm`. Extra excludes come from `.soignore` in the repo root (gitignore syntax, including `!` negation).
 
-`.so/` itself is listed in `.so/.gitignore` so it is not committed.
+`.so/.gitignore` ignores `sessions/`, `db/`, and `harvest/`.
 
 Symlinks that escape the repository are not indexed.
 

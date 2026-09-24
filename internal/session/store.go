@@ -43,6 +43,8 @@ type Meta struct {
 	IsSubagent    bool       `json:"is_subagent,omitempty"`
 
 	// VCS / join fields (materialized from spans + optional git trailers).
+	TenantID     string              `json:"tenant_id,omitempty"`
+	PrincipalID  string              `json:"principal_id,omitempty"`
 	ProjectID    string              `json:"project_id,omitempty"`
 	RepoRoot     string              `json:"repo_root,omitempty"`
 	Branch       string              `json:"branch,omitempty"`
@@ -192,6 +194,9 @@ func (s *Store) List() ([]IndexEntry, error) {
 	}
 	entries := make([]Meta, 0, len(byID))
 	for _, meta := range byID {
+		if !s.visible(meta) {
+			continue
+		}
 		entries = append(entries, meta)
 	}
 	sort.Slice(entries, func(i, j int) bool {
@@ -482,7 +487,13 @@ func (s *Store) Get(id string) (Meta, error) {
 		return Meta{}, err
 	}
 	var d Document
-	return d.Meta, json.Unmarshal(data, &d)
+	if err := json.Unmarshal(data, &d); err != nil {
+		return Meta{}, err
+	}
+	if !s.visible(d.Meta) {
+		return Meta{}, os.ErrNotExist
+	}
+	return d.Meta, nil
 }
 
 // GetFootprint loads the footprint embedded in session.json.
@@ -616,7 +627,28 @@ func mergeMetaSticky(existing, incoming Meta) Meta {
 }
 
 // UpdateMeta writes session.json and refreshes the sessions index.
+func (s *Store) visible(meta Meta) bool {
+	sc := s.Paths.Scope
+	if sc.TenantID == "" || sc.PrincipalID == "" {
+		return true
+	}
+	return meta.TenantID == sc.TenantID && meta.PrincipalID == sc.PrincipalID
+}
+
+func (s *Store) stamp(meta *Meta) {
+	sc := s.Paths.Scope
+	if sc.TenantID == "" {
+		return
+	}
+	meta.TenantID = sc.TenantID
+	meta.PrincipalID = sc.PrincipalID
+	if meta.ProjectID == "" {
+		meta.ProjectID = sc.ProjectID
+	}
+}
+
 func (s *Store) UpdateMeta(meta Meta) error {
+	s.stamp(&meta)
 	dir := s.Paths.SessionDir(meta.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -628,6 +660,7 @@ func (s *Store) UpdateMeta(meta Meta) error {
 }
 
 func (s *Store) Start(meta Meta) error {
+	s.stamp(&meta)
 	if meta.ID == "" {
 		meta.ID = fmt.Sprintf("ses_%d", time.Now().UnixNano())
 	}

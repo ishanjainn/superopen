@@ -20,6 +20,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/projects"
+	"github.com/ishanjainn/superopen/internal/scope"
 	"github.com/ishanjainn/superopen/internal/session"
 	"github.com/ishanjainn/superopen/internal/version"
 )
@@ -48,7 +49,20 @@ func newRootCommand() *cobra.Command {
 	cli.Bind(root, &cliFlags)
 	prev := root.PersistentPreRunE
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		_ = config.PromoteFileToEnv()
+		if strings.TrimSpace(os.Getenv("SUPEROPEN_TENANT")) == "" {
+			_ = os.Setenv("SUPEROPEN_TENANT", scope.DefaultTenant)
+		}
+		if strings.TrimSpace(os.Getenv("SUPEROPEN_USER")) == "" {
+			if p := scope.Principal(); p != "" {
+				_ = os.Setenv("SUPEROPEN_USER", p)
+			}
+		}
+		if strings.TrimSpace(os.Getenv("SUPEROPEN_PRINCIPAL")) == "" {
+			_ = os.Setenv("SUPEROPEN_PRINCIPAL", os.Getenv("SUPEROPEN_USER"))
+		}
+		if sc, err := scope.Current(repoRoot()); err == nil {
+			_ = config.PromoteFileToEnv(sc)
+		}
 		if prev != nil {
 			return prev(cmd, args)
 		}
@@ -66,7 +80,6 @@ func newRootCommand() *cobra.Command {
 		cmdMemory(),
 		cmdHarvest(),
 		cmdScan(),
-		cmdForward(),
 		cmdDev(),
 		cmdStatus(),
 		cmdGC(),
@@ -274,8 +287,7 @@ macOS, Linux, and Windows. No source checkout is required.
 
 With no flags, removes:
   - hooks, /so skill, and durable guidance for every
-    supported coding agent (Claude Code, Cursor, Codex, Gemini CLI,
-    OpenCode, Copilot CLI, Pi)
+    supported coding agent (see so install --help)
   - project index (config dir)
   - marketplace copy (data dir)
   - session-state caches

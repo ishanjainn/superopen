@@ -31,7 +31,7 @@ export function soJSONRows<T>(res: Pick<SoJSON<T>, "data" | "items">): T[] {
  */
 export async function soJSON<T = unknown>(
   args: string[],
-  opts?: { cwd?: string; timeoutMs?: number },
+  opts?: { cwd?: string; timeoutMs?: number; stdin?: string },
 ): Promise<SoJSON<T>> {
   const cwd = opts?.cwd ?? repoCwd();
   const bin = soBinary();
@@ -41,13 +41,19 @@ export async function soJSON<T = unknown>(
       ...process.env,
       SUPEROPEN_JSON: "1",
       SUPEROPEN_ROOT: repoRoot(),
+      SUPEROPEN_TENANT: process.env.SUPEROPEN_TENANT || "local",
+      SUPEROPEN_PRINCIPAL: process.env.SUPEROPEN_PRINCIPAL || process.env.SUPEROPEN_USER || process.env.USER || "local",
+      SUPEROPEN_USER: process.env.SUPEROPEN_USER || process.env.USER || "local",
     },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [opts?.stdin != null ? "pipe" : "ignore", "pipe", "pipe"],
   });
+  if (opts?.stdin != null && child.stdin) {
+    child.stdin.end(opts.stdin);
+  }
   const chunks: Buffer[] = [];
   const errChunks: Buffer[] = [];
-  child.stdout.on("data", (c) => chunks.push(c));
-  child.stderr.on("data", (c) => errChunks.push(c));
+  child.stdout?.on("data", (c) => chunks.push(c));
+  child.stderr?.on("data", (c) => errChunks.push(c));
   const timeout = opts?.timeoutMs ?? 60_000;
   const code: number = await new Promise((resolve) => {
     const t = setTimeout(() => {

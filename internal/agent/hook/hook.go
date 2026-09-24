@@ -43,6 +43,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/redact"
+	"github.com/ishanjainn/superopen/internal/scope"
 	"github.com/ishanjainn/superopen/internal/session"
 	"github.com/ishanjainn/superopen/internal/session/agentlinks"
 	"github.com/spf13/cobra"
@@ -175,9 +176,17 @@ func run(cmd *cobra.Command, vendor, event, kind string) (rerr error) {
 	// so without this step a value set in config.env would be invisible
 	// to them. Existing env vars take precedence so a user's shell
 	// override always wins.
-	if err := config.PromoteFileToEnv(); err != nil {
-		logErrorf("hook config-file env promote: %v", err)
-		// non-fatal - the rest of the hook can still proceed without it
+	stampProcessScope("")
+	hookRoot := hookRepoRoot(payload)
+	if strings.TrimSpace(hookRoot) == "" {
+		hookRoot, _ = os.Getwd()
+	}
+	hookScope, scopeErr := scope.Current(hookRoot)
+	if scopeErr == nil {
+		if err := config.PromoteFileToEnv(hookScope); err != nil {
+			logErrorf("hook config-file env promote: %v", err)
+			// non-fatal - the rest of the hook can still proceed without it
+		}
 	}
 
 	// Resolve the canonical user identity BEFORE the OTel SDK boots so
@@ -235,6 +244,7 @@ func run(cmd *cobra.Command, vendor, event, kind string) (rerr error) {
 		_ = os.Setenv("SUPEROPEN_USER", resolvedUser)
 		cached.User = resolvedUser
 	}
+	stampProcessScope(resolvedUser)
 
 	// Working folder, permission mode, and VCS snapshot - sticky
 	// session-level facts the trace-detail header expects on every
@@ -338,7 +348,12 @@ func run(cmd *cobra.Command, vendor, event, kind string) (rerr error) {
 		sessionstate.Save(sessionID, vendor, cached)
 	}
 
-	cfg, err := config.Load(nil)
+	cfgScope, cfgErr := scope.Current(hookRoot)
+	if cfgErr != nil {
+		logErrorf("hook config load: %v", cfgErr)
+		return nil
+	}
+	cfg, err := config.Load(cfgScope, nil)
 	if err != nil {
 		logErrorf("hook config load: %v", err)
 		return nil
@@ -518,10 +533,27 @@ func shouldFinalizeNested(event string) bool {
 	}
 }
 
+func stampProcessScope(principal string) {
+	if strings.TrimSpace(os.Getenv("SUPEROPEN_TENANT")) == "" {
+		_ = os.Setenv("SUPEROPEN_TENANT", scope.DefaultTenant)
+	}
+	principal = strings.TrimSpace(principal)
+	if principal == "" {
+		principal = scope.Principal()
+	}
+	if principal != "" && strings.TrimSpace(os.Getenv("SUPEROPEN_USER")) == "" {
+		_ = os.Setenv("SUPEROPEN_USER", principal)
+	}
+	if principal != "" && strings.TrimSpace(os.Getenv("SUPEROPEN_PRINCIPAL")) == "" {
+		_ = os.Setenv("SUPEROPEN_PRINCIPAL", principal)
+	}
+}
+
 var spawnSessionFinalize = func(root, id string) {
 	if root == "" || id == "" {
 		return
 	}
+	stampProcessScope("")
 	cli.SpawnSO(root, "--root", root, "sessions", "finalize", id)
 }
 
@@ -600,6 +632,7 @@ func nestedChildSessionID(payload []byte) string {
 }
 
 func maybeIngestMemory(event string, payload []byte) {
+	stampProcessScope("")
 	root := hookRepoRoot(payload)
 	if root == "" {
 		return

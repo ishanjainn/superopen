@@ -600,6 +600,9 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 	}
 
 	screen := omitUnmentionedTests(screenQueryNodes(orderedAll), req.Question, terms)
+	if len(screen) == 0 {
+		screen = fillEmptyScreen(orderedAll, req.Question, terms)
+	}
 	other := foundNodes - len(screen)
 	if other < 0 {
 		other = 0
@@ -1939,7 +1942,7 @@ func hasAspect(aspects []string, wanted string) bool {
 	return false
 }
 
-func countBy(ctx context.Context, db *sql.DB, query string, args ...any) (map[string]int, error) {
+func countBy(ctx context.Context, db *scopedDB, query string, args ...any) (map[string]int, error) {
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

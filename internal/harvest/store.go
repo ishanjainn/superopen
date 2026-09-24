@@ -11,12 +11,15 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/scope"
 	_ "modernc.org/sqlite"
 )
 
 const harvestDDL = `
 CREATE TABLE IF NOT EXISTS harvest_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
   session_id TEXT NOT NULL,
   status TEXT NOT NULL,
   provider TEXT NOT NULL DEFAULT '',
@@ -28,6 +31,8 @@ CREATE INDEX IF NOT EXISTS harvest_runs_session ON harvest_runs(session_id, stat
 
 CREATE TABLE IF NOT EXISTS harvest_proposals (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL,
+  principal_id TEXT NOT NULL,
   session_id TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL,
   kind TEXT NOT NULL,
@@ -52,9 +57,10 @@ CREATE INDEX IF NOT EXISTS harvest_proposals_session ON harvest_proposals(sessio
 `
 
 type Store struct {
-	db   *sql.DB
-	root string
-	path string
+	db    *harvestDB
+	root  string
+	path  string
+	scope scope.Scope
 }
 
 func OpenRoot(root string) (*Store, error) {
@@ -77,7 +83,12 @@ func open(root, dbPath string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db, root: root, path: dbPath}
+	sc, err := scope.Current(root)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	s := &Store{db: &harvestDB{DB: db, tenant: sc.TenantID, principal: sc.PrincipalID, project: sc.ProjectID}, root: root, path: dbPath, scope: sc}
 	for _, pragma := range []string{
 		"PRAGMA foreign_keys = ON",
 		"PRAGMA busy_timeout = 5000",
@@ -92,15 +103,6 @@ func open(root, dbPath string) (*Store, error) {
 	if _, err := db.Exec(harvestDDL); err != nil {
 		s.Close()
 		return nil, fmt.Errorf("initialize harvest schema: %w", err)
-	}
-	for _, stmt := range []string{
-		`ALTER TABLE harvest_proposals ADD COLUMN memory_title TEXT NOT NULL DEFAULT ''`,
-		`ALTER TABLE harvest_proposals ADD COLUMN memory_text TEXT NOT NULL DEFAULT ''`,
-	} {
-		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
-			s.Close()
-			return nil, fmt.Errorf("harvest column: %w", err)
-		}
 	}
 	return s, nil
 }
@@ -120,6 +122,21 @@ func (s *Store) SuccessfulRun(sessionID string) bool {
 	var n int
 	_ = s.db.QueryRow(`SELECT COUNT(*) FROM harvest_runs WHERE session_id=? AND status=?`, sessionID, StatusProposed).Scan(&n)
 	return n > 0
+}
+
+// JevRun returns the stored JSON for the latest Jev decision on a session.
+func (s *Store) JevRun(sessionID string) (string, bool) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", false
+	}
+	var skipped string
+	err := s.db.QueryRow(`SELECT skipped FROM harvest_runs WHERE session_id=? AND provider=? ORDER BY id DESC LIMIT 1`,
+		sessionID, "jev").Scan(&skipped)
+	if err != nil || strings.TrimSpace(skipped) == "" {
+		return "", false
+	}
+	return skipped, true
 }
 
 // HasAttempt is true when SessionEnd already queued or ran harvest for this session.
@@ -188,9 +205,12 @@ func (s *Store) ResolvePending(sessionID, status, note string) error {
 }
 
 func (s *Store) InsertRun(sessionID, status, provider, skipped string) (int64, error) {
+	if err := scope.Check(s.scope); err != nil {
+		return 0, err
+	}
 	now := nowRFC()
-	res, err := s.db.Exec(`INSERT INTO harvest_runs(session_id,status,provider,skipped,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
-		sessionID, status, provider, skipped, now, now)
+	res, err := s.db.Exec(`INSERT INTO harvest_runs(tenant_id,principal_id,session_id,status,provider,skipped,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`,
+		s.scope.TenantID, s.scope.PrincipalID, sessionID, status, provider, skipped, now, now)
 	if err != nil {
 		return 0, err
 	}
@@ -198,6 +218,9 @@ func (s *Store) InsertRun(sessionID, status, provider, skipped string) (int64, e
 }
 
 func (s *Store) InsertProposal(p Proposal) (Proposal, error) {
+	if err := scope.Check(s.scope); err != nil {
+		return p, err
+	}
 	now := nowRFC()
 	if p.CreatedAt == "" {
 		p.CreatedAt = now
@@ -211,9 +234,9 @@ func (s *Store) InsertProposal(p Proposal) (Proposal, error) {
 		ev = []byte("[]")
 	}
 	res, err := s.db.Exec(`INSERT INTO harvest_proposals(
-		session_id,status,kind,target,title,reason,issue,suggestion,diff,base_hash,base_mtime,evidence,plus,minus,memory_title,memory_text,created_at,updated_at
-	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		p.SessionID, p.Status, p.Kind, p.Target, p.Title, p.Reason, p.Issue, p.Suggestion, p.Diff,
+		tenant_id,principal_id,session_id,status,kind,target,title,reason,issue,suggestion,diff,base_hash,base_mtime,evidence,plus,minus,memory_title,memory_text,created_at,updated_at
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		s.scope.TenantID, s.scope.PrincipalID, p.SessionID, p.Status, p.Kind, p.Target, p.Title, p.Reason, p.Issue, p.Suggestion, p.Diff,
 		p.BaseHash, p.BaseMtime, string(ev), p.Plus, p.Minus, p.MemoryTitle, p.MemoryText, p.CreatedAt, p.UpdatedAt)
 	if err != nil {
 		return p, err

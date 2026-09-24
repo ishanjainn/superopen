@@ -80,3 +80,17 @@ __SO_BIN__ graph coverage                           # indexed vs missed files
 Check `graph coverage` before any negative or exhaustive claim, then read source for the
 ranges it reports as missed. A clean coverage result means no recorded gap, not proof of
 completeness.
+
+## First screen and clipped snippets
+
+`graph query` puts project source on the first screen. Test files, and paths under
+`vendor`, `node_modules`, `dist`, `third_party`, or `static`, stay off that screen
+unless the question names them. A wide class attaches only methods the question names.
+A line like `N other nodes` points at `snippet` and `trace`. Do not re-query to recover them.
+
+A clipped snippet prints `omitted: L<start>-<end>` and a follow-up command. Run that
+command. Do not Read the whole file to fill the gap.
+
+```bash
+__SO_BIN__ graph snippet <qn> --from <start>
+```

@@ -9,7 +9,7 @@ import (
 const (
 	ProtocolVersion = 1
 	EngineName      = "so-graph"
-	SchemaVersion   = 3
+	SchemaVersion   = 4
 )
 
 type Operation string

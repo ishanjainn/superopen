@@ -12,11 +12,11 @@ export function projectIdFromRequest(req: Request): string {
   const header = req.headers.get("x-so-project");
   if (header != null) {
     const value = header.trim();
-    return value === "all" ? "" : value;
+    return value;
   }
   try {
     const value = new URL(req.url).searchParams.get("project")?.trim() || "";
-    return value === "all" ? "" : value;
+    return value;
   } catch {
     return "";
   }
@@ -35,7 +35,7 @@ function resolveWorkspace(projectFilter: string): WorkspaceOverride & {
   const { projects, active } = listProjects(activeRoot);
   const filter = projectFilter.trim();
 
-  if (!filter || filter === "all") {
+  if (!filter) {
     return {
       repoRoot: activeRoot,
       soRoot: join(activeRoot, ".so"),
@@ -89,7 +89,7 @@ export function projectsForFilter(projectFilter: string): Project[] {
   const { projects } = listProjects(activeRoot);
   const filter = projectFilter.trim();
 
-  if (!filter || filter === "all") {
+  if (!filter) {
     const local = projects.filter((p) => p.repo_root === activeRoot);
     if (local.length) return local;
     return [

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
+	"github.com/ishanjainn/superopen/internal/scope"
 )
 
 // IndexAllDevelopment is the private all-language build path. Every language,
@@ -24,9 +25,6 @@ func IndexAllDevelopment(ctx context.Context, request api.BuildRequest, engineVe
 	}
 	root, err := CanonicalRoot(request.RepoRoot)
 	if err != nil {
-		return api.BuildResult{}, err
-	}
-	if err := MigrateLegacyCacheIfNeeded(root); err != nil {
 		return api.BuildResult{}, err
 	}
 	applyMemoryBudget()
@@ -388,6 +386,12 @@ func publishDevelopmentGraph(ctx context.Context, root, project, engineVersion, 
 		store, err := OpenWritableFresh(path)
 		if err != nil {
 			return err
+		}
+		if sc, scErr := scope.Current(root); scErr == nil {
+			store.scope = sc
+			store.db.tenant = sc.TenantID
+			store.db.principal = sc.PrincipalID
+			store.db.project = sc.ProjectID
 		}
 		buildErr := store.BuildFresh(ctx, func(builder *Builder) error {
 			if err := builder.PutProject(ProjectRecord{Name: project, RootPath: root, Generation: generation,

@@ -11,6 +11,7 @@ import { playgroundTopBarClassName } from "./sidebar-layout-context";
 
 const TITLES: Record<string, string> = {
   "/sessions": "Sessions",
+  "/scan": "Scan",
   "/memory": "Memory",
   "/harvest": "Harvest",
   "/graph": "Graph",

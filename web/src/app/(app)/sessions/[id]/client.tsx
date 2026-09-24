@@ -76,6 +76,7 @@ function SessionDetail() {
   const [chatPct, setChatPct] = useState(50);
   const [hudHost, setHudHost] = useState<HTMLElement | null>(null);
   const [harvestOpen, setHarvestOpen] = useState(0);
+  const [findings, setFindings] = useState(0);
   const syncSource = useRef<"idle" | "chat" | "map">("idle");
   const chatSeekNonce = useRef(0);
 
@@ -113,6 +114,16 @@ function SessionDetail() {
           setHarvestOpen(Array.isArray(harvestBody.items) ? harvestBody.items.length : 0);
         } catch {
           setHarvestOpen(0);
+        }
+        try {
+          const scanUrl = new URL("/api/scan", window.location.origin);
+          scanUrl.searchParams.set("session", id);
+          if (projectId) scanUrl.searchParams.set("project", projectId);
+          const scanRes = await fetch(scanUrl.toString());
+          const scanBody = (await scanRes.json()) as { items?: unknown[] };
+          setFindings(Array.isArray(scanBody.items) ? scanBody.items.length : 0);
+        } catch {
+          setFindings(0);
         }
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Could not load session");
@@ -213,6 +224,18 @@ function SessionDetail() {
                 {harvestOpen} harvest
               </Link>
             ) : null}
+            {findings > 0 ? (
+              <Link
+                href={`/scan?session=${encodeURIComponent(id)}`}
+                className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] text-red-800 hover:bg-red-100"
+              >
+                {findings} findings
+              </Link>
+            ) : (
+              <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-500">
+                No findings
+              </span>
+            )}
           </span>
         }
         actions={

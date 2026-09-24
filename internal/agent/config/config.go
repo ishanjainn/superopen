@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ishanjainn/superopen/internal/scope"
 )
 
 // DefaultRetentionHours is 7 days, expressed in hours as the settings unit.
@@ -72,6 +74,8 @@ var allowedFileKeys = map[string]struct{}{
 	"SUPEROPEN_CODING_REPO_ALLOWLIST": {},
 	"SUPEROPEN_HOOK_STRICT":           {},
 	"SUPEROPEN_BUILD_SLOTS":           {},
+	"SUPEROPEN_HARVEST_JEV":           {},
+	"TYPESAFE_API_KEY":                {},
 	EnvSessionRetentionHours:          {},
 	EnvMemoryRetentionHours:           {},
 }
@@ -82,7 +86,10 @@ var allowedFileKeys = map[string]struct{}{
 // ~/.config/superopen/config.env would silently be unavailable to
 // per-vendor adapters that bypass the resolved struct. Existing env
 // vars take precedence so we never override a real shell setting.
-func PromoteFileToEnv() error {
+func PromoteFileToEnv(sc scope.Scope) error {
+	if err := scope.Check(sc); err != nil {
+		return err
+	}
 	vals, err := readConfigFile()
 	if err != nil {
 		return err
@@ -98,11 +105,14 @@ func PromoteFileToEnv() error {
 	return nil
 }
 
-// Load resolves config across all sources.
+// Load resolves this principal's settings. Keys stay in the one config file.
 //
 // `flags` may be nil when no command-level flags are involved (e.g. the
 // hot-path hook subcommand reads only env + file).
-func Load(flags *Flags) (*Resolved, error) {
+func Load(sc scope.Scope, flags *Flags) (*Resolved, error) {
+	if err := scope.Check(sc); err != nil {
+		return nil, err
+	}
 	defaults := builtinDefaults()
 	res := &Resolved{Source: map[string]string{}}
 
@@ -268,6 +278,16 @@ func readConfigFile() (map[string]string, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// Get reads one allow-listed key from the config file.
+func Get(key string) (string, bool) {
+	vals, err := readConfigFile()
+	if err != nil {
+		return "", false
+	}
+	v, ok := vals[key]
+	return v, ok && strings.TrimSpace(v) != ""
 }
 
 // Save writes the supplied key/value pairs to ~/.config/superopen/config.env

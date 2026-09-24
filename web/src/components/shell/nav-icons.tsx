@@ -64,6 +64,16 @@ export function MemoryIcon({ className, ...props }: NavIconProps) {
   );
 }
 
+/** Scan: a check mark over a recorded trace. */
+export function ScanIcon({ className, ...props }: NavIconProps) {
+  return (
+    <NavIcon className={className} {...props}>
+      <path d="M5 12.5 9 16.5 19 6.5" />
+      <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+    </NavIcon>
+  );
+}
+
 /** Harvest: compare two revisions of a playbook. */
 export function HarvestIcon({ className, ...props }: NavIconProps) {
   return (

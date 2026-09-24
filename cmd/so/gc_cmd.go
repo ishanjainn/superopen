@@ -22,7 +22,8 @@ Open harvest proposals and pending harvest runs are kept. Teachings, pins, and
 the code graph are never deleted by age. Checkpoints live inside session folders
 and go with the session.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			settings, err := retention.LoadSettings()
+			root := repoRoot()
+			settings, err := retention.LoadSettings(root)
 			if err != nil {
 				return err
 			}
@@ -33,7 +34,7 @@ and go with the session.`,
 				settings.MemoryHours = memoryHours
 			}
 			if cmd.Flags().Changed("sessions-hours") || cmd.Flags().Changed("memory-hours") {
-				settings, err = retention.SaveSettings(settings)
+				settings, err = retention.SaveSettings(root, settings)
 				if err != nil {
 					return err
 				}
@@ -43,7 +44,6 @@ and go with the session.`,
 					fmt.Fprintf(cmd.OutOrStdout(), "sessions %dh\nmemories %dh\n(0 = keep forever; default 168h)\n", settings.SessionHours, settings.MemoryHours)
 				}, settings)
 			}
-			root := repoRoot()
 			if err := failIfUnmanaged(root); err != nil {
 				return err
 			}

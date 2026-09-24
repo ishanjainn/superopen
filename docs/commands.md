@@ -28,6 +28,7 @@ Exit codes are stable: `0` ok, `1` error, `2` usage, `3` not found,
 | `so projects` | List repositories registered with Superopen (`projects prune` drops missing entries) |
 | `so status` | Show active observability sessions |
 | `so gc` | Apply retention (`--show`, `--sessions-hours`, `--memory-hours`) |
+| `so scan` | Run detection rules over recorded tool calls. See [scan.md](scan.md). |
 | `so version` | Print CLI version |
 
 ## so graph ([graph.md](graph.md))
@@ -46,6 +47,8 @@ compact file rollups (`--files`, `--base main`). `--json` / `--full` are
 escape hatches. Cypher support is a read-only subset (`so graph cypher --help`).
 
 `so graph --no-refresh` skips the query-path freshness check (useful in CI).
+`SUPEROPEN_NO_REFRESH=1` does the same. A clipped snippet prints
+`omitted:` and a follow-up `so graph snippet <qn> --from <line>`.
 
 ## so memory ([memory.md](memory.md))
 
@@ -74,8 +77,23 @@ Plugin manifests invoke it. Do not run it by hand.
 ## so harvest ([harvest.md](harvest.md))
 
 ```text
-brief  propose  skip  scan  list  show  review  apply  decline  inventory
+brief  propose  skip  scan  list  show  review  apply  decline  inventory  jev  jev-settings
 ```
 
 Proposals are staged diffs on instruction files. Nothing goes live without
-`so harvest apply`.
+`so harvest apply`. Kind `memory` can store diary text on apply without a diff.
+With Jev harvest enabled in Settings, the UI evaluates the latest finished
+session and the agent is not asked to propose.
+
+## so scan ([scan.md](scan.md))
+
+```bash
+so scan
+so scan --session <id> --min-severity high --fail-on high
+so scan --json
+so scan --rules <dir>
+```
+
+Reads `.so/sessions/`. Does not block the agent. Empty stored rules fall back
+to a small built-in baseline. `--json` is the shared `{ok, kind, data}` envelope.
+The UI loads this when you open Scan or a session.

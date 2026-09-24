@@ -3,8 +3,6 @@
 package projects
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/scope"
 )
 
 const fileName = "projects.json"
@@ -22,6 +21,7 @@ const fileName = "projects.json"
 // Project is one registered repo/.so pair.
 type Project struct {
 	ID               string    `json:"id"`
+	TenantID         string    `json:"tenant_id,omitempty"`
 	Name             string    `json:"name"`
 	RepoRoot         string    `json:"repo_root"`
 	SoRoot           string    `json:"so_root"`
@@ -102,8 +102,7 @@ func save(f fileShape) error {
 }
 
 func idFor(repoRoot string) string {
-	sum := sha1.Sum([]byte(filepath.Clean(repoRoot)))
-	return hex.EncodeToString(sum[:8])
+	return scope.ProjectID(repoRoot)
 }
 
 // ephemeral reports whether repoRoot is a scratch path that must never enter
@@ -192,6 +191,7 @@ func Eligible(repoRoot string) bool {
 func projectStub(repoRoot, soRoot, remoteURL string) Project {
 	return Project{
 		ID:         idFor(repoRoot),
+		TenantID:   scope.DefaultTenant,
 		Name:       filepath.Base(repoRoot),
 		RepoRoot:   repoRoot,
 		SoRoot:     soRoot,
@@ -232,6 +232,7 @@ func Register(repoRoot, soRoot, remoteURL string) (Project, error) {
 	name := filepath.Base(repoRoot)
 	p := Project{
 		ID:         id,
+		TenantID:   scope.DefaultTenant,
 		Name:       name,
 		RepoRoot:   repoRoot,
 		SoRoot:     soRoot,
@@ -470,15 +471,12 @@ func Use(idOrRoot string) (Project, error) {
 }
 
 // ResolvePaths returns projects matching filter.
-// empty / "all" → all; otherwise id/name/root match.
+// Empty means the current checkout, which the caller already has.
+// A project id is one checkout.
 func ResolveFilter(filter string) ([]Project, error) {
-	all, err := List()
-	if err != nil {
-		return nil, err
-	}
 	filter = strings.TrimSpace(filter)
-	if filter == "" || filter == "all" {
-		return all, nil
+	if filter == "" {
+		return nil, nil
 	}
 	p, err := Get(filter)
 	if err != nil {

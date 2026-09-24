@@ -356,8 +356,9 @@ func TestSearchDegreeZeroAndEntryPointSemantics(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := writable.db.ExecContext(ctx, `INSERT INTO nodes(
-		project,label,name,qualified_name,file_path,start_line,end_line,properties
-	) VALUES('fixture','Function','UnusedHelper','graph.UnusedHelper','internal/graph/graph.go',132,134,'{}')`)
+		tenant_id,scope_project_id,project,label,name,qualified_name,file_path,start_line,end_line,properties
+	) VALUES(?,?,'fixture','Function','UnusedHelper','graph.UnusedHelper','internal/graph/graph.go',132,134,'{}')`,
+		writable.scope.TenantID, writable.scope.ProjectID)
 	if err != nil {
 		writable.Close()
 		t.Fatal(err)

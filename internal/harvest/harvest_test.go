@@ -208,6 +208,9 @@ func TestSessionStartLinePendingNotOpenReview(t *testing.T) {
 	if !paths.MentionsCommand(line, "harvest brief") || !paths.MentionsCommand(line, "harvest skip") {
 		t.Fatalf("live line must name brief then skip: %q", line)
 	}
+	if !strings.Contains(line, "sess-pending") || !strings.Contains(line, "memory capture") || !strings.Contains(line, "not a playbook diff") {
+		t.Fatalf("pending line must keep the session and treat the current message as a note: %q", line)
+	}
 	if strings.Contains(line, "harvest scan") {
 		t.Fatalf("live line must not name headless scan: %q", line)
 	}
@@ -408,6 +411,9 @@ func TestBriefUsesPendingSession(t *testing.T) {
 	}
 	if !strings.Contains(text, "brief-1") || !strings.Contains(text, "You propose playbook patches") {
 		t.Fatalf("brief: %q", text)
+	}
+	if !strings.Contains(text, "memory capture") || !strings.Contains(text, "stdin") || !strings.Contains(text, "Do not write a file") {
+		t.Fatalf("brief must keep this turn as a note and propose on stdin: %q", text)
 	}
 }
 

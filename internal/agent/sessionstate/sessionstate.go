@@ -15,7 +15,7 @@
 //     against the new payload to emit a `coding_agent.permission_mode.changed`
 //     event when the user toggles modes.
 //
-// The cache lives under $XDG_CACHE_HOME/so/sessions/<sid>__<vendor>.json.
+// The cache lives under $XDG_CACHE_HOME/so/sessions/<principal>__<sid>__<vendor>.json.
 // Files are bounded in size (a few hundred bytes each), are written
 // 0600, and are best-effort: a corrupt or missing file falls through to
 // the empty state and the hook proceeds without it.
@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -365,7 +366,12 @@ func path(sessionID, vendor string) string {
 	if safeSID == "" || safeVendor == "" {
 		return ""
 	}
-	return filepath.Join(root, "so", "sessions", safeSID+"__"+safeVendor+".json")
+	principal := strings.TrimSpace(os.Getenv("SUPEROPEN_USER"))
+	if principal == "" {
+		principal = "local"
+	}
+	safePrincipal := safeFilenameRe.ReplaceAllString(principal, "_")
+	return filepath.Join(root, "so", "sessions", safePrincipal+"__"+safeSID+"__"+safeVendor+".json")
 }
 
 // diskMu serialises Load / Save inside a single process. Cross-process

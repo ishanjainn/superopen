@@ -255,6 +255,7 @@ Restart the coding agent so it drops in-memory hooks.
 - [Sessions](docs/sessions.md) - how agent sessions are recorded
 - [Memory](docs/memory.md) - project diary over sessions
 - [Harvest](docs/harvest.md) - playbook patches gated on human apply
+- [Scan](docs/scan.md) - detection rules over recorded tool calls
 - [Troubleshooting](docs/troubleshooting.md) - install, PATH, hooks, UI, stale graph
 - [Contributing](CONTRIBUTING.md) - local build from source
 
