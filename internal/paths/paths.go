@@ -28,7 +28,7 @@ type Paths struct {
 }
 
 // GitignoreContents is written to .so/.gitignore on first init or worktree seed.
-const GitignoreContents = "# Superopen machine-local data (do not commit).\nsessions/\ndb/\nharvest/\n"
+const GitignoreContents = "# Superopen machine-local data (do not commit).\nsessions/\ndb/\nharvest/\nforward/\n"
 
 func FindRoot(start string) (string, error) {
 	absolute, err := filepath.Abs(start)

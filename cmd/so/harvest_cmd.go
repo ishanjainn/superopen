@@ -42,8 +42,8 @@ func harvestInventoryCmd() *cobra.Command {
 		Short: "List playbook files (hash, protected)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			root := repoRoot()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			files, err := harvest.Inventory(root)
 			if err != nil {
@@ -73,8 +73,8 @@ func harvestProposeCmd() *cobra.Command {
 		Short: "Ingest JSON proposals from stdin or --file (live wrap-up / headless)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			root := repoRoot()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			var raw []byte
 			var err error
@@ -108,8 +108,8 @@ func harvestScanCmd() *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			id := ""
 			if len(args) == 1 {
@@ -135,8 +135,8 @@ func harvestBriefCmd() *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			id := ""
 			if len(args) == 1 {
@@ -160,8 +160,8 @@ func harvestSkipCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			if err := harvest.Skip(root, args[0], reason); err != nil {
 				return err
@@ -183,8 +183,8 @@ func harvestListCmd() *cobra.Command {
 		Short: "List harvest proposals (default: open)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			root := repoRoot()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			store, err := harvest.OpenRoot(root)
 			if err != nil {
@@ -205,11 +205,11 @@ func harvestListCmd() *cobra.Command {
 					"title": p.Title, "plus": p.Plus, "minus": p.Minus, "session": p.SessionID,
 				})
 			}
+			out().Next("so harvest show <id>", "so harvest apply <id>", "so harvest decline <id>")
 			if len(rows) == 0 {
 				out().Empty("proposals")
 				return nil
 			}
-			out().Next("so harvest show <id>", "so harvest apply <id>", "so harvest decline <id>")
 			out().Rows("proposals", []string{"id", "status", "kind", "target", "title", "plus", "minus"}, rows)
 			return nil
 		},
@@ -255,8 +255,8 @@ func harvestShowCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			id, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
@@ -297,8 +297,8 @@ func harvestApplyCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			id, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
@@ -324,8 +324,8 @@ func harvestDeclineCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := repoRoot()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			id, err := strconv.ParseInt(args[0], 10, 64)
 			if err != nil {
@@ -348,8 +348,8 @@ func harvestReviewCmd() *cobra.Command {
 		Short: "Compact OPEN pack (load only when asked)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			root := repoRoot()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			text, items, err := harvest.Review(root)
 			if err != nil {

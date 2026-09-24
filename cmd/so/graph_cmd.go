@@ -26,8 +26,8 @@ func newGraphCommand() *cobra.Command {
 }
 
 func runGraphRefresh(cmd *cobra.Command, root string, force, fromProbe bool) error {
-	if skipIfUnmanaged(cmd, root) {
-		return nil
+	if err := failIfUnmanaged(root); err != nil {
+		return err
 	}
 	c, err := client.Resolve()
 	if err != nil {
@@ -77,8 +77,8 @@ func graphNativeCommands() []*cobra.Command {
 			force, _ := cmd.Flags().GetBool("force")
 			fromProbe, _ := cmd.Flags().GetBool("probe")
 			root, _ := hookRepoAndSession()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			if detach {
 				if engine.BuildBusy(root) || engine.BuildPoolFull() {

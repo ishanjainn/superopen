@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS harvest_proposals (
   evidence TEXT NOT NULL DEFAULT '[]',
   plus INTEGER NOT NULL DEFAULT 0,
   minus INTEGER NOT NULL DEFAULT 0,
+  memory_title TEXT NOT NULL DEFAULT '',
+  memory_text TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -90,6 +92,15 @@ func open(root, dbPath string) (*Store, error) {
 	if _, err := db.Exec(harvestDDL); err != nil {
 		s.Close()
 		return nil, fmt.Errorf("initialize harvest schema: %w", err)
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE harvest_proposals ADD COLUMN memory_title TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE harvest_proposals ADD COLUMN memory_text TEXT NOT NULL DEFAULT ''`,
+	} {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			s.Close()
+			return nil, fmt.Errorf("harvest column: %w", err)
+		}
 	}
 	return s, nil
 }
@@ -200,10 +211,10 @@ func (s *Store) InsertProposal(p Proposal) (Proposal, error) {
 		ev = []byte("[]")
 	}
 	res, err := s.db.Exec(`INSERT INTO harvest_proposals(
-		session_id,status,kind,target,title,reason,issue,suggestion,diff,base_hash,base_mtime,evidence,plus,minus,created_at,updated_at
-	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		session_id,status,kind,target,title,reason,issue,suggestion,diff,base_hash,base_mtime,evidence,plus,minus,memory_title,memory_text,created_at,updated_at
+	) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		p.SessionID, p.Status, p.Kind, p.Target, p.Title, p.Reason, p.Issue, p.Suggestion, p.Diff,
-		p.BaseHash, p.BaseMtime, string(ev), p.Plus, p.Minus, p.CreatedAt, p.UpdatedAt)
+		p.BaseHash, p.BaseMtime, string(ev), p.Plus, p.Minus, p.MemoryTitle, p.MemoryText, p.CreatedAt, p.UpdatedAt)
 	if err != nil {
 		return p, err
 	}
@@ -219,7 +230,7 @@ func (s *Store) InsertProposal(p Proposal) (Proposal, error) {
 }
 
 func (s *Store) GetProposal(id int64) (Proposal, error) {
-	row := s.db.QueryRow(`SELECT id,session_id,status,kind,target,title,reason,issue,suggestion,diff,base_hash,base_mtime,evidence,plus,minus,created_at,updated_at
+	row := s.db.QueryRow(`SELECT id,session_id,status,kind,target,title,reason,issue,suggestion,diff,base_hash,base_mtime,evidence,plus,minus,memory_title,memory_text,created_at,updated_at
 		FROM harvest_proposals WHERE id=?`, id)
 	return scanProposal(row)
 }
@@ -425,10 +436,10 @@ func (s *Store) List(status string) ([]Proposal, error) {
 	var rows *sql.Rows
 	var err error
 	if status == "" {
-		rows, err = s.db.Query(`SELECT id,session_id,status,kind,target,title,reason,issue,suggestion,diff,base_hash,base_mtime,evidence,plus,minus,created_at,updated_at
+		rows, err = s.db.Query(`SELECT id,session_id,status,kind,target,title,reason,issue,suggestion,diff,base_hash,base_mtime,evidence,plus,minus,memory_title,memory_text,created_at,updated_at
 			FROM harvest_proposals WHERE status=? ORDER BY id DESC`, StatusOpen)
 	} else {
-		rows, err = s.db.Query(`SELECT id,session_id,status,kind,target,title,reason,issue,suggestion,diff,base_hash,base_mtime,evidence,plus,minus,created_at,updated_at
+		rows, err = s.db.Query(`SELECT id,session_id,status,kind,target,title,reason,issue,suggestion,diff,base_hash,base_mtime,evidence,plus,minus,memory_title,memory_text,created_at,updated_at
 			FROM harvest_proposals WHERE status=? ORDER BY id DESC`, status)
 	}
 	if err != nil {
@@ -461,7 +472,7 @@ func (s *Store) SetStatus(id int64, status string) error {
 func scanProposal(row interface{ Scan(dest ...any) error }) (Proposal, error) {
 	var p Proposal
 	var ev string
-	err := row.Scan(&p.ID, &p.SessionID, &p.Status, &p.Kind, &p.Target, &p.Title, &p.Reason, &p.Issue, &p.Suggestion, &p.Diff, &p.BaseHash, &p.BaseMtime, &ev, &p.Plus, &p.Minus, &p.CreatedAt, &p.UpdatedAt)
+	err := row.Scan(&p.ID, &p.SessionID, &p.Status, &p.Kind, &p.Target, &p.Title, &p.Reason, &p.Issue, &p.Suggestion, &p.Diff, &p.BaseHash, &p.BaseMtime, &ev, &p.Plus, &p.Minus, &p.MemoryTitle, &p.MemoryText, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return p, err
 	}

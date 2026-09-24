@@ -4,6 +4,17 @@
 
   <a href="https://github.com/ishanjainn/superopen"><img src="./assets/superopen-banner.svg" width="100%" height="100%" alt="Superopen"/></a>
 </p>
+<p align="center">
+  <a href="#getting-started">Getting started</a>
+  ·
+  <a href="docs/installation.md">Install</a>
+  ·
+  <a href="docs/README.md">Docs</a>
+  ·
+  <a href="#supported-agents">Agents</a>
+  ·
+  <a href="docs/commands.md">Commands</a>
+</p>
 
 Superopen is not another coding agent. It builds the open source harness around Claude Code, Cursor, Codex, and similar agents so every coding session improves the next with less token waste and lower cost.
 
@@ -14,8 +25,10 @@ Superopen is not another coding agent. It builds the open source harness around 
 
 **The numbers speak for themselves**. In our benchmarks, Claude Code with Superopen solves **4 times more tasks correctly** while cutting tokens, cost, and latency roughly in half:
 
+<div align="center">
+
 | Metric | Cold Claude Code | Claude Code with Superopen | Improvement |
-|---|---|---|---|
+| :---: | :---: | :---: | :---: |
 | Correctness | 1 / 5 (20%) | **4 / 5 (80%)** | **+60 pts** |
 | Tokens | 19.1M | **9.6M** | **+50%** |
 | Cost | $1.52 | **$0.87** | **+43%** |
@@ -25,30 +38,76 @@ Superopen is not another coding agent. It builds the open source harness around 
 
 Source: [BENCHMARKS.md](BENCHMARKS.md)
 
+</div>
+
 ## Getting Started
 
 Full walkthrough: [docs/installation.md](docs/installation.md).
+
+### 1. Install `so`
+
+<details open>
+<summary><strong>macOS</strong></summary>
 
 ```bash
 brew install ishanjainn/superopen/so
 so install
 ```
 
-`so install` is user-global. It wires the `/so` skill, hooks, and graph-first guidance into every supported agent. It does not write files inside a repo. Add `--vendor=cursor` (or `claude-code`, `codex`, `gemini`, `opencode`, `copilot-cli`, `pi`) to install one agent only.
+</details>
 
-Then, in your repository:
+<details>
+<summary><strong>Linux</strong> (curl)</summary>
+
+The installer downloads the latest release, puts `so` on your PATH, and runs `so install`.
 
 ```bash
-so init         # or /so init in the agent chat
+curl -fsSL https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.sh | sh
 ```
 
-That is the whole setup. You get a `.so/` in that tree.
+Open a new terminal if `so` is not found, or run `export PATH="$HOME/.superopen/bin:$PATH"`.
+
+</details>
+
+<details>
+<summary><strong>Windows</strong> (PowerShell)</summary>
+
+Same installer path as curl, via PowerShell. It places `so.exe` on your user PATH and runs `so install`.
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/ishanjainn/superopen/main/scripts/install.ps1 | iex
+```
+
+Open a new PowerShell window after install. In a terminal, run `so init` with no leading slash. PowerShell treats `/so` as a path.
+
+</details>
+
+### 2. Initialize the repository
+
+From the repo root, or `/so init` in agent chat:
+
+```bash
+so init
+```
+
+That creates `.so/` in the repository along with the repository knowledge graph:
 
 ```text
 .so/
+  .gitignore    # sessions/, db/, harvest/ (do not commit)
   sessions/     # session events, transcripts, checkpoints
-  db/so.db      # SQLite store: Graph + Memory
-  .gitignore
+  db/so.db      # SQLite store: graph + memory
+```
+
+Reopen Claude Code, Cursor, Codex, or any other supported harness and keep working as you were.
+**Superopen automatically tracks each session, steers agents to be 40% cheaper and 60% more correct!**
+
+### 3. Open the UI (optional)
+
+Needs Node.js 20+. `-d` starts the UI in the background and opens it when ready.
+
+```bash
+so dev -d
 ```
 
 ## The Problem
@@ -62,6 +121,20 @@ Every session, your coding agent starts from zero. It greps, opens files, follow
 Humans onboard to a codebase once. Agents onboard every single time.
 
 ## See it in action
+
+```text
+Run the agent
+    ↓
+Record the session
+    ↓
+Answer from the graph
+    ↓
+Distill what mattered
+    ↓
+Review harvest
+    ↓
+Reuse it next time
+```
 
 After `so init`, agents ask these four surfaces instead of grepping and re-reading transcripts:
 
@@ -102,6 +175,51 @@ applied #7 improve AGENTS.md
 
 `query` is the code map. `recall` is the project diary (cite `#id`). Distill compresses a finished session into knowledge (`--brief` then `--apply`, or `[]` if nothing durable). Harvest stages a playbook diff until you `apply`. More: [graph](docs/graph.md), [memory](docs/memory.md), [harvest](docs/harvest.md).
 
+## Supported agents
+
+`so install` wires all of these. Hooks only run in repos where you ran `so init`.
+
+| Agent | `--vendor` |
+| --- | --- |
+| Claude Code | `claude-code` |
+| Cursor | `cursor` |
+| Codex | `codex` |
+| Gemini | `gemini` |
+| OpenCode | `opencode` |
+| Copilot | `copilot-cli` |
+| Pi | `pi` |
+| Antigravity | `antigravity` |
+| Cline | `cline` |
+| DeepSeek Harness | `dsh` |
+| Devin | `devin` |
+| Factory Droid | `factory` |
+| Grok | `grok` |
+| Hermes | `hermes` |
+| Kimi Code | `kimi` |
+| Kiro | `kiro` |
+| Muse | `muse` |
+| Oh My Pi | `omp` |
+| OpenClaw | `openclaw` |
+| OpenHands | `openhands` |
+| Prime | `prime` |
+| Qwen Code | `qwen` |
+| Senpi | `senpi` |
+| VS Code | `vscode` |
+
+## What a session records
+
+Hooks append spans while you work in an inited repo. `so sessions` turns those into a document with token and cost totals.
+
+Recorded: session start and end, user prompts, assistant turns, tool calls, and file paths on Read, Edit, and Write.
+
+Not recorded as-is: prompt and tool-argument text is redacted. Shell commands are not stamped with a file path. Hooks fail open, so a telemetry error never blocks the agent.
+
+```bash
+so sessions
+so sessions show <id>
+so sessions tokens
+```
+
 ## Prerequisites
 
 | Requirement | Minimum | Check | Install |
@@ -139,3 +257,11 @@ Restart the coding agent so it drops in-memory hooks.
 - [Harvest](docs/harvest.md) - playbook patches gated on human apply
 - [Troubleshooting](docs/troubleshooting.md) - install, PATH, hooks, UI, stale graph
 - [Contributing](CONTRIBUTING.md) - local build from source
+
+## Contributing
+
+Issues and pull requests are welcome. End users install a release binary. To build from a checkout, use the same installer scripts as production: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+[Apache 2.0](LICENSE)

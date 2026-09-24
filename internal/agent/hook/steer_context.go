@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,7 +12,9 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/agent/sessionstate"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
+	"github.com/ishanjainn/superopen/internal/agent/vendors"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
+	"github.com/ishanjainn/superopen/internal/guards"
 	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
@@ -30,7 +33,7 @@ func emitSteerContext(vendor, event, kind string, payload []byte) {
 		return
 	}
 	var body any
-	switch vendor {
+	switch hookProtocol(vendor) {
 	case "claude-code":
 		hso := map[string]any{
 			"hookEventName": decision.hookEvent,
@@ -45,6 +48,14 @@ func emitSteerContext(vendor, event, kind string, payload []byte) {
 		}
 		body = map[string]any{"hookSpecificOutput": hso}
 	case "cursor":
+		if decision.deny && event == "beforeShellExecution" {
+			body = map[string]any{
+				"permission":    "deny",
+				"user_message":  decision.text,
+				"agent_message": decision.text,
+			}
+			break
+		}
 		if decision.deny || decision.text == "" {
 			// Cursor has no PreToolUse deny contract matching Claude.
 			if decision.text == "" {
@@ -66,7 +77,7 @@ func emitSteerContext(vendor, event, kind string, payload []byte) {
 				"additionalContext": decision.text,
 			},
 		}
-	case "gemini", "copilot-cli", "opencode", "pi":
+	case "context", "pi":
 		if decision.text == "" {
 			return
 		}
@@ -100,6 +111,7 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		return steerDecision{}, false
 	}
 	ev := strings.TrimSpace(event)
+	vendor = steerVendor(vendor)
 	var sessionEvent, toolEvent bool
 	var compactEvent bool
 	switch vendor {
@@ -108,7 +120,7 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		toolEvent = ev == "PreToolUse"
 	case "cursor":
 		sessionEvent = ev == "sessionStart" || ev == "beforeSubmitPrompt" || ev == "subagentStart"
-		toolEvent = ev == "preToolUse" || ev == "beforeReadFile"
+		toolEvent = ev == "preToolUse" || ev == "beforeReadFile" || ev == "beforeShellExecution"
 		compactEvent = ev == "preCompact"
 	case "gemini":
 		lower := strings.ToLower(ev)
@@ -129,7 +141,7 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 			lower == "before_agent_start" || lower == "session_shutdown" || lower == "agent_end"
 		toolEvent = lower == "tool.execute.before" || lower == "tool_execution_start"
 	default:
-		return steerDecision{}, false
+		sessionEvent, toolEvent, compactEvent = classifyExtraEvent(ev)
 	}
 
 	switch {
@@ -156,6 +168,14 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		// Stop, SessionEnd, and other lifecycle events are observability-only.
 		return steerDecision{}, false
 	case toolEvent:
+		if reason, denied := guardDeny(payload, vendor); denied {
+			if vendor == "codex" {
+				// Codex drops PreToolUse stdout, so a deny cannot be enforced.
+				fmt.Fprintf(os.Stderr, "guard: %s\n", reason)
+				return steerDecision{}, false
+			}
+			return steerDecision{deny: true, text: reason, hookEvent: ev}, true
+		}
 		// Codex does not consume additionalContext / deny from PreToolUse
 		// the way Claude and Cursor do; emitting steer text would be dropped
 		// by the host. Session and prompt events still fire.
@@ -551,6 +571,45 @@ func stampRoot(payload []byte) string {
 	return repoRoot(payload)
 }
 
+func guardDeny(payload []byte, vendor string) (string, bool) {
+	if !guards.Enabled() {
+		return "", false
+	}
+	tool := toolNameFromPayload(payload)
+	cmd := bashCommandFromPayload(payload)
+	action := "tool.invoked"
+	if cmd != "" {
+		action = "command.executed"
+	}
+	ev := guards.Event{
+		Timestamp:     guards.FormatTimestamp(time.Now()),
+		Vendor:        guards.Vendor,
+		Product:       guards.Product,
+		SchemaVersion: guards.SchemaVersion,
+		Severity:      guards.SeverityInfo,
+		Event:         guards.EventInfo{Kind: "tool", Action: action, Fidelity: guards.FidelityObserved},
+		Harness:       guards.HarnessInfo{Name: vendor, CollectionMethod: guards.CollectionMethodHook},
+	}
+	if cmd != "" {
+		ev.Command = &guards.CommandInfo{Command: cmd}
+	}
+	if tool != "" {
+		ev.Tool = &guards.ToolInfo{Name: tool}
+	}
+	resp := guards.Evaluate(context.Background(), guards.Ask{
+		Phase:    guards.PhasePreTool,
+		Platform: vendor,
+		Event:    ev,
+	})
+	if !resp.Denied() {
+		return "", false
+	}
+	if strings.TrimSpace(resp.Reason) == "" {
+		return "denied", true
+	}
+	return resp.Reason, true
+}
+
 func isSessionStartEvent(vendor, ev string) bool {
 	switch vendor {
 	case "claude-code", "codex":
@@ -568,7 +627,54 @@ func isSessionStartEvent(vendor, ev string) bool {
 		lower := strings.ToLower(ev)
 		return lower == "session_start" || lower == "sessionstart"
 	default:
-		return false
+		lower := strings.ToLower(strings.TrimSpace(ev))
+		return lower == "sessionstart" || lower == "session_start" || lower == "on_session_start" || lower == "beforerun" || lower == "preinvocation" || lower == "session.created"
+	}
+}
+
+func hookProtocol(vendor string) string {
+	switch vendor {
+	case "claude-code", "cursor", "codex":
+		return vendor
+	case "pi", "omp", "prime", "senpi":
+		return "pi"
+	case "gemini", "copilot-cli", "opencode":
+		return "context"
+	default:
+		if spec, ok := vendors.ByID(vendor); ok {
+			if spec.Protocol == vendors.ProtocolPi {
+				return "pi"
+			}
+			if spec.Protocol == vendors.ProtocolClaude {
+				return "claude-code"
+			}
+		}
+		return "context"
+	}
+}
+
+func steerVendor(vendor string) string {
+	switch vendor {
+	case "omp", "prime", "senpi":
+		return "pi"
+	default:
+		return vendor
+	}
+}
+
+func classifyExtraEvent(ev string) (session, tool, compact bool) {
+	switch strings.ToLower(strings.TrimSpace(ev)) {
+	case "sessionstart", "session_start", "on_session_start", "beforerun", "preinvocation", "session.created",
+		"userpromptsubmit", "beforesubmitprompt", "beforeagent", "userpromptsubmitted", "pre_llm_call", "before_agent_start",
+		"subagentstart", "subagent_spawned":
+		return true, false, false
+	case "pretooluse", "beforetool", "pre_tool_use", "pre_tool_call", "before_tool_call", "beforeshellexecution", "beforereadfile",
+		"tool.execute.before", "tool_execution_start":
+		return false, true, false
+	case "precompact", "pre_compact", "before_compaction":
+		return false, false, true
+	default:
+		return false, false, false
 	}
 }
 

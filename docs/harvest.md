@@ -4,6 +4,8 @@ After a coding session, harvest proposes small patches to instruction files
 such as `AGENTS.md`, vendor rules, and skills. **Humans approve before
 anything becomes always-on.** A bad always-on rule is paid on every future
 session, so harvest stays off the hot path: no hook injection while you work.
+A proposal may also carry `memory_title` and `memory_text`. That text is stored
+for later recall only when the proposal is applied.
 
 Live agent first: SessionStart and the first prompt-submit inject
 `HARVEST pending` (`brief`, then `propose`, or `skip <id>`). SessionEnd uses

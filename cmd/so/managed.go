@@ -7,19 +7,19 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/graph/api"
 	"github.com/ishanjainn/superopen/internal/graph/client"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/paths"
 )
 
-func skipIfUnmanaged(cmd *cobra.Command, root string) bool {
+func failIfUnmanaged(root string) error {
 	engine.SeedLinkedWorktree(root)
 	if paths.Managed(root) {
-		return false
+		return nil
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), paths.UnmanagedMessage)
-	return true
+	return cli.Fail(cli.ExitFail, paths.UnmanagedMessage, "so init")
 }
 
 func graphNoRefresh(cmd *cobra.Command) bool {

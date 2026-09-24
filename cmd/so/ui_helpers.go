@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -177,7 +179,12 @@ func startNextUI(repoRoot string, port int, hot bool) (*exec.Cmd, string, error)
 	if err != nil {
 		return nil, "", err
 	}
-	command.Stdout, command.Stderr = os.Stdout, os.Stderr
+	// Hold Next's startup banner. After the UI is up, later lines (requests,
+	// errors) pass through. Foreground and detached both do this: detached
+	// stdout is the log file, so those logs land there instead of the terminal.
+	nextLog := &followWriter{out: os.Stdout}
+	command.Stdout = nextLog
+	command.Stderr = nextLog
 	if err := command.Start(); err != nil {
 		return nil, "", err
 	}
@@ -187,11 +194,45 @@ func startNextUI(repoRoot string, port int, hot bool) (*exec.Cmd, string, error)
 		if response, err := http.Get(url + "/graph"); err == nil {
 			_ = response.Body.Close()
 			if response.StatusCode < 500 {
+				nextLog.follow()
 				return command, url, nil
 			}
 		}
 		time.Sleep(400 * time.Millisecond)
 	}
 	_ = command.Process.Kill()
+	detail := strings.TrimSpace(nextLog.buffered())
+	if detail != "" {
+		return nil, "", fmt.Errorf("timed out waiting for UI on %s\n%s", url, detail)
+	}
 	return nil, "", fmt.Errorf("timed out waiting for UI on %s", url)
+}
+
+// followWriter buffers until follow, then copies new writes to out.
+type followWriter struct {
+	mu   sync.Mutex
+	buf  bytes.Buffer
+	out  *os.File
+	live bool
+}
+
+func (w *followWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.live {
+		return w.out.Write(p)
+	}
+	return w.buf.Write(p)
+}
+
+func (w *followWriter) follow() {
+	w.mu.Lock()
+	w.live = true
+	w.mu.Unlock()
+}
+
+func (w *followWriter) buffered() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
 }

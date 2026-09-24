@@ -83,8 +83,8 @@ func cmdSessions() *cobra.Command {
 				id = strings.TrimSpace(args[0])
 			}
 			root, hookID := hookRepoAndSession()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			if id == "" {
 				id = hookID

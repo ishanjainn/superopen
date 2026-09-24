@@ -61,7 +61,7 @@ Linked git worktrees of an inited parent can seed on the first `so graph query`.
 ## Hooks do not fire
 
 1. Run `so install` (add `--vendor=...` if you only want one agent).
-2. Restart the coding agent. Claude Code, Cursor, Codex, Gemini CLI, OpenCode, Copilot CLI, and Pi load hooks on startup.
+2. Restart the coding agent. Every harness in the [install table](installation.md) loads hooks on startup.
 3. After you upgrade or move the `so` binary, run `so install` again so hook scripts keep the current path.
 4. Confirm you are in an inited repo. Hooks stay quiet in unmanaged trees (no `.so/`).
 5. Codex Desktop rejects PreToolUse `additionalContext`. On Codex, graph-first guidance lives in `AGENTS.md` and the skill, not in a PreToolUse nudge.

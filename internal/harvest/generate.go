@@ -244,10 +244,11 @@ func buildPrompt(root, sessionID string, store *Store) (string, error) {
 	}
 	digest := session.Digest(root, sessionID)
 	var b strings.Builder
-	b.WriteString("You propose playbook patches for Superopen harvest. Output JSON only: an array of objects with keys kind,target,title,reason,issue,suggestion,diff,evidence.\n")
-	b.WriteString("kind is improve|create|simplify|principle. Prefer simplify/delete of unused or duplicate rules. Max 3 proposals.\n")
+	b.WriteString("You propose playbook patches for Superopen harvest. Output JSON only: an array of objects with keys kind,target,title,reason,issue,suggestion,diff,evidence,memory_title,memory_text.\n")
+	b.WriteString("kind is improve|create|simplify|principle|memory. Prefer simplify/delete of unused or duplicate rules. Max 3 proposals.\n")
 	b.WriteString("Each proposal needs a concrete reason and evidence (session/memory/graph ids that exist). Do not restate graph-first, Superopen sentinel, or memory contracts.\n")
 	b.WriteString("diff must be a unified diff against the named target. Do not edit files. Do not dump full playbook bodies.\n")
+	b.WriteString("If this session contains a correction or debugging pattern future agents should reuse, put it in memory_title and memory_text on one proposal. That text is stored only when the proposal is applied. Use kind memory and omit target when there is no playbook patch.\n")
 	b.WriteString("Session: ")
 	b.WriteString(sessionID)
 	b.WriteString("\n")

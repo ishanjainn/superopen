@@ -85,7 +85,7 @@ never blocks a developer's prompt.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&vendor, "vendor", "", "Vendor: claude-code | cursor | codex | gemini | opencode | copilot-cli | pi")
+	cmd.Flags().StringVar(&vendor, "vendor", "", "Vendor id. Original agents plus qwen, cline, grok, kiro, factory, and the other installed hook agents.")
 	cmd.Flags().StringVar(&event, "event", "", "Hook event name (vendor-specific; e.g. SessionStart, PreToolUse)")
 	cmd.Flags().StringVar(&kind, "kind", "", "Graph-gate kind for PreToolUse: search | read")
 	_ = cmd.MarkFlagRequired("vendor")

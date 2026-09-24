@@ -44,8 +44,8 @@ and go with the session.`,
 				}, settings)
 			}
 			root := repoRoot()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			result, err := retention.Sweep(root)
 			if err != nil {

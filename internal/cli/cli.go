@@ -382,6 +382,48 @@ func (o *Out) WriteError(err error) {
 	}
 }
 
+// NormalizeExit maps Cobra usage failures (unknown command, bad flag, wrong
+// arity) onto the AXI usage code. Graph output is unchanged.
+func NormalizeExit(err error) error {
+	if err == nil {
+		return nil
+	}
+	var ae *Error
+	if errors.As(err, &ae) {
+		return err
+	}
+	msg := err.Error()
+	if isUsageMessage(msg) {
+		return Usage(msg, "")
+	}
+	return err
+}
+
+func isUsageMessage(msg string) bool {
+	switch {
+	case strings.Contains(msg, "unknown command"):
+		return true
+	case strings.Contains(msg, "unknown flag"):
+		return true
+	case strings.Contains(msg, "unknown shorthand"):
+		return true
+	case strings.Contains(msg, "accepts "):
+		return true
+	case strings.Contains(msg, "requires at least"):
+		return true
+	case strings.Contains(msg, "required flag"):
+		return true
+	case strings.Contains(msg, "flag needs an argument"):
+		return true
+	case strings.Contains(msg, "bad flag syntax"):
+		return true
+	case strings.HasPrefix(msg, "invalid argument "):
+		return true
+	default:
+		return false
+	}
+}
+
 // ExitCode extracts an AXI exit code from err.
 func ExitCode(err error) int {
 	if err == nil {

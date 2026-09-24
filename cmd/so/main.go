@@ -31,6 +31,7 @@ func out() *cli.Out { return cli.New(cliFlags) }
 func main() {
 	root := newRootCommand()
 	if err := root.Execute(); err != nil {
+		err = cli.NormalizeExit(err)
 		out().WriteError(err)
 		os.Exit(cli.ExitCode(err))
 	}
@@ -64,6 +65,8 @@ func newRootCommand() *cobra.Command {
 		cmdSessions(),
 		cmdMemory(),
 		cmdHarvest(),
+		cmdScan(),
+		cmdForward(),
 		cmdDev(),
 		cmdStatus(),
 		cmdGC(),
@@ -229,6 +232,19 @@ Installs the /so skill, observability hooks, and durable graph-first guidance
 --strict denies the first in-repo source Read once per session so the agent
 must query the graph first.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			out := cmd.OutOrStdout()
+			printInstallBanner(out)
+			if len(vendors) == 0 {
+				input, closeInput := installPromptInput()
+				if input != nil && writerIsTerminal(out) {
+					chosen, err := promptInstallVendors(input, out)
+					closeInput()
+					if err != nil {
+						return err
+					}
+					vendors = chosen
+				}
+			}
 			report, err := agent.Install(repoRoot(), vendors, agent.Options{Strict: strict})
 			if err != nil {
 				return err
@@ -238,12 +254,10 @@ must query the graph first.`,
 			if findWebDir("") == "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "note: web UI is not in %s; reinstall Superopen (release tarball, brew, or install.ps1) so `so dev` works from any repo.\n", expectedWebDir())
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "Next: open your coding agent and run /so init in a repository.")
-			fmt.Fprintln(cmd.OutOrStdout(), "Restart the agent so it loads the new hooks.")
 			return nil
 		},
 	}
-	command.Flags().StringSliceVar(&vendors, "vendor", nil, "Install selected vendor hooks (default: all supported)")
+	command.Flags().StringSliceVar(&vendors, "vendor", nil, "Install these harnesses only (repeatable). Omit to choose, or to install all when not a terminal")
 	command.Flags().BoolVar(&strict, "strict", false, "Deny the first in-repo source Read once per session (graph-first)")
 	return command
 }
@@ -287,11 +301,11 @@ Chocolatey). Use that manager's uninstall after this command.
 					fmt.Printf("The so binary is still provided by a package manager. Remove it with: %s\n", hint)
 				}
 			}
-			fmt.Println("Restart your coding agent so it drops in-memory hooks.")
+			fmt.Println("  Restart the coding agent so it drops in-memory hooks.")
 			return nil
 		},
 	}
-	command.Flags().StringVar(&vendor, "vendor", "", "Remove hooks for one vendor only (claude-code | cursor | codex | gemini | opencode | copilot-cli | pi | all)")
+	command.Flags().StringVar(&vendor, "vendor", "", "Remove hooks for one vendor only (claude-code | cursor | codex | gemini | opencode | copilot-cli | pi | qwen | cline | grok | ... | all)")
 	command.Flags().BoolVar(&keepData, "keep-data", false, "Keep per-repo .so session/graph data")
 	command.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would be removed without modifying any files")
 	return command

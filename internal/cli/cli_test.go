@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -88,6 +89,21 @@ func TestHome(t *testing.T) {
 	}
 	if !strings.Contains(got, "help[1]:") {
 		t.Fatalf("help missing: %q", got)
+	}
+}
+
+func TestNormalizeExitUsage(t *testing.T) {
+	err := NormalizeExit(errors.New(`unknown command "nope" for "so"`))
+	if ExitCode(err) != ExitUsage {
+		t.Fatalf("exit=%d", ExitCode(err))
+	}
+	err = NormalizeExit(errors.New(`invalid argument "nope" for "--sessions-hours" flag`))
+	if ExitCode(err) != ExitUsage {
+		t.Fatalf("flag exit=%d", ExitCode(err))
+	}
+	err = NormalizeExit(errors.New("disk full"))
+	if ExitCode(err) != ExitFail {
+		t.Fatalf("fail exit=%d", ExitCode(err))
 	}
 }
 

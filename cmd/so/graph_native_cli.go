@@ -109,8 +109,8 @@ func nativeGraphLeaf(use, short string, operation api.Operation, params func(*co
 				root = args[0]
 			}
 		}
-		if skipIfUnmanaged(cmd, root) {
-			return nil
+		if err := failIfUnmanaged(root); err != nil {
+			return err
 		}
 		stale := ""
 		switch operation {

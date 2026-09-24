@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/agent/config"
 	"github.com/ishanjainn/superopen/internal/agent/install"
 	"github.com/ishanjainn/superopen/internal/agent/skills"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
+	"github.com/ishanjainn/superopen/internal/agent/vendors"
 	"github.com/ishanjainn/superopen/internal/paths"
 )
 
@@ -32,7 +34,7 @@ type InstallReport struct {
 // Install installs coding-agent observability for the given vendors and the
 // user-global /so skill and durable graph-first guidance.
 // Hooks and skills are user-scoped (not cwd-dependent).
-func Install(repoRoot string, vendors []string, opts Options) (InstallReport, error) {
+func Install(repoRoot string, selected []string, opts Options) (InstallReport, error) {
 	_ = repoRoot
 	report := InstallReport{Hooks: map[string][]string{}}
 	_ = removeNetworkTelemetryConfig()
@@ -64,9 +66,11 @@ func Install(repoRoot string, vendors []string, opts Options) (InstallReport, er
 		}
 		report.Guidance = append(report.Guidance, p)
 	}
-	targets := vendors
+	targets := selected
 	if len(targets) == 0 {
-		targets = []string{"claude-code", "cursor", "codex", "gemini", "opencode", "copilot-cli", "pi"}
+		for _, spec := range vendors.All() {
+			targets = append(targets, spec.ID)
+		}
 	}
 	seen := make(map[string]bool, len(targets))
 	for _, v := range targets {
@@ -77,9 +81,6 @@ func Install(repoRoot string, vendors []string, opts Options) (InstallReport, er
 		case "copilot":
 			v = "copilot-cli"
 		case "agents", "":
-			continue
-		case "kilo", "aider", "claw", "openclaw", "droid", "factory", "trae", "trae-cn", "hermes", "kiro", "devin", "codebuddy", "kimi", "amp", "antigravity", "vscode", "windows":
-			// These agents do not expose a stable telemetry hook contract yet.
 			continue
 		}
 		if seen[v] {
@@ -95,51 +96,66 @@ func Install(repoRoot string, vendors []string, opts Options) (InstallReport, er
 	return report, nil
 }
 
-// Write prints a grouped, non-interactive summary of what install wrote.
+// Write prints a short checklist of what install finished.
 func (r InstallReport) Write(w io.Writer) {
-	fmt.Fprintln(w, "Installing Superopen…")
-	writeGroup(w, "Skill", r.Skills)
-	writeGroup(w, "Guidance", r.Guidance)
-	if r.CursorRule != "" {
-		fmt.Fprintln(w, "Cursor rule")
-		fmt.Fprintf(w, "  %s\n", r.CursorRule)
+	green, reset := "", ""
+	if writerIsTTY(w) {
+		green, reset = "\033[32m", "\033[0m"
 	}
-	if len(r.Hooks) > 0 {
-		fmt.Fprintln(w, "Hooks")
-		for _, vendor := range []string{"claude-code", "cursor", "codex", "gemini", "opencode", "copilot-cli", "pi"} {
-			paths := r.Hooks[vendor]
-			if len(paths) == 0 {
-				continue
-			}
-			fmt.Fprintf(w, "  %s\n", vendor)
-			for _, p := range paths {
-				fmt.Fprintf(w, "    %s\n", p)
-			}
+	tick := func(label, detail string) {
+		if detail == "" {
+			fmt.Fprintf(w, "  %s✓%s  %s\n", green, reset, label)
+			return
 		}
-		for vendor, paths := range r.Hooks {
-			switch vendor {
-			case "claude-code", "cursor", "codex", "gemini", "opencode", "copilot-cli", "pi":
-				continue
-			}
-			fmt.Fprintf(w, "  %s\n", vendor)
-			for _, p := range paths {
-				fmt.Fprintf(w, "    %s\n", p)
-			}
-		}
+		fmt.Fprintf(w, "  %s✓%s  %-14s %s\n", green, reset, label, detail)
+	}
+	if len(r.Skills) > 0 || len(r.Guidance) > 0 || r.CursorRule != "" {
+		tick("Skill", "")
+	}
+	if names := hookNames(r.Hooks); len(names) > 0 {
+		tick("Hooks", strings.Join(names, ", "))
 	}
 	if r.Strict {
-		fmt.Fprintln(w, "Strict mode: first in-repo source Read is denied once per session until a graph query.")
+		tick("Strict mode", "first source read waits for a graph query")
 	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  Next")
+	fmt.Fprintln(w, "    so init        in a repository")
+	fmt.Fprintln(w, "    so dev         open the UI")
+	fmt.Fprintln(w, "  Restart the coding agent so it loads the hooks.")
 }
 
-func writeGroup(w io.Writer, title string, items []string) {
-	if len(items) == 0 {
-		return
+func hookNames(hooks map[string][]string) []string {
+	seen := map[string]bool{}
+	var names []string
+	for _, spec := range vendors.All() {
+		if len(hooks[spec.ID]) == 0 {
+			continue
+		}
+		seen[spec.ID] = true
+		names = append(names, spec.Label)
 	}
-	fmt.Fprintln(w, title)
-	for _, p := range items {
-		fmt.Fprintf(w, "  %s\n", p)
+	var extra []string
+	for id, paths := range hooks {
+		if seen[id] || len(paths) == 0 {
+			continue
+		}
+		extra = append(extra, vendors.Label(id))
 	}
+	sort.Strings(extra)
+	return append(names, extra...)
+}
+
+func writerIsTTY(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	st, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return st.Mode()&os.ModeCharDevice != 0
 }
 
 // Status reports whether each vendor looks installed.

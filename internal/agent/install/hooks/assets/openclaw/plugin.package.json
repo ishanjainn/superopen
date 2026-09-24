@@ -1,0 +1,11 @@
+{
+  "name": "@superopen-labs/openclaw-superopen-endpoint",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Superopen endpoint telemetry plugin for OpenClaw Gateway",
+  "type": "module",
+  "openclaw": {
+    "extensions": ["./superopen.js"],
+    "runtimeExtensions": ["./superopen.js"]
+  }
+}

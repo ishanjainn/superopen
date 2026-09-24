@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/ishanjainn/superopen/internal/memory"
 )
 
 func Apply(root string, id int64, force bool) (Proposal, error) {
@@ -22,6 +24,18 @@ func Apply(root string, id int64, force bool) (Proposal, error) {
 	}
 	if p.Status != StatusOpen {
 		return p, fmt.Errorf("proposal %d is %s", id, p.Status)
+	}
+	if strings.TrimSpace(p.MemoryText) != "" {
+		if err := captureProposal(root, p); err != nil {
+			return p, err
+		}
+	}
+	if p.Kind == KindMemory && strings.TrimSpace(p.Diff) == "" {
+		if err := store.SetStatus(id, StatusApplied); err != nil {
+			return p, err
+		}
+		p.Status = StatusApplied
+		return p, nil
 	}
 	if ProtectedPath(p.Target) {
 		return p, fmt.Errorf("target is protected")
@@ -109,4 +123,24 @@ func Decline(root string, id int64) (Proposal, error) {
 	}
 	p.Status = StatusDeclined
 	return p, nil
+}
+
+func captureProposal(root string, p Proposal) error {
+	mem, err := memory.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer mem.Close()
+	title := strings.TrimSpace(p.MemoryTitle)
+	if title == "" {
+		title = p.Title
+	}
+	_, err = mem.Capture(memory.CaptureInput{
+		SessionID: p.SessionID,
+		Kind:      memory.KindSession,
+		Title:     title,
+		Text:      p.MemoryText,
+		Source:    memory.SourceAgent,
+	})
+	return err
 }

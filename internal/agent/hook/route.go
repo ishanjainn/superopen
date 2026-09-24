@@ -197,7 +197,7 @@ func bashCommandFromPayload(payload []byte) string {
 }
 
 var soVerb = map[string]struct{}{
-	"graph": {}, "memory": {}, "sessions": {}, "init": {}, "harvest": {},
+	"graph": {}, "memory": {}, "sessions": {}, "init": {}, "harvest": {}, "scan": {}, "forward": {},
 	"status": {}, "gc": {}, "install": {}, "uninstall": {}, "dev": {},
 	"projects": {},
 }

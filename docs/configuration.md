@@ -68,7 +68,7 @@ Exit codes stay stable: `0` ok, `1` error, `2` usage, `3` not found, `4` continu
 
 | Flag | Meaning |
 |------|---------|
-| `--vendor` | One or more of `claude-code`, `cursor`, `codex`, `gemini`, `opencode`, `copilot-cli`, `pi`. Default: all. |
+| `--vendor` | One agent id, or `all` (the default). Ids: `claude-code`, `cursor`, `codex`, `gemini`, `opencode`, `copilot-cli`, `pi`, `antigravity`, `cline`, `dsh`, `devin`, `factory`, `grok`, `hermes`, `kimi`, `kiro`, `muse`, `omp`, `openclaw`, `openhands`, `prime`, `qwen`, `senpi`, `vscode`. Paths: [installation](installation.md). |
 | `--strict` | Deny the first in-repo source Read once per session. |
 
 **`so init`** (per repository)
@@ -182,6 +182,23 @@ The FTS index stores plaintext of episode bodies so keyword search works. `memor
 | OpenCode | `~/.config/opencode` |
 | Copilot CLI | `~/.copilot` (or `COPILOT_HOME`) |
 | Pi | Pi user config |
+| Antigravity | `~/.gemini/config/hooks.json` |
+| Cline | `~/.cline/plugins/superopen.ts` |
+| DeepSeek Harness | `~/.dsh/superopen-hooks.json` |
+| Devin | `~/.config/devin/config.json` |
+| Factory Droid | `~/.factory/settings.json` |
+| Grok | `~/.grok/hooks/superopen.json` |
+| Hermes | `~/.hermes/config.yaml` |
+| Kimi Code | `~/.kimi-code/config.toml` |
+| Kiro | `~/.kiro/hooks/superopen.json` |
+| Muse | `~/.config/muse/superopen-hooks.json` |
+| Oh My Pi | `~/.omp/agent/extensions/superopen/index.ts` |
+| OpenClaw | `~/.openclaw/extensions/superopen/index.js` |
+| OpenHands | `~/.openhands/hooks.json` |
+| Prime | `~/.prime/agent/extensions/superopen/index.ts` |
+| Qwen Code | `~/.qwen/settings.json` |
+| Senpi | `~/.omo/agent/extensions/superopen/index.ts` |
+| VS Code | `~/.copilot/hooks/superopen-vscode.json` |
 
 Restart the agent after install or uninstall.
 

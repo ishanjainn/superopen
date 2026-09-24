@@ -18,7 +18,7 @@ Related: [troubleshooting](troubleshooting.md), [configuration](configuration.md
 | curl + tar (Linux alternative) | any | `curl --version` | Usually already present |
 | PowerShell (Windows) | 5+ | `$PSVersionTable` | Built-in |
 | Node.js (for `so dev` only) | 20+ | `node --version` | Not needed for graph, sessions, or memory |
-| Coding agent | Claude Code, Cursor, Codex, Gemini CLI, OpenCode, Copilot CLI, or Pi | - | Install the agent first |
+| Coding agent | See the agent table under `so install` | - | Install the agent first |
 
 Python 3 is optional. It is only used for denser memory embeddings. Go is only needed if you build from source.
 
@@ -112,7 +112,7 @@ Default: every supported agent. Limit to one:
 
 ```bash
 so install --vendor=cursor
-# also: claude-code, codex, gemini, opencode, copilot-cli, pi
+# any id from the table below
 ```
 
 Stricter graph-first gate (denies the first in-repo source Read once per session):
@@ -125,15 +125,32 @@ Same effect as `SUPEROPEN_HOOK_STRICT=1`. See [configuration](configuration.md).
 
 Restart the agent so it loads the new hooks. After you replace the `so` binary, run `so install` again so hook scripts keep the current path.
 
-| Agent | Typical user-global location |
-|-------|------------------------------|
-| Claude Code | `~/.claude` (or `CLAUDE_CONFIG_DIR`) |
-| Cursor | `~/.cursor/hooks.json` and `~/.cursor/rules/superopen.mdc` |
-| Codex | `~/.codex` (or `CODEX_HOME`) |
-| Gemini CLI | Gemini user config |
-| OpenCode | `~/.config/opencode` |
-| Copilot CLI | `~/.copilot` (or `COPILOT_HOME`) |
-| Pi | Pi user config |
+| Agent | `--vendor` | Typical user-global location |
+|-------|-----------|------------------------------|
+| Claude Code | `claude-code` | `~/.claude` (or `CLAUDE_CONFIG_DIR`) |
+| Cursor | `cursor` | `~/.cursor/hooks.json` and `~/.cursor/rules/superopen.mdc` |
+| Codex | `codex` | `~/.codex` (or `CODEX_HOME`) |
+| Gemini CLI | `gemini` | Gemini user config |
+| OpenCode | `opencode` | `~/.config/opencode` |
+| Copilot CLI | `copilot-cli` | `~/.copilot` (or `COPILOT_HOME`) |
+| Pi | `pi` | Pi user config |
+| Antigravity | `antigravity` | `~/.gemini/config/hooks.json` |
+| Cline | `cline` | `~/.cline/plugins/superopen.ts` |
+| DeepSeek Harness | `dsh` | `~/.dsh/superopen-hooks.json` |
+| Devin | `devin` | `~/.config/devin/config.json` |
+| Factory Droid | `factory` | `~/.factory/settings.json` |
+| Grok | `grok` | `~/.grok/hooks/superopen.json` |
+| Hermes | `hermes` | `~/.hermes/config.yaml` |
+| Kimi Code | `kimi` | `~/.kimi-code/config.toml` |
+| Kiro | `kiro` | `~/.kiro/hooks/superopen.json` |
+| Muse | `muse` | `~/.config/muse/superopen-hooks.json` |
+| Oh My Pi | `omp` | `~/.omp/agent/extensions/superopen/index.ts` |
+| OpenClaw | `openclaw` | `~/.openclaw/extensions/superopen/index.js` |
+| OpenHands | `openhands` | `~/.openhands/hooks.json` |
+| Prime | `prime` | `~/.prime/agent/extensions/superopen/index.ts` |
+| Qwen Code | `qwen` | `~/.qwen/settings.json` |
+| Senpi | `senpi` | `~/.omo/agent/extensions/superopen/index.ts` |
+| VS Code | `vscode` | `~/.copilot/hooks/superopen-vscode.json` |
 
 Codex Desktop rejects PreToolUse `additionalContext`. On Codex, always-on guidance lives in `AGENTS.md` and the skill.
 

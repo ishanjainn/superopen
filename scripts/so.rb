@@ -18,15 +18,27 @@ class So < Formula
 
   def install
     system "go", "build", "-o", bin/"so", "./cmd/so"
-    dst = share/"superopen/web"
-    dst.mkpath
-    Dir.children("web").each do |name|
-      next if name == "node_modules" || name == ".next"
-      cp_r buildpath/"web"/name, dst/name
-    end
-    cd dst do
-      system "npm", "install", "--ignore-scripts"
-      system "npm", "run", "build"
+    log = buildpath/"web-build.log"
+    cd "web" do
+      cmd = "npm install --ignore-scripts >>#{log} 2>&1 && npm run build >>#{log} 2>&1"
+      unless quiet_system("sh", "-c", cmd)
+        odie "UI build failed. See #{log}"
+      end
+      standalone = buildpath/"web/.next/standalone"
+      odie "web UI standalone build missing" unless (standalone/"server.js").exist?
+      static_dir = buildpath/"web/.next/static"
+      if static_dir.exist?
+        (standalone/".next/static").mkpath
+        static_dir.children.each { |child| cp_r child, standalone/".next/static"/child.basename }
+      end
+      public_dir = buildpath/"web/public"
+      if public_dir.exist?
+        (standalone/"public").mkpath
+        public_dir.children.each { |child| cp_r child, standalone/"public"/child.basename }
+      end
+      dst = share/"superopen/web"
+      dst.mkpath
+      standalone.children.each { |child| cp_r child, dst/child.basename }
     end
   end
 

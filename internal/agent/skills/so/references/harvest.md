@@ -29,7 +29,9 @@ Pipe JSON to stdin (PowerShell: `'{"session_id":"<id>",...}' | __SO_BIN__ harves
   "title": "drop unused always-on rule",
   "reason": "the session never used this rule and it costs every turn",
   "diff": "--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ ...",
-  "evidence": [{"kind":"session","id":"<id>","label":"user correction"}]
+  "evidence": [{"kind":"session","id":"<id>","label":"user correction"}],
+  "memory_title": "optional reusable correction",
+  "memory_text": "stored only when this proposal is applied"
 }
 ```
 
