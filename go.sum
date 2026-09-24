@@ -22,8 +22,8 @@ github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/joelspadin/tree-sitter-devicetree v0.14.1 h1:FIOmj5spoKgmXaEXHWA8PkxrK2W6pJFSO0LoM6BECoM=
-github.com/joelspadin/tree-sitter-devicetree v0.14.1/go.mod h1:J2olG4dkDsYSOD0ov1TaSgE8iCtBUU9KygjK42x6rq0=
+github.com/joelspadin/tree-sitter-devicetree v0.15.0 h1:ePItEhi3qKrsWTwAyGsrzl/x7XZFWmh9jSAp8vhs9SQ=
+github.com/joelspadin/tree-sitter-devicetree v0.15.0/go.mod h1:JShba0nDv2epuRFIMkpKFpEefn1jUqY5UdiqIQG4Dhc=
 github.com/klauspost/compress v1.19.2 h1:hMRETovs/pu/dVWN7zIT1PGG8t509MwT6bO7XSi26R8=
 github.com/klauspost/compress v1.19.2/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/klauspost/cpuid/v2 v2.2.10 h1:tBs3QSyvjDyFTq3uoc/9xFpCuOsJQFNPiAhYdw2skhE=
