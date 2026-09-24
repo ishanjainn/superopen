@@ -18,6 +18,5 @@ func writeInitGitignores(root string) error {
 			return err
 		}
 	}
-	_, err := paths.EnsureRepoIgnore(root)
-	return err
+	return nil
 }
