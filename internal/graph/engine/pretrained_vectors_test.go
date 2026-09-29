@@ -50,6 +50,11 @@ func TestPretrainedVectorLoaderVerifiesAndDecodes(t *testing.T) {
 	if fallback := semanticIndex("missing", model); fallback == (semanticVector{}) {
 		t.Fatal("missing token did not use sparse fallback")
 	}
+	crlf := bytes.ReplaceAll(tokens, []byte("\n"), []byte("\r\n"))
+	files["tokens.txt"] = &fstest.MapFile{Data: crlf}
+	if _, err := loadPretrainedVectors(files, "tokens.txt", "vectors.bin", digestBytes(tokens), digestBytes(vectors), 2); err != nil {
+		t.Fatalf("CRLF vocabulary must verify as LF: %v", err)
+	}
 }
 
 func TestPretrainedVectorLoaderRejectsCorruptionAndShape(t *testing.T) {
