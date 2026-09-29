@@ -66,6 +66,108 @@ func TestQuerySeedingPrefersDottedSymbol(t *testing.T) {
 	}
 }
 
+func TestQueryBodiesOmitCalleeMenu(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	src := "package answer\nfunc answer() {\n\tenable()\n}\nfunc enable() {}\n"
+	if err := os.WriteFile(filepath.Join(root, "answer.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := t.TempDir() + "/graph.db"
+	store, err := OpenWritable(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.Build(ctx, func(builder *Builder) error {
+		if err := builder.PutProject(ProjectRecord{
+			Name: "fixture", RootPath: root, Generation: "one",
+			EngineVersion: "test", IndexedAt: time.Now().UTC(),
+		}); err != nil {
+			return err
+		}
+		answer, err := builder.PutNode(api.Node{
+			Project: "fixture", Label: "Function", Name: "answer", QualifiedName: "answer.answer",
+			Location: api.Location{File: "answer.go", StartLine: 2, EndLine: 4},
+		})
+		if err != nil {
+			return err
+		}
+		enable, err := builder.PutNode(api.Node{
+			Project: "fixture", Label: "Function", Name: "enable", QualifiedName: "answer.enable",
+			Location: api.Location{File: "answer.go", StartLine: 5, EndLine: 5},
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := builder.PutNode(api.Node{
+			Project: "fixture", Label: "Function", Name: "noise", QualifiedName: "answer.noise",
+			Location: api.Location{File: "other.go", StartLine: 1, EndLine: 2},
+		}); err != nil {
+			return err
+		}
+		_, err = builder.PutEdge(api.Edge{Project: "fixture", SourceID: answer, TargetID: enable, Type: "CALLS"})
+		return err
+	})
+	if closeErr := store.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err = OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	got, err := store.Query(ctx, api.QueryRequest{Project: "fixture", Question: "answer", Budget: 4000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Text, "BODIES:") || !strings.Contains(got.Text, "func answer") {
+		t.Fatalf("expected attached body, got %q", got.Text)
+	}
+	if !strings.Contains(got.Text, "other nodes.") {
+		t.Fatalf("expected other-node count, got %q", got.Text)
+	}
+	if strings.Contains(got.Text, "for callees") {
+		t.Fatalf("bodies screen must not offer the callee menu: %q", got.Text)
+	}
+	if strings.Contains(got.Text, "NODE enable") {
+		t.Fatalf("callee must stay off the first screen: %q", got.Text)
+	}
+
+	empty := fixtureGraph(t, func(builder *Builder) error {
+		answer, err := builder.PutNode(api.Node{
+			Project: "fixture", Label: "Function", Name: "answer", QualifiedName: "answer.answer",
+			Location: api.Location{File: "answer.go", StartLine: 2, EndLine: 4},
+		})
+		if err != nil {
+			return err
+		}
+		noise, err := builder.PutNode(api.Node{
+			Project: "fixture", Label: "Function", Name: "noise", QualifiedName: "answer.noise",
+			Location: api.Location{File: "other.go", StartLine: 1, EndLine: 2},
+		})
+		if err != nil {
+			return err
+		}
+		_, err = builder.PutEdge(api.Edge{Project: "fixture", SourceID: answer, TargetID: noise, Type: "CALLS"})
+		return err
+	})
+	defer empty.Close()
+	plain, err := empty.Query(ctx, api.QueryRequest{Project: "fixture", Question: "answer", Budget: 4000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.Text, "BODIES:") {
+		t.Fatalf("missing source must not attach bodies: %q", plain.Text)
+	}
+	if !strings.Contains(plain.Text, "for callees") {
+		t.Fatalf("no-body screen must keep the menu, got %q", plain.Text)
+	}
+}
+
 func TestQuerySeedsCallableNotJSONFile(t *testing.T) {
 	ctx := context.Background()
 	store := fixtureGraph(t, func(builder *Builder) error {

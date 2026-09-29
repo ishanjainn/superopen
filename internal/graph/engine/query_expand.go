@@ -526,15 +526,21 @@ func screenQueryNodes(ordered []queryNodeHit) []queryNodeHit {
 	return out
 }
 
-// renderSeedQueryText prints seeds before any source bodies. The other-nodes
-// line names snippet and trace so a caller that cuts the tail still sees them.
-func renderSeedQueryText(screen []queryNodeHit, other int) string {
+// renderSeedQueryText prints seeds before any source bodies. When bodies are
+// attached, the other-nodes line is only a count: the BODIES header already
+// says to stop or snippet one listed qn. When there are no bodies, the line
+// still names snippet and trace so a caller that cuts the tail can recover.
+func renderSeedQueryText(screen []queryNodeHit, other int, withBodies bool) string {
 	var b strings.Builder
 	for _, hit := range screen {
 		b.WriteString(formatQueryNodeLine(hit))
 	}
 	if other > 0 {
-		fmt.Fprintf(&b, "%d other nodes. `so graph snippet <qn>` for a NODE already shown. `so graph trace <qn> --direction incoming` for callers. `so graph trace <qn>` for callees.\n", other)
+		if withBodies {
+			fmt.Fprintf(&b, "%d other nodes.\n", other)
+		} else {
+			fmt.Fprintf(&b, "%d other nodes. `so graph snippet <qn>` for a NODE already shown. `so graph trace <qn> --direction incoming` for callers. `so graph trace <qn>` for callees.\n", other)
+		}
 	}
 	return b.String()
 }

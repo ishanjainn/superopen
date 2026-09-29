@@ -167,6 +167,9 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		}
 		// Stop, SessionEnd, and other lifecycle events are observability-only.
 		return steerDecision{}, false
+	case vendor == "claude-code" && ev == "PostToolUse":
+		recordClaudeQueryFiles(payload)
+		return steerDecision{}, false
 	case toolEvent:
 		if reason, denied := guardDeny(payload, vendor); denied {
 			if vendor == "codex" {
@@ -260,11 +263,21 @@ func graphGate(payload []byte, vendor, kind, hookEvent string) (steerDecision, b
 	}
 
 	if engine.QueryStampFreshFor(stampRoot(payload), steerSessionID(payload)) {
-		if gate == "read" && isSourceRead(payload, tool, hookEvent) {
-			if !claimSnippetOverflow(payload, vendor) {
-				return steerDecision{}, false
+		readLike := gate == "read" && (isSourceRead(payload, tool, hookEvent) || (isBashTool(tool) && bashLooksLikeRead(cmd)))
+		if readLike {
+			if claimSnippetOverflow(payload, vendor) {
+				return steerDecision{text: steer.SnippetOverflowNudge(), hookEvent: hookEvent}, true
 			}
-			return steerDecision{text: steer.SnippetOverflowNudge(), hookEvent: hookEvent}, true
+			if listed := matchingListedFile(payload, vendor, cmd); listed != "" && claimQueryFileExtra(payload, vendor, listed) {
+				return steerDecision{text: steer.SnippetOverflowNudge(), hookEvent: hookEvent}, true
+			}
+			return steerDecision{}, false
+		}
+		if gate == "search" {
+			if listed := matchingListedFile(payload, vendor, cmd); listed != "" && claimQueryFileExtra(payload, vendor, listed) {
+				return steerDecision{text: steer.SnippetOverflowNudge(), hookEvent: hookEvent}, true
+			}
+			return steerDecision{}, false
 		}
 		return steerDecision{}, false
 	}
@@ -522,6 +535,155 @@ func claimSnippetOverflow(payload []byte, vendor string) bool {
 	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
 		return &s.SnippetOverflowReminded
 	}, "last_snippet_overflow")
+}
+
+const queryListedFileCap = 16
+
+var querySrcPattern = regexp.MustCompile(`src=([^\s\]]+)`)
+
+// recordClaudeQueryFiles stores src= paths from a graph query's Bash stdout.
+// Missing stdout leaves the session list unchanged, so a later grep stays silent.
+func recordClaudeQueryFiles(payload []byte) {
+	cmd := bashCommandFromPayload(payload)
+	if !bashLooksLikeGraphQuery(cmd) {
+		return
+	}
+	stdout := claudeBashStdout(payload)
+	if strings.TrimSpace(stdout) == "" {
+		return
+	}
+	files := srcPathsFromQuery(stdout)
+	if len(files) == 0 {
+		return
+	}
+	sessionID := steerSessionID(payload)
+	if sessionID == "" {
+		return
+	}
+	state := sessionstate.Load(sessionID, "claude-code")
+	if state == nil {
+		state = &sessionstate.State{}
+	}
+	state.QueryListedFiles = files
+	sessionstate.Save(sessionID, "claude-code", state)
+}
+
+func claudeBashStdout(payload []byte) string {
+	var probe map[string]any
+	if json.Unmarshal(payload, &probe) != nil {
+		return ""
+	}
+	raw, ok := probe["tool_response"]
+	if !ok || raw == nil {
+		return ""
+	}
+	switch v := raw.(type) {
+	case string:
+		return v
+	case map[string]any:
+		if s, ok := v["stdout"].(string); ok && strings.TrimSpace(s) != "" {
+			return s
+		}
+		if s, ok := v["output"].(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+func srcPathsFromQuery(stdout string) []string {
+	matches := querySrcPattern.FindAllStringSubmatch(stdout, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, queryListedFileCap)
+	for _, m := range matches {
+		p := filepath.ToSlash(strings.TrimSpace(m[1]))
+		if p == "" || p == "-" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+		if len(out) >= queryListedFileCap {
+			break
+		}
+	}
+	return out
+}
+
+func matchingListedFile(payload []byte, vendor, cmd string) string {
+	sessionID := steerSessionID(payload)
+	if sessionID == "" {
+		return ""
+	}
+	state := sessionstate.Load(sessionID, steerVendor(vendor))
+	if state == nil || len(state.QueryListedFiles) == 0 {
+		return ""
+	}
+	candidates := []string{peekContext(payload).ToolPath}
+	if strings.TrimSpace(cmd) != "" {
+		candidates = append(candidates, cmd)
+	}
+	for _, listed := range state.QueryListedFiles {
+		for _, cand := range candidates {
+			if pathMentionsListed(cand, listed) {
+				return listed
+			}
+		}
+	}
+	return ""
+}
+
+func pathMentionsListed(raw, listed string) bool {
+	raw = filepath.ToSlash(strings.TrimSpace(raw))
+	listed = filepath.ToSlash(strings.TrimSpace(listed))
+	if raw == "" || listed == "" {
+		return false
+	}
+	if raw == listed || strings.HasSuffix(raw, "/"+listed) {
+		return true
+	}
+	idx := strings.Index(raw, listed)
+	if idx < 0 {
+		return false
+	}
+	if idx > 0 {
+		prev := raw[idx-1]
+		if prev != '/' && prev != ' ' && prev != '\t' && prev != '"' && prev != '\'' {
+			return false
+		}
+	}
+	end := idx + len(listed)
+	if end == len(raw) {
+		return true
+	}
+	next := raw[end]
+	return next == ' ' || next == '\t' || next == '"' || next == '\'' || next == '\n' || next == '\r'
+}
+
+func claimQueryFileExtra(payload []byte, vendor, listed string) bool {
+	listed = filepath.ToSlash(strings.TrimSpace(listed))
+	if listed == "" {
+		return false
+	}
+	sessionID := steerSessionID(payload)
+	vendor = steerVendor(vendor)
+	if sessionID == "" || vendor == "" {
+		return false
+	}
+	state := sessionstate.Load(sessionID, vendor)
+	if state == nil {
+		state = &sessionstate.State{}
+	}
+	for _, got := range state.QueryFileExtraNudged {
+		if got == listed {
+			return false
+		}
+	}
+	state.QueryFileExtraNudged = append(state.QueryFileExtraNudged, listed)
+	sessionstate.Save(sessionID, vendor, state)
+	return true
 }
 
 func claimQueryRepeat(payload []byte, vendor string) bool {

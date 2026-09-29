@@ -112,6 +112,11 @@ type State struct {
 	// SnippetOverflowReminded is true after the post-query Read overflow
 	// (snippet a listed NODE instead of reading whole modules) fired once.
 	SnippetOverflowReminded bool `json:"snippet_overflow_reminded,omitempty"`
+	// QueryListedFiles are src= paths from the latest Claude Code graph
+	// query stdout in this session. QueryFileExtraNudged are those paths
+	// that already received the one extra snippet reminder.
+	QueryListedFiles     []string `json:"query_listed_files,omitempty"`
+	QueryFileExtraNudged []string `json:"query_file_extra_nudged,omitempty"`
 	// QueryRepeatReminded is true after the post-query overflow that
 	// asks the agent to snippet a listed NODE instead of running graph
 	// query again (unless the dump was TRUNCATED).

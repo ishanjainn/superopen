@@ -607,17 +607,16 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 	if other < 0 {
 		other = 0
 	}
-	output := renderSeedQueryText(screen, other)
-	if also := s.sameNameLines(ctx, req.Project, screen); also != "" {
-		output += also
-	}
 	bodyChars := maxChars
 	if bodyChars < queryBodyReserve {
 		bodyChars = queryBodyReserve
 	}
-	if bodies := s.appendQueryBodies(ctx, req.Project, pickQueryAttachNodes(screen), bodyChars); bodies != "" {
-		output += bodies
+	bodies := s.appendQueryBodies(ctx, req.Project, pickQueryAttachNodes(screen), bodyChars)
+	output := renderSeedQueryText(screen, other, bodies != "")
+	if also := s.sameNameLines(ctx, req.Project, screen); also != "" {
+		output += also
 	}
+	output += bodies
 
 	result.Text = output
 	result.Budget.RequestedTokens = budget
