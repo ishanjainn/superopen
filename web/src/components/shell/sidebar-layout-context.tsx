@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { cn } from "@/lib/utils";
@@ -36,19 +37,21 @@ function loadPinned(): boolean {
 
 function savePinned(pinned: boolean) {
 	setUIPref("sidebar_pinned", pinned ? "1" : "0");
+	for (const listener of pinListeners) listener();
+}
+
+const pinListeners = new Set<() => void>();
+
+function subscribePinned(listener: () => void) {
+	pinListeners.add(listener);
+	return () => pinListeners.delete(listener);
 }
 
 export function SidebarLayoutProvider({ children }: { children: ReactNode }) {
-  const [isPinned, setIsPinned] = useState(false);
+  const isPinned = useSyncExternalStore(subscribePinned, loadPinned, () => false);
   const [hovered, setHovered] = useState(false);
-  const [ready, setReady] = useState(false);
   const hoverTimer = useRef<number | null>(null);
   const isExpanded = isPinned || hovered;
-
-  useEffect(() => {
-    setIsPinned(loadPinned());
-    setReady(true);
-  }, []);
 
   useEffect(() => {
     return () => {
@@ -57,15 +60,10 @@ export function SidebarLayoutProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const togglePin = useCallback(() => {
-    setIsPinned((value) => {
-      const next = !value;
-      savePinned(next);
-      return next;
-    });
+    savePinned(!loadPinned());
   }, []);
 
   const expandSidebar = useCallback(() => {
-    setIsPinned(true);
     savePinned(true);
   }, []);
 
@@ -96,14 +94,6 @@ export function SidebarLayoutProvider({ children }: { children: ReactNode }) {
     }),
     [isExpanded, isPinned, togglePin, expandSidebar, setSidebarHover]
   );
-
-  if (!ready) {
-    return (
-      <SidebarLayoutContext.Provider value={value}>
-        {children}
-      </SidebarLayoutContext.Provider>
-    );
-  }
 
   return (
     <SidebarLayoutContext.Provider value={value}>{children}</SidebarLayoutContext.Provider>
