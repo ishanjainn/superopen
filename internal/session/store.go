@@ -649,8 +649,7 @@ func (s *Store) stamp(meta *Meta) {
 
 func (s *Store) UpdateMeta(meta Meta) error {
 	s.stamp(&meta)
-	dir := s.Paths.SessionDir(meta.ID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := s.mkdirSession(meta.ID); err != nil {
 		return err
 	}
 	if err := s.writeDocument(meta.ID, func(d *Document) { d.Meta = meta }); err != nil {
@@ -671,14 +670,20 @@ func (s *Store) Start(meta Meta) error {
 		meta.StartedAt = time.Now().UTC()
 	}
 	meta.Status = StatusActive
-	dir := s.Paths.SessionDir(meta.ID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := s.mkdirSession(meta.ID); err != nil {
 		return err
 	}
 	if err := s.writeDocument(meta.ID, func(d *Document) { d.Meta = meta }); err != nil {
 		return err
 	}
 	return s.upsertIndex(meta)
+}
+
+func (s *Store) mkdirSession(id string) error {
+	if err := paths.WriteGitignore(s.Paths.RepoRoot); err != nil {
+		return err
+	}
+	return os.MkdirAll(s.Paths.SessionDir(id), 0o755)
 }
 
 // UpsertActiveFromSpans creates/refreshes an active session row so the UI shows
@@ -833,10 +838,10 @@ func truncateRunes(s string, n int) string {
 
 // MaterializeFromSpans builds events, footprint, and updates session.json post-session.
 func (s *Store) MaterializeFromSpans(id string, spans []trace.Span, tokens int64, cost float64) (Meta, error) {
-	dir := s.Paths.SessionDir(id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := s.mkdirSession(id); err != nil {
 		return Meta{}, err
 	}
+	dir := s.Paths.SessionDir(id)
 
 	meta, err := s.Get(id)
 	if err != nil {
@@ -1040,6 +1045,9 @@ func (s *Store) writeDocument(id string, mutate func(*Document)) error {
 			d.ID = id
 		}
 		path := filepath.Join(s.Paths.SessionDir(id), "session.json")
+		if err := paths.WriteGitignore(s.Paths.RepoRoot); err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}

@@ -19,7 +19,7 @@ func failIfUnmanaged(root string) error {
 	if paths.Managed(root) {
 		return nil
 	}
-	return cli.Fail(cli.ExitFail, paths.UnmanagedMessage, "so init")
+	return cli.Skip("not a Superopen repo")
 }
 
 func graphNoRefresh(cmd *cobra.Command) bool {

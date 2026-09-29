@@ -15,7 +15,7 @@ If that path is missing, fall back to `$SUPEROPEN_SO_BIN` or `so` / `so.exe` on 
 
 Never Grep `.so/` or installed skill/rule directories. Never pipe `so` through `head`/`tail`. If you spawn a Task/subagent, its prompt must say to run the same command line first (Explore children never see SessionStart).
 
-If `.so/` is missing, still run **one** `graph query`. If stdout is `not a Superopen repo; run so init`, stop. Do not `so init` unless the user explicitly asked. A linked git worktree of a managed parent seeds on that call.
+If `.so/` is missing, still run **one** `graph query`. If stdout says `not a Superopen repo`, stop. Do not `so init` unless the user explicitly asked. A linked git worktree of a managed parent seeds on that call.
 
 ## Scenario table
 

@@ -92,6 +92,18 @@ func TestHome(t *testing.T) {
 	}
 }
 
+func TestQuietUnmanagedSkipsWithoutErrorPrefix(t *testing.T) {
+	err := QuietUnmanaged(errors.New("not a Superopen repo; run so init"))
+	if ExitCode(err) != ExitOK {
+		t.Fatalf("exit=%d", ExitCode(err))
+	}
+	var buf bytes.Buffer
+	(&Out{W: &buf}).WriteError(err)
+	if buf.String() != "not a Superopen repo\n" {
+		t.Fatalf("got %q", buf.String())
+	}
+}
+
 func TestNormalizeExitUsage(t *testing.T) {
 	err := NormalizeExit(errors.New(`unknown command "nope" for "so"`))
 	if ExitCode(err) != ExitUsage {

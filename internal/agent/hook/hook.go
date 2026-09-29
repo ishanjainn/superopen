@@ -686,7 +686,7 @@ func hookRepoRoot(payload []byte) string {
 		start = wd
 	}
 	found, err := paths.FindRoot(start)
-	if err != nil || found == "" {
+	if err != nil || found == "" || !paths.Managed(found) {
 		return ""
 	}
 	return found

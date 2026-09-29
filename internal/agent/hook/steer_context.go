@@ -719,6 +719,9 @@ func claimRootStamp(payload []byte, name string) bool {
 	if engine.QueryStampFreshAt(path) {
 		return false
 	}
+	if err := paths.WriteGitignore(root); err != nil {
+		return false
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return false
 	}

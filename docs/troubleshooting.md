@@ -38,11 +38,11 @@ PowerShell uses `/` as a path separator. In a terminal, run `so init` with no le
 
 In agent chat, `/so init` is still the skill command. That is not a PowerShell path.
 
-## `not a Superopen repo; run so init`
+## `not a Superopen repo`
 
-`so install` only wires coding agents on this machine. It does not create project data.
+`so install` only wires coding agents on this machine. It does not create project data. A command in a repo without `.so/` prints `not a Superopen repo` and exits 0. It does not create `.so/`.
 
-Each repository still needs `so init` once, from that repo's root. That command creates `.so/` and builds the graph.
+Each repository still needs `so init` once, from that repo's root, when you want a graph there. That command creates `.so/`, writes `.so/.gitignore`, and builds the graph.
 
 After init, restart the agent so it sees the new directory.
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/graph/buildpool"
 	"github.com/ishanjainn/superopen/internal/memory"
+	sopaths "github.com/ishanjainn/superopen/internal/paths"
 )
 
 // ErrBuildPoolFull is returned when the global max concurrent builds are already running.
@@ -33,6 +34,9 @@ func publish(ctx context.Context, repoRoot string, build func(context.Context, s
 		return "", err
 	}
 	if err := os.MkdirAll(paths.Root, 0o700); err != nil {
+		return "", err
+	}
+	if err := sopaths.WriteGitignore(repoRoot); err != nil {
 		return "", err
 	}
 	var unlock func()

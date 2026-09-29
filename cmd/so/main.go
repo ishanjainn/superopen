@@ -32,7 +32,7 @@ func out() *cli.Out { return cli.New(cliFlags) }
 func main() {
 	root := newRootCommand()
 	if err := root.Execute(); err != nil {
-		err = cli.NormalizeExit(err)
+		err = cli.QuietUnmanaged(cli.NormalizeExit(err))
 		out().WriteError(err)
 		os.Exit(cli.ExitCode(err))
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ishanjainn/superopen/internal/scope"
 	_ "modernc.org/sqlite"
@@ -130,7 +131,26 @@ func (paths Paths) EnsureDirs() error {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
-	return nil
+	return WriteGitignore(paths.RepoRoot)
+}
+
+// WriteGitignore creates .so/.gitignore when it is missing. Callers that
+// create .so/ must use this so db/, sessions/, and harvest/ stay untracked.
+func WriteGitignore(repoRoot string) error {
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		return nil
+	}
+	ignorePath := filepath.Join(Resolve(repoRoot).Root, ".gitignore")
+	if _, err := os.Stat(ignorePath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(ignorePath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(ignorePath, []byte(GitignoreContents), 0o644)
 }
 
 func (paths Paths) SessionDir(id string) string {

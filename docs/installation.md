@@ -184,7 +184,7 @@ This creates `.so/`, writes `.so/.gitignore`, builds the graph, and registers th
 | `--cursor-rules` | Also write `.cursor/rules/superopen.mdc` in this repo |
 | `--root` | Nested package graph (otherwise nearest `.so/` or git top-level) |
 
-A repo without `.so/` stays unmanaged. Hooks stay quiet there. `so graph query` prints `not a Superopen repo; run so init`.
+A repo without `.so/` stays unmanaged. Hooks stay quiet there and do not create `.so/`. `so graph query` prints `not a Superopen repo` and exits 0. Run `so init` in that repo only when you want a graph there.
 
 Linked git worktrees of an inited parent can seed on the first graph query. If that still prints the unmanaged message, run `so init` in the worktree.
 
