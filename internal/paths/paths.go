@@ -1,9 +1,14 @@
 package paths
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/ishanjainn/superopen/internal/scope"
+	_ "modernc.org/sqlite"
 )
 
 const (
@@ -25,6 +30,7 @@ type Paths struct {
 	DBDir         string
 	Database      string
 	BuildLock     string
+	Scope         scope.Scope
 }
 
 // GitignoreContents is written to .so/.gitignore on first init or worktree seed.
@@ -73,7 +79,7 @@ func Resolve(repoRoot string) Paths {
 	root := filepath.Join(repoRoot, DirName)
 	sessions := filepath.Join(root, SessionsName)
 	dbDir := filepath.Join(root, DBName)
-	return Paths{
+	layout := Paths{
 		RepoRoot:      repoRoot,
 		Root:          root,
 		TracesDir:     sessions,
@@ -83,6 +89,27 @@ func Resolve(repoRoot string) Paths {
 		Database:      filepath.Join(dbDir, DatabaseFile),
 		BuildLock:     filepath.Join(dbDir, BuildLock),
 	}
+	if sc, err := scope.Current(repoRoot); err == nil {
+		layout.Scope = sc
+	}
+	return layout
+}
+
+// ResetStaleStore removes a database that is not the current shape, plus session files.
+func ResetStaleStore(layout Paths) error {
+	if _, err := os.Stat(layout.Database); err != nil {
+		return nil
+	}
+	if storeHasScopeColumns(layout.Database) {
+		return nil
+	}
+	for _, path := range []string{layout.Database, layout.Database + "-wal", layout.Database + "-shm", layout.Database + ".key"} {
+		_ = os.Remove(path)
+	}
+	if layout.SessionsDir != "" {
+		_ = os.RemoveAll(layout.SessionsDir)
+	}
+	return nil
 }
 
 func (paths Paths) Exists() bool {
@@ -104,9 +131,60 @@ func (paths Paths) EnsureDirs() error {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
-	return nil
+	return WriteGitignore(paths.RepoRoot)
+}
+
+// WriteGitignore creates .so/.gitignore when it is missing. Callers that
+// create .so/ must use this so db/, sessions/, and harvest/ stay untracked.
+func WriteGitignore(repoRoot string) error {
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		return nil
+	}
+	ignorePath := filepath.Join(Resolve(repoRoot).Root, ".gitignore")
+	if _, err := os.Stat(ignorePath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(ignorePath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(ignorePath, []byte(GitignoreContents), 0o644)
 }
 
 func (paths Paths) SessionDir(id string) string {
 	return filepath.Join(paths.SessionsDir, id)
+}
+
+func storeHasScopeColumns(dbPath string) bool {
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?mode=ro")
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	return !DatabaseMissingScope(db)
+}
+
+// DatabaseMissingScope reports a database that has tables but not the current scope columns.
+func DatabaseMissingScope(db *sql.DB) bool {
+	var projects, episodes int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='projects'`).Scan(&projects)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memory_episodes'`).Scan(&episodes)
+	if projects == 0 && episodes == 0 {
+		return false
+	}
+	if projects > 0 {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('projects') WHERE name='tenant_id'`).Scan(&n); err != nil || n == 0 {
+			return true
+		}
+	}
+	if episodes > 0 {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('memory_episodes') WHERE name='tenant_id'`).Scan(&n); err != nil || n == 0 {
+			return true
+		}
+	}
+	return false
 }

@@ -4,8 +4,14 @@ After a coding session, harvest proposes small patches to instruction files
 such as `AGENTS.md`, vendor rules, and skills. **Humans approve before
 anything becomes always-on.** A bad always-on rule is paid on every future
 session, so harvest stays off the hot path: no hook injection while you work.
+A proposal may also carry `memory_title` and `memory_text`. That text is stored
+for later recall only when the proposal is applied. Kind `memory` with
+`memory_text` and an empty diff does not edit a file: omit `target`. Other
+kinds still need a target. `simplify`, `create`, and any non-additive patch need `so harvest apply --force`.
 
-Live agent first: SessionStart and the first prompt-submit inject
+When Settings turns on Jev harvest, that pending line stays off. The Harvest page sends the latest finished session to Jev and stores the candidate only when Jev says promote, evidence is at least 2.5 of 4, and the correction probability is at least 0.80. The candidate text is the task and the human correction from the session. Jev does not write a playbook diff.
+
+Live agent first, when Jev harvest is off: SessionStart and the first prompt-submit inject
 `HARVEST pending` (`brief`, then `propose`, or `skip <id>`). SessionEnd uses
 the live vendor's own one-shot CLI when it is authenticated. Otherwise work
 stays pending for the next SessionStart. There is no cross-vendor fallback.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronsLeft, ChevronsRight } from "lucide-react";
+import { Pin, PinOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { displayVersion } from "@/lib/version";
@@ -11,7 +11,7 @@ import {
 } from "./sidebar-layout-context";
 
 export default function SidebarBrand() {
-  const { isExpanded, toggleSidebar } = useSidebarLayout();
+  const { isExpanded, isPinned, togglePin } = useSidebarLayout();
   const [version, setVersion] = useState("");
 
   useEffect(() => {
@@ -41,20 +41,20 @@ export default function SidebarBrand() {
           <Button
             variant="outline"
             size="icon"
-            onClick={toggleSidebar}
-            aria-label={isExpanded ? "Collapse sidebar" : "Expand sidebar"}
-            aria-expanded={isExpanded}
+            onClick={togglePin}
+            aria-label={isPinned ? "Unpin sidebar" : "Pin sidebar open"}
+            aria-pressed={isPinned}
             className="absolute -right-3 top-1/2 z-50 size-6 -translate-y-1/2 rounded-full border-neutral-300 bg-white p-0 text-neutral-600 shadow-sm hover:bg-neutral-50 hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-neutral-400"
           >
-            {isExpanded ? (
-              <ChevronsLeft className="size-3.5" />
+            {isPinned ? (
+              <PinOff className="size-3.5" />
             ) : (
-              <ChevronsRight className="size-3.5" />
+              <Pin className="size-3.5" />
             )}
           </Button>
         </TooltipTrigger>
         <TooltipContent side="right" sideOffset={10}>
-          {isExpanded ? "Collapse sidebar" : "Expand sidebar"}
+          {isPinned ? "Unpin sidebar" : "Pin sidebar open"}
         </TooltipContent>
       </Tooltip>
       {/* The mark keeps its slot in both states; expanding only reveals the

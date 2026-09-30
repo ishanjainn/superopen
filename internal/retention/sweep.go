@@ -9,6 +9,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/scope"
 	"github.com/ishanjainn/superopen/internal/session"
 )
 
@@ -29,9 +30,13 @@ type Settings struct {
 	MemoryHours  int `json:"memory_hours"`
 }
 
-func LoadSettings() (Settings, error) {
-	_ = config.PromoteFileToEnv()
-	cfg, err := config.Load(nil)
+func LoadSettings(root string) (Settings, error) {
+	sc, err := scope.Current(root)
+	if err != nil {
+		return Settings{}, err
+	}
+	_ = config.PromoteFileToEnv(sc)
+	cfg, err := config.Load(sc, nil)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -41,7 +46,7 @@ func LoadSettings() (Settings, error) {
 	}, nil
 }
 
-func SaveSettings(next Settings) (Settings, error) {
+func SaveSettings(root string, next Settings) (Settings, error) {
 	if next.SessionHours < 0 {
 		next.SessionHours = config.DefaultRetentionHours
 	}
@@ -54,12 +59,12 @@ func SaveSettings(next Settings) (Settings, error) {
 	}); err != nil {
 		return Settings{}, err
 	}
-	return LoadSettings()
+	return LoadSettings(root)
 }
 
 // Sweep deletes expired sessions and unpinned memories for one managed repo.
 func Sweep(root string) (Result, error) {
-	settings, err := LoadSettings()
+	settings, err := LoadSettings(root)
 	if err != nil {
 		return Result{}, err
 	}

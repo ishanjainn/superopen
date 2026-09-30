@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/agent/install"
+	"github.com/ishanjainn/superopen/internal/agent/vendors"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/projects"
 )
@@ -36,6 +37,13 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 	// other tools' entries.
 	if vendor == "cursor" {
 		return uninstallCursorHooks(dryRun)
+	}
+	if spec, ok := vendors.ByID(vendor); ok {
+		paths, err := install.UninstallCatalog(spec, dryRun)
+		if err != nil {
+			return paths, []string{err.Error()}
+		}
+		return paths, nil
 	}
 	if vendor == "gemini" {
 		path, pathErr := vendorDestRoot(vendor)

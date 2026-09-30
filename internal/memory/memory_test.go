@@ -386,9 +386,9 @@ func TestMaybeDistillSkipsWorkerSession(t *testing.T) {
 	store := session.NewStore(paths.Resolve(root))
 	if err := store.Start(session.Meta{
 		ID: id, Vendor: "claude-code", Model: "<synthetic>",
-		Title: "You write Superopen memory for a coding agent",
+		Title:         "You write Superopen memory for a coding agent",
 		PromptPreview: "You write Superopen memory for a coding agent",
-		StartedAt: time.Now().UTC(),
+		StartedAt:     time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1498,38 +1498,6 @@ func TestFreshStoreHasNoRankingSeeds(t *testing.T) {
 	}
 }
 
-func TestSchema3DropsSeededRankingKnobs(t *testing.T) {
-	root := testRoot(t)
-	store, err := OpenRoot(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.setMeta("schema_version", "2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetProfile("fts_keep", "7"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetProfile("dense_keep", "3"); err != nil {
-		t.Fatal(err)
-	}
-	store.Close()
-	store, err = OpenRoot(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	if got, _ := store.meta("fts_keep"); got != "" {
-		t.Fatalf("schema 2→3 must drop seeded fts_keep, got %q", got)
-	}
-	if got, _ := store.meta("dense_keep"); got != "" {
-		t.Fatalf("schema 2→3 must drop seeded dense_keep, got %q", got)
-	}
-	if store.knobInt("fts_keep", ftsPrimaryKeep) != ftsPrimaryKeep {
-		t.Fatalf("search should fall through to constant %d", ftsPrimaryKeep)
-	}
-}
-
 func TestSchema3KeepsExplicitRankingOverride(t *testing.T) {
 	root := testRoot(t)
 	store, err := OpenRoot(root)
@@ -2257,9 +2225,9 @@ func TestSearchFTSUnionOutsideRecencyWindow(t *testing.T) {
 		created := time.Now().UTC().Add(time.Duration(i+1) * time.Second).Format(time.RFC3339Nano)
 		uid := "fill-" + itoa(i)
 		if _, err := store.db.Exec(`
-INSERT INTO memory_episodes(uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,faded_at,last_accessed_at,community_id,centrality,tier,horizon,keep_until_session,never_decay,tags,fading,topic,facts,narrative,concepts,content_hash)
-VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			uid, "", "", KindSession, SourceAgent, "later "+itoa(i), "unrelated later diary", "", "", 4,
+INSERT INTO memory_episodes(tenant_id,principal_id,uid,session_id,span_id,kind,source,title,text,files,tool_name,tokens,pinned,faded,embedding_pending,created_at,updated_at,valid_from,valid_to,faded_at,last_accessed_at,community_id,centrality,tier,horizon,keep_until_session,never_decay,tags,fading,topic,facts,narrative,concepts,content_hash)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			store.scope.TenantID, store.scope.PrincipalID, uid, "", "", KindSession, SourceAgent, "later "+itoa(i), "unrelated later diary", "", "", 4,
 			0, 0, 1, created, created, created, "", "", "", "", 0, HorizonMedium, HorizonMedium, 0, 0, "", 0, "", "[]", "", "[]", ""); err != nil {
 			t.Fatal(err)
 		}

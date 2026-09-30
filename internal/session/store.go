@@ -43,6 +43,8 @@ type Meta struct {
 	IsSubagent    bool       `json:"is_subagent,omitempty"`
 
 	// VCS / join fields (materialized from spans + optional git trailers).
+	TenantID     string              `json:"tenant_id,omitempty"`
+	PrincipalID  string              `json:"principal_id,omitempty"`
 	ProjectID    string              `json:"project_id,omitempty"`
 	RepoRoot     string              `json:"repo_root,omitempty"`
 	Branch       string              `json:"branch,omitempty"`
@@ -192,6 +194,9 @@ func (s *Store) List() ([]IndexEntry, error) {
 	}
 	entries := make([]Meta, 0, len(byID))
 	for _, meta := range byID {
+		if !s.visible(meta) {
+			continue
+		}
 		entries = append(entries, meta)
 	}
 	sort.Slice(entries, func(i, j int) bool {
@@ -482,7 +487,13 @@ func (s *Store) Get(id string) (Meta, error) {
 		return Meta{}, err
 	}
 	var d Document
-	return d.Meta, json.Unmarshal(data, &d)
+	if err := json.Unmarshal(data, &d); err != nil {
+		return Meta{}, err
+	}
+	if !s.visible(d.Meta) {
+		return Meta{}, os.ErrNotExist
+	}
+	return d.Meta, nil
 }
 
 // GetFootprint loads the footprint embedded in session.json.
@@ -616,9 +627,29 @@ func mergeMetaSticky(existing, incoming Meta) Meta {
 }
 
 // UpdateMeta writes session.json and refreshes the sessions index.
+func (s *Store) visible(meta Meta) bool {
+	sc := s.Paths.Scope
+	if sc.TenantID == "" || sc.PrincipalID == "" {
+		return true
+	}
+	return meta.TenantID == sc.TenantID && meta.PrincipalID == sc.PrincipalID
+}
+
+func (s *Store) stamp(meta *Meta) {
+	sc := s.Paths.Scope
+	if sc.TenantID == "" {
+		return
+	}
+	meta.TenantID = sc.TenantID
+	meta.PrincipalID = sc.PrincipalID
+	if meta.ProjectID == "" {
+		meta.ProjectID = sc.ProjectID
+	}
+}
+
 func (s *Store) UpdateMeta(meta Meta) error {
-	dir := s.Paths.SessionDir(meta.ID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	s.stamp(&meta)
+	if err := s.mkdirSession(meta.ID); err != nil {
 		return err
 	}
 	if err := s.writeDocument(meta.ID, func(d *Document) { d.Meta = meta }); err != nil {
@@ -628,6 +659,7 @@ func (s *Store) UpdateMeta(meta Meta) error {
 }
 
 func (s *Store) Start(meta Meta) error {
+	s.stamp(&meta)
 	if meta.ID == "" {
 		meta.ID = fmt.Sprintf("ses_%d", time.Now().UnixNano())
 	}
@@ -638,14 +670,20 @@ func (s *Store) Start(meta Meta) error {
 		meta.StartedAt = time.Now().UTC()
 	}
 	meta.Status = StatusActive
-	dir := s.Paths.SessionDir(meta.ID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := s.mkdirSession(meta.ID); err != nil {
 		return err
 	}
 	if err := s.writeDocument(meta.ID, func(d *Document) { d.Meta = meta }); err != nil {
 		return err
 	}
 	return s.upsertIndex(meta)
+}
+
+func (s *Store) mkdirSession(id string) error {
+	if err := paths.WriteGitignore(s.Paths.RepoRoot); err != nil {
+		return err
+	}
+	return os.MkdirAll(s.Paths.SessionDir(id), 0o755)
 }
 
 // UpsertActiveFromSpans creates/refreshes an active session row so the UI shows
@@ -800,10 +838,10 @@ func truncateRunes(s string, n int) string {
 
 // MaterializeFromSpans builds events, footprint, and updates session.json post-session.
 func (s *Store) MaterializeFromSpans(id string, spans []trace.Span, tokens int64, cost float64) (Meta, error) {
-	dir := s.Paths.SessionDir(id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := s.mkdirSession(id); err != nil {
 		return Meta{}, err
 	}
+	dir := s.Paths.SessionDir(id)
 
 	meta, err := s.Get(id)
 	if err != nil {
@@ -1007,6 +1045,9 @@ func (s *Store) writeDocument(id string, mutate func(*Document)) error {
 			d.ID = id
 		}
 		path := filepath.Join(s.Paths.SessionDir(id), "session.json")
+		if err := paths.WriteGitignore(s.Paths.RepoRoot); err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}

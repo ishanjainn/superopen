@@ -1,6 +1,12 @@
 package hook
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestClassifyPromptMemoryCueFirstPerson(t *testing.T) {
 	cases := []string{
@@ -63,5 +69,56 @@ func TestClassifyPromptCaptureVsRecall(t *testing.T) {
 	}
 	if got := classifyPrompt("do you remember this timeout"); got != routeMemory {
 		t.Errorf("do you remember this must stay recall, got %q", got)
+	}
+}
+
+func TestClassifyPromptContributorNotesAreCapture(t *testing.T) {
+	p := "Code-shaped questions beat notes-shaped ones. That rule belongs in the contributor notes, not as a comment on the function. Leave the source as it is."
+	if got := classifyPrompt(p); got != routeCapture {
+		t.Fatalf("classifyPrompt(%q)=%q want capture", p, got)
+	}
+	if got := classifyPrompt("how does this function work"); got != routeCode {
+		t.Fatalf("question about a function must stay code, got %q", got)
+	}
+	if got := classifyPrompt("where is the class in internal/foo.go"); got != routeCode {
+		t.Fatalf("path question must stay code, got %q", got)
+	}
+	if got := classifyPrompt("add a comment on the function"); got == routeCode {
+		t.Fatal("bare function must not force code")
+	}
+}
+
+func TestWeakDeclDoesNotSteerGraph(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".so"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"session_id": "weak-decl",
+		"cwd":        root,
+		"prompt":     "add a comment on the function",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok := steerTextFor("cursor", "beforeSubmitPrompt", payload)
+	if ok && strings.Contains(text, "graph query") {
+		t.Fatalf("a bare function mention must not steer the graph, got %q", text)
+	}
+	notes := "Code-shaped questions beat notes-shaped ones. That rule belongs in the contributor notes, not as a comment on the function. Leave the source as it is."
+	payload, err = json.Marshal(map[string]any{
+		"session_id": "notes-capture",
+		"cwd":        root,
+		"prompt":     notes,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _, ok = steerTextFor("cursor", "beforeSubmitPrompt", payload)
+	if !ok || !strings.Contains(text, "memory capture") {
+		t.Fatalf("contributor notes must steer memory capture, ok=%v text=%q", ok, text)
 	}
 }

@@ -12,13 +12,15 @@ package install
 import (
 	"fmt"
 	"strings"
+
+	"github.com/ishanjainn/superopen/internal/agent/vendors"
 )
 
 // vendorsFromArg expands the --vendor argument into a slice of vendor IDs.
 func vendorsFromArg(arg string) ([]string, error) {
 	switch strings.ToLower(strings.TrimSpace(arg)) {
 	case "all":
-		return []string{"claude-code", "cursor", "codex", "gemini", "opencode", "copilot-cli", "pi"}, nil
+		return append([]string{"claude-code", "cursor", "codex", "gemini", "opencode", "copilot-cli", "pi"}, vendors.IDs()...), nil
 	case "claude-code", "cc":
 		return []string{"claude-code"}, nil
 	case "cursor":
@@ -34,6 +36,9 @@ func vendorsFromArg(arg string) ([]string, error) {
 	case "pi":
 		return []string{"pi"}, nil
 	default:
+		if spec, ok := vendors.ByID(arg); ok {
+			return []string{spec.ID}, nil
+		}
 		return nil, fmt.Errorf("unknown --vendor %q", arg)
 	}
 }

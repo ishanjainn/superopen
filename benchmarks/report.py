@@ -525,22 +525,22 @@ def _swe_headline_table(swe: dict[str, Any]) -> str:
 
 def _swe_efficiency_note(swe: dict[str, Any]) -> str:
     summary = swe.get("summary") or {}
-    over = summary.get("efficiency_over") or "all_completed"
-    if over == "both_resolved":
-        return (
-            "Correctness is scored on every instance. Tokens, cost, tool calls, API requests "
-            "and wall-clock are over instances both arms resolved."
-        )
-    if not summary.get("graded"):
-        return (
-            "Correctness is scored on every instance (pending official grader until `--swe-grade` "
-            "succeeds). Efficiency rows are over all completed sessions until both arms have "
-            "resolved instances."
-        )
-    return (
-        "Correctness is scored on every instance. Efficiency rows are over all completed sessions "
-        "(no instance both arms resolved)."
+    note = (
+        "Correctness is scored on every instance. Tokens, cost, tool calls, API requests "
+        "and wall-clock are over every completed session."
     )
+    both_n = int(summary.get("both_resolved_n") or 0)
+    if both_n:
+        nat = _fmt_usd(summary.get("both_resolved_native_cost_usd")) or "—"
+        so = _fmt_usd(summary.get("both_resolved_superopen_cost_usd")) or "—"
+        note += (
+            f" Both arms passed {both_n} instance"
+            f"{'' if both_n == 1 else 's'}"
+            f" (cost {nat} vs {so}; not the headline)."
+        )
+    elif not summary.get("graded"):
+        note += " Official grades are pending until `--swe-grade` succeeds."
+    return note
 
 
 def _swe_instance_tables(swe: dict[str, Any]) -> str:
@@ -991,9 +991,9 @@ def _glance_table(
             f"| SWE-bench | {swe_ds} | Correctness | {so_c} | {nat_c} |",
             f"| SWE-bench | {swe_ds} | Cost | {so_usd} | {nat_usd} |",
             f"| Memory | {locomo_ds} | recall@10 | {_fmt_recall(locomo, k=10)} | {_memory_compared_with(locomo)} |",
-            f"| Memory | {locomo_ds} | QA accuracy | {_fmt_qa_short(locomo)} | — |",
+            f"| Memory | {locomo_ds} | QA accuracy | {_fmt_qa(locomo)} | — |",
             f"| Memory | LongMemEval-S (50) | recall@10 | {_fmt_recall(lme, k=10)} | {_memory_compared_with(lme)} |",
-            f"| Memory | LongMemEval-S (50) | QA accuracy | {_fmt_qa_short(lme)} | — |",
+            f"| Memory | LongMemEval-S (50) | QA accuracy | {_fmt_qa(lme)} | — |",
             f"| Graph | Django {django_tag} | 12-probe | {graph_s} | — |",
             f"| Sessions | Django (6) | Key-fact coverage | {sess_so} | {sess_nat} |",
             f"| Sessions | Django (6) | Cost | {sess_usd} | {sess_usd_nat} |",

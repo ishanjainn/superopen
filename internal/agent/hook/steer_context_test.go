@@ -557,6 +557,181 @@ func TestQueryStampFreshReadOverflowsToSnippetOnce(t *testing.T) {
 	}
 }
 
+func TestQueryListedFileNudgesOnceMore(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".so", "db"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".so", "db", "so.db"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const session = "listed-session"
+	writeHookSession(t, root, session)
+	py := filepath.Join(root, "django", "db", "models", "sql", "query.py")
+	if err := os.MkdirAll(filepath.Dir(py), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(py, []byte("def get_aggregation():\n    pass\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout := "NODE get_aggregation [qn=django.db.models.sql.query.Query.get_aggregation src=django/db/models/sql/query.py loc=L10-20]\n4 other nodes.\n"
+	post, err := json.Marshal(map[string]any{
+		"session_id": session,
+		"cwd":        root,
+		"tool_name":  "Bash",
+		"tool_input": map[string]any{"command": "/usr/local/bin/so graph query 'strip unused annotations from count'"},
+		"tool_response": map[string]any{
+			"stdout": stdout,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PostToolUse", "", post); ok {
+		t.Fatal("recording query files must not inject context")
+	}
+	empty, err := json.Marshal(map[string]any{
+		"session_id":    session,
+		"cwd":           root,
+		"tool_name":     "Bash",
+		"tool_input":    map[string]any{"command": "/usr/local/bin/so graph query 'again'"},
+		"tool_response": map[string]any{"stdout": ""},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PostToolUse", "", empty); ok {
+		t.Fatal("empty stdout must not inject context")
+	}
+	engine.RecordQueryStampFor(root, session)
+
+	readOf := func(path string) []byte {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{
+			"tool_name":  "Read",
+			"tool_input": map[string]any{"file_path": path},
+			"cwd":        root,
+			"session_id": session,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	listed := readOf(py)
+	if d, ok := steerDecisionFor("claude-code", "PreToolUse", "read", listed); !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") {
+		t.Fatalf("first read is the edit read, got ok=%v deny=%v text=%q", ok, d.deny, d.text)
+	}
+	if d, ok := steerDecisionFor("claude-code", "PreToolUse", "read", listed); !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") {
+		t.Fatalf("second read of a listed file must nudge once more, got ok=%v deny=%v text=%q", ok, d.deny, d.text)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "read", listed); ok {
+		t.Fatal("third read of a listed file must stay silent")
+	}
+	other := filepath.Join(root, "django", "db", "models", "query.py")
+	if err := os.WriteFile(other, []byte("class QuerySet:\n    pass\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "read", readOf(other)); ok {
+		t.Fatal("second read of an unlisted file must stay silent")
+	}
+
+	pattern, err := json.Marshal(map[string]any{
+		"tool_name":  "Grep",
+		"tool_input": map[string]any{"pattern": "Count"},
+		"cwd":        root,
+		"session_id": session,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "search", pattern); ok {
+		t.Fatal("pattern-only grep must stay silent")
+	}
+
+	sed, err := json.Marshal(map[string]any{
+		"tool_name":  "Bash",
+		"tool_input": map[string]any{"command": "sed -n '10,40p' django/db/models/sql/query.py"},
+		"cwd":        root,
+		"session_id": session,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "", sed); ok {
+		t.Fatal("bash read of a file already extra-nudged must stay silent")
+	}
+}
+
+func TestQueryListedGrepNudgesOnce(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".so", "db"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".so", "db", "so.db"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const session = "grep-session"
+	writeHookSession(t, root, session)
+	py := filepath.Join(root, "django", "db", "models", "sql", "query.py")
+	if err := os.MkdirAll(filepath.Dir(py), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(py, []byte("def get_count():\n    pass\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	post, err := json.Marshal(map[string]any{
+		"session_id": session,
+		"cwd":        root,
+		"tool_name":  "Bash",
+		"tool_input": map[string]any{"command": "so graph query 'count annotations'"},
+		"tool_response": map[string]any{
+			"stdout": "NODE Query.get_count [src=django/db/models/sql/query.py loc=L1-8]\n",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PostToolUse", "", post); ok {
+		t.Fatal("recording query files must not inject context")
+	}
+	engine.RecordQueryStampFor(root, session)
+	grep := func(path string) []byte {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{
+			"tool_name":  "Grep",
+			"tool_input": map[string]any{"pattern": "annotation", "path": path},
+			"cwd":        root,
+			"session_id": session,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	listed := grep("django/db/models/sql/query.py")
+	if d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", listed); !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") {
+		t.Fatalf("path-scoped grep of a listed file must nudge once, got ok=%v deny=%v text=%q", ok, d.deny, d.text)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "search", listed); ok {
+		t.Fatal("second path-scoped grep must stay silent")
+	}
+	runtests, err := json.Marshal(map[string]any{
+		"tool_name":  "Bash",
+		"tool_input": map[string]any{"command": "python runtests.py --parallel=8"},
+		"cwd":        root,
+		"session_id": session,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "search", runtests); ok {
+		t.Fatal("runtests must stay ungated")
+	}
+}
+
 func TestQueryRepeatOverflowOnceAfterStamp(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()

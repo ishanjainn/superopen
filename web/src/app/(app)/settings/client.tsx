@@ -31,6 +31,9 @@ export default function SettingsPage() {
   const [sessionHours, setSessionHours] = useState("168");
   const [memoryHours, setMemoryHours] = useState("168");
   const [retentionLoaded, setRetentionLoaded] = useState(false);
+  const [jevEnabled, setJevEnabled] = useState(false);
+  const [jevKeySet, setJevKeySet] = useState(false);
+  const [jevKey, setJevKey] = useState("");
   const [removeTarget, setRemoveTarget] = useState<{
     id: string;
     label: string;
@@ -46,17 +49,58 @@ export default function SettingsPage() {
             session_hours?: number;
             memory_hours?: number;
           };
-          if (!r.ok) return;
-          setSessionHours(String(body.session_hours ?? 168));
-          setMemoryHours(String(body.memory_hours ?? 168));
+          if (r.ok) {
+            setSessionHours(String(body.session_hours ?? 168));
+            setMemoryHours(String(body.memory_hours ?? 168));
+          }
           setRetentionLoaded(true);
         } catch {
           setRetentionLoaded(true);
+        }
+        try {
+          const r = await fetch("/api/settings/jev");
+          const body = (await r.json()) as { enabled?: boolean; key_set?: boolean };
+          if (r.ok) {
+            setJevEnabled(Boolean(body.enabled));
+            setJevKeySet(Boolean(body.key_set));
+          }
+        } catch {
+          /* settings stay at the default off position */
         }
       })();
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  const saveJev = useCallback(async () => {
+    setBusyId("jev");
+    setError("");
+    setStatus("");
+    try {
+      const r = await fetch("/api/settings/jev", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          enabled: jevEnabled,
+          api_key: jevKey,
+        }),
+      });
+      const body = (await r.json().catch(() => ({}))) as {
+        error?: string;
+        enabled?: boolean;
+        key_set?: boolean;
+      };
+      if (!r.ok) throw new Error(body.error || "save failed");
+      setJevEnabled(Boolean(body.enabled));
+      setJevKeySet(Boolean(body.key_set));
+      setJevKey("");
+      setStatus(body.enabled ? "Jev harvest is on." : "Jev harvest is off.");
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusyId("");
+    }
+  }, [jevEnabled, jevKey]);
 
   const saveRetention = useCallback(async (apply: boolean) => {
     setBusyId("retention");
@@ -201,6 +245,43 @@ export default function SettingsPage() {
                 </button>
               ))}
             </div>
+          </section>
+
+          <section className="rounded border border-neutral-200 p-4">
+            <h2 className="font-medium text-neutral-900">Jev harvest</h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              Off by default. When on, the Harvest page asks Jev whether the latest
+              finished session is worth keeping. Coding agents are not asked to propose.
+            </p>
+            <label className="mt-3 flex items-center gap-2 text-sm text-neutral-800">
+              <input
+                type="checkbox"
+                checked={jevEnabled}
+                disabled={busyId === "jev"}
+                onChange={(event) => setJevEnabled(event.target.checked)}
+              />
+              Use Jev
+            </label>
+            <label className="mt-3 block text-xs text-neutral-600">
+              TYPESAFE_API_KEY
+              <input
+                type="password"
+                autoComplete="off"
+                disabled={busyId === "jev"}
+                value={jevKey}
+                placeholder={jevKeySet ? "Saved" : "Required when Jev is on"}
+                onChange={(event) => setJevKey(event.target.value)}
+                className="mt-1.5 w-full rounded border border-neutral-300 px-2 py-1.5 font-mono text-xs outline-none focus:border-neutral-500"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={busyId === "jev"}
+              onClick={() => void saveJev()}
+              className="mt-3 rounded border border-neutral-200 px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+            >
+              Save
+            </button>
           </section>
 
           <section className="rounded border border-neutral-200 p-4">

@@ -94,6 +94,7 @@ func TestHeadlessEnvSkipsHook(t *testing.T) {
 		t.Fatal("headless worker must not materialize a session")
 	}
 }
+
 // host-mismatch guard's right-hand side: only `CLAUDECODE=1` is
 // authoritative. Cursor 3.4+ honours the Claude Code plugin spec and
 // fires our --vendor=cc hook for Cursor's own agent turns, mirroring
@@ -355,6 +356,30 @@ func TestMaybeFinalizeSessionCascadesActiveChildren(t *testing.T) {
 	}
 	if !want[parent] || !want[child] {
 		t.Fatalf("finalize ids=%v want parent+child", got)
+	}
+}
+
+func TestSessionEndUnmanagedDoesNotCreateSO(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"cwd":             root,
+		"conversation_id": "chat-without-so",
+	})
+	var got []string
+	prev := spawnSessionFinalize
+	spawnSessionFinalize = func(_, id string) { got = append(got, id) }
+	t.Cleanup(func() { spawnSessionFinalize = prev })
+
+	maybeFinalizeSession("sessionEnd", payload)
+	maybeIngestMemory("sessionEnd", payload)
+	if len(got) != 0 {
+		t.Fatalf("unmanaged session end spawned finalize: %v", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".so")); !os.IsNotExist(err) {
+		t.Fatal("unmanaged session end created .so")
 	}
 }
 

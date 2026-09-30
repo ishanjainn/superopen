@@ -17,6 +17,7 @@ next session starts smarter and cheaper.
 | [sessions.md](sessions.md) | How agent sessions are recorded and materialized |
 | [memory.md](memory.md) | Project diary over sessions: capture, search, distill |
 | [harvest.md](harvest.md) | Playbook patches staged for human approval |
+| [scan.md](scan.md) | Detection rules over recorded tool calls |
 | [troubleshooting.md](troubleshooting.md) | Install, PATH, hooks, UI, stale graph |
 
 ## Quick start
@@ -38,6 +39,7 @@ so init                                # creates .so/ in that repo
 2. A repo becomes managed when `so init` creates `.so/`.
 3. **Graph**: structural questions go to `so graph query` instead of grep.
 4. **Sessions** (`so sessions`) record what happened while you worked.
+   The Scan page checks those tool calls. You do not run `so scan` by hand.
 5. **Memory** (`so memory`) distills sessions into searchable prior work.
 6. **Harvest** proposes instruction-file patches. You approve before anything
    becomes always-on.

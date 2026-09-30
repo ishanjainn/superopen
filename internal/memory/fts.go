@@ -13,34 +13,6 @@ const ftsDeleteTrigger = `CREATE TRIGGER IF NOT EXISTS memory_episodes_ad AFTER 
   DELETE FROM memory_episodes_fts WHERE rowid = old.id;
 END;`
 
-// ensurePlaintextFTS migrates content= / ciphertext FTS to a standalone
-// index over plaintext so lexical search can see diary bodies.
-func (s *Store) ensurePlaintextFTS() error {
-	_, _ = s.db.Exec(`DROP TRIGGER IF EXISTS memory_episodes_ai`)
-	_, _ = s.db.Exec(`DROP TRIGGER IF EXISTS memory_episodes_au`)
-	var sql string
-	err := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE name='memory_episodes_fts' AND sql IS NOT NULL`).Scan(&sql)
-	needRebuild := err != nil || strings.Contains(strings.ToLower(sql), "content=")
-	if !needRebuild {
-		needRebuild = s.ftsLooksSealed()
-	}
-	if !needRebuild {
-		_, _ = s.db.Exec(ftsDeleteTrigger)
-		return nil
-	}
-	_, _ = s.db.Exec(`DROP TRIGGER IF EXISTS memory_episodes_ad`)
-	if _, err := s.db.Exec(`DROP TABLE IF EXISTS memory_episodes_fts`); err != nil {
-		return err
-	}
-	if _, err := s.db.Exec(plaintextFTSDDL); err != nil {
-		return err
-	}
-	if _, err := s.db.Exec(ftsDeleteTrigger); err != nil {
-		return err
-	}
-	return s.rebuildFTS()
-}
-
 func (s *Store) ftsLooksSealed() bool {
 	var sample string
 	err := s.db.QueryRow(`SELECT text FROM memory_episodes_fts WHERE text != '' LIMIT 1`).Scan(&sample)

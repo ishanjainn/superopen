@@ -117,12 +117,12 @@ func (s *Store) appendQueryBodies(ctx context.Context, project string, nodes []a
 		}
 		title := fmt.Sprintf("%s [%s src=%s loc=%s]", queryNodeDisplayName(display), display.Label, got.Location.File, queryNodeLoc(display))
 		block := "\n--- " + title + " ---\n" + got.Code + "\n"
+		need := len(block)
 		if used == 0 {
-			if leftover < headerBudget+len(block) {
-				break
-			}
-		} else if used+len(block) > leftover {
-			break
+			need += headerBudget
+		}
+		if used+need > leftover {
+			continue
 		}
 		parts = append(parts, body{title: title, code: got.Code})
 		if used == 0 {

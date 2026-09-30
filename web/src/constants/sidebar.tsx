@@ -3,6 +3,7 @@ import {
   GraphIcon,
   HarvestIcon,
   MemoryIcon,
+  ScanIcon,
   SessionsIcon,
 } from "@/components/shell/nav-icons";
 import type { SidebarItemProps } from "@/types/sidebar";
@@ -20,6 +21,12 @@ export const SIDEBAR_ITEMS: SidebarItemProps[] = [
     icon: <SessionsIcon className={ICON_CLASSES} />,
     text: "Sessions",
     link: "/sessions",
+    type: "action",
+  },
+  {
+    icon: <ScanIcon className={ICON_CLASSES} />,
+    text: "Scan",
+    link: "/scan",
     type: "action",
   },
   {

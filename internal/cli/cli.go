@@ -358,6 +358,28 @@ func Fail(code int, msg string, hint string) error {
 	return &Error{Code: code, Message: msg, Hint: hint}
 }
 
+// Skip stops a command without failing the process. Agents treat a non-zero
+// exit in an uninited repo as a task to run so init.
+func Skip(msg string) error {
+	return &Error{Code: ExitOK, Message: msg}
+}
+
+// QuietUnmanaged turns "not a Superopen repo" into a zero-exit skip so an
+// agent working in another checkout is not told to initialize it.
+func QuietUnmanaged(err error) error {
+	if err == nil {
+		return nil
+	}
+	var ae *Error
+	if errors.As(err, &ae) && ae.Code == ExitOK {
+		return err
+	}
+	if strings.Contains(err.Error(), "not a Superopen repo") {
+		return Skip("not a Superopen repo")
+	}
+	return err
+}
+
 // WriteError emits a structured AXI error on stdout (stderr is debug only).
 func (o *Out) WriteError(err error) {
 	if err == nil {
@@ -366,6 +388,16 @@ func (o *Out) WriteError(err error) {
 	var ae *Error
 	if !errors.As(err, &ae) {
 		ae = &Error{Code: ExitFail, Message: err.Error()}
+	}
+	if ae.Code == ExitOK {
+		if o.Flags.JSON {
+			_ = json.NewEncoder(o.W).Encode(map[string]any{
+				"ok": true, "skipped": true, "message": ae.Message,
+			})
+			return
+		}
+		fmt.Fprintln(o.W, ae.Message)
+		return
 	}
 	if o.Flags.JSON {
 		_ = json.NewEncoder(o.W).Encode(map[string]any{
@@ -379,6 +411,48 @@ func (o *Out) WriteError(err error) {
 	fmt.Fprintf(o.W, "error: %s\n", ae.Message)
 	if ae.Hint != "" {
 		fmt.Fprintf(o.W, "hint: %s\n", ae.Hint)
+	}
+}
+
+// NormalizeExit maps Cobra usage failures (unknown command, bad flag, wrong
+// arity) onto the AXI usage code. Graph output is unchanged.
+func NormalizeExit(err error) error {
+	if err == nil {
+		return nil
+	}
+	var ae *Error
+	if errors.As(err, &ae) {
+		return err
+	}
+	msg := err.Error()
+	if isUsageMessage(msg) {
+		return Usage(msg, "")
+	}
+	return err
+}
+
+func isUsageMessage(msg string) bool {
+	switch {
+	case strings.Contains(msg, "unknown command"):
+		return true
+	case strings.Contains(msg, "unknown flag"):
+		return true
+	case strings.Contains(msg, "unknown shorthand"):
+		return true
+	case strings.Contains(msg, "accepts "):
+		return true
+	case strings.Contains(msg, "requires at least"):
+		return true
+	case strings.Contains(msg, "required flag"):
+		return true
+	case strings.Contains(msg, "flag needs an argument"):
+		return true
+	case strings.Contains(msg, "bad flag syntax"):
+		return true
+	case strings.HasPrefix(msg, "invalid argument "):
+		return true
+	default:
+		return false
 	}
 }
 

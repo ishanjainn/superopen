@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/agent/headless"
+	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/session"
 )
@@ -206,6 +207,9 @@ func TestSessionStartLinePendingNotOpenReview(t *testing.T) {
 	}
 	if !paths.MentionsCommand(line, "harvest brief") || !paths.MentionsCommand(line, "harvest skip") {
 		t.Fatalf("live line must name brief then skip: %q", line)
+	}
+	if !strings.Contains(line, "sess-pending") || !strings.Contains(line, "memory capture") || !strings.Contains(line, "not a playbook diff") {
+		t.Fatalf("pending line must keep the session and treat the current message as a note: %q", line)
 	}
 	if strings.Contains(line, "harvest scan") {
 		t.Fatalf("live line must not name headless scan: %q", line)
@@ -408,6 +412,9 @@ func TestBriefUsesPendingSession(t *testing.T) {
 	if !strings.Contains(text, "brief-1") || !strings.Contains(text, "You propose playbook patches") {
 		t.Fatalf("brief: %q", text)
 	}
+	if !strings.Contains(text, "memory capture") || !strings.Contains(text, "stdin") || !strings.Contains(text, "Do not write a file") {
+		t.Fatalf("brief must keep this turn as a note and propose on stdin: %q", text)
+	}
 }
 
 func TestMaybeGenerateSkipsWorkerSession(t *testing.T) {
@@ -540,5 +547,56 @@ func TestDeleteExpiredKeepsOpenAndPending(t *testing.T) {
 	latest, ok := store.LatestRun()
 	if !ok || latest.SessionID != "still-pending" {
 		t.Fatalf("pending run must remain, latest=%+v", latest)
+	}
+}
+
+func TestApplyStoresMemoryAndDeclineDoesNot(t *testing.T) {
+	root := testRepo(t)
+	proposed, err := Propose(root, ProposeInput{
+		Kind:        KindMemory,
+		Title:       "keep cookies in sqlite",
+		Reason:      "the session corrected a wrong store",
+		MemoryTitle: "keep cookies in sqlite",
+		MemoryText:  "auth cookies stay in sqlite",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	declined, err := Propose(root, ProposeInput{
+		Kind:        KindMemory,
+		Title:       "do not store this",
+		Reason:      "rejected correction",
+		MemoryTitle: "do not store this",
+		MemoryText:  "this text must stay out of recall",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Decline(root, declined.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(root, proposed.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	mem, err := memory.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mem.Close()
+	hits, err := mem.Search(memory.SearchFilter{Query: "cookies stay in sqlite", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 || !strings.Contains(hits[0].Text, "auth cookies stay in sqlite") {
+		t.Fatal("applied memory was not stored")
+	}
+	hidden, err := mem.Search(memory.SearchFilter{Query: "must stay out of recall", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hit := range hidden {
+		if strings.Contains(hit.Text, "must stay out of recall") {
+			t.Fatalf("declined text was stored: %+v", hit)
+		}
 	}
 }

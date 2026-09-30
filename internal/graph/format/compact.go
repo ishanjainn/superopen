@@ -215,6 +215,18 @@ func SnippetCompact(result api.SnippetResult) string {
 	if result.Clipped {
 		b.WriteString("clipped: true\n")
 	}
+	if result.OmittedStart > 0 && result.OmittedEnd >= result.OmittedStart {
+		fmt.Fprintf(&b, "omitted: L%d-%d\n", result.OmittedStart, result.OmittedEnd)
+		if qn := strings.TrimSpace(result.QualifiedName); qn != "" {
+			fmt.Fprintf(&b, "so graph snippet %s --from %d\n", qn, result.OmittedStart)
+		}
+	}
+	if result.Clipped && len(result.DirectCallees) > 0 {
+		b.WriteString("callees: (cols: qn file)\n")
+		for _, node := range result.DirectCallees {
+			fmt.Fprintf(&b, "  %s %s\n", node.QualifiedName, node.Location.File)
+		}
+	}
 	if len(result.Suggestions) > 0 && result.Status != "ambiguous" {
 		fmt.Fprintf(&b, "also: %d  (cols: qn label file)\n", len(result.Suggestions))
 		for _, node := range result.Suggestions {

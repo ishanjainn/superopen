@@ -170,9 +170,7 @@ func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen, hot b
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode < 500 {
-				fmt.Printf("Superopen UI %s (pid %d)\n", url, cmd.Process.Pid)
-				fmt.Printf("Logs: %s\n", logPath)
-				fmt.Printf("Stop: so dev stop\n")
+				printDevURL(url)
 				maybeOpenUI(url+"/graph", noOpen)
 				return nil
 			}
@@ -180,6 +178,10 @@ func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen, hot b
 		time.Sleep(400 * time.Millisecond)
 	}
 	return fmt.Errorf("timed out waiting for UI on %s; see %s", url, logPath)
+}
+
+func printDevURL(url string) {
+	fmt.Printf("Running on: %s\n", url)
 }
 
 func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot bool) error {
@@ -190,9 +192,7 @@ func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot b
 		runner.Start(context.Background())
 		defer runner.Stop()
 	}
-	fmt.Println("Live graph refresh active (local git poll ~60s; no LLM).")
 	memory.EnsureEmbedWorker()
-	fmt.Printf("Embed worker http://%s\n", memory.DefaultEmbedListen)
 	go func() {
 		_ = runRetentionSweep(root)
 		ticker := time.NewTicker(5 * time.Minute)
@@ -207,11 +207,7 @@ func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot b
 	if err != nil {
 		return fmt.Errorf("Next.js UI: %w", err)
 	}
-	mode := "prebuilt"
-	if hot {
-		mode = "hot / Turbopack"
-	}
-	fmt.Printf("Superopen UI %s (%s)\n", nextURL, mode)
+	printDevURL(nextURL)
 	maybeOpenUI(nextURL+"/graph", noOpen)
 
 	// Track foreground runs too so `so dev stop` works from another shell.

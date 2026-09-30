@@ -1,0 +1,8 @@
+{
+  "id": "superopen-endpoint",
+  "name": "Superopen Endpoint Telemetry",
+  "description": "Records OpenClaw agent activity to the local Superopen endpoint log.",
+  "categories": ["other"],
+  "activation": { "onStartup": true },
+  "configSchema": { "type": "object", "additionalProperties": false }
+}

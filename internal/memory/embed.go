@@ -163,7 +163,7 @@ func normalizeEmbedText(s string) string {
 
 func embedFeatures(text string) []string {
 	words := strings.Fields(text)
-	out := make([]string, 0, len(words)*2+16)
+	out := make([]string, 0, 16)
 	var prev string
 	for _, word := range words {
 		out = append(out, "w:"+word)

@@ -154,15 +154,16 @@ describe("removeProject / pruneMissingProjects", () => {
     expect(
       runWithProject("cccccccccccccccc", () => [repoRoot(), soRoot()])
     ).toEqual([selected, join(selected, ".so")]);
-    expect(projectsForFilter("all").map((project) => project.repo_root)).toEqual([
+    expect(projectsForFilter("").map((project) => project.repo_root)).toEqual([
       active,
     ]);
+    expect(projectsForFilter("all")).toEqual([]);
     expect(
       projectIdFromRequest(
         new Request("http://localhost/api/sessions", {
           headers: { "x-so-project": "all" },
         })
       )
-    ).toBe("");
+    ).toBe("all");
   });
 });

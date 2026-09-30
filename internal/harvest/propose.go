@@ -14,20 +14,26 @@ func Propose(root string, in ProposeInput) (Proposal, error) {
 	in.Title = strings.TrimSpace(in.Title)
 	in.Target = strings.TrimSpace(in.Target)
 	in.Kind = strings.ToLower(strings.TrimSpace(in.Kind))
+	in.MemoryTitle = strings.TrimSpace(in.MemoryTitle)
+	in.MemoryText = strings.TrimSpace(in.MemoryText)
+	if in.Title == "" {
+		in.Title = in.MemoryTitle
+	}
 	if in.Reason == "" {
 		return Proposal{}, fmt.Errorf("reason is required")
 	}
 	if in.Title == "" {
 		return Proposal{}, fmt.Errorf("title is required")
 	}
-	if in.Target == "" {
-		return Proposal{}, fmt.Errorf("target is required")
-	}
 	if in.Kind == "" {
 		in.Kind = KindImprove
 	}
+	memoryOnly := in.Kind == KindMemory && in.MemoryText != "" && strings.TrimSpace(in.Diff) == ""
+	if in.Target == "" && !memoryOnly {
+		return Proposal{}, fmt.Errorf("target is required")
+	}
 	switch in.Kind {
-	case KindImprove, KindCreate, KindSimplify, KindPrinciple:
+	case KindImprove, KindCreate, KindSimplify, KindPrinciple, KindMemory:
 	default:
 		return Proposal{}, fmt.Errorf("unknown kind %q", in.Kind)
 	}
@@ -45,24 +51,47 @@ func Propose(root string, in ProposeInput) (Proposal, error) {
 	if store.FindOpenDup(in.Target, in.Title) {
 		return Proposal{}, fmt.Errorf("duplicate open proposal")
 	}
+	if memoryOnly {
+		p := Proposal{
+			SessionID:   in.SessionID,
+			Status:      StatusOpen,
+			Kind:        in.Kind,
+			Title:       in.Title,
+			Reason:      in.Reason,
+			Issue:       in.Issue,
+			Evidence:    in.Evidence,
+			MemoryTitle: in.MemoryTitle,
+			MemoryText:  in.MemoryText,
+		}
+		out, err := store.InsertProposal(p)
+		if err != nil {
+			return out, err
+		}
+		if in.SessionID != "" {
+			_ = store.ResolvePending(in.SessionID, StatusProposed, "")
+		}
+		return out, nil
+	}
 	abs := filepath.Join(root, filepath.FromSlash(in.Target))
 	live, liveErr := os.ReadFile(abs)
 	liveStr := string(live)
 	if liveErr == nil && strings.TrimSpace(in.Diff) != "" && AlreadyContains(liveStr, in.Diff) {
 		plus, minus := DiffStats(in.Diff)
 		p := Proposal{
-			SessionID:  in.SessionID,
-			Status:     StatusNoop,
-			Kind:       in.Kind,
-			Target:     in.Target,
-			Title:      in.Title,
-			Reason:     in.Reason,
-			Issue:      in.Issue,
-			Suggestion: in.Suggestion,
-			Diff:       in.Diff,
-			Evidence:   in.Evidence,
-			Plus:       plus,
-			Minus:      minus,
+			SessionID:   in.SessionID,
+			Status:      StatusNoop,
+			Kind:        in.Kind,
+			Target:      in.Target,
+			Title:       in.Title,
+			Reason:      in.Reason,
+			Issue:       in.Issue,
+			Suggestion:  in.Suggestion,
+			Diff:        in.Diff,
+			Evidence:    in.Evidence,
+			Plus:        plus,
+			Minus:       minus,
+			MemoryTitle: in.MemoryTitle,
+			MemoryText:  in.MemoryText,
 		}
 		if h, err := HashFile(root, in.Target); err == nil {
 			p.BaseHash = h
@@ -78,18 +107,20 @@ func Propose(root string, in ProposeInput) (Proposal, error) {
 	}
 	plus, minus := DiffStats(in.Diff)
 	p := Proposal{
-		SessionID:  in.SessionID,
-		Status:     StatusOpen,
-		Kind:       in.Kind,
-		Target:     in.Target,
-		Title:      in.Title,
-		Reason:     in.Reason,
-		Issue:      in.Issue,
-		Suggestion: in.Suggestion,
-		Diff:       in.Diff,
-		Evidence:   in.Evidence,
-		Plus:       plus,
-		Minus:      minus,
+		SessionID:   in.SessionID,
+		Status:      StatusOpen,
+		Kind:        in.Kind,
+		Target:      in.Target,
+		Title:       in.Title,
+		Reason:      in.Reason,
+		Issue:       in.Issue,
+		Suggestion:  in.Suggestion,
+		Diff:        in.Diff,
+		Evidence:    in.Evidence,
+		Plus:        plus,
+		Minus:       minus,
+		MemoryTitle: in.MemoryTitle,
+		MemoryText:  in.MemoryText,
 	}
 	if liveErr == nil {
 		if h, err := HashFile(root, in.Target); err == nil {

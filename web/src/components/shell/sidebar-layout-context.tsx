@@ -6,7 +6,9 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { cn } from "@/lib/utils";
@@ -14,63 +16,84 @@ import { getUIPref, setUIPref } from "@/lib/ui-prefs";
 
 type SidebarLayoutContextValue = {
   isExpanded: boolean;
+  isPinned: boolean;
   toggleSidebar: () => void;
+  togglePin: () => void;
   expandSidebar: () => void;
+  setSidebarHover: (hover: boolean) => void;
   sidebarWidthClass: string;
 };
 
 const SidebarLayoutContext = createContext<SidebarLayoutContextValue | null>(null);
 
-async function loadExpanded(): Promise<boolean> {
-	const value = getUIPref("sidebar_expanded");
-	return value !== "0" && value !== "false";
+function loadPinned(): boolean {
+	const pinned = getUIPref("sidebar_pinned");
+	if (pinned === "1" || pinned === "true") return true;
+	if (pinned === "0" || pinned === "false") return false;
+	// Older builds stored an explicit expand toggle. Honor that once.
+	const legacy = getUIPref("sidebar_expanded");
+	return legacy === "1" || legacy === "true";
 }
 
-async function saveExpanded(expanded: boolean) {
-	setUIPref("sidebar_expanded", expanded ? "1" : "0");
+function savePinned(pinned: boolean) {
+	setUIPref("sidebar_pinned", pinned ? "1" : "0");
+	for (const listener of pinListeners) listener();
+}
+
+const pinListeners = new Set<() => void>();
+
+function subscribePinned(listener: () => void) {
+	pinListeners.add(listener);
+	return () => pinListeners.delete(listener);
 }
 
 export function SidebarLayoutProvider({ children }: { children: ReactNode }) {
-  const [isExpanded, setIsExpanded] = useState(true);
-  const [ready, setReady] = useState(false);
+  const isPinned = useSyncExternalStore(subscribePinned, loadPinned, () => false);
+  const [hovered, setHovered] = useState(false);
+  const hoverTimer = useRef<number | null>(null);
+  const isExpanded = isPinned || hovered;
 
   useEffect(() => {
-    loadExpanded().then((v) => {
-      setIsExpanded(v);
-      setReady(true);
-    });
+    return () => {
+      if (hoverTimer.current != null) window.clearTimeout(hoverTimer.current);
+    };
   }, []);
 
-  const toggleSidebar = useCallback(() => {
-    setIsExpanded((value) => {
-      const next = !value;
-      void saveExpanded(next);
-      return next;
-    });
+  const togglePin = useCallback(() => {
+    savePinned(!loadPinned());
   }, []);
 
   const expandSidebar = useCallback(() => {
-    setIsExpanded(true);
-    void saveExpanded(true);
+    savePinned(true);
+  }, []);
+
+  const setSidebarHover = useCallback((hover: boolean) => {
+    if (hoverTimer.current != null) {
+      window.clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+    }
+    if (hover) {
+      setHovered(true);
+      return;
+    }
+    hoverTimer.current = window.setTimeout(() => {
+      setHovered(false);
+      hoverTimer.current = null;
+    }, 120);
   }, []);
 
   const value = useMemo(
     () => ({
       isExpanded,
-      toggleSidebar,
+      isPinned,
+      toggleSidebar: togglePin,
+      togglePin,
       expandSidebar,
+      setSidebarHover,
       sidebarWidthClass: isExpanded ? "w-64" : "w-16",
     }),
-    [isExpanded, toggleSidebar, expandSidebar]
+    [isExpanded, isPinned, togglePin, expandSidebar, setSidebarHover]
   );
-
-  if (!ready) {
-    return (
-      <SidebarLayoutContext.Provider value={value}>
-        {children}
-      </SidebarLayoutContext.Provider>
-    );
-  }
 
   return (
     <SidebarLayoutContext.Provider value={value}>{children}</SidebarLayoutContext.Provider>

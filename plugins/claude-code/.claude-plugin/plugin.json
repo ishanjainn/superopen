@@ -1,7 +1,7 @@
 {
   "name": "superopen-cc",
   "version": "0.1.0",
-  "description": "Superopen telemetry for Claude Code: sessions, tool calls, edit decisions, and cost rollups.",
+  "description": "Local code graph, session history, and project memory for Claude Code. Queries the graph instead of grepping, and keeps what mattered for the next session.",
   "author": {
     "name": "Superopen",
     "url": "https://github.com/ishanjainn/superopen"

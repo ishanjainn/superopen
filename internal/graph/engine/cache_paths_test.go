@@ -1,7 +1,6 @@
 package engine_test
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -31,30 +30,3 @@ func TestCachePathsUsesRepoSODb(t *testing.T) {
 	}
 }
 
-func TestMigrateLegacyCacheIfNeeded(t *testing.T) {
-	repo := t.TempDir()
-	legacy, err := engine.LegacyCachePaths(repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(legacy.Root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(legacy.Database, []byte("sqlite-placeholder"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := engine.MigrateLegacyCacheIfNeeded(repo); err != nil {
-		t.Fatal(err)
-	}
-	dst, err := engine.CachePaths(repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, err := os.ReadFile(dst.Database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(body) != "sqlite-placeholder" {
-		t.Fatalf("migrated body %q", body)
-	}
-}

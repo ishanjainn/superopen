@@ -87,6 +87,47 @@ func hashRefreshMode() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv(refreshModeEnv)), "hash")
 }
 
+// StaleHeader keeps the stable first line and names the dirty paths so the
+// agent reads those files. The rest of the query answer is the last index.
+func StaleHeader(changes api.ChangeSet) string {
+	var paths []string
+	seen := map[string]struct{}{}
+	add := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	for _, group := range [][]api.FileChange{changes.Added, changes.Modified, changes.Deleted, changes.Renamed} {
+		for _, change := range group {
+			add(change.Path)
+		}
+	}
+	if len(paths) == 0 {
+		return GraphStaleHeader
+	}
+	sort.Strings(paths)
+	const maxPaths = 12
+	// A whole-tree dirty set sorts dotfiles first and is not the edit.
+	if len(paths) > maxPaths {
+		return GraphStaleHeader
+	}
+	var b strings.Builder
+	b.WriteString(GraphStaleHeader)
+	b.WriteString("\nThese files are absent from this answer. Read them:\n")
+	for _, path := range paths {
+		b.WriteString("  ")
+		b.WriteString(path)
+		b.WriteByte('\n')
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 func RefreshDisabled() bool {
 	v := strings.TrimSpace(os.Getenv(noRefreshEnv))
 	return v == "1" || strings.EqualFold(v, "true")

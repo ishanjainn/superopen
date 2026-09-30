@@ -70,7 +70,6 @@ func SeedLinkedWorktree(repoRoot string) {
 		}
 	}
 	cleanup = false
-	_, _ = paths.EnsureRepoIgnore(root)
 }
 
 func seedDisabled() bool {

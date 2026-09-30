@@ -28,16 +28,21 @@ function BrowserTitle() {
 }
 
 function PlaygroundShellFrame({ children }: { children: ReactNode }) {
-  const { sidebarWidthClass } = useSidebarLayout();
+  const { sidebarWidthClass, setSidebarHover } = useSidebarLayout();
+  const hoverHandlers = {
+    onMouseEnter: () => setSidebarHover(true),
+    onMouseLeave: () => setSidebarHover(false),
+  };
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden border border-neutral-200 bg-white">
       <div className="flex shrink-0 border-b border-neutral-200">
         <div
           className={cn(
-            "relative shrink-0 border-r border-neutral-200",
+            "relative shrink-0 border-r border-neutral-200 transition-[width] duration-500 ease-in-out",
             sidebarWidthClass
           )}
+          {...hoverHandlers}
         >
           <SidebarBrand />
         </div>
@@ -46,9 +51,10 @@ function PlaygroundShellFrame({ children }: { children: ReactNode }) {
       <div className="flex min-h-0 flex-1">
         <div
           className={cn(
-            "relative z-30 flex shrink-0 flex-col border-r border-neutral-200",
+            "relative z-30 flex shrink-0 flex-col border-r border-neutral-200 transition-[width] duration-500 ease-in-out",
             sidebarWidthClass
           )}
+          {...hoverHandlers}
         >
           <Sidebar />
         </div>

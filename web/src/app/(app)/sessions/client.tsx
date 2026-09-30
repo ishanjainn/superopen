@@ -41,6 +41,26 @@ function vendorLabel(vendor?: string): string {
   if (v.includes("opencode")) return "OpenCode";
   if (v.includes("copilot")) return "Copilot";
   if (v === "pi") return "Pi";
+  const names: Record<string, string> = {
+    antigravity: "Antigravity",
+    cline: "Cline",
+    dsh: "DeepSeek Harness",
+    devin: "Devin",
+    factory: "Factory Droid",
+    grok: "Grok",
+    hermes: "Hermes",
+    kimi: "Kimi Code",
+    kiro: "Kiro",
+    muse: "Muse",
+    omp: "Oh My Pi",
+    openclaw: "OpenClaw",
+    openhands: "OpenHands",
+    prime: "Prime",
+    qwen: "Qwen Code",
+    senpi: "Senpi",
+    vscode: "VS Code",
+  };
+  if (names[v]) return names[v];
   return vendor || "Agent";
 }
 

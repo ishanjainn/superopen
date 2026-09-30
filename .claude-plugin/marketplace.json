@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "superopen-cc",
-      "description": "OpenTelemetry-native session, tool, and edit-decision capture for Claude Code.",
+      "description": "Local code graph, session memory, and harvest for Claude Code. The next session queries what this one already learned.",
       "author": {
         "name": "Superopen"
       },

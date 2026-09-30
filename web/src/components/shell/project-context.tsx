@@ -92,15 +92,9 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         meta?.repo ||
         "repo";
       setCurrentSlug(slug);
-      // "all" was a legacy aggregate scope. Data pages are now always bound
-      // to one repository, while Settings still lists the global registry.
       const preferredProject = list.find((project) => project.id === pref);
       const selected =
-        pref !== "all" &&
-        preferredProject &&
-        preferredProject.repo_root !== meta?.root
-          ? pref
-          : "";
+        preferredProject && preferredProject.repo_root !== meta?.root ? pref : "";
       setProjectIdState(selected);
       if (selected !== pref) void savePref(selected);
       setReady(true);
@@ -142,7 +136,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [projectIdRef]);
 
   const setProjectId = useCallback((id: string) => {
-    const selected = id === "all" ? "" : id;
+    const selected = id;
     setProjectIdState(selected);
     void savePref(selected);
   }, []);

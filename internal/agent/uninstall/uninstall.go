@@ -19,6 +19,7 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/agent/skills"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
+	"github.com/ishanjainn/superopen/internal/agent/vendors"
 	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/spf13/cobra"
 )
@@ -33,48 +34,43 @@ func RemoveAll(purge, keepData, dryRun bool, stdout, stderr io.Writer) (removed 
 	if stderr == nil {
 		stderr = io.Discard
 	}
-	targets, _ := vendorsFromArg("all")
-	for _, v := range targets {
-		r, e := uninstallVendor(v, dryRun)
-		removed = append(removed, r...)
-		errs = append(errs, e...)
-		if dryRun {
-			fmt.Fprintf(stdout, "[dry-run] would remove %d path(s) for %s\n", len(r), v)
-		} else {
-			fmt.Fprintf(stdout, "hooks: removed %s (%d path(s))\n", v, len(r))
+	var hooked []string
+	spinWork(stdout, "Removing hooks", func() {
+		targets, _ := vendorsFromArg("all")
+		for _, v := range targets {
+			r, e := uninstallVendor(v, dryRun)
+			removed = append(removed, r...)
+			errs = append(errs, e...)
+			if len(r) > 0 {
+				hooked = append(hooked, vendors.Label(v))
+			}
+			for _, msg := range e {
+				fmt.Fprintf(stderr, "uninstall %s: %s\n", v, msg)
+			}
 		}
-		for _, path := range r {
-			fmt.Fprintf(stdout, "  - %s\n", path)
-		}
-		for _, msg := range e {
-			fmt.Fprintf(stderr, "uninstall %s: %s\n", v, msg)
-		}
-	}
+	})
+	tick(stdout, "Hooks", strings.Join(hooked, ", "))
 	if !dryRun {
-		for _, path := range skills.RemoveAll() {
-			removed = append(removed, path)
-			fmt.Fprintf(stdout, "skill: removed %s\n", path)
-		}
-		for _, path := range steer.RemoveAll() {
-			removed = append(removed, path)
-			fmt.Fprintf(stdout, "guidance: removed %s\n", path)
-		}
+		spinWork(stdout, "Removing the skill", func() {
+			for _, path := range skills.RemoveAll() {
+				removed = append(removed, path)
+			}
+			for _, path := range steer.RemoveAll() {
+				removed = append(removed, path)
+			}
+		})
+		tick(stdout, "Skill", "")
 	}
 	if purge {
-		r, e := purgeShared(dryRun, keepData)
-		removed = append(removed, r...)
-		errs = append(errs, e...)
-		if dryRun {
-			fmt.Fprintf(stdout, "[dry-run] --purge would remove %d shared path(s)\n", len(r))
-		} else {
-			fmt.Fprintf(stdout, "hooks: purged %d shared path(s)\n", len(r))
-		}
-		for _, path := range r {
-			fmt.Fprintf(stdout, "  - %s\n", path)
-		}
-		for _, msg := range e {
-			fmt.Fprintf(stderr, "uninstall --purge: %s\n", msg)
-		}
+		spinWork(stdout, "Removing local data", func() {
+			r, e := purgeShared(dryRun, keepData)
+			removed = append(removed, r...)
+			errs = append(errs, e...)
+			for _, msg := range e {
+				fmt.Fprintf(stderr, "uninstall --purge: %s\n", msg)
+			}
+		})
+		tick(stdout, "Data", "")
 	}
 	return removed, errs
 }
@@ -140,7 +136,7 @@ func Run(cmd *cobra.Command, vendor string, purge, dryRun bool) error {
 func vendorsFromArg(arg string) ([]string, error) {
 	switch arg {
 	case "all":
-		return []string{"claude-code", "cursor", "codex", "gemini", "opencode", "copilot-cli", "pi"}, nil
+		return append([]string{"claude-code", "cursor", "codex", "gemini", "opencode", "copilot-cli", "pi"}, vendors.IDs()...), nil
 	case "claude-code", "cc":
 		return []string{"claude-code"}, nil
 	case "cursor":
@@ -156,6 +152,9 @@ func vendorsFromArg(arg string) ([]string, error) {
 	case "pi":
 		return []string{"pi"}, nil
 	default:
+		if spec, ok := vendors.ByID(arg); ok {
+			return []string{spec.ID}, nil
+		}
 		return nil, fmt.Errorf("unknown --vendor %q", arg)
 	}
 }

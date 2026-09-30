@@ -38,11 +38,11 @@ PowerShell uses `/` as a path separator. In a terminal, run `so init` with no le
 
 In agent chat, `/so init` is still the skill command. That is not a PowerShell path.
 
-## `not a Superopen repo; run so init`
+## `not a Superopen repo`
 
-`so install` only wires coding agents on this machine. It does not create project data.
+`so install` only wires coding agents on this machine. It does not create project data. A command in a repo without `.so/` prints `not a Superopen repo` and exits 0. It does not create `.so/`.
 
-Each repository still needs `so init` once, from that repo's root. That command creates `.so/` and builds the graph.
+Each repository still needs `so init` once, from that repo's root, when you want a graph there. That command creates `.so/`, writes `.so/.gitignore`, and builds the graph.
 
 After init, restart the agent so it sees the new directory.
 
@@ -61,7 +61,7 @@ Linked git worktrees of an inited parent can seed on the first `so graph query`.
 ## Hooks do not fire
 
 1. Run `so install` (add `--vendor=...` if you only want one agent).
-2. Restart the coding agent. Claude Code, Cursor, Codex, Gemini CLI, OpenCode, Copilot CLI, and Pi load hooks on startup.
+2. Restart the coding agent. Every harness in the [install table](installation.md) loads hooks on startup.
 3. After you upgrade or move the `so` binary, run `so install` again so hook scripts keep the current path.
 4. Confirm you are in an inited repo. Hooks stay quiet in unmanaged trees (no `.so/`).
 5. Codex Desktop rejects PreToolUse `additionalContext`. On Codex, graph-first guidance lives in `AGENTS.md` and the skill, not in a PreToolUse nudge.
@@ -90,6 +90,7 @@ incremental `so graph refresh --probe` when the workspace already has `.so/`.
 Session hooks do not refresh the graph. On a large repo the query may wait a
 couple of seconds, then prefix the answer with
 `[!] graph stale: edit not indexed yet` if the index is still behind.
+When 12 or fewer files are dirty, the following lines name them.
 
 ```bash
 so graph refresh          # incremental
@@ -97,7 +98,7 @@ so graph build --force    # full rebuild
 so graph status           # build state
 ```
 
-Skip query-path refresh with `so graph --no-refresh`.
+Skip query-path refresh with `so graph --no-refresh` or `SUPEROPEN_NO_REFRESH=1`.
 
 If refresh prints `build pool full`, another repo is building. Default pool size is 2. Set `SUPEROPEN_BUILD_SLOTS` (use `0` for unlimited). See [configuration](configuration.md).
 
@@ -117,7 +118,7 @@ Do not pipe `so` through `head` or `tail`. That hides `TRUNCATED` and `help[]`.
 
 Discovery skips `vendor/`, `node_modules/`, and similar generated trees, plus binary suffixes such as `.wasm`. Extra excludes come from `.soignore` in the repo root (gitignore syntax, including `!` negation).
 
-`.so/` itself is listed in `.so/.gitignore` so it is not committed.
+`.so/.gitignore` ignores `sessions/`, `db/`, and `harvest/`.
 
 Symlinks that escape the repository are not indexed.
 

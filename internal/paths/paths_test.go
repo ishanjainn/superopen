@@ -20,6 +20,13 @@ func TestResolveAndEnsureDirs(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(p.Root, "sessions")); err != nil {
 		t.Fatal(err)
 	}
+	ignore, err := os.ReadFile(filepath.Join(p.Root, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(ignore) != paths.GitignoreContents {
+		t.Fatalf("gitignore = %q", ignore)
+	}
 }
 
 func TestManaged(t *testing.T) {

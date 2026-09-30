@@ -1,6 +1,7 @@
 package hook
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,7 +12,9 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/agent/sessionstate"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
+	"github.com/ishanjainn/superopen/internal/agent/vendors"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
+	"github.com/ishanjainn/superopen/internal/guards"
 	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
@@ -30,7 +33,7 @@ func emitSteerContext(vendor, event, kind string, payload []byte) {
 		return
 	}
 	var body any
-	switch vendor {
+	switch hookProtocol(vendor) {
 	case "claude-code":
 		hso := map[string]any{
 			"hookEventName": decision.hookEvent,
@@ -45,6 +48,14 @@ func emitSteerContext(vendor, event, kind string, payload []byte) {
 		}
 		body = map[string]any{"hookSpecificOutput": hso}
 	case "cursor":
+		if decision.deny && event == "beforeShellExecution" {
+			body = map[string]any{
+				"permission":    "deny",
+				"user_message":  decision.text,
+				"agent_message": decision.text,
+			}
+			break
+		}
 		if decision.deny || decision.text == "" {
 			// Cursor has no PreToolUse deny contract matching Claude.
 			if decision.text == "" {
@@ -66,7 +77,7 @@ func emitSteerContext(vendor, event, kind string, payload []byte) {
 				"additionalContext": decision.text,
 			},
 		}
-	case "gemini", "copilot-cli", "opencode", "pi":
+	case "context", "pi":
 		if decision.text == "" {
 			return
 		}
@@ -100,6 +111,7 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		return steerDecision{}, false
 	}
 	ev := strings.TrimSpace(event)
+	vendor = steerVendor(vendor)
 	var sessionEvent, toolEvent bool
 	var compactEvent bool
 	switch vendor {
@@ -108,7 +120,7 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		toolEvent = ev == "PreToolUse"
 	case "cursor":
 		sessionEvent = ev == "sessionStart" || ev == "beforeSubmitPrompt" || ev == "subagentStart"
-		toolEvent = ev == "preToolUse" || ev == "beforeReadFile"
+		toolEvent = ev == "preToolUse" || ev == "beforeReadFile" || ev == "beforeShellExecution"
 		compactEvent = ev == "preCompact"
 	case "gemini":
 		lower := strings.ToLower(ev)
@@ -129,7 +141,7 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 			lower == "before_agent_start" || lower == "session_shutdown" || lower == "agent_end"
 		toolEvent = lower == "tool.execute.before" || lower == "tool_execution_start"
 	default:
-		return steerDecision{}, false
+		sessionEvent, toolEvent, compactEvent = classifyExtraEvent(ev)
 	}
 
 	switch {
@@ -155,7 +167,18 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		}
 		// Stop, SessionEnd, and other lifecycle events are observability-only.
 		return steerDecision{}, false
+	case vendor == "claude-code" && ev == "PostToolUse":
+		recordClaudeQueryFiles(payload)
+		return steerDecision{}, false
 	case toolEvent:
+		if reason, denied := guardDeny(payload, vendor); denied {
+			if vendor == "codex" {
+				// Codex drops PreToolUse stdout, so a deny cannot be enforced.
+				fmt.Fprintf(os.Stderr, "guard: %s\n", reason)
+				return steerDecision{}, false
+			}
+			return steerDecision{deny: true, text: reason, hookEvent: ev}, true
+		}
 		// Codex does not consume additionalContext / deny from PreToolUse
 		// the way Claude and Cursor do; emitting steer text would be dropped
 		// by the host. Session and prompt events still fire.
@@ -240,11 +263,21 @@ func graphGate(payload []byte, vendor, kind, hookEvent string) (steerDecision, b
 	}
 
 	if engine.QueryStampFreshFor(stampRoot(payload), steerSessionID(payload)) {
-		if gate == "read" && isSourceRead(payload, tool, hookEvent) {
-			if !claimSnippetOverflow(payload, vendor) {
-				return steerDecision{}, false
+		readLike := gate == "read" && (isSourceRead(payload, tool, hookEvent) || (isBashTool(tool) && bashLooksLikeRead(cmd)))
+		if readLike {
+			if claimSnippetOverflow(payload, vendor) {
+				return steerDecision{text: steer.SnippetOverflowNudge(), hookEvent: hookEvent}, true
 			}
-			return steerDecision{text: steer.SnippetOverflowNudge(), hookEvent: hookEvent}, true
+			if listed := matchingListedFile(payload, vendor, cmd); listed != "" && claimQueryFileExtra(payload, vendor, listed) {
+				return steerDecision{text: steer.SnippetOverflowNudge(), hookEvent: hookEvent}, true
+			}
+			return steerDecision{}, false
+		}
+		if gate == "search" {
+			if listed := matchingListedFile(payload, vendor, cmd); listed != "" && claimQueryFileExtra(payload, vendor, listed) {
+				return steerDecision{text: steer.SnippetOverflowNudge(), hookEvent: hookEvent}, true
+			}
+			return steerDecision{}, false
 		}
 		return steerDecision{}, false
 	}
@@ -399,7 +432,9 @@ func promptSubmitText(payload []byte, vendor string) string {
 		kind = routeMemory
 	}
 	if kind == "" {
-		if src {
+		if weakDeclOnly(prompt) {
+			kind = routeEmpty
+		} else if src {
 			kind = routeCode
 		} else if n > 0 {
 			kind = routeMemory
@@ -502,6 +537,155 @@ func claimSnippetOverflow(payload []byte, vendor string) bool {
 	}, "last_snippet_overflow")
 }
 
+const queryListedFileCap = 16
+
+var querySrcPattern = regexp.MustCompile(`src=([^\s\]]+)`)
+
+// recordClaudeQueryFiles stores src= paths from a graph query's Bash stdout.
+// Missing stdout leaves the session list unchanged, so a later grep stays silent.
+func recordClaudeQueryFiles(payload []byte) {
+	cmd := bashCommandFromPayload(payload)
+	if !bashLooksLikeGraphQuery(cmd) {
+		return
+	}
+	stdout := claudeBashStdout(payload)
+	if strings.TrimSpace(stdout) == "" {
+		return
+	}
+	files := srcPathsFromQuery(stdout)
+	if len(files) == 0 {
+		return
+	}
+	sessionID := steerSessionID(payload)
+	if sessionID == "" {
+		return
+	}
+	state := sessionstate.Load(sessionID, "claude-code")
+	if state == nil {
+		state = &sessionstate.State{}
+	}
+	state.QueryListedFiles = files
+	sessionstate.Save(sessionID, "claude-code", state)
+}
+
+func claudeBashStdout(payload []byte) string {
+	var probe map[string]any
+	if json.Unmarshal(payload, &probe) != nil {
+		return ""
+	}
+	raw, ok := probe["tool_response"]
+	if !ok || raw == nil {
+		return ""
+	}
+	switch v := raw.(type) {
+	case string:
+		return v
+	case map[string]any:
+		if s, ok := v["stdout"].(string); ok && strings.TrimSpace(s) != "" {
+			return s
+		}
+		if s, ok := v["output"].(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+func srcPathsFromQuery(stdout string) []string {
+	matches := querySrcPattern.FindAllStringSubmatch(stdout, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, queryListedFileCap)
+	for _, m := range matches {
+		p := filepath.ToSlash(strings.TrimSpace(m[1]))
+		if p == "" || p == "-" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+		if len(out) >= queryListedFileCap {
+			break
+		}
+	}
+	return out
+}
+
+func matchingListedFile(payload []byte, vendor, cmd string) string {
+	sessionID := steerSessionID(payload)
+	if sessionID == "" {
+		return ""
+	}
+	state := sessionstate.Load(sessionID, steerVendor(vendor))
+	if state == nil || len(state.QueryListedFiles) == 0 {
+		return ""
+	}
+	candidates := []string{peekContext(payload).ToolPath}
+	if strings.TrimSpace(cmd) != "" {
+		candidates = append(candidates, cmd)
+	}
+	for _, listed := range state.QueryListedFiles {
+		for _, cand := range candidates {
+			if pathMentionsListed(cand, listed) {
+				return listed
+			}
+		}
+	}
+	return ""
+}
+
+func pathMentionsListed(raw, listed string) bool {
+	raw = filepath.ToSlash(strings.TrimSpace(raw))
+	listed = filepath.ToSlash(strings.TrimSpace(listed))
+	if raw == "" || listed == "" {
+		return false
+	}
+	if raw == listed || strings.HasSuffix(raw, "/"+listed) {
+		return true
+	}
+	idx := strings.Index(raw, listed)
+	if idx < 0 {
+		return false
+	}
+	if idx > 0 {
+		prev := raw[idx-1]
+		if prev != '/' && prev != ' ' && prev != '\t' && prev != '"' && prev != '\'' {
+			return false
+		}
+	}
+	end := idx + len(listed)
+	if end == len(raw) {
+		return true
+	}
+	next := raw[end]
+	return next == ' ' || next == '\t' || next == '"' || next == '\'' || next == '\n' || next == '\r'
+}
+
+func claimQueryFileExtra(payload []byte, vendor, listed string) bool {
+	listed = filepath.ToSlash(strings.TrimSpace(listed))
+	if listed == "" {
+		return false
+	}
+	sessionID := steerSessionID(payload)
+	vendor = steerVendor(vendor)
+	if sessionID == "" || vendor == "" {
+		return false
+	}
+	state := sessionstate.Load(sessionID, vendor)
+	if state == nil {
+		state = &sessionstate.State{}
+	}
+	for _, got := range state.QueryFileExtraNudged {
+		if got == listed {
+			return false
+		}
+	}
+	state.QueryFileExtraNudged = append(state.QueryFileExtraNudged, listed)
+	sessionstate.Save(sessionID, vendor, state)
+	return true
+}
+
 func claimQueryRepeat(payload []byte, vendor string) bool {
 	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
 		return &s.QueryRepeatReminded
@@ -535,6 +719,9 @@ func claimRootStamp(payload []byte, name string) bool {
 	if engine.QueryStampFreshAt(path) {
 		return false
 	}
+	if err := paths.WriteGitignore(root); err != nil {
+		return false
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return false
 	}
@@ -549,6 +736,45 @@ func stampRoot(payload []byte) string {
 		return root
 	}
 	return repoRoot(payload)
+}
+
+func guardDeny(payload []byte, vendor string) (string, bool) {
+	if !guards.Enabled() {
+		return "", false
+	}
+	tool := toolNameFromPayload(payload)
+	cmd := bashCommandFromPayload(payload)
+	action := "tool.invoked"
+	if cmd != "" {
+		action = "command.executed"
+	}
+	ev := guards.Event{
+		Timestamp:     guards.FormatTimestamp(time.Now()),
+		Vendor:        guards.Vendor,
+		Product:       guards.Product,
+		SchemaVersion: guards.SchemaVersion,
+		Severity:      guards.SeverityInfo,
+		Event:         guards.EventInfo{Kind: "tool", Action: action, Fidelity: guards.FidelityObserved},
+		Harness:       guards.HarnessInfo{Name: vendor, CollectionMethod: guards.CollectionMethodHook},
+	}
+	if cmd != "" {
+		ev.Command = &guards.CommandInfo{Command: cmd}
+	}
+	if tool != "" {
+		ev.Tool = &guards.ToolInfo{Name: tool}
+	}
+	resp := guards.Evaluate(context.Background(), guards.Ask{
+		Phase:    guards.PhasePreTool,
+		Platform: vendor,
+		Event:    ev,
+	})
+	if !resp.Denied() {
+		return "", false
+	}
+	if strings.TrimSpace(resp.Reason) == "" {
+		return "denied", true
+	}
+	return resp.Reason, true
 }
 
 func isSessionStartEvent(vendor, ev string) bool {
@@ -568,7 +794,54 @@ func isSessionStartEvent(vendor, ev string) bool {
 		lower := strings.ToLower(ev)
 		return lower == "session_start" || lower == "sessionstart"
 	default:
-		return false
+		lower := strings.ToLower(strings.TrimSpace(ev))
+		return lower == "sessionstart" || lower == "session_start" || lower == "on_session_start" || lower == "beforerun" || lower == "preinvocation" || lower == "session.created"
+	}
+}
+
+func hookProtocol(vendor string) string {
+	switch vendor {
+	case "claude-code", "cursor", "codex":
+		return vendor
+	case "pi", "omp", "prime", "senpi":
+		return "pi"
+	case "gemini", "copilot-cli", "opencode":
+		return "context"
+	default:
+		if spec, ok := vendors.ByID(vendor); ok {
+			if spec.Protocol == vendors.ProtocolPi {
+				return "pi"
+			}
+			if spec.Protocol == vendors.ProtocolClaude {
+				return "claude-code"
+			}
+		}
+		return "context"
+	}
+}
+
+func steerVendor(vendor string) string {
+	switch vendor {
+	case "omp", "prime", "senpi":
+		return "pi"
+	default:
+		return vendor
+	}
+}
+
+func classifyExtraEvent(ev string) (session, tool, compact bool) {
+	switch strings.ToLower(strings.TrimSpace(ev)) {
+	case "sessionstart", "session_start", "on_session_start", "beforerun", "preinvocation", "session.created",
+		"userpromptsubmit", "beforesubmitprompt", "beforeagent", "userpromptsubmitted", "pre_llm_call", "before_agent_start",
+		"subagentstart", "subagent_spawned":
+		return true, false, false
+	case "pretooluse", "beforetool", "pre_tool_use", "pre_tool_call", "before_tool_call", "beforeshellexecution", "beforereadfile",
+		"tool.execute.before", "tool_execution_start":
+		return false, true, false
+	case "precompact", "pre_compact", "before_compaction":
+		return false, false, true
+	default:
+		return false, false, false
 	}
 }
 

@@ -1,0 +1,3 @@
+internal/graph/engine/assets/model/code_tokens.txt text eol=lf
+internal/graph/engine/assets/model/code_vectors.bin binary
+internal/graph/engine/assets/grammars/* binary

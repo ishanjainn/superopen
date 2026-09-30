@@ -17,6 +17,8 @@ import (
 	"unicode"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
+	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/scope"
 	_ "modernc.org/sqlite"
 )
 
@@ -27,25 +29,33 @@ CREATE TABLE IF NOT EXISTS store_meta (
   value TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS projects (
-  name TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
+  name TEXT NOT NULL,
   indexed_at TEXT NOT NULL,
   root_path TEXT NOT NULL,
   generation TEXT NOT NULL,
   source_revision TEXT NOT NULL DEFAULT '',
-  engine_version TEXT NOT NULL
+  engine_version TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, scope_project_id, name)
 );
 CREATE TABLE IF NOT EXISTS file_hashes (
-  project TEXT NOT NULL REFERENCES projects(name) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
+  project TEXT NOT NULL,
   rel_path TEXT NOT NULL,
   sha256 TEXT NOT NULL,
   mtime_ns INTEGER NOT NULL DEFAULT 0,
   size INTEGER NOT NULL DEFAULT 0,
   language TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (project, rel_path)
+  PRIMARY KEY (tenant_id, scope_project_id, project, rel_path),
+  FOREIGN KEY (tenant_id, scope_project_id, project) REFERENCES projects(tenant_id, scope_project_id, name) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS nodes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  project TEXT NOT NULL REFERENCES projects(name) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
+  project TEXT NOT NULL,
   label TEXT NOT NULL,
   name TEXT NOT NULL,
   qualified_name TEXT NOT NULL,
@@ -55,44 +65,60 @@ CREATE TABLE IF NOT EXISTS nodes (
   end_line INTEGER NOT NULL DEFAULT 0,
   end_column INTEGER NOT NULL DEFAULT 0,
   properties TEXT NOT NULL DEFAULT '{}',
-  UNIQUE(project, qualified_name)
+  UNIQUE(tenant_id, scope_project_id, project, qualified_name),
+  FOREIGN KEY (tenant_id, scope_project_id, project) REFERENCES projects(tenant_id, scope_project_id, name) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS edges (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  project TEXT NOT NULL REFERENCES projects(name) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
+  project TEXT NOT NULL,
   source_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
   target_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
   type TEXT NOT NULL,
   properties TEXT NOT NULL DEFAULT '{}',
   evidence TEXT NOT NULL DEFAULT '{}',
   local_name TEXT NOT NULL DEFAULT '',
-  UNIQUE(project, source_id, target_id, type, local_name)
+  UNIQUE(tenant_id, scope_project_id, project, source_id, target_id, type, local_name),
+  FOREIGN KEY (tenant_id, scope_project_id, project) REFERENCES projects(tenant_id, scope_project_id, name) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS project_summaries (
-  project TEXT PRIMARY KEY REFERENCES projects(name) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
+  project TEXT NOT NULL,
   summary TEXT NOT NULL,
   source_hash TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, scope_project_id, project),
+  FOREIGN KEY (tenant_id, scope_project_id, project) REFERENCES projects(tenant_id, scope_project_id, name) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS lsp_surface (
-  project TEXT NOT NULL REFERENCES projects(name) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
+  project TEXT NOT NULL,
   rel_path TEXT NOT NULL,
   surface_sha TEXT NOT NULL,
   defs_json TEXT NOT NULL,
   ref_bloom BLOB,
   config_ctx TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (project, rel_path)
+  PRIMARY KEY (tenant_id, scope_project_id, project, rel_path),
+  FOREIGN KEY (tenant_id, scope_project_id, project) REFERENCES projects(tenant_id, scope_project_id, name) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS index_coverage (
-  project TEXT NOT NULL REFERENCES projects(name) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
+  project TEXT NOT NULL,
   rel_path TEXT NOT NULL,
   kind TEXT NOT NULL,
   detail TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (project, rel_path, kind)
+  PRIMARY KEY (tenant_id, scope_project_id, project, rel_path, kind),
+  FOREIGN KEY (tenant_id, scope_project_id, project) REFERENCES projects(tenant_id, scope_project_id, name) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS index_coverage_meta (
-  project TEXT PRIMARY KEY REFERENCES projects(name) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
+  project TEXT NOT NULL,
   generation TEXT NOT NULL,
   index_mode TEXT NOT NULL,
   recorded_at TEXT NOT NULL,
@@ -100,52 +126,68 @@ CREATE TABLE IF NOT EXISTS index_coverage_meta (
   ignored_files_stored INTEGER NOT NULL DEFAULT 0,
   ignored_files_total INTEGER NOT NULL DEFAULT 0,
   coverage_version INTEGER NOT NULL DEFAULT 1,
-  hash_records_complete INTEGER NOT NULL DEFAULT 0
+  hash_records_complete INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (tenant_id, scope_project_id, project),
+  FOREIGN KEY (tenant_id, scope_project_id, project) REFERENCES projects(tenant_id, scope_project_id, name) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS node_vectors (
   node_id INTEGER PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
-  project TEXT NOT NULL REFERENCES projects(name) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
+  project TEXT NOT NULL,
   dimensions INTEGER NOT NULL,
   quantization TEXT NOT NULL,
   scale REAL NOT NULL DEFAULT 1,
   offset REAL NOT NULL DEFAULT 0,
   code_sum INTEGER NOT NULL DEFAULT 0,
-  vector BLOB NOT NULL
+  vector BLOB NOT NULL,
+  FOREIGN KEY (tenant_id, scope_project_id, project) REFERENCES projects(tenant_id, scope_project_id, name) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS token_vectors (
-  project TEXT NOT NULL REFERENCES projects(name) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
+  project TEXT NOT NULL,
   token TEXT NOT NULL,
   dimensions INTEGER NOT NULL,
   quantization TEXT NOT NULL,
   idf REAL NOT NULL DEFAULT 0,
   vector BLOB NOT NULL,
-  PRIMARY KEY (project, token)
+  PRIMARY KEY (tenant_id, scope_project_id, project, token),
+  FOREIGN KEY (tenant_id, scope_project_id, project) REFERENCES projects(tenant_id, scope_project_id, name) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS unresolved_relationships (
   id INTEGER PRIMARY KEY,
-  project TEXT NOT NULL REFERENCES projects(name) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
+  project TEXT NOT NULL,
   source_qn TEXT NOT NULL,
   target_text TEXT NOT NULL,
   type TEXT NOT NULL,
   properties TEXT NOT NULL DEFAULT '{}',
   evidence TEXT NOT NULL DEFAULT '{}',
-  UNIQUE(project, source_qn, target_text, type)
+  UNIQUE(tenant_id, scope_project_id, project, source_qn, target_text, type),
+  FOREIGN KEY (tenant_id, scope_project_id, project) REFERENCES projects(tenant_id, scope_project_id, name) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS unresolved_source_idx ON unresolved_relationships(project, source_qn);
+CREATE INDEX IF NOT EXISTS unresolved_source_idx ON unresolved_relationships(tenant_id, scope_project_id, project, source_qn);
 CREATE TABLE IF NOT EXISTS communities (
-  project TEXT NOT NULL REFERENCES projects(name) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
+  project TEXT NOT NULL,
   id INTEGER NOT NULL,
   name TEXT NOT NULL,
   hub_node_id INTEGER REFERENCES nodes(id) ON DELETE SET NULL,
   properties TEXT NOT NULL DEFAULT '{}',
-  PRIMARY KEY (project, id)
+  PRIMARY KEY (tenant_id, scope_project_id, project, id),
+  FOREIGN KEY (tenant_id, scope_project_id, project) REFERENCES projects(tenant_id, scope_project_id, name) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS community_nodes (
+  tenant_id TEXT NOT NULL,
+  scope_project_id TEXT NOT NULL,
   project TEXT NOT NULL,
   community_id INTEGER NOT NULL,
   node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  PRIMARY KEY (project, community_id, node_id),
-  FOREIGN KEY (project, community_id) REFERENCES communities(project, id) ON DELETE CASCADE
+  PRIMARY KEY (tenant_id, scope_project_id, project, community_id, node_id),
+  FOREIGN KEY (tenant_id, scope_project_id, project, community_id) REFERENCES communities(tenant_id, scope_project_id, project, id) ON DELETE CASCADE
 );
 `
 
@@ -173,8 +215,100 @@ CREATE INDEX IF NOT EXISTS idx_file_hashes_language ON file_hashes(project, lang
 const schemaSearchDDL = schemaFTSDDL + schemaIndexDDL
 
 type Store struct {
-	db   *sql.DB
-	path string
+	db    *scopedDB
+	path  string
+	scope scope.Scope
+}
+
+type scopedDB struct {
+	*sql.DB
+	tenant    string
+	principal string
+	project   string
+}
+
+func (d *scopedDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	q, err := scopeSQL(query, d.tenant, d.principal, d.project)
+	if err != nil {
+		return nil, err
+	}
+	return d.DB.QueryContext(ctx, q, args...)
+}
+
+func (d *scopedDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	q, err := scopeSQL(query, d.tenant, d.principal, d.project)
+	if err != nil {
+		return d.DB.QueryRowContext(ctx, `SELECT 1 WHERE 0`)
+	}
+	return d.DB.QueryRowContext(ctx, q, args...)
+}
+
+func (d *scopedDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	q, err := scopeSQL(query, d.tenant, d.principal, d.project)
+	if err != nil {
+		return nil, err
+	}
+	return d.DB.ExecContext(ctx, q, args...)
+}
+
+func (d *scopedDB) Query(query string, args ...any) (*sql.Rows, error) {
+	q, err := scopeSQL(query, d.tenant, d.principal, d.project)
+	if err != nil {
+		return nil, err
+	}
+	return d.DB.Query(q, args...)
+}
+
+func (d *scopedDB) QueryRow(query string, args ...any) *sql.Row {
+	q, err := scopeSQL(query, d.tenant, d.principal, d.project)
+	if err != nil {
+		return d.DB.QueryRow(`SELECT 1 WHERE 0`)
+	}
+	return d.DB.QueryRow(q, args...)
+}
+
+func (d *scopedDB) Exec(query string, args ...any) (sql.Result, error) {
+	q, err := scopeSQL(query, d.tenant, d.principal, d.project)
+	if err != nil {
+		return nil, err
+	}
+	return d.DB.Exec(q, args...)
+}
+
+func scopeSQL(query, tenant, principal, project string) (string, error) {
+	upper := strings.ToUpper(strings.TrimSpace(query))
+	if strings.HasPrefix(upper, "INSERT") || strings.HasPrefix(upper, "CREATE") || strings.HasPrefix(upper, "PRAGMA") || strings.HasPrefix(upper, "DROP") || strings.HasPrefix(upper, "ANALYZE") {
+		return query, nil
+	}
+	if err := scope.Check(scope.Scope{TenantID: tenant, PrincipalID: principal, ProjectID: project}); err != nil {
+		return "", err
+	}
+	if strings.Contains(query, "tenant_id=") {
+		return query, nil
+	}
+	litT := scope.SQLLiteral(tenant)
+	litP := scope.SQLLiteral(project)
+	pred := "tenant_id=" + litT + " AND scope_project_id=" + litP
+	query = qualifyProjectEquals(query, litT, litP)
+	for _, table := range []string{"nodes", "edges", "file_hashes"} {
+		old := table + ".project=projects.name"
+		if strings.Contains(query, old) {
+			query = strings.ReplaceAll(query, old, old+" AND "+table+".tenant_id=projects.tenant_id AND "+table+".scope_project_id=projects.scope_project_id")
+		}
+	}
+	if strings.Contains(query, "FROM projects") && !strings.Contains(query, "projects.tenant_id=") {
+		query = strings.ReplaceAll(query, "FROM projects", "FROM (SELECT * FROM projects WHERE "+pred+") AS projects")
+	}
+	return query, nil
+}
+
+var projectEquals = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*\.)?project=\?`)
+
+func qualifyProjectEquals(query, litT, litP string) string {
+	return projectEquals.ReplaceAllStringFunc(query, func(match string) string {
+		prefix := strings.TrimSuffix(match, "project=?")
+		return match + " AND " + prefix + "tenant_id=" + litT + " AND " + prefix + "scope_project_id=" + litP
+	})
 }
 
 type ProjectRecord struct {
@@ -196,6 +330,39 @@ type FileRecord struct {
 	LineCount int
 }
 
+func scopeForDatabase(path string) (scope.Scope, error) {
+	repo := filepath.Dir(path)
+	parent := filepath.Dir(path)
+	if filepath.Base(parent) == "db" && filepath.Base(filepath.Dir(parent)) == paths.DirName {
+		repo = filepath.Dir(filepath.Dir(parent))
+	}
+	return scope.Current(repo)
+}
+
+func dropStaleDatabase(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	db, err := sql.Open(sqliteDriverName, path)
+	if err != nil {
+		return err
+	}
+	stale := paths.DatabaseMissingScope(db)
+	_ = db.Close()
+	if !stale {
+		return nil
+	}
+	_ = os.Remove(path)
+	_ = os.Remove(path + "-wal")
+	_ = os.Remove(path + "-shm")
+	parent := filepath.Dir(path)
+	if filepath.Base(parent) == "db" && filepath.Base(filepath.Dir(parent)) == paths.DirName {
+		_ = os.RemoveAll(filepath.Join(filepath.Dir(parent), "sessions"))
+		_ = os.Remove(filepath.Join(parent, "so.db.key"))
+	}
+	return nil
+}
+
 func OpenWritable(path string) (*Store, error) {
 	return openWritable(path, true)
 }
@@ -204,7 +371,30 @@ func OpenWritableFresh(path string) (*Store, error) {
 	return openWritable(path, false)
 }
 
+func OpenWritableScoped(path string, sc scope.Scope) (*Store, error) {
+	sc, err := sc.Validated()
+	if err != nil {
+		return nil, err
+	}
+	s, err := openWritable(path, true)
+	if err != nil {
+		return nil, err
+	}
+	s.scope = sc
+	s.db.tenant = sc.TenantID
+	s.db.principal = sc.PrincipalID
+	s.db.project = sc.ProjectID
+	return s, nil
+}
+
 func openWritable(path string, withSearch bool) (*Store, error) {
+	sc, err := scopeForDatabase(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := dropStaleDatabase(path); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
@@ -213,7 +403,7 @@ func openWritable(path string, withSearch bool) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db, path: path}
+	s := &Store{db: &scopedDB{DB: db, tenant: sc.TenantID, principal: sc.PrincipalID, project: sc.ProjectID}, path: path, scope: sc}
 	if err := s.configure(false); err != nil {
 		s.Close()
 		return nil, err
@@ -252,7 +442,12 @@ func OpenReadOnly(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(8)
-	s := &Store{db: db, path: path}
+	sc, err := scopeForDatabase(path)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	s := &Store{db: &scopedDB{DB: db, tenant: sc.TenantID, principal: sc.PrincipalID, project: sc.ProjectID}, path: path, scope: sc}
 	if err := s.configure(true); err != nil {
 		s.Close()
 		return nil, err
@@ -297,6 +492,8 @@ func (s *Store) Path() string { return s.path }
 
 type Builder struct {
 	tx         *sql.Tx
+	tenant     string
+	projectID  string
 	insertOnly bool
 	nextNodeID int64
 	nodeStmt   *sql.Stmt
@@ -312,7 +509,7 @@ func (s *Store) Build(ctx context.Context, fn func(*Builder) error) error {
 	if err != nil {
 		return err
 	}
-	b := &Builder{tx: tx}
+	b := &Builder{tx: tx, tenant: s.scope.TenantID, projectID: s.scope.ProjectID}
 	if err := fn(b); err != nil {
 		_ = tx.Rollback()
 		return err
@@ -330,19 +527,19 @@ func (b *Builder) PutProject(p ProjectRecord) error {
 	if p.IndexedAt.IsZero() {
 		p.IndexedAt = time.Now().UTC()
 	}
-	_, err := b.tx.Exec(`INSERT INTO projects(name,indexed_at,root_path,generation,source_revision,engine_version)
-		VALUES(?,?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET indexed_at=excluded.indexed_at,
+	_, err := b.tx.Exec(`INSERT INTO projects(tenant_id,scope_project_id,name,indexed_at,root_path,generation,source_revision,engine_version)
+		VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,scope_project_id,name) DO UPDATE SET indexed_at=excluded.indexed_at,
 		root_path=excluded.root_path,generation=excluded.generation,
 		source_revision=excluded.source_revision,engine_version=excluded.engine_version`,
-		p.Name, p.IndexedAt.Format(time.RFC3339Nano), p.RootPath, p.Generation, p.SourceRevision, p.EngineVersion)
+		b.tenant, b.projectID, p.Name, p.IndexedAt.Format(time.RFC3339Nano), p.RootPath, p.Generation, p.SourceRevision, p.EngineVersion)
 	return err
 }
 
 func (b *Builder) PutFile(f FileRecord) error {
-	_, err := b.tx.Exec(`INSERT INTO file_hashes(project,rel_path,sha256,mtime_ns,size,language)
-		VALUES(?,?,?,?,?,?) ON CONFLICT(project,rel_path) DO UPDATE SET sha256=excluded.sha256,
+	_, err := b.tx.Exec(`INSERT INTO file_hashes(tenant_id,scope_project_id,project,rel_path,sha256,mtime_ns,size,language)
+		VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,scope_project_id,project,rel_path) DO UPDATE SET sha256=excluded.sha256,
 		mtime_ns=excluded.mtime_ns,size=excluded.size,language=excluded.language`,
-		f.Project, filepath.ToSlash(f.Path), f.SHA256, f.MTimeNS, f.Size, f.Language)
+		b.tenant, b.projectID, f.Project, filepath.ToSlash(f.Path), f.SHA256, f.MTimeNS, f.Size, f.Language)
 	return err
 }
 
@@ -356,8 +553,8 @@ func (b *Builder) PutNode(n api.Node) (int64, error) {
 	}
 	var oldID int64
 	var oldName, oldQN, oldLabel, oldFile string
-	oldErr := b.tx.QueryRow(`SELECT id,name,qualified_name,label,file_path FROM nodes WHERE project=? AND qualified_name=?`,
-		n.Project, n.QualifiedName).Scan(&oldID, &oldName, &oldQN, &oldLabel, &oldFile)
+	oldErr := b.tx.QueryRow(`SELECT id,name,qualified_name,label,file_path FROM nodes WHERE tenant_id=? AND scope_project_id=? AND project=? AND qualified_name=?`,
+		b.tenant, b.projectID, n.Project, n.QualifiedName).Scan(&oldID, &oldName, &oldQN, &oldLabel, &oldFile)
 	if oldErr != nil && !errors.Is(oldErr, sql.ErrNoRows) {
 		return 0, oldErr
 	}
@@ -366,11 +563,11 @@ func (b *Builder) PutNode(n api.Node) (int64, error) {
 			return 0, err
 		}
 	}
-	row := b.tx.QueryRow(`INSERT INTO nodes(project,label,name,qualified_name,file_path,start_line,start_column,end_line,end_column,properties)
-		VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project,qualified_name) DO UPDATE SET
+	row := b.tx.QueryRow(`INSERT INTO nodes(tenant_id,scope_project_id,project,label,name,qualified_name,file_path,start_line,start_column,end_line,end_column,properties)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,scope_project_id,project,qualified_name) DO UPDATE SET
 		label=excluded.label,name=excluded.name,file_path=excluded.file_path,start_line=excluded.start_line,
 		start_column=excluded.start_column,end_line=excluded.end_line,end_column=excluded.end_column,
-		properties=excluded.properties RETURNING id`, n.Project, n.Label, n.Name, n.QualifiedName,
+		properties=excluded.properties RETURNING id`, b.tenant, b.projectID, n.Project, n.Label, n.Name, n.QualifiedName,
 		filepath.ToSlash(n.Location.File), n.Location.StartLine, n.Location.StartColumn,
 		n.Location.EndLine, n.Location.EndColumn, props)
 	var id int64
@@ -404,10 +601,10 @@ func (b *Builder) PutEdge(e api.Edge) (int64, error) {
 	if b.insertOnly {
 		return b.queueEdgeInsert(e.Project, e.SourceID, e.TargetID, e.Type, props, string(evidence), localName)
 	}
-	row := b.tx.QueryRow(`INSERT INTO edges(project,source_id,target_id,type,properties,evidence,local_name)
-		VALUES(?,?,?,?,?,?,?) ON CONFLICT(project,source_id,target_id,type,local_name) DO UPDATE SET
+	row := b.tx.QueryRow(`INSERT INTO edges(tenant_id,scope_project_id,project,source_id,target_id,type,properties,evidence,local_name)
+		VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,scope_project_id,project,source_id,target_id,type,local_name) DO UPDATE SET
 		properties=excluded.properties,evidence=excluded.evidence RETURNING id`,
-		e.Project, e.SourceID, e.TargetID, e.Type, props, string(evidence), localName)
+		b.tenant, b.projectID, e.Project, e.SourceID, e.TargetID, e.Type, props, string(evidence), localName)
 	var id int64
 	return id, row.Scan(&id)
 }
@@ -424,9 +621,9 @@ func (b *Builder) PutUnresolved(relationship api.UnresolvedRelationship) error {
 	if err != nil {
 		return err
 	}
-	_, err = b.tx.Exec(`INSERT INTO unresolved_relationships(project,source_qn,target_text,type,properties,evidence)
-		VALUES(?,?,?,?,?,?) ON CONFLICT(project,source_qn,target_text,type) DO UPDATE SET
-		properties=excluded.properties,evidence=excluded.evidence`, relationship.Project, relationship.Source,
+	_, err = b.tx.Exec(`INSERT INTO unresolved_relationships(tenant_id,scope_project_id,project,source_qn,target_text,type,properties,evidence)
+		VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,scope_project_id,project,source_qn,target_text,type) DO UPDATE SET
+		properties=excluded.properties,evidence=excluded.evidence`, b.tenant, b.projectID, relationship.Project, relationship.Source,
 		relationship.TargetText, relationship.Type, properties, string(evidence))
 	return err
 }
@@ -449,12 +646,12 @@ func (b *Builder) PutSemanticVector(nodeID int64, project string, vector semanti
 		}
 		encoded[dimension] = byte(int8(value * 127))
 	}
-	result, err := b.tx.Exec(`INSERT INTO node_vectors(node_id,project,dimensions,quantization,scale,offset,code_sum,vector)
-		SELECT id,project,?,'int8-unit',1,0,0,? FROM nodes WHERE id=? AND project=?
+	result, err := b.tx.Exec(`INSERT INTO node_vectors(node_id,tenant_id,scope_project_id,project,dimensions,quantization,scale,offset,code_sum,vector)
+		SELECT id,tenant_id,scope_project_id,project,?,'int8-unit',1,0,0,? FROM nodes WHERE id=? AND tenant_id=? AND scope_project_id=? AND project=?
 		ON CONFLICT(node_id) DO UPDATE SET project=excluded.project,dimensions=excluded.dimensions,
 		quantization=excluded.quantization,scale=excluded.scale,offset=excluded.offset,
 		code_sum=excluded.code_sum,vector=excluded.vector`,
-		semanticDimensions, encoded, nodeID, project)
+		semanticDimensions, encoded, nodeID, b.tenant, b.projectID, project)
 	if err != nil {
 		return err
 	}
@@ -483,21 +680,21 @@ func (b *Builder) PutSemanticToken(project, token string, vector semanticVector,
 		}
 		encoded[dimension] = byte(int8(scaled))
 	}
-	_, err := b.tx.Exec(`INSERT INTO token_vectors(project,token,dimensions,quantization,idf,vector)
-		VALUES(?,?,?,'int8-unit',?,?) ON CONFLICT(project,token) DO UPDATE SET
+	_, err := b.tx.Exec(`INSERT INTO token_vectors(tenant_id,scope_project_id,project,token,dimensions,quantization,idf,vector)
+		VALUES(?,?,?,?,?,'int8-unit',?,?) ON CONFLICT(tenant_id,scope_project_id,project,token) DO UPDATE SET
 		dimensions=excluded.dimensions,quantization=excluded.quantization,idf=excluded.idf,vector=excluded.vector`,
-		project, token, semanticDimensions, idf, encoded)
+		b.tenant, b.projectID, project, token, semanticDimensions, idf, encoded)
 	return err
 }
 
 func (b *Builder) PutCoverage(project string, coverage api.Coverage) error {
-	if _, err := b.tx.Exec(`DELETE FROM index_coverage WHERE project=?`, project); err != nil {
+	if _, err := b.tx.Exec(`DELETE FROM index_coverage WHERE tenant_id=? AND scope_project_id=? AND project=?`, b.tenant, b.projectID, project); err != nil {
 		return err
 	}
 	for _, row := range coverage.Rows {
-		if _, err := b.tx.Exec(`INSERT INTO index_coverage(project,rel_path,kind,detail) VALUES(?,?,?,?)
-			ON CONFLICT(project,rel_path,kind) DO UPDATE SET detail=excluded.detail`,
-			project, filepath.ToSlash(row.Path), row.Kind, row.Detail); err != nil {
+		if _, err := b.tx.Exec(`INSERT INTO index_coverage(tenant_id,scope_project_id,project,rel_path,kind,detail) VALUES(?,?,?,?,?,?)
+			ON CONFLICT(tenant_id,scope_project_id,project,rel_path,kind) DO UPDATE SET detail=excluded.detail`,
+			b.tenant, b.projectID, project, filepath.ToSlash(row.Path), row.Kind, row.Detail); err != nil {
 			return err
 		}
 	}
@@ -505,11 +702,11 @@ func (b *Builder) PutCoverage(project string, coverage api.Coverage) error {
 	if coverage.RecordedAt != nil {
 		recordedAt = coverage.RecordedAt.UTC()
 	}
-	_, err := b.tx.Exec(`INSERT INTO index_coverage_meta(project,generation,index_mode,recorded_at,recording_status,coverage_version,hash_records_complete)
-		VALUES(?,?,?,?,?,1,?) ON CONFLICT(project) DO UPDATE SET generation=excluded.generation,
+	_, err := b.tx.Exec(`INSERT INTO index_coverage_meta(tenant_id,scope_project_id,project,generation,index_mode,recorded_at,recording_status,coverage_version,hash_records_complete)
+		VALUES(?,?,?,?,?,?,?,1,?) ON CONFLICT(tenant_id,scope_project_id,project) DO UPDATE SET generation=excluded.generation,
 		index_mode=excluded.index_mode,recorded_at=excluded.recorded_at,recording_status=excluded.recording_status,
 		coverage_version=excluded.coverage_version,hash_records_complete=excluded.hash_records_complete`,
-		project, coverage.Generation, coverage.IndexMode, recordedAt.Format(time.RFC3339Nano), coverage.RecordingStatus, coverage.HashRecordsComplete)
+		b.tenant, b.projectID, project, coverage.Generation, coverage.IndexMode, recordedAt.Format(time.RFC3339Nano), coverage.RecordingStatus, coverage.HashRecordsComplete)
 	if err != nil {
 		return err
 	}

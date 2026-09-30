@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ishanjainn/superopen/internal/agent/vendors"
 	"github.com/ishanjainn/superopen/internal/paths"
 )
 
@@ -62,6 +63,9 @@ func installVendor(vendor string, dryRun bool) ([]string, error) {
 	switch vendor {
 	case "gemini", "opencode", "copilot-cli", "pi":
 		return installGenericVendor(vendor, dryRun)
+	}
+	if spec, ok := vendors.ByID(vendor); ok {
+		return installCatalogVendor(spec, dryRun)
 	}
 
 	dest, err := vendorDestRoot(vendor)
@@ -230,6 +234,13 @@ func vendorMarkerPaths(vendor string) ([]string, error) {
 		}
 		return []string{filepath.Join(base, "hooks", "superopen.json")}, nil
 	default:
+		if spec, ok := vendors.ByID(vendor); ok {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, err
+			}
+			return []string{filepath.Join(home, filepath.FromSlash(spec.Rel))}, nil
+		}
 		return nil, fmt.Errorf("unknown vendor %q", vendor)
 	}
 }

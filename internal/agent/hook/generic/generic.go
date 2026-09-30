@@ -34,7 +34,7 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	sid := str(payload, "session_id", "sessionId", "sessionID", "conversation_id", "id")
+	sid := str(payload, "session_id", "sessionId", "sessionID", "conversation_id", "taskId", "task_id", "sessionKey", "id")
 	if sid == "" || strings.EqualFold(sid, "unknown") {
 		return nil
 	}
@@ -50,7 +50,7 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 		// The submitted event is the sole authoritative prompt trace. This
 		// model-facing hook exists only to deliver locally retrieved context.
 		return nil
-	case ev == "sessionstart" || ev == "session_start":
+	case ev == "sessionstart" || ev == "session_start" || ev == "on_session_start" || ev == "beforerun" || ev == "preinvocation" || ev == "session.created":
 		return in.Emit.EmitSession(normalize.Session{
 			SessionID: sid,
 			Vendor:    a.name,
@@ -58,7 +58,7 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 			CWD:       cwd,
 			StartedAt: now,
 		})
-	case ev == "sessionend" || ev == "session_end":
+	case ev == "sessionend" || ev == "session_end" || ev == "on_session_end" || ev == "session.deleted":
 		return in.Emit.EmitSession(normalize.Session{
 			SessionID: sid,
 			Vendor:    a.name,
@@ -66,14 +66,14 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 			CWD:       cwd,
 			EndedAt:   now,
 		})
-	case ev == "beforeagent" || ev == "userpromptsubmitted":
+	case ev == "beforeagent" || ev == "userpromptsubmitted" || ev == "userpromptsubmit" || ev == "pre_llm_call" || ev == "message_received":
 		if prompt == "" {
 			return nil
 		}
 		return in.Emit.EmitLLMTurn(normalize.LLMTurn{
 			SessionID: sid, Vendor: a.name, Model: model, Prompt: prompt, GenerationID: generationID, StartedAt: now,
 		})
-	case ev == "afteragent" || ev == "agentstop":
+	case ev == "afteragent" || ev == "agentstop" || ev == "stop" || ev == "afterrun" || ev == "postinvocation" || ev == "llm_output":
 		response := str(payload, "prompt_response", "response", "output", "text")
 		if prompt == "" && response == "" && !hasUsage(payload) {
 			return nil
@@ -83,8 +83,9 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 		}
 		applyUsage(&turn, payload)
 		return in.Emit.EmitLLMTurn(turn)
-	case ev == "beforetool" || ev == "pretooluse" || ev == "aftertool" || ev == "posttooluse" || ev == "posttoolusefailure":
-		toolName := str(payload, "tool_name", "toolName", "tool")
+	case ev == "beforetool" || ev == "pretooluse" || ev == "pre_tool_use" || ev == "pre_tool_call" || ev == "before_tool_call" ||
+		ev == "aftertool" || ev == "posttooluse" || ev == "post_tool_call" || ev == "after_tool_call" || ev == "posttoolusefailure":
+		toolName := str(payload, "tool_name", "toolName", "tool", "name")
 		toolID := str(payload, "tool_call_id", "toolCallId", "tool_use_id")
 		toolInput := jsonText(payload["tool_input"])
 		toolResponse := jsonText(payload["tool_response"])
@@ -95,7 +96,7 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 			SessionID: sid, Vendor: a.name, Model: model, ToolName: toolName,
 			ToolUseID: toolID, Args: toolInput, Result: toolResponse,
 		}
-		if ev == "beforetool" || ev == "pretooluse" {
+		if ev == "beforetool" || ev == "pretooluse" || ev == "pre_tool_use" || ev == "pre_tool_call" || ev == "before_tool_call" {
 			call.StartedAt = now
 		} else {
 			call.EndedAt = now

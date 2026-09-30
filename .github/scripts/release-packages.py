@@ -1108,9 +1108,12 @@ class So < Formula
   def install
     if build.head?
       system "go", "build", "-o", bin/"so", "./cmd/so"
+      log = buildpath/"web-build.log"
       cd "web" do
-        system "npm", "install", "--ignore-scripts"
-        system "npm", "run", "build"
+        cmd = "npm install --ignore-scripts >>#{{log}} 2>&1 && npm run build >>#{{log}} 2>&1"
+        unless quiet_system("sh", "-c", cmd)
+          odie "UI build failed. See #{{log}}"
+        end
       end
       standalone = buildpath/"web/.next/standalone"
       odie "web UI standalone build missing" unless (standalone/"server.js").exist?

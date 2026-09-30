@@ -51,10 +51,12 @@ func graphNativeReadCommands() []*cobra.Command {
 	trace.Flags().Int("limit", 100, "Maximum visited results")
 	snippet := nativeGraphLeaf("snippet <qualified-name>", "Read source for an indexed symbol", api.OpSnippet, func(cmd *cobra.Command, args []string) any {
 		contextLines, _ := cmd.Flags().GetInt("context")
-		return api.SnippetRequest{RepoRoot: repoRoot(), QualifiedName: args[0], ContextLines: contextLines}
+		fromLine, _ := cmd.Flags().GetInt("from")
+		return api.SnippetRequest{RepoRoot: repoRoot(), QualifiedName: args[0], ContextLines: contextLines, StartLine: fromLine}
 	})
 	snippet.Args = cobra.ExactArgs(1)
 	snippet.Flags().Int("context", 0, "Neighboring source lines")
+	snippet.Flags().Int("from", 0, "First source line to read; use the omitted line from a clipped snippet")
 	architecture := nativeGraphLeaf("architecture", "Summarize repository architecture", api.OpArchitecture, func(cmd *cobra.Command, _ []string) any {
 		path, _ := cmd.Flags().GetString("path")
 		aspects, _ := cmd.Flags().GetStringSlice("aspect")
@@ -107,13 +109,17 @@ func nativeGraphLeaf(use, short string, operation api.Operation, params func(*co
 				root = args[0]
 			}
 		}
-		if skipIfUnmanaged(cmd, root) {
-			return nil
+		if err := failIfUnmanaged(root); err != nil {
+			return err
 		}
 		stale := ""
 		switch operation {
 		case api.OpQuery, api.OpSearch, api.OpSnippet, api.OpTrace, api.OpImpact, api.OpArchitecture, api.OpCodeSearch, api.OpCypher:
-			stale = ensureFreshGraph(cmd, root)
+			var freshErr error
+			stale, freshErr = ensureFreshGraph(cmd, root)
+			if freshErr != nil {
+				return freshErr
+			}
 		}
 		client, err := client.Resolve()
 		if err != nil {

@@ -83,8 +83,8 @@ func cmdSessions() *cobra.Command {
 				id = strings.TrimSpace(args[0])
 			}
 			root, hookID := hookRepoAndSession()
-			if skipIfUnmanaged(cmd, root) {
-				return nil
+			if err := failIfUnmanaged(root); err != nil {
+				return err
 			}
 			if id == "" {
 				id = hookID
@@ -112,7 +112,11 @@ func cmdSessions() *cobra.Command {
 			if len(args) == 1 {
 				id = strings.TrimSpace(args[0])
 			}
-			return refreshSession(repoRoot(), id, out())
+			root := repoRoot()
+			if err := failIfUnmanaged(root); err != nil {
+				return err
+			}
+			return refreshSession(root, id, out())
 		},
 	})
 	command.AddCommand(&cobra.Command{
@@ -386,6 +390,9 @@ func loadSessionSpans(store *trace.LocalJSONL, requestedID string) (string, []tr
 }
 
 func demoSession(root string) error {
+	if err := failIfUnmanaged(root); err != nil {
+		return err
+	}
 	paths := paths.Resolve(root)
 	if err := paths.EnsureDirs(); err != nil {
 		return err
@@ -420,6 +427,9 @@ func claimSessionFinalize(root, id string) (unlock func(), ok bool) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return func() {}, true
+	}
+	if !paths.Managed(root) {
+		return func() {}, false
 	}
 	_ = paths.Resolve(root).EnsureDirs()
 	unlock, err := headless.TryLock(headless.LockPath(root, "finalize."+lockToken(id)))

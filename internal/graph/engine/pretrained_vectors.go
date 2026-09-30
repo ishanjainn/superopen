@@ -44,6 +44,9 @@ func loadPretrainedVectors(files fs.FS, tokensPath, vectorsPath, tokenDigest, ve
 	if err != nil {
 		return nil, err
 	}
+	// A Windows checkout can rewrite the vocabulary to CRLF. The pinned digest
+	// is of the LF bytes, so normalize before verification.
+	tokenBytes = bytes.ReplaceAll(tokenBytes, []byte("\r\n"), []byte("\n"))
 	vectorBytes, err := mmapFSFile(files, vectorsPath)
 	if err != nil {
 		vectorBytes, err = fs.ReadFile(files, vectorsPath)

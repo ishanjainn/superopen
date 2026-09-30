@@ -19,7 +19,7 @@
     "clsx": "2.1.1",
     "cmdk": "1.0.4",
     "lucide-react": "0.469.0",
-    "next": "16.3.0",
+    "next": "16.3.6",
     "postprocessing": "^6.39.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -35,10 +35,14 @@
     "@types/three": "^0.181.0",
     "autoprefixer": "10.4.20",
     "eslint": "^9.39.5",
-    "eslint-config-next": "16.3.0",
+    "eslint-config-next": "16.3.6",
     "postcss": "8.5.26",
     "tailwindcss": "3.4.17",
     "typescript": "5.7.3",
-    "vitest": "^4.1.10"
+    "vitest": "4.1.11"
+  },
+  "overrides": {
+    "js-yaml": "4.3.2",
+    "sharp": "0.35.4"
   }
 }

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func (s *Store) ensureKnobs() error {
+func (s *Store) seedKnobs() error {
 	// Ranking knobs (rrf_k, fts_keep, …) are not seeded. Search falls
 	// through to the Go constants so a product default change takes
 	// effect without a store rewrite. memory_meta holds explicit
@@ -19,21 +19,6 @@ func (s *Store) ensureKnobs() error {
 	}
 	for k, v := range defaults {
 		if _, err := s.db.Exec(`INSERT OR IGNORE INTO memory_meta(key, value) VALUES(?,?)`, k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-var seededRankingKeys = []string{
-	"rrf_k", "fts_rrf", "dense_rrf", "dense_rrf_lexical",
-	"fts_candidates", "dense_candidates", "fts_keep", "dense_keep",
-	"capture_floor", "capture_cap", "edge_half_life",
-}
-
-func (s *Store) dropSeededRankingKnobs() error {
-	for _, k := range seededRankingKeys {
-		if _, err := s.db.Exec(`DELETE FROM memory_meta WHERE key=?`, k); err != nil {
 			return err
 		}
 	}

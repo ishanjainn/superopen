@@ -11,7 +11,8 @@ server, no daemon, and no API key. Everything below runs locally.
 | Graph engine | `internal/graph/engine/` | Tree-sitter extract to SQLite store to query/BFS/render |
 | Sessions | `internal/session/`, `internal/agent/export/` | Observability spans to materialized session documents |
 | Memory | `internal/memory/` | Project diary over sessions: retrieval, distill, expiry |
-| Harvest | `internal/harvest/` | Proposed playbook patches, gated apply |
+| Harvest | `internal/harvest/` | Proposed playbook patches, gated apply. Optional Jev decision in the UI. |
+| Scan | `internal/guards/` | Detection rules over recorded tool calls (`so scan`, also the Scan page) |
 | Agent harness | `internal/agent/` (`install/`, `hook/`, `steer/`, `skills/`) | What `so install` writes into agent configs |
 | Web UI | `web/` (served by `so dev`) | Sessions, memory, and graph visualization on localhost |
 
@@ -41,7 +42,8 @@ server, no daemon, and no API key. Everything below runs locally.
 |----------|------------|----------|
 | `<repo>/.so/sessions/` | `so init`, session hooks | Raw spans, events.jsonl, checkpoints (gitignored) |
 | `<repo>/.so/db/so.db` | graph build, memory writes | One SQLite store: graph tables and memory tables (gitignored) |
-| `<repo>/.so/.gitignore` | `so init` | Keeps `.so/` out of git |
+| `<repo>/.so/guards/` | you | Optional `*.rule.yaml` files for `so scan`. Not gitignored. Empty means the built-in baseline. |
+| `<repo>/.so/.gitignore` | `so init` | Ignores `sessions/`, `db/`, and `harvest/` |
 | User skill/config dirs | `so install` | `/so` skill, hooks, durable guidance. Never per-repo (unless `so init --cursor-rules`). |
 | Config dir (`~/.config/superopen` / `%APPDATA%\superopen`) | `so init`, `so gc` | `projects.json` cross-repo index, `config.env` |
 

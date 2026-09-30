@@ -24,16 +24,27 @@ func TestWriteInitGitignoresHidesSO(t *testing.T) {
 	if err := paths.Resolve(root).EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}
+	db := filepath.Join(root, ".so", "db", "so.db")
+	if err := os.WriteFile(db, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := writeInitGitignores(root); err != nil {
 		t.Fatal(err)
+	}
+	repoIgnore, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(repoIgnore) != "*.pyc\n" {
+		t.Fatalf("init must not edit the repo .gitignore, got %q", repoIgnore)
 	}
 	cmd := exec.Command("git", "-C", root, "status", "--porcelain")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git status: %v %s", err, out)
 	}
-	if strings.Contains(string(out), ".so") {
-		t.Fatalf("git status must not mention .so/: %q", out)
+	if strings.Contains(string(out), "so.db") {
+		t.Fatalf("machine-local db must stay ignored: %q", out)
 	}
 }
 

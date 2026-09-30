@@ -27,9 +27,53 @@ $InstallDir = if ($env:SUPEROPEN_INSTALL_DIR) {
 }
 $Version = if ($env:SUPEROPEN_VERSION) { $env:SUPEROPEN_VERSION } else { 'latest' }
 
+$script:SpinPs = $null
+$script:SpinHandle = $null
+$script:SpinState = $null
+
+function Stop-Spin {
+    if ($script:SpinState) { $script:SpinState.Stop = $true }
+    if ($script:SpinPs) {
+        try { $null = $script:SpinPs.EndInvoke($script:SpinHandle) } catch {}
+        $script:SpinPs.Dispose()
+        $script:SpinPs = $null
+        $script:SpinHandle = $null
+        $script:SpinState = $null
+        try { [Console]::Write("`r" + (' ' * 80) + "`r") } catch {}
+    }
+}
+
+function Start-Spin([string]$Message) {
+    Stop-Spin
+    $redirected = $false
+    try { $redirected = [Console]::IsOutputRedirected } catch { $redirected = $true }
+    if ($redirected) {
+        Write-Host "  …  $Message"
+        return
+    }
+    $utf = $false
+    try { $utf = [Console]::OutputEncoding.WebName -match 'utf-8' } catch {}
+    $state = [hashtable]::Synchronized(@{ Stop = $false; Message = $Message; Utf = $utf })
+    $script:SpinState = $state
+    $script:SpinPs = [powershell]::Create().AddScript({
+        param($state)
+        $braille = @([char]0x280B, [char]0x2819, [char]0x2839, [char]0x2838, [char]0x283C, [char]0x2834, [char]0x2826, [char]0x2827, [char]0x2807, [char]0x280F)
+        $ascii = @('|', '/', '-', '\')
+        $frames = if ($state.Utf) { $braille } else { $ascii }
+        $i = 0
+        while (-not $state.Stop) {
+            $frame = $frames[$i % $frames.Count]
+            [Console]::Write("`r  $frame  $($state.Message)")
+            $i++
+            Start-Sleep -Milliseconds 80
+        }
+    }).AddArgument($state)
+    $script:SpinHandle = $script:SpinPs.BeginInvoke()
+}
+
 function Write-So($msg)     { Write-Host "so: $msg" }
 function Write-SoWarn($msg) { Write-Warning "so: $msg" }
-function Stop-So($msg)      { throw "so: $msg" }
+function Stop-So($msg)      { Stop-Spin; throw "so: $msg" }
 
 function Web-Dst {
     Join-Path (Split-Path $InstallDir -Parent) 'share\superopen\web'
@@ -41,12 +85,15 @@ function Install-SoWebFromSource([string]$WebSrc) {
     if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
         Stop-So 'npm not found; Node.js is required to build the Superopen UI from a checkout'
     }
-    Write-So 'npm install --ignore-scripts (web UI)'
+    Start-Spin 'Building the UI'
+    $log = Join-Path $env:TEMP 'so-web-build.log'
     Push-Location $WebSrc
     try {
-        npm install --ignore-scripts
-        Write-So 'npm run build (web UI)'
-        npm run build
+        cmd /c "npm install --ignore-scripts > `"$log`" 2>&1 && npm run build >> `"$log`" 2>&1"
+        if ($LASTEXITCODE -ne 0) {
+            Get-Content $log -ErrorAction SilentlyContinue
+            Stop-So 'UI build failed'
+        }
     } finally {
         Pop-Location
     }
@@ -67,14 +114,14 @@ function Install-SoWebFromSource([string]$WebSrc) {
         Copy-Item -Recurse -Force (Join-Path $publicSrc '*') $publicDst
     }
     $webDst = Web-Dst
-    Write-So "Installing prebuilt web UI into $webDst"
     if (Test-Path $webDst) { Remove-Item -Recurse -Force $webDst }
     Copy-Item -Recurse -Force $standalone $webDst
+    Stop-Spin
+    Write-Host "  ✓  UI             $webDst"
 }
 
 function Install-SoWebTarball([string]$Archive) {
     $webDst = Web-Dst
-    Write-So "Installing prebuilt web UI into $webDst"
     if (Test-Path $webDst) { Remove-Item -Recurse -Force $webDst }
     New-Item -ItemType Directory -Force -Path $webDst | Out-Null
     & tar -xzf $Archive -C $webDst
@@ -82,6 +129,8 @@ function Install-SoWebTarball([string]$Archive) {
     if (-not (Test-Path (Join-Path $webDst 'server.js'))) {
         Stop-So 'so-web.tar.gz is missing server.js (not a standalone UI bundle)'
     }
+    Stop-Spin
+    Write-Host "  ✓  UI             $webDst"
 }
 
 function Add-SoUserPath([string]$Dir) {
@@ -91,7 +140,7 @@ function Add-SoUserPath([string]$Dir) {
     if ($pathParts -notcontains $Dir) {
         $newPath = if ($currentUserPath) { "$currentUserPath;$Dir" } else { $Dir }
         [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-        Write-So "Added $Dir to your user PATH (open a new terminal to pick it up)"
+        Write-Host "  ✓  PATH           open a new terminal ($Dir)"
     }
     $env:Path = "$Dir;$env:Path"
 }
@@ -106,7 +155,17 @@ if ($ScriptDir) {
     $Root = Join-Path $ScriptDir '..'
     $MainGo = Join-Path $Root 'cmd\so\main.go'
     if ((Test-Path $MainGo) -and (Get-Command go -ErrorAction SilentlyContinue)) {
-        Write-So 'Building so from local source...'
+        Write-Host ''
+        Write-Host @'
+
+  ____  _   _ ____  _____ ____   ___  ____  _____ _   _
+ / ___|| | | |  _ \| ____|  _ \ / _ \|  _ \| ____| \ | |
+ \___ \| | | | |_) |  _| | |_) | | | | |_) |  _| |  \| |
+  ___) | |_| |  __/| |___|  _ <| |_| |  __/| |___| |\  |
+ |____/ \___/|_|   |_____|_| \_\\___/|_|   |_____|_| \_|
+
+'@
+        Start-Spin 'Building the CLI'
         New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
         $Out = Join-Path $InstallDir 'so.exe'
         Push-Location $Root
@@ -121,12 +180,12 @@ if ($ScriptDir) {
         } finally {
             Pop-Location
         }
-        Write-So "Installed: $Out"
+        Stop-Spin
+        Write-Host "  ✓  CLI            $Out"
         Install-SoWebFromSource (Join-Path $Root 'web')
         Add-SoUserPath $InstallDir
+        $env:SUPEROPEN_INSTALLER = '1'
         & $Out install
-        Write-So 'Done. In a test repo: so init && so dev'
-        Write-So 'Wipe with: powershell -File scripts/uninstall.ps1'
         return
     }
 }
@@ -151,7 +210,17 @@ $url = if ($Version -eq 'latest') {
     "https://github.com/$Repo/releases/download/cli-$Version/$asset"
 }
 
-Write-So "Downloading $asset"
+Write-Host ''
+Write-Host @'
+
+  ____  _   _ ____  _____ ____   ___  ____  _____ _   _
+ / ___|| | | |  _ \| ____|  _ \ / _ \|  _ \| ____| \ | |
+ \___ \| | | | |_) |  _| | |_) | | | | |_) |  _| |  \| |
+  ___) | |_| |  __/| |___|  _ <| |_| |  __/| |___| |\  |
+ |____/ \___/|_|   |_____|_| \_\\___/|_|   |_____|_| \_|
+
+'@
+Start-Spin 'Downloading the CLI'
 
 $tmpDir = Join-Path $env:TEMP ("so-install-" + [System.Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmpDir | Out-Null
@@ -178,7 +247,8 @@ try {
     $target = Join-Path $InstallDir 'so.exe'
     Move-Item -Path $extracted.FullName -Destination $target -Force
 
-    Write-So "Installed: $target"
+    Stop-Spin
+    Write-Host "  ✓  CLI            $target"
     Add-SoUserPath $InstallDir
 
     $webAsset = 'so-web.tar.gz'
@@ -187,12 +257,12 @@ try {
     } else {
         "https://github.com/$Repo/releases/download/cli-$Version/$webAsset"
     }
-    Write-So "Downloading $webAsset"
+    Start-Spin 'Downloading the UI'
     $webTar = Join-Path $tmpDir $webAsset
     Invoke-WebRequest -Uri $webUrl -OutFile $webTar -UseBasicParsing
     Install-SoWebTarball $webTar
+    $env:SUPEROPEN_INSTALLER = '1'
     & $target install
-    Write-So 'Done. In a test repo: so init && so dev'
 }
 finally {
     Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue

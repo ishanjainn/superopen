@@ -18,6 +18,7 @@ const (
 	KindCreate    = "create"
 	KindSimplify  = "simplify"
 	KindPrinciple = "principle"
+	KindMemory    = "memory"
 
 	MaxProposals = 3
 
@@ -65,36 +66,40 @@ type HistoryItem struct {
 }
 
 type Proposal struct {
-	ID         int64      `json:"id"`
-	SessionID  string     `json:"session_id,omitempty"`
-	Status     string     `json:"status"`
-	Kind       string     `json:"kind"`
-	Target     string     `json:"target"`
-	Title      string     `json:"title"`
-	Reason     string     `json:"reason"`
-	Issue      string     `json:"issue,omitempty"`
-	Suggestion string     `json:"suggestion,omitempty"`
-	Diff       string     `json:"diff,omitempty"`
-	BaseHash   string     `json:"base_hash,omitempty"`
-	BaseMtime  string     `json:"base_mtime,omitempty"`
-	Evidence   []Evidence `json:"evidence,omitempty"`
-	Plus       int        `json:"plus,omitempty"`
-	Minus      int        `json:"minus,omitempty"`
-	CreatedAt  string     `json:"created_at"`
-	UpdatedAt  string     `json:"updated_at"`
+	ID          int64      `json:"id"`
+	SessionID   string     `json:"session_id,omitempty"`
+	Status      string     `json:"status"`
+	Kind        string     `json:"kind"`
+	Target      string     `json:"target"`
+	Title       string     `json:"title"`
+	Reason      string     `json:"reason"`
+	Issue       string     `json:"issue,omitempty"`
+	Suggestion  string     `json:"suggestion,omitempty"`
+	Diff        string     `json:"diff,omitempty"`
+	BaseHash    string     `json:"base_hash,omitempty"`
+	BaseMtime   string     `json:"base_mtime,omitempty"`
+	Evidence    []Evidence `json:"evidence,omitempty"`
+	Plus        int        `json:"plus,omitempty"`
+	Minus       int        `json:"minus,omitempty"`
+	MemoryTitle string     `json:"memory_title,omitempty"`
+	MemoryText  string     `json:"memory_text,omitempty"`
+	CreatedAt   string     `json:"created_at"`
+	UpdatedAt   string     `json:"updated_at"`
 }
 
 type ProposeInput struct {
-	SessionID  string     `json:"session_id"`
-	Kind       string     `json:"kind"`
-	Target     string     `json:"target"`
-	Title      string     `json:"title"`
-	Reason     string     `json:"reason"`
-	Issue      string     `json:"issue"`
-	Suggestion string     `json:"suggestion"`
-	Diff       string     `json:"diff"`
-	Evidence   []Evidence `json:"evidence"`
-	Provider   string     `json:"provider,omitempty"`
+	SessionID   string     `json:"session_id"`
+	Kind        string     `json:"kind"`
+	Target      string     `json:"target"`
+	Title       string     `json:"title"`
+	Reason      string     `json:"reason"`
+	Issue       string     `json:"issue"`
+	Suggestion  string     `json:"suggestion"`
+	Diff        string     `json:"diff"`
+	Evidence    []Evidence `json:"evidence"`
+	Provider    string     `json:"provider,omitempty"`
+	MemoryTitle string     `json:"memory_title,omitempty"`
+	MemoryText  string     `json:"memory_text,omitempty"`
 }
 
 type GenerateResult struct {

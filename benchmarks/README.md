@@ -71,6 +71,8 @@ Compare runs **identical prompts** on both arms. Only the superopen arm gets `so
 | `temporal` | Index size across 5 Django LTS tags | no | yes | longer (optional) |
 | `all` | Full suite including harness smoke and SWE-bench | mixed | yes | longest |
 
+SWE headline tokens, cost, tool calls, API requests, and wall-clock cover every completed session. When both arms pass the same instance, that pair is a side note, not the headline.
+
 `--max-spend 0` forbids LLM calls (`compare`, `swe`, and `memory --phase 3` skip). `--mode all` always runs memory phase 3 and `--swe-grade` so `BENCHMARKS.md` has no `pending` cells (needs `--max-spend > 0` and `ANTHROPIC_API_KEY`). Pass `--no-swe-grade` only if you want patches without official verdicts.
 
 ### Reproduce commands

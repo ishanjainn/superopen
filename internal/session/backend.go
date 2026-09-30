@@ -37,7 +37,7 @@ type AttributionSummary struct {
 
 // Filter selects sessions across backends.
 type Filter struct {
-	ProjectID string // empty or "all" = all registered / current
+	ProjectID string // empty = the current checkout
 	Query     string
 	Commit    string
 	PR        string // number or URL substring
@@ -94,7 +94,7 @@ func (l *LocalMulti) bindings(filter Filter) ([]projectBinding, error) {
 		for _, p := range projs {
 			add(p.ID, p.Name, p.RepoRoot, paths.Resolve(p.RepoRoot))
 		}
-	} else if filter.ProjectID != "" && filter.ProjectID != "all" {
+	} else if filter.ProjectID != "" {
 		return nil, err
 	}
 	return out, nil
@@ -150,16 +150,12 @@ func (l *LocalMulti) List(ctx context.Context, filter Filter) ([]ListItem, error
 
 func (l *LocalMulti) Get(ctx context.Context, projectID, sessionID string) (Meta, error) {
 	_ = ctx
-	f := Filter{ProjectID: projectID}
-	if projectID == "" {
-		f.ProjectID = "all"
-	}
-	binds, err := l.bindings(f)
+	binds, err := l.bindings(Filter{ProjectID: projectID})
 	if err != nil {
 		return Meta{}, err
 	}
 	for _, b := range binds {
-		if projectID != "" && projectID != "all" && b.ID != projectID && b.RepoRoot != projectID {
+		if projectID != "" && b.ID != projectID && b.RepoRoot != projectID {
 			continue
 		}
 		ss := NewStore(b.Paths)
@@ -175,7 +171,7 @@ func (l *LocalMulti) Get(ctx context.Context, projectID, sessionID string) (Meta
 }
 
 func (l *LocalMulti) StoreFor(projectID string) (*Store, paths.Paths, error) {
-	if projectID == "" || projectID == "all" {
+	if projectID == "" {
 		return NewStore(l.Current), l.Current, nil
 	}
 	p, err := projects.Get(projectID)
