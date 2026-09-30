@@ -6,7 +6,7 @@ require (
 	github.com/RubixDev/tree-sitter-asm v0.24.0
 	github.com/google/cel-go v0.30.0
 	github.com/ishanjainn/superopen/sdk/go v0.0.0
-	github.com/joelspadin/tree-sitter-devicetree v0.14.1
+	github.com/joelspadin/tree-sitter-devicetree v0.15.0
 	github.com/klauspost/compress v1.19.2
 	github.com/mattn/go-sqlite3 v1.14.50
 	github.com/pelletier/go-toml/v2 v2.3.1
