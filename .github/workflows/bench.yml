@@ -76,7 +76,7 @@ jobs:
         run: make build-native
 
       - name: Restore benchmark cache (Django mirror + datasets)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             benchmarks/cache/django
