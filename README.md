@@ -23,18 +23,18 @@ Superopen is not another coding agent. It builds the open source harness around 
 - Distill compresses what mattered into a short index (at most about 350 tokens) so the next session starts with signal, not noise (90.8% / 82% recall@10).
 - Harvest proposes playbook patches from the session with reusable guidance you apply only when you want it.
 
-**The numbers speak for themselves**. In our benchmarks, Claude Code with Superopen solves **4 times more tasks correctly** while cutting tokens, cost, and latency roughly in half:
+In one small SWE-bench Verified run (5 tasks), Claude Code with Superopen used fewer tokens, cost less, and finished faster, with the same number of tasks passed. Results varied by task; this is an early, small-sample benchmark, not a general accuracy claim:
 
 <div align="center">
 
 | Metric | Cold Claude Code | Claude Code with Superopen | Improvement |
 | :---: | :---: | :---: | :---: |
-| Correctness | 1 / 5 (20%) | **4 / 5 (80%)** | **+60 pts** |
-| Tokens | 19.1M | **9.6M** | **+50%** |
-| Cost | $1.52 | **$0.87** | **+43%** |
-| Tool calls | 81 | **44** | **+46%** |
-| API requests | 82 | **45** | **+45%** |
-| Wall-clock | 504s | **312s** | **+38%** |
+| Correctness | 4 / 5 (80%) | **4 / 5 (80%)** | **Same pass count** |
+| Tokens | 61.4M | **36.9M** | **40% fewer** |
+| Cost | $4.31 | **$2.70** | **37% lower** |
+| Tool calls | 249 | **161** | **35% fewer** |
+| API requests | 254 | **166** | **35% fewer** |
+| Wall-clock | 1,429s | **933s** | **35% faster** |
 
 Source: [BENCHMARKS.md](BENCHMARKS.md)
 
@@ -100,7 +100,7 @@ That creates `.so/` in the repository along with the repository knowledge graph:
 ```
 
 Reopen Claude Code, Cursor, Codex, or any other supported harness and keep working as you were.
-**Superopen automatically tracks each session, steers agents to be 40% cheaper and 60% more correct!**
+Superopen automatically tracks sessions and provides local graph and memory tools. In the five-task SWE-bench run above, Claude Code used 40% fewer tokens and passed the same number of tasks as the baseline.
 
 ### 3. Open the UI (optional)
 
