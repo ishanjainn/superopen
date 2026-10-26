@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -243,11 +244,14 @@ func (s *Store) Trace(ctx context.Context, req api.TraceRequest) (api.TraceResul
 		req.EdgeTypes = []string{"CALLS", "USAGE", "CONFIGURES"}
 	}
 	req.Direction = direction
-	result := api.TraceResult{Direction: direction}
+	result := api.TraceResult{Direction: direction, Start: starts[0].QualifiedName}
 	startIDs := map[int64]bool{}
 	for _, start := range starts {
 		startIDs[start.ID] = true
 	}
+	uncertain := map[int64]bool{}
+	tests := map[int64]bool{}
+	external := map[string]bool{}
 	for len(queue) > 0 && result.Visited < limit {
 		current := queue[0]
 		queue = queue[1:]
@@ -267,6 +271,21 @@ func (s *Store) Trace(ctx context.Context, req api.TraceRequest) (api.TraceResul
 			if skipDataLanguageVariable(next.node) && !startIDs[next.node.ID] {
 				continue
 			}
+			if !req.Uncertain && edgeConfidence(next.edge) < traceMinConfidence {
+				uncertain[next.node.ID] = true
+				continue
+			}
+			if !req.Tests && !startIDs[next.node.ID] && queryNodeLooksLikeTest(next.node) {
+				tests[next.node.ID] = true
+				continue
+			}
+			if isSyntheticQueryNode(next.node) {
+				if !external[next.node.QualifiedName] {
+					external[next.node.QualifiedName] = true
+					result.External = append(result.External, next.node.QualifiedName)
+				}
+				continue
+			}
 			visited[next.node.ID] = true
 			path := append(append([]api.TraceStep(nil), current.path...), api.TraceStep{
 				Node: next.node, Via: &next.edge, Evidence: next.edge.Evidence, Hop: hop + 1,
@@ -278,6 +297,13 @@ func (s *Store) Trace(ctx context.Context, req api.TraceRequest) (api.TraceResul
 		}
 	}
 	result.Truncated = len(queue) > 0
+	for id := range uncertain {
+		if !visited[id] && !tests[id] {
+			result.Uncertain++
+		}
+	}
+	result.Tests = len(tests)
+	sort.Strings(result.External)
 	includeUnresolved := req.Direction == "" || req.Direction == "outgoing" || req.Direction == "both"
 	for qualifiedName := range visitedQualifiedNames(result.Paths, starts) {
 		if !includeUnresolved {
@@ -327,6 +353,21 @@ func (s *Store) Trace(ctx context.Context, req api.TraceRequest) (api.TraceResul
 		result.Suggestions = slimIdentityNodes(leftovers)
 	}
 	return result, nil
+}
+
+// traceMinConfidence is the floor for an edge trace walks by default. Below
+// it the resolver matched a bare method name shared by several unrelated
+// classes (x.items() to HttpResponseBase.items), and walking it fans out
+// into code the start never calls.
+const traceMinConfidence = 0.3
+
+// edgeConfidence is the resolver's confidence in an edge. Structural edges
+// carry none and are certain.
+func edgeConfidence(e api.Edge) float64 {
+	if e.Evidence == nil || e.Evidence.Confidence <= 0 {
+		return 1
+	}
+	return e.Evidence.Confidence
 }
 
 func callableLabel(label string) bool {
@@ -458,8 +499,10 @@ func visitedQualifiedNames(paths [][]api.TraceStep, starts []api.Node) map[strin
 	return result
 }
 
-func (s *Store) queryCallerText(ctx context.Context, seeds []api.RankedNode) (string, error) {
+func (s *Store) queryCallerText(ctx context.Context, seeds []api.RankedNode) (string, []api.Node, error) {
 	var b strings.Builder
+	var all []api.Node
+	seenCaller := map[int64]bool{}
 	remaining := queryRowCap()
 	for _, seed := range seeds {
 		if isSyntheticQueryNode(seed.Node) {
@@ -467,7 +510,7 @@ func (s *Store) queryCallerText(ctx context.Context, seeds []api.RankedNode) (st
 		}
 		neighbors, err := s.neighbors(ctx, seed.Node, "incoming", []string{"CALLS", "USAGE", "CONFIGURES"}, 100)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		var rows []neighbor
 		for _, next := range neighbors {
@@ -475,6 +518,10 @@ func (s *Store) queryCallerText(ctx context.Context, seeds []api.RankedNode) (st
 				continue
 			}
 			rows = append(rows, next)
+			if !seenCaller[next.node.ID] {
+				seenCaller[next.node.ID] = true
+				all = append(all, next.node)
+			}
 		}
 		shown := rows
 		extra := 0
@@ -499,9 +546,9 @@ func (s *Store) queryCallerText(ctx context.Context, seeds []api.RankedNode) (st
 		}
 	}
 	if b.Len() == 0 {
-		return "No matching nodes found.\n", nil
+		return "No matching nodes found.\n", nil, nil
 	}
-	return b.String(), nil
+	return b.String(), all, nil
 }
 
 func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResult, error) {
@@ -525,12 +572,27 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 		return api.QueryResult{}, err
 	}
 	seeded := scoreQuerySeeds(candidates, terms, req.Question)
+	withTests := queryMentionsTests(req.Question, terms)
+	ranked, err := s.rankQueryRows(ctx, req.Project, req.Question, withTests)
+	if err != nil {
+		return api.QueryResult{}, err
+	}
+	bodyChars := maxChars
+	if bodyChars < queryBodyReserve {
+		bodyChars = queryBodyReserve
+	}
 	if len(seeded.seeds) == 0 {
-		return api.QueryResult{
+		result := api.QueryResult{
 			Text:     "No matching nodes found.",
 			Question: req.Question,
 			Budget:   api.Budget{RequestedTokens: budget, ReturnedTokens: 1, Truncated: false},
-		}, nil
+		}
+		if len(ranked) > 0 {
+			if err := s.fillQueryRows(ctx, &result, ranked, req, bodyChars); err != nil {
+				return api.QueryResult{}, err
+			}
+		}
+		return result, nil
 	}
 
 	result := api.QueryResult{Seeds: seeded.seeds, Question: req.Question}
@@ -539,13 +601,17 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 		if len(targets) == 0 {
 			targets = seeded.seeds
 		}
-		output, err := s.queryCallerText(ctx, targets)
+		output, callers, err := s.queryCallerText(ctx, targets)
 		if err != nil {
 			return api.QueryResult{}, err
 		}
 		for _, seed := range targets {
 			result.Nodes = append(result.Nodes, seed.Node)
+			if !isSyntheticQueryNode(seed.Node) {
+				result.CallersOf = append(result.CallersOf, seed.QualifiedName)
+			}
 		}
+		pageQueryRows(&result, callers, req)
 		result.Text = output
 		result.Budget.RequestedTokens = budget
 		result.Budget.ReturnedTokens = (len(output) + queryCharsPerToken - 1) / queryCharsPerToken
@@ -564,13 +630,13 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 
 	expand := seeded.primary
 	if len(expand) == 0 {
-		n := seedMaxK
+		n := queryExpandMaxK
 		if n > len(seeded.seeds) {
 			n = len(seeded.seeds)
 		}
 		expand = seeded.seeds[:n]
-	} else if len(expand) > seedMaxK {
-		expand = expand[:seedMaxK]
+	} else if len(expand) > queryExpandMaxK {
+		expand = expand[:queryExpandMaxK]
 	}
 
 	edgeLines, err := s.queryExpandBFS(ctx, expand, seedIDs, depth, degrees, nodesByID, seenEdges, &result.Edges, overlap)
@@ -607,10 +673,6 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 	if other < 0 {
 		other = 0
 	}
-	bodyChars := maxChars
-	if bodyChars < queryBodyReserve {
-		bodyChars = queryBodyReserve
-	}
 	bodies := s.appendQueryBodies(ctx, req.Project, pickQueryAttachNodes(screen), bodyChars)
 	output := renderSeedQueryText(screen, other, bodies != "")
 	if also := s.sameNameLines(ctx, req.Project, screen); also != "" {
@@ -624,7 +686,165 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 	result.Budget.Truncated = rowCapped || len(output) > maxChars
 	result.Page.Total = foundNodes
 	result.Page.Truncated = rowCapped
+	rows := mergeQueryRows(ranked, queryAnswerRows(screen, candidates, orderedAll, req.Question, terms))
+	if err := s.fillQueryRows(ctx, &result, rows, req, bodyChars); err != nil {
+		return api.QueryResult{}, err
+	}
 	return result, nil
+}
+
+// mergeQueryRows lists the ranked rows, then rows only the name seeds and
+// graph expansion reached, so paging still walks into neighbors.
+func mergeQueryRows(ranked, rest []api.Node) []api.Node {
+	seen := make(map[int64]bool, len(ranked))
+	out := make([]api.Node, 0, len(ranked)+len(rest))
+	for _, n := range ranked {
+		seen[n.ID] = true
+		out = append(out, n)
+	}
+	for _, n := range rest {
+		if n.ID != 0 && seen[n.ID] {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// fillQueryRows pages the rows, attaches the first callables' bodies on the
+// first page, and keeps the edges that join two listed rows.
+func (s *Store) fillQueryRows(ctx context.Context, result *api.QueryResult, rows []api.Node, req api.QueryRequest, bodyChars int) error {
+	pageQueryRows(result, rows, req)
+	if result.Offset == 0 {
+		var attach []api.Node
+		for _, n := range result.Rows {
+			if queryAttachableLabel(n.Label) {
+				attach = append(attach, n)
+			}
+		}
+		result.Bodies = s.collectQueryBodies(ctx, req.Project, attach, bodyChars)
+	}
+	edges, err := s.edgesAmong(ctx, req.Project, result.Rows)
+	if err != nil {
+		return err
+	}
+	result.Edges = edges
+	return nil
+}
+
+// edgesAmong returns behavioral edges whose ends are both in nodes, at the
+// confidence trace walks by default.
+func (s *Store) edgesAmong(ctx context.Context, project string, nodes []api.Node) ([]api.Edge, error) {
+	if len(nodes) < 2 {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		if n.ID != 0 {
+			ids = append(ids, strconv.FormatInt(n.ID, 10))
+		}
+	}
+	list := strings.Join(ids, ",")
+	rows, err := s.db.QueryContext(ctx, `SELECT id,source_id,target_id,type FROM edges WHERE project=? AND source_id IN (`+list+`) AND target_id IN (`+list+`)
+		AND type IN ('CALLS','USAGE','INHERITS','IMPLEMENTS','OVERRIDE','WRITES','READS','CONFIGURES')
+		AND (CASE WHEN json_valid(evidence) THEN coalesce(nullif(json_extract(evidence,'$.confidence'),0),1) ELSE 1 END) >= ? ORDER BY id`, project, traceMinConfidence)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []api.Edge
+	for rows.Next() {
+		var e api.Edge
+		if err := rows.Scan(&e.ID, &e.SourceID, &e.TargetID, &e.Type); err != nil {
+			return nil, err
+		}
+		if e.SourceID == e.TargetID {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// queryDefaultLimit is the default page of ranked rows. Printing only the
+// 1-4 seeds hid the edit target on most SWE-bench queries; 15 rows of the
+// same ranking surfaced it on more than half.
+const queryDefaultLimit = 15
+
+// queryAnswerRows ranks every node the query found: listed seeds, then the
+// search order, then graph neighbors. Tests stay out unless asked for.
+func queryAnswerRows(screen []queryNodeHit, candidates []seedCandidate, ordered []queryNodeHit, question string, terms []string) []api.Node {
+	withTests := queryMentionsTests(question, terms)
+	seen := map[int64]bool{}
+	var rows []api.Node
+	add := func(n api.Node) {
+		if n.ID != 0 && seen[n.ID] {
+			return
+		}
+		// A row an agent cannot open (Route, external node) is noise.
+		if !queryRowEligible(n, withTests) {
+			return
+		}
+		if n.ID != 0 {
+			seen[n.ID] = true
+		}
+		rows = append(rows, n)
+	}
+	for _, hit := range screen {
+		add(hit.node)
+	}
+	for _, cand := range candidates {
+		add(cand.node)
+	}
+	for _, hit := range ordered {
+		// Neighbors reached only by graph expansion: a whole-file Module or
+		// File row (sphinx.domains.cpp, 1-7901) is not an answer. Its symbols
+		// carry the file; a Module the search matched still lists above.
+		if !hit.seed && !hit.screen && (hit.node.Label == "Module" || hit.node.Label == "File") {
+			continue
+		}
+		add(hit.node)
+	}
+	return demoteVendoredRows(rows, question, terms)
+}
+
+// demoteVendoredRows moves dependency and build-tree rows (static, vendor,
+// node_modules, dist, third_party) behind project source, keeping order
+// otherwise. Seeds already carry this penalty; the FTS-order rows did not, so
+// jquery and underscore filled the page on a Sphinx query.
+func demoteVendoredRows(rows []api.Node, question string, terms []string) []api.Node {
+	out := make([]api.Node, 0, len(rows))
+	var vendored []api.Node
+	for _, n := range rows {
+		if seg := queryVendoredSegment(n.Location.File); seg != "" && !queryMentionsTerm(question, terms, seg) {
+			vendored = append(vendored, n)
+			continue
+		}
+		out = append(out, n)
+	}
+	return append(out, vendored...)
+}
+
+func pageQueryRows(result *api.QueryResult, rows []api.Node, req api.QueryRequest) {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = queryDefaultLimit
+	}
+	offset := req.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	result.RowsTotal = len(rows)
+	result.Offset = offset
+	if offset >= len(rows) {
+		result.Rows = []api.Node{}
+		return
+	}
+	end := offset + limit
+	if end > len(rows) {
+		end = len(rows)
+	}
+	result.Rows = rows[offset:end]
 }
 
 func (s *Store) communityLabelByNodeID(ctx context.Context, project string) (map[int64]string, error) {
@@ -826,6 +1046,13 @@ func coverageFreshness(root, rel, storedHash string, indexed bool) string {
 	return "fresh"
 }
 
+// snippetMaxLines covers most methods in one call. Query bodies pass the
+// tighter queryBodyMaxLines so several fit in the compact budget.
+const (
+	snippetMaxLines   = 250
+	queryBodyMaxLines = 80
+)
+
 func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.SnippetResult, error) {
 	if req.Project == "" {
 		req.Project, _ = s.defaultProject(ctx)
@@ -901,7 +1128,10 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 		return api.SnippetResult{}, errors.New("snippet path escapes repository")
 	}
 	fileOrModule := matched != nil && (matched.Label == "File" || matched.Label == "Module")
-	maxSpan := 80
+	maxSpan := snippetMaxLines
+	if req.MaxLines > 0 {
+		maxSpan = req.MaxLines
+	}
 	if fileOrModule {
 		maxSpan = 500
 	}

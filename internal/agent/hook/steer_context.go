@@ -591,15 +591,67 @@ func claudeBashStdout(payload []byte) string {
 	return ""
 }
 
+var queryTableHeader = regexp.MustCompile(`^(nodes|callers)\[\d+\]\{qn,kind,file,lines\}:$`)
+
+// queryTableFiles reads the file column of TOON nodes/callers rows.
+func queryTableFiles(stdout string) []string {
+	var files []string
+	inTable := false
+	for _, line := range strings.Split(stdout, "\n") {
+		if queryTableHeader.MatchString(strings.TrimSpace(line)) && !strings.HasPrefix(line, " ") {
+			inTable = true
+			continue
+		}
+		if !inTable {
+			continue
+		}
+		if !strings.HasPrefix(line, "  ") {
+			inTable = false
+			continue
+		}
+		if cells := splitTOONRow(strings.TrimSpace(line)); len(cells) >= 3 {
+			files = append(files, cells[2])
+		}
+	}
+	return files
+}
+
+// splitTOONRow splits one comma-delimited TOON row, honoring "quoted" cells.
+func splitTOONRow(row string) []string {
+	var cells []string
+	var cur strings.Builder
+	quoted := false
+	for i := 0; i < len(row); i++ {
+		c := row[i]
+		switch {
+		case quoted && c == '\\' && i+1 < len(row):
+			i++
+			cur.WriteByte(row[i])
+		case c == '"':
+			quoted = !quoted
+		case c == ',' && !quoted:
+			cells = append(cells, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	return append(cells, cur.String())
+}
+
 func srcPathsFromQuery(stdout string) []string {
-	matches := querySrcPattern.FindAllStringSubmatch(stdout, -1)
-	if len(matches) == 0 {
+	var paths []string
+	for _, m := range querySrcPattern.FindAllStringSubmatch(stdout, -1) {
+		paths = append(paths, m[1])
+	}
+	paths = append(paths, queryTableFiles(stdout)...)
+	if len(paths) == 0 {
 		return nil
 	}
 	seen := map[string]bool{}
 	out := make([]string, 0, queryListedFileCap)
-	for _, m := range matches {
-		p := filepath.ToSlash(strings.TrimSpace(m[1]))
+	for _, raw := range paths {
+		p := filepath.ToSlash(strings.TrimSpace(raw))
 		if p == "" || p == "-" || seen[p] {
 			continue
 		}

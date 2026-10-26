@@ -7,22 +7,33 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph/api"
 )
 
-// HelpForQuery returns AXI next-step commands after a graph query.
-func HelpForQuery(result api.QueryResult) []string {
-	qn := ""
-	if len(result.Seeds) > 0 {
-		qn = result.Seeds[0].QualifiedName
-	}
+// Hints follow AXI §9: a few runnable next steps, only where the next step is
+// not obvious. A self-contained answer gets none. Dynamic values the CLI
+// cannot know (which row the agent wants) stay placeholders like <qn>.
+
+// HelpForQuery returns next steps after a graph query page.
+func HelpForQuery(result api.QueryResult, question string, limit int) []string {
 	var hints []string
-	if qn == "" {
-		hints = []string{
-			"so graph search <name>",
-			"so graph snippet <qualified_name>",
+	shownEnd := result.Offset + len(result.Rows)
+	if more := result.RowsTotal - shownEnd; more > 0 && len(result.Rows) > 0 {
+		cmd := fmt.Sprintf("so graph query %s --offset %d", Quote(question), shownEnd)
+		if limit > 0 {
+			cmd += fmt.Sprintf(" --limit %d", limit)
 		}
-	} else {
-		hints = []string{fmt.Sprintf("so graph snippet %s", qn)}
+		hints = append(hints, fmt.Sprintf("%d more ranked: %s", more, cmd))
 	}
-	if looksLikeImpactQuestion(result.Question) {
+	for _, body := range result.Bodies {
+		if body.TotalLines > body.EndLine-body.StartLine+1 {
+			hints = append(hints, fmt.Sprintf("rest of %s: so graph snippet %s --from %d", lastSegment(body.QualifiedName), body.QualifiedName, body.EndLine+1))
+		}
+	}
+	switch {
+	case len(result.Rows) == 0 && result.Offset == 0:
+		hints = append(hints, "so graph search <name>", "so graph code-search \"<text>\"")
+	case len(result.Bodies) == 0 && len(result.Rows) > 0:
+		hints = append(hints, "so graph snippet <qn>")
+	}
+	if looksLikeImpactQuestion(question) && len(result.CallersOf) == 0 {
 		hints = append(hints, "so graph impact --files <path>")
 	}
 	return hints
@@ -41,71 +52,96 @@ func looksLikeImpactQuestion(q string) bool {
 	return false
 }
 
-// HelpForImpact returns AXI next-step commands after a graph impact dump.
+// HelpForImpact returns next steps after a graph impact dump.
 func HelpForImpact(result api.ImpactResult) []string {
-	if len(result.ImpactedFiles) > 0 {
-		return []string{
-			fmt.Sprintf("so graph snippet <qn>  # then check %s", result.ImpactedFiles[0].Path),
-		}
+	if len(result.ImpactedFiles) > 0 || len(result.Impacted) > 0 {
+		return []string{"so graph trace <qn> --direction incoming"}
 	}
-	if len(result.Impacted) > 0 && result.Impacted[0].QualifiedName != "" {
-		return []string{fmt.Sprintf("so graph snippet %s", result.Impacted[0].QualifiedName)}
-	}
-	return []string{"so graph impact --files <path>"}
+	return nil
 }
 
-// HelpForSearch returns AXI next-step commands after a graph search.
-func HelpForSearch(result api.SearchResult) []string {
+// HelpForSearch returns next steps after a graph search.
+func HelpForSearch(result api.SearchResult, query string, limit int) []string {
 	matches := result.Matches
 	if len(matches) == 0 {
 		matches = result.Semantic
 	}
 	if len(matches) == 0 {
-		return []string{"so graph query \"<question>\""}
+		// Imports, strings and stdlib names are not graph symbols.
+		return []string{fmt.Sprintf("text search (imports, strings, unindexed files): so graph code-search %s", Quote(query))}
 	}
-	qn := matches[0].QualifiedName
-	return []string{
-		fmt.Sprintf("so graph snippet %s", qn),
-		fmt.Sprintf("so graph trace %s", qn),
+	var hints []string
+	if more := result.Page.Total - len(matches); more > 0 {
+		next := len(matches) * 3
+		if limit > 0 {
+			next = limit * 3
+		}
+		hints = append(hints, fmt.Sprintf("%d more: so graph search %s --limit %d", more, Quote(query), next))
 	}
+	return append(hints, "so graph snippet <qn>")
 }
 
-// HelpForTrace returns AXI next-step commands after a graph trace.
+// HelpForTrace returns next steps after a graph trace.
 func HelpForTrace(result api.TraceResult) []string {
-	qn := ""
-	if result.Status == "ambiguous" && len(result.Suggestions) > 0 {
-		qn = result.Suggestions[0].QualifiedName
-		return []string{fmt.Sprintf("so graph snippet %s", qn)}
+	if result.Status == "ambiguous" {
+		return []string{"so graph trace <qn>"}
 	}
+	start := result.Start
+	if start == "" {
+		start = "<qn>"
+	}
+	empty := true
 	for _, path := range result.Paths {
-		if len(path) > 0 && path[0].Node.QualifiedName != "" {
-			qn = path[0].Node.QualifiedName
-			break
+		if len(path) > 1 {
+			empty = false
 		}
 	}
-	if qn == "" {
-		return []string{"so graph snippet <qualified_name>"}
+	var hints []string
+	if result.Uncertain > 0 {
+		hints = append(hints, fmt.Sprintf("%d guessed: so graph trace %s --direction %s --uncertain", result.Uncertain, start, normalizeTraceDirection(result.Direction)))
 	}
-	return []string{fmt.Sprintf("so graph snippet %s", qn)}
+	if result.Tests > 0 {
+		hints = append(hints, fmt.Sprintf("%d in tests: so graph trace %s --direction %s --tests", result.Tests, start, normalizeTraceDirection(result.Direction)))
+	}
+	if empty {
+		return append(hints, "dynamic or string references: so graph code-search \"<name>\"")
+	}
+	if result.Truncated {
+		hints = append(hints, fmt.Sprintf("so graph trace %s --direction %s --limit 300", start, normalizeTraceDirection(result.Direction)))
+	}
+	return append(hints, "so graph snippet <qn>")
 }
 
-// HelpForSnippet returns AXI next-step commands after a graph snippet.
+// HelpForSnippet returns next steps after a graph snippet. A complete body is
+// self-contained and gets no hint.
 func HelpForSnippet(result api.SnippetResult) []string {
-	if result.Status == "ambiguous" && len(result.Suggestions) > 0 {
-		qn := result.Suggestions[0].QualifiedName
-		if qn != "" {
-			return []string{fmt.Sprintf("so graph snippet %s", qn)}
-		}
+	if result.Status == "ambiguous" {
+		return []string{"so graph snippet <qn>"}
 	}
-	qn := result.QualifiedName
-	if qn == "" {
+	if result.OmittedStart > 0 && strings.TrimSpace(result.QualifiedName) != "" {
+		return []string{fmt.Sprintf("rest (L%d-%d): so graph snippet %s --from %d", result.OmittedStart, result.OmittedEnd, result.QualifiedName, result.OmittedStart)}
+	}
+	return nil
+}
+
+// HelpForCodeSearch returns next steps after a text search.
+func HelpForCodeSearch(result api.CodeSearchResult, pattern string, limit int) []string {
+	if more := result.TotalGrepMatches - len(result.Matches); more > 0 {
+		next := limit * 5
+		if next <= 0 {
+			next = 100
+		}
 		return []string{
-			"so graph trace <qualified_name> --direction incoming",
-			"so graph trace <qualified_name> --direction outgoing",
+			fmt.Sprintf("%d more: so graph code-search %s --limit %d", more, Quote(pattern), next),
+			fmt.Sprintf("narrow: so graph code-search %s <path>", Quote(pattern)),
 		}
 	}
-	return []string{
-		fmt.Sprintf("so graph trace %s --direction incoming", qn),
-		fmt.Sprintf("so graph trace %s --direction outgoing", qn),
+	return nil
+}
+
+func lastSegment(qn string) string {
+	if i := strings.LastIndex(qn, "."); i >= 0 && i+1 < len(qn) {
+		return qn[i+1:]
 	}
+	return qn
 }

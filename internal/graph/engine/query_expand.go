@@ -358,7 +358,7 @@ func queryWideType(n api.Node) bool {
 }
 
 // spliceWideTypeMethods keeps seed Class/Module rows, then adds same-file
-// methods the question actually names so snippet stays within the 80-line cap
+// methods the question actually names so snippet stays within its line cap
 // instead of pointing at a 1700-line class. Methods with no name overlap stay
 // off the first screen. The 16-row cap still applies to result.Nodes.
 func (s *Store) spliceWideTypeMethods(ctx context.Context, ordered []queryNodeHit, terms []string) []queryNodeHit {

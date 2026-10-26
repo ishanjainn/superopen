@@ -89,3 +89,33 @@ func TestCodeSearchFallbackFindsMatchesWithoutRipgrep(t *testing.T) {
 		t.Fatalf("file = %q", result.Matches[0].Location.File)
 	}
 }
+
+func TestCodeSearchPathFilterAndLineNumbers(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "core", "mail"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "core", "mail", "utils.py"), []byte("import x\nDNS_NAME = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other.py"), []byte("DNS_NAME = 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, noRG := range []bool{false, true} {
+		if noRG {
+			t.Setenv("PATH", t.TempDir())
+		}
+		for _, filter := range []string{"core/mail", "./core/mail/", "core/mail/utils.py"} {
+			result, err := CodeSearch(context.Background(), root, api.CodeSearchRequest{Pattern: "DNS_NAME", PathFilter: filter, Limit: 5})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Matches) != 1 || result.Matches[0].Location.File != "core/mail/utils.py" || result.Matches[0].Location.StartLine != 2 {
+				t.Fatalf("noRG=%v filter=%q matches=%#v", noRG, filter, result.Matches)
+			}
+		}
+	}
+	if _, err := CodeSearch(context.Background(), root, api.CodeSearchRequest{Pattern: "DNS_NAME", PathFilter: "../etc"}); err == nil {
+		t.Fatal("a path outside the repo must fail")
+	}
+}

@@ -271,3 +271,37 @@ func seedNames(seeds []api.RankedNode) []string {
 	}
 	return out
 }
+
+func TestQueryProperNamesSkipsProseCapitals(t *testing.T) {
+	got := queryProperNames("Where is DNS_NAME used for email Message-ID and how does QuerySet build it?")
+	for _, name := range got {
+		if name == "Message" || name == "Where" {
+			t.Fatalf("prose capital treated as a symbol: %v", got)
+		}
+	}
+	want := map[string]bool{"DNS_NAME": false, "QuerySet": false}
+	for _, name := range got {
+		if _, ok := want[name]; ok {
+			want[name] = true
+		}
+	}
+	for name, seen := range want {
+		if !seen {
+			t.Fatalf("identifier %s missing from %v", name, got)
+		}
+	}
+	if mid := queryProperNames("the Message class sends mail"); len(mid) != 1 || mid[0] != "Message" {
+		t.Fatalf("mid-sentence class name should stay a name: %v", mid)
+	}
+}
+
+func TestPickQuerySeedsKeepsSameShortNameAcrossQualifiedNames(t *testing.T) {
+	ranked := []api.RankedNode{
+		{Node: api.Node{Label: "Class", Name: "Message", QualifiedName: "django.contrib.messages.storage.base.Message"}, Score: 10},
+		{Node: api.Node{Label: "Method", Name: "message", QualifiedName: "django.core.mail.message.EmailMessage.message"}, Score: 9},
+	}
+	seeds := pickQuerySeeds(ranked, nil)
+	if len(seeds) != 2 {
+		t.Fatalf("distinct qualified names must both seed, got %v", seedNames(seeds))
+	}
+}

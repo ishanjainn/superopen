@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // Exit codes (stable for agents).
@@ -206,10 +207,19 @@ func (o *Out) flushHints() {
 	if o.Flags.JSON || len(o.hints) == 0 {
 		return
 	}
-	fmt.Fprintf(o.W, "help[%d]:\n", len(o.hints))
-	for _, h := range o.hints {
+	hints := o.takeHints()
+	fmt.Fprintf(o.W, "help[%d]:\n", len(hints))
+	for _, h := range hints {
 		fmt.Fprintf(o.W, "  %s\n", h)
 	}
+}
+
+// takeHints returns the queued hints and clears them, so a shared Out does
+// not repeat one command's hints after the next.
+func (o *Out) takeHints() []string {
+	hints := o.hints
+	o.hints = nil
+	return hints
 }
 
 // Empty prints a definitive empty state.
@@ -220,7 +230,7 @@ func (o *Out) Empty(kind string) {
 			"kind":  kind,
 			"count": 0,
 			"items": []any{},
-			"next":  o.hints,
+			"next":  o.takeHints(),
 		})
 		return
 	}
@@ -237,7 +247,7 @@ func (o *Out) Rows(kind string, cols []string, rows []map[string]any) {
 			"kind":  kind,
 			"count": len(rows),
 			"items": rows,
-			"next":  o.hints,
+			"next":  o.takeHints(),
 		})
 		return
 	}
@@ -284,7 +294,7 @@ func (o *Out) Home(description string, lines []string) {
 			"bin":         BinPath(),
 			"description": description,
 			"lines":       lines,
-			"next":        o.hints,
+			"next":        o.takeHints(),
 		}
 		_ = json.NewEncoder(o.W).Encode(payload)
 		return
@@ -307,7 +317,7 @@ func (o *Out) Object(kind string, v any) {
 			"ok":   true,
 			"kind": kind,
 			"data": v,
-			"next": o.hints,
+			"next": o.takeHints(),
 		})
 		return
 	}
@@ -431,6 +441,32 @@ func NormalizeExit(err error) error {
 	return err
 }
 
+// WithUsageHint completes a usage error in one turn (AXI §6): it names the
+// command's usage line and its valid flags, so the agent does not need a
+// follow-up --help call.
+func WithUsageHint(err error, cmd *cobra.Command) error {
+	var ae *Error
+	if cmd == nil || !errors.As(err, &ae) || ae.Code != ExitUsage || ae.Hint != "" {
+		return err
+	}
+	var flags []string
+	seen := map[string]bool{}
+	add := func(f *pflag.Flag) {
+		if f.Hidden || f.Name == "help" || seen[f.Name] {
+			return
+		}
+		seen[f.Name] = true
+		flags = append(flags, "--"+f.Name)
+	}
+	cmd.LocalFlags().VisitAll(add)
+	cmd.InheritedFlags().VisitAll(add)
+	hint := "usage: " + cmd.UseLine()
+	if len(flags) > 0 {
+		hint += "; flags: " + strings.Join(flags, ", ")
+	}
+	return &Error{Code: ae.Code, Message: ae.Message, Hint: hint}
+}
+
 func isUsageMessage(msg string) bool {
 	switch {
 	case strings.Contains(msg, "unknown command"):
@@ -475,7 +511,7 @@ func (o *Out) HumanOrJSON(kind string, human func(), data any) error {
 			"ok":   true,
 			"kind": kind,
 			"data": data,
-			"next": o.hints,
+			"next": o.takeHints(),
 		})
 		return nil
 	}

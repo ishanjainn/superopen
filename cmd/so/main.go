@@ -27,12 +27,21 @@ import (
 
 var cliFlags cli.Flags
 
-func out() *cli.Out { return cli.New(cliFlags) }
+// sharedOut is the one presentation context per process. A fresh Out per
+// call dropped hints queued by out().Next before out().HumanOrJSON printed.
+var sharedOut = cli.New(cliFlags)
+
+func out() *cli.Out {
+	sharedOut.Flags = cliFlags
+	sharedOut.W = os.Stdout
+	sharedOut.ErrW = os.Stderr
+	return sharedOut
+}
 
 func main() {
 	root := newRootCommand()
-	if err := root.Execute(); err != nil {
-		err = cli.QuietUnmanaged(cli.NormalizeExit(err))
+	if cmd, err := root.ExecuteC(); err != nil {
+		err = cli.WithUsageHint(cli.QuietUnmanaged(cli.NormalizeExit(err)), cmd)
 		out().WriteError(err)
 		os.Exit(cli.ExitCode(err))
 	}

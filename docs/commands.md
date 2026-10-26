@@ -41,8 +41,9 @@ architecture           coverage   diagnostics
 artifact   layout      projects
 ```
 
-Defaults: compact `NODE`/`EDGE` text under a token budget. `TRUNCATED`
-means run `snippet` or ask a narrower question. `so graph impact` prints
+Defaults: AXI TOON (`count: N of M`, `name[N]{cols}:` rows, `help[]`). A
+query prints 15 ranked rows; the `help[]` line gives the `--offset` command for
+more. `so graph impact` prints
 compact file rollups (`--files`, `--base main`). `--json` / `--full` are
 escape hatches. Cypher support is a read-only subset (`so graph cypher --help`).
 

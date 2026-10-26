@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -365,7 +366,7 @@ func TestSearchDegreeZeroAndEntryPointSemantics(t *testing.T) {
 	}
 	id, err := result.LastInsertId()
 	if err == nil {
-		_, err = writable.db.ExecContext(ctx, `INSERT INTO nodes_fts(rowid,name,qualified_name,label,file_path) VALUES(?,?,?,?,?)`,
+		_, err = writable.db.ExecContext(ctx, `INSERT INTO nodes_fts(rowid,name,qualified_name,label,file_path,body) VALUES(?,?,?,?,?,'')`,
 			id, "UnusedHelper", "graph.UnusedHelper", "Function", "internal/graph/graph.go")
 	}
 	if closeErr := writable.Close(); err == nil {
@@ -456,5 +457,61 @@ func TestMarshalObjectTypedNilProperties(t *testing.T) {
 	got, err = marshalObject(api.Properties{})
 	if err != nil || got != "{}" {
 		t.Fatalf("empty properties = %q err=%v", got, err)
+	}
+}
+
+func TestFTSQueryDropsStopwordsAndShortTokens(t *testing.T) {
+	got := ftsQuery("Where is DNS_NAME used for an email Message-ID")
+	for _, bad := range []string{`"is"`, `"an"`, `"for"`, `"where"`, `"id"`} {
+		if strings.Contains(got, bad) {
+			t.Fatalf("ftsQuery kept %s: %s", bad, got)
+		}
+	}
+	for _, want := range []string{`"dns_name"*`, `"email"*`, `"message"*`, `"used"*`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ftsQuery missing %s: %s", want, got)
+		}
+	}
+	if got := ftsQuery("url api"); !strings.Contains(got, `"url"`) || strings.Contains(got, `"url"*`) {
+		t.Fatalf("3-char tokens match exactly, not by prefix: %s", got)
+	}
+	if got := ftsQuery("is it"); got == "" {
+		t.Fatal("an all-stopword query must still search")
+	}
+}
+
+func TestFTSStem(t *testing.T) {
+	cases := map[string]string{
+		"properties": "property",
+		"members":    "member",
+		"decorated":  "decorat",
+		"decorating": "decorat",
+		"options":    "option",
+		"class":      "class",    // double s
+		"process":    "process",  // double s
+		"status":     "status",   // us
+		"analysis":   "analysis", // is
+		"utf8s":      "utf8s",    // digit
+		"can_do":     "can_do",   // identifier
+		"uses":       "uses",     // too short to stem safely
+		"ties":       "ties",
+		"isproperty": "isproperty",
+	}
+	for in, want := range cases {
+		if got := ftsStem(in); got != want {
+			t.Fatalf("ftsStem(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestFTSQueryStemsContentWords(t *testing.T) {
+	got := ftsQuery("where do autodoc properties get decorated")
+	for _, want := range []string{`"property"*`, `"decorat"*`, `"autodoc"*`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ftsQuery missing %s: %s", want, got)
+		}
+	}
+	if strings.Contains(got, `"properties"`) || strings.Contains(got, `"decorated"`) {
+		t.Fatalf("inflected forms must be replaced by their stem: %s", got)
 	}
 }

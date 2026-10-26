@@ -100,7 +100,7 @@ These are not stored in `config.env` (except where noted above). Set them in the
 |----------|----------|
 | `SUPEROPEN_SO_BIN` | Absolute path to `so` when `PATH` does not have it. The installed skill also pins the path from `so install`. |
 | `SUPEROPEN_WEB_DIR` | Override UI sources for `so dev --hot`. Release installs do not need this. |
-| `SUPEROPEN_GRAPH_QUERY_MAX_ROWS` | NODE/EDGE row cap for `so graph query` (default `16`). |
+| `SUPEROPEN_GRAPH_QUERY_MAX_ROWS` | Cap on the full node/edge arrays in `so graph query --json --full` (default `16`). The printed page is `--limit` (default 15). |
 | `SUPEROPEN_NO_REFRESH` | `1` or `true`: skip query-path graph freshness (same as `so graph --no-refresh`). |
 | `SUPEROPEN_REFRESH` | `hash`: compare file bytes even when size and mtime match. Default compares size and mtime. |
 | `SUPEROPEN_HEADLESS` | Set to `1` by distill/harvest workers so they are not recorded as sessions. |
@@ -154,10 +154,11 @@ Put a `.soignore` in the repository root. Syntax matches `.gitignore`, including
 
 Defaults (see [graph](graph.md)):
 
-- Compact `NODE` / `EDGE` text
-- Token budget about 1200
-- At most 16 NODE rows and 16 EDGE rows unless `SUPEROPEN_GRAPH_QUERY_MAX_ROWS` is set
-- Symbol snippets clip around 80 lines. File and Module snippets clip around 500 lines. A clipped snippet prints `omitted:` and `so graph snippet <qn> --from <line>`.
+- AXI TOON text: `count: N of M`, `nodes[N]{qn,kind,file,lines}:`, `help[]`
+- 15 ranked rows per page (`--limit`), `--offset` for the next page
+- Body budget about 1200 tokens (`--budget`)
+- Symbol snippets clip around 250 lines. Bodies attached to `so graph query` clip around 80. File and Module snippets clip around 500 lines. A clipped body prints `code[<shown> of <total> lines]` and a `help[]` line with `so graph snippet <qn> --from <line>`.
+- Index progress goes to stderr only on a terminal (`SUPEROPEN_PROGRESS=1` forces it on).
 
 `so graph --no-refresh` and `SUPEROPEN_NO_REFRESH=1` skip the query-path freshness check (CI). `SUPEROPEN_REFRESH=hash` hashes file bytes when size and mtime still match. Session
 hooks do not spawn `so graph refresh`; reads probe and refresh on demand.

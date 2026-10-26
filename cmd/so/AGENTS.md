@@ -10,7 +10,7 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). Graph output: [../graph/AGENTS
 
 | Surface | Format |
 |---------|--------|
-| `so graph *` success | compact `NODE` / `EDGE` (not AXI TOON) |
+| `so graph *` success | **axi.md** TOON: `count: N of M`, `nodes[N]{qn,kind,file,lines}:`, numbered `code[]`, `help[]` (`internal/graph/format`) |
 | `so memory`, `so sessions` (user) | **axi.md**: TOON lists, content-first dashboards, `help[]`, structured errors on stdout |
 | `so sessions hook` | **host JSON** (`additionalContext` / permission). Not AXI. Always exit 0 on telemetry failure. Hidden from `so sessions --help`; invoked by vendor plugin manifests |
 
@@ -30,7 +30,6 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). Graph output: [../graph/AGENTS
 
 | Topic | Superopen |
 |-------|-----------|
-| Graph success output | compact `NODE`/`EDGE`; TOON would regress agent piping |
 | Memory / sessions | **axi.md TOON** + dashboards; `--json` opt-in envelope |
 | Hook stdout | Host control JSON, not AXI |
 

@@ -36,7 +36,7 @@ func PlanIncremental(ctx context.Context, repoRoot, project string, excludes []s
 	}
 	prior := incrementalSnapshot{files: map[string]string{}}
 	store, err := OpenReadOnly(paths.Database)
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) || errors.Is(err, ErrIncompatibleSchema) {
 		return api.ChangeSet{RequiresFull: true, Reason: "no compatible prior generation", SourceRevision: gitRevision(ctx, root)}, nil
 	}
 	if err != nil {

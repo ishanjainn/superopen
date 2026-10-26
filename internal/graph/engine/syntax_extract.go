@@ -455,11 +455,67 @@ func attachSyntaxDocstrings(language string, root syntaxView, source []byte, def
 					attachGoTypeDocstring(child, truncateSyntaxComment(nodeText(previous, source), 500), byStart, definitions)
 				}
 			}
+			if language == "python" {
+				attachPythonDocstring(parent, child, source, byStart, definitions)
+			}
 			walk(child)
 			previous = child
 		}
 	}
 	walk(root)
+}
+
+// attachPythonDocstring reads the string literal that opens a def or class
+// body. Python puts the docstring inside the body, so the preceding-comment
+// rule never sees it. A decorated def may be keyed by the decorator start.
+func attachPythonDocstring(parent, node syntaxView, source []byte, byStart map[uint32][]int, definitions []SyntaxFact) {
+	if node.Kind() != "function_definition" && node.Kind() != "class_definition" {
+		return
+	}
+	indexes := byStart[node.StartByte()]
+	if len(indexes) == 0 && !viewMissing(parent) && parent.Kind() == "decorated_definition" {
+		indexes = byStart[parent.StartByte()]
+	}
+	if len(indexes) == 0 {
+		return
+	}
+	body, ok := findField(node, "body")
+	if !ok {
+		return
+	}
+	for i := 0; i < body.ChildCount(); i++ {
+		stmt := body.ChildAt(i)
+		if !stmt.IsNamed() {
+			continue
+		}
+		if isSyntaxComment(stmt.Kind()) {
+			continue
+		}
+		if stmt.Kind() != "expression_statement" || stmt.ChildCount() == 0 || stmt.ChildAt(0).Kind() != "string" {
+			return
+		}
+		doc := pythonDocstringText(nodeText(stmt.ChildAt(0), source))
+		if doc == "" {
+			return
+		}
+		for _, index := range indexes {
+			if definitions[index].Docstring == "" {
+				definitions[index].Docstring = truncateSyntaxComment(doc, 500)
+			}
+		}
+		return
+	}
+}
+
+// pythonDocstringText strips the string prefix and quotes and trims space.
+func pythonDocstringText(raw string) string {
+	s := strings.TrimLeft(raw, "rRuUbBfF")
+	for _, q := range []string{`"""`, `'''`, `"`, `'`} {
+		if len(s) >= 2*len(q) && strings.HasPrefix(s, q) && strings.HasSuffix(s, q) {
+			return strings.TrimSpace(s[len(q) : len(s)-len(q)])
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 func attachGoTypeDocstring(node syntaxView, value string, byStart map[uint32][]int, definitions []SyntaxFact) {
@@ -1557,6 +1613,12 @@ func isSyntaxReferenceNode(language string, node, parent syntaxView, ancestors [
 	if language == "python" && kind == "attribute" && syntaxDirectArgumentValue(node, ancestors) {
 		return false
 	}
+	// The member name in obj.name is not a free name: the whole attribute is
+	// the reference. As a bare usage it resolved to any function so named
+	// (compiler.get_converters to urls.converters.get_converters).
+	if language == "python" && kind == "identifier" && parent.Kind() == "attribute" && node.FieldName() == "attribute" {
+		return false
+	}
 	if language == "rust" && (kind == "identifier" || kind == "scoped_identifier") && parent.Kind() == "scoped_identifier" {
 		return false
 	}
@@ -1809,7 +1871,10 @@ func syntaxFieldBindingNode(kind string) bool {
 		"lexical_declaration", "short_var_declaration", "local_variable_declaration", "property_declaration",
 		"field_declaration", "value_declaration", "val_definition", "var_definition", "let_declaration",
 		"local_bind", "let_binding", "data_declaration", "net_declaration", "object_declaration",
-		"number_declaration", "typed_binding", "variable_assignment":
+		"number_declaration", "typed_binding", "variable_assignment",
+		// Loop targets bind too: for x in xs (Python, comprehensions),
+		// for (x of xs) (JavaScript), for x in xs (Rust), for (T x : xs) (Java).
+		"for_statement", "for_in_clause", "for_in_statement", "for_expression", "enhanced_for_statement":
 		return true
 	default:
 		return false

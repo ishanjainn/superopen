@@ -17,8 +17,10 @@ const (
 	prefixMatchBonus    = 100.0
 	substringMatchBonus = 1.0
 	sourceMatchBonus    = 0.5
-	seedMaxK            = 3
+	seedMaxK            = 6
 	seedGapRatio        = 0.2
+	// queryExpandMaxK bounds the BFS roots. More seeds are listed than walked.
+	queryExpandMaxK = 3
 )
 
 var queryWordToken = regexp.MustCompile(`[\pL\pN_]+`)
@@ -144,7 +146,14 @@ func queryNodeDisplayName(n api.Node) string {
 	return parts[len(parts)-1]
 }
 
-const queryFTSSeedLimit = 50
+const (
+	queryFTSSeedLimit = 50
+	// queryFTSOverfetch widens the search so test hits can be set aside
+	// without starving the seed pool.
+	queryFTSOverfetch = 6
+	// queryFTSMinNonTest is the pool size below which tests are let back in.
+	queryFTSMinNonTest = 10
+)
 
 func (s *Store) querySeedCandidates(ctx context.Context, project, question string, terms []string) ([]seedCandidate, map[int64]int, error) {
 	seen := map[int64]bool{}
@@ -154,16 +163,46 @@ func (s *Store) querySeedCandidates(ctx context.Context, project, question strin
 		q = strings.Join(terms, " ")
 	}
 	if q != "" {
-		res, err := s.Search(ctx, api.SearchRequest{Project: project, Query: q, Limit: queryFTSSeedLimit})
+		// A sentence-style question ORs generic words (other, not, order), and
+		// long test names match many of them, so the top 50 can be all tests.
+		// Scoring penalizes tests later, too late to recover the real code.
+		// Fetch wide, set tests aside unless the question asks for them, and
+		// only then cut to the seed limit.
+		withTests := queryMentionsTests(question, terms)
+		fetch := queryFTSSeedLimit
+		if !withTests {
+			fetch = queryFTSSeedLimit * queryFTSOverfetch
+		}
+		res, err := s.Search(ctx, api.SearchRequest{Project: project, Query: q, Limit: fetch})
 		if err != nil {
 			return nil, nil, err
 		}
+		var aside []api.Node
+		kept := 0
 		for _, match := range res.Matches {
 			if seen[match.ID] {
 				continue
 			}
+			if !withTests && queryNodeLooksLikeTest(match.Node) {
+				aside = append(aside, match.Node)
+				continue
+			}
+			if kept >= queryFTSSeedLimit {
+				continue
+			}
 			seen[match.ID] = true
 			nodes = append(nodes, match.Node)
+			kept++
+		}
+		// Too few non-test hits (a question about test helpers, or a tiny
+		// repo): fall back to the tests that matched.
+		for _, node := range aside {
+			if kept >= queryFTSMinNonTest {
+				break
+			}
+			seen[node.ID] = true
+			nodes = append(nodes, node)
+			kept++
 		}
 		for _, name := range queryProperNames(question) {
 			named, err := s.Search(ctx, api.SearchRequest{Project: project, Query: name, Limit: 12})
@@ -442,8 +481,8 @@ func scoreQuerySeeds(candidates []seedCandidate, terms []string, question string
 	}
 	out.seeds = pickQuerySeeds(out.ranked, out.bestSeedByTerm)
 	out.primary = pickQuerySeeds(out.ranked, nil)
-	if len(out.primary) > seedMaxK {
-		out.primary = out.primary[:seedMaxK]
+	if len(out.primary) > queryExpandMaxK {
+		out.primary = out.primary[:queryExpandMaxK]
 	}
 	return out
 }
@@ -454,8 +493,16 @@ func pickQuerySeeds(ranked []api.RankedNode, bestByTerm map[string]api.RankedNod
 	}
 	top := ranked[0].Score
 	var seeds []api.RankedNode
-	seenLabel := map[string]struct{}{}
-	labelKey := func(n api.RankedNode) string {
+	// Ranked picks dedupe by qualified name: a short-name key let Message
+	// drop EmailMessage.message, a different symbol. A term claim still may
+	// not add a second symbol with a seed's short name (queryset next to
+	// QuerySet), since one matched word is weaker evidence than the score.
+	seenQN := map[string]struct{}{}
+	seenName := map[string]struct{}{}
+	qnKey := func(n api.RankedNode) string {
+		if n.QualifiedName != "" {
+			return n.QualifiedName
+		}
 		return strings.ToLower(n.Name)
 	}
 	for _, item := range ranked {
@@ -465,11 +512,12 @@ func pickQuerySeeds(ranked []api.RankedNode, bestByTerm map[string]api.RankedNod
 		if len(seeds) > 0 && item.Score < top*seedGapRatio {
 			break
 		}
-		key := labelKey(item)
-		if _, ok := seenLabel[key]; ok {
+		key := qnKey(item)
+		if _, ok := seenQN[key]; ok {
 			continue
 		}
-		seenLabel[key] = struct{}{}
+		seenQN[key] = struct{}{}
+		seenName[strings.ToLower(item.Name)] = struct{}{}
 		seeds = append(seeds, item)
 	}
 	terms := make([]string, 0, len(bestByTerm))
@@ -479,21 +527,14 @@ func pickQuerySeeds(ranked []api.RankedNode, bestByTerm map[string]api.RankedNod
 	sort.Strings(terms)
 	for _, term := range terms {
 		item := bestByTerm[term]
-		key := labelKey(item)
-		if _, ok := seenLabel[key]; ok {
+		if _, ok := seenQN[qnKey(item)]; ok {
 			continue
 		}
-		dup := false
-		for _, seed := range seeds {
-			if seed.QualifiedName == item.QualifiedName {
-				dup = true
-				break
-			}
-		}
-		if dup {
+		if _, ok := seenName[strings.ToLower(item.Name)]; ok {
 			continue
 		}
-		seenLabel[key] = struct{}{}
+		seenQN[qnKey(item)] = struct{}{}
+		seenName[strings.ToLower(item.Name)] = struct{}{}
 		seeds = append(seeds, item)
 	}
 	return seeds
@@ -560,18 +601,39 @@ func queryProperNames(question string) []string {
 		seen[key] = struct{}{}
 		out = append(out, tok)
 	}
-	for _, piece := range strings.Fields(question) {
+	for i, piece := range strings.Fields(question) {
 		clean := strings.Trim(piece, `"'`+"`")
 		if strings.Contains(clean, ".") && queryWordToken.MatchString(clean) {
 			add(clean)
 		}
 		for _, tok := range queryWordToken.FindAllString(clean, -1) {
-			if queryLooksProper(tok) {
-				add(tok)
+			if !queryLooksProper(tok) {
+				continue
 			}
+			// An Initial-cap word that opens the question or sits in a
+			// hyphen compound (Message-ID) is prose, not a symbol.
+			if queryInitialCapOnly(tok) && (i == 0 || strings.Contains(clean, "-")) {
+				continue
+			}
+			add(tok)
 		}
 	}
 	return out
+}
+
+// queryInitialCapOnly is true for Word: one leading capital, no underscore.
+// CamelCase, ALLCAPS and snake_case names stay identifiers.
+func queryInitialCapOnly(tok string) bool {
+	if strings.Contains(tok, "_") {
+		return false
+	}
+	upper := 0
+	for _, r := range tok {
+		if unicode.IsUpper(r) {
+			upper++
+		}
+	}
+	return upper == 1 && unicode.IsUpper([]rune(tok)[0])
 }
 
 func queryIdentifierLower(question string, terms []string) map[string]bool {
@@ -704,16 +766,37 @@ func queryAsksForCallers(question string) bool {
 	return false
 }
 
+// queryMentionsTests is true when the question asks about tests. A word
+// that appears only inside a path (a traceback frame in
+// tests/expressions/tests.py) is where something ran, not what is asked.
 func queryMentionsTests(question string, terms []string) bool {
-	for _, t := range terms {
-		switch t {
+	prose, inPath := map[string]bool{}, map[string]bool{}
+	for _, piece := range strings.Fields(strings.ToLower(question)) {
+		path := strings.ContainsAny(piece, `/\`)
+		for _, tok := range queryWordToken.FindAllString(piece, -1) {
+			if path {
+				inPath[tok] = true
+			} else {
+				prose[tok] = true
+			}
+		}
+	}
+	asks := func(word string) bool {
+		switch word {
 		case "test", "tests", "testing", "spec", "specs", "fixture", "fixtures", "pytest", "conftest":
 			return true
 		}
+		return false
 	}
-	q := strings.ToLower(question)
-	for _, w := range []string{" test ", " tests ", " spec ", " fixture ", " pytest ", " conftest "} {
-		if strings.Contains(" "+q+" ", w) {
+	for word := range prose {
+		if asks(word) {
+			return true
+		}
+	}
+	// A term given apart from the question counts; one the question has
+	// only inside paths does not.
+	for _, t := range terms {
+		if asks(t) && !inPath[t] {
 			return true
 		}
 	}

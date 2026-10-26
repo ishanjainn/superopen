@@ -105,35 +105,51 @@ func graphNativeCommands() []*cobra.Command {
 		depth, _ := cmd.Flags().GetInt("depth")
 		budget, _ := cmd.Flags().GetInt("budget")
 		terms, _ := cmd.Flags().GetStringSlice("term")
+		limit, _ := cmd.Flags().GetInt("limit")
+		offset, _ := cmd.Flags().GetInt("offset")
 		return api.QueryRequest{
 			RepoRoot: repoRoot(),
 			Question: args[0],
 			Terms:    terms,
 			Depth:    depth,
 			Budget:   budget,
+			Limit:    limit,
+			Offset:   offset,
 		}
 	})
 	query.Args = cobra.ExactArgs(1)
 	query.Flags().Int("depth", 2, "Traversal depth")
 	query.Flags().Int("budget", 1200, "Approximate output token budget")
 	query.Flags().StringSlice("term", nil, "Additional exact graph seed")
+	query.Flags().Int("limit", 0, "Ranked rows per page (default 15)")
+	query.Flags().Int("offset", 0, "Skip this many ranked rows (from a previous page's hint)")
 
-	codeSearch := nativeGraphLeaf("code-search <pattern>", "Search indexed source code", api.OpCodeSearch, func(cmd *cobra.Command, args []string) any {
+	codeSearch := nativeGraphLeaf("code-search <pattern> [path]", "Search indexed source code", api.OpCodeSearch, func(cmd *cobra.Command, args []string) any {
 		limit, _ := cmd.Flags().GetInt("limit")
 		regex, _ := cmd.Flags().GetBool("regex")
 		filePattern, _ := cmd.Flags().GetString("file-pattern")
+		if glob, _ := cmd.Flags().GetString("glob"); glob != "" {
+			filePattern = glob
+		}
+		path, _ := cmd.Flags().GetString("path")
+		if len(args) > 1 {
+			path = args[1]
+		}
 		return api.CodeSearchRequest{
-			RepoRoot: repoRoot(),
-			Pattern:  args[0],
-			Regex:    regex,
-			FileGlob: filePattern,
-			Limit:    limit,
+			RepoRoot:   repoRoot(),
+			Pattern:    args[0],
+			Regex:      regex,
+			FileGlob:   filePattern,
+			PathFilter: path,
+			Limit:      limit,
 		}
 	})
-	codeSearch.Args = cobra.ExactArgs(1)
+	codeSearch.Args = cobra.RangeArgs(1, 2)
 	codeSearch.Flags().Int("limit", 20, "Maximum results")
 	codeSearch.Flags().Bool("regex", false, "Interpret pattern as a regular expression")
-	codeSearch.Flags().String("file-pattern", "", "Restrict source files")
+	codeSearch.Flags().String("file-pattern", "", "Restrict source files by glob (e.g. *.py)")
+	codeSearch.Flags().String("glob", "", "Same as --file-pattern")
+	codeSearch.Flags().String("path", "", "Restrict to a repo-relative file or directory (same as the [path] argument)")
 
 	commands := []*cobra.Command{build, refresh, query, codeSearch, graphBuildsCommand()}
 	commands = append(commands, graphNativeReadCommands()...)

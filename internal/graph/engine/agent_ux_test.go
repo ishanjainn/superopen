@@ -646,6 +646,14 @@ func TestQueryMentionsPytestAndConftest(t *testing.T) {
 	if queryMentionsTests("how does Site register models", nil) {
 		t.Fatal("production question must keep the test-path penalty")
 	}
+	// A traceback frame's path is where code ran, not a question about tests.
+	q := `TypeError File "/home/u/django/tests/expressions/tests.py", line 1218, in test_duration File "/home/u/django/django/db/models/query.py"`
+	if queryMentionsTests(q, queryTerms(q, nil)) {
+		t.Fatal("a test path inside pasted text must not switch the page to tests")
+	}
+	if !queryMentionsTests("which tests cover tests/expressions/tests.py", queryTerms("which tests cover tests/expressions/tests.py", nil)) {
+		t.Fatal("tests asked in prose still count")
+	}
 }
 
 func TestIsTestPathIncludesConftest(t *testing.T) {
@@ -1036,7 +1044,7 @@ func TestClippedSnippetListsCallees(t *testing.T) {
 	}
 	var src strings.Builder
 	src.WriteString("package pkg\nfunc helper() {}\nfunc big() {\n")
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 300; i++ {
 		src.WriteString("\thelper()\n")
 	}
 	src.WriteString("}\n")
@@ -1064,7 +1072,7 @@ func TestClippedSnippetListsCallees(t *testing.T) {
 		}
 		big, err := builder.PutNode(api.Node{
 			Project: "fixture", Label: "Function", Name: "big", QualifiedName: "pkg.big",
-			Location: api.Location{File: "pkg/big.go", StartLine: 3, EndLine: 110},
+			Location: api.Location{File: "pkg/big.go", StartLine: 3, EndLine: 304},
 		})
 		if err != nil {
 			return err
@@ -1096,7 +1104,7 @@ func TestClippedSnippetListsCallees(t *testing.T) {
 	}
 }
 
-func TestLongBodyDoesNotDropShorterOne(t *testing.T) {
+func TestLongBodyIsClippedNotSkipped(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "pkg"), 0o755); err != nil {
@@ -1150,11 +1158,11 @@ func TestLongBodyDoesNotDropShorterOne(t *testing.T) {
 		{Label: "Function", Name: "big", QualifiedName: "pkg.big", Location: api.Location{File: "pkg/bodies.go", StartLine: 2, EndLine: 83}},
 		{Label: "Function", Name: "small", QualifiedName: "pkg.small", Location: api.Location{File: "pkg/bodies.go", StartLine: 84, EndLine: 84}},
 	}, 400)
-	if !strings.Contains(bodies, "func small") || !strings.Contains(bodies, "return") {
-		t.Fatalf("short body must remain when the first block does not fit:\n%s", bodies)
+	if !strings.Contains(bodies, "x := 1") {
+		t.Fatalf("the top-ranked body must be attached, clipped if long:\n%s", bodies)
 	}
-	if strings.Contains(bodies, "x := 1") {
-		t.Fatalf("oversized body must be skipped:\n%s", bodies)
+	if !strings.Contains(bodies, "func small") {
+		t.Fatalf("the short body fits the remaining budget:\n%s", bodies)
 	}
 }
 
@@ -1166,7 +1174,7 @@ func TestClippedCalleesPreferSameFile(t *testing.T) {
 	}
 	var src strings.Builder
 	src.WriteString("package pkg\nfunc helper() {}\nfunc big() {\n")
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 300; i++ {
 		src.WriteString("\thelper()\n")
 	}
 	src.WriteString("}\n")
@@ -1208,7 +1216,7 @@ func TestClippedCalleesPreferSameFile(t *testing.T) {
 		}
 		big, err := builder.PutNode(api.Node{
 			Project: "fixture", Label: "Function", Name: "big", QualifiedName: "pkg.big",
-			Location: api.Location{File: "pkg/big.go", StartLine: 3, EndLine: 110},
+			Location: api.Location{File: "pkg/big.go", StartLine: 3, EndLine: 304},
 		})
 		if err != nil {
 			return err
@@ -1349,14 +1357,16 @@ func TestQueryAgentJSONOmitsNodeArray(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(raw, []byte(`"nodes":`)) || bytes.Contains(raw, []byte(`"edges":`)) {
-		t.Fatalf("agent JSON must not include nodes/edges arrays: %s", raw)
+	// Agent JSON is the page the text view shows: slim rows, no full
+	// Node/Edge structs (ids, properties, evidence).
+	if bytes.Contains(raw, []byte(`"properties"`)) || bytes.Contains(raw, []byte(`"source_id"`)) || bytes.Contains(raw, []byte(`"text"`)) {
+		t.Fatalf("agent JSON must not include full node/edge structs: %s", raw)
 	}
 	if len(raw) > 64*1024 {
 		t.Fatalf("agent JSON too large: %d", len(raw))
 	}
-	if !bytes.Contains(raw, []byte(`"text"`)) {
-		t.Fatalf("agent JSON missing text: %s", raw[:200])
+	if !bytes.Contains(raw, []byte(`"total":`)) || !bytes.Contains(raw, []byte(`"qn":"pkg.Root"`)) {
+		t.Fatalf("agent JSON missing the ranked page: %s", raw[:200])
 	}
 }
 
@@ -1623,10 +1633,10 @@ func TestTraceIncomingLabelsCallers(t *testing.T) {
 	if !strings.Contains(text, "direction: incoming") {
 		t.Fatalf("compact missing incoming: %q", text)
 	}
-	if !strings.Contains(text, "callers:") {
+	if !strings.Contains(text, "callers[") {
 		t.Fatalf("incoming compact must say callers: %q", text)
 	}
-	if strings.Contains(text, "callees:") {
+	if strings.Contains(text, "callees") {
 		t.Fatalf("incoming compact must not say callees: %q", text)
 	}
 	if !strings.Contains(text, "useLeaf") {
@@ -1706,13 +1716,9 @@ func TestSnippetPrefersFunctionOverModuleAndPathPicksFile(t *testing.T) {
 		t.Fatalf("file snippet must not be L1-only: %#v", byPath.Location)
 	}
 
-	help := format.HelpForSnippet(symbol)
-	joined := strings.Join(help, "\n")
-	if strings.Contains(joined, "--direction both") {
-		t.Fatalf("AXI help must not default to both: %v", help)
-	}
-	if !strings.Contains(joined, "incoming") || !strings.Contains(joined, "outgoing") {
-		t.Fatalf("AXI help should suggest incoming and outgoing: %v", help)
+	// A complete body is self-contained (AXI §9): no next-step hints.
+	if help := format.HelpForSnippet(symbol); len(help) != 0 {
+		t.Fatalf("complete snippet must not add hints: %v", help)
 	}
 }
 
@@ -1818,16 +1824,16 @@ func TestSnippetClipsWideFileRange(t *testing.T) {
 		t.Fatalf("clipped snippet still too large: %d newlines", strings.Count(got.Code, "\n"))
 	}
 	compact := format.SnippetCompact(got)
-	if !strings.Contains(compact, "clipped: true") {
-		t.Fatalf("compact missing clipped flag: %q", compact)
+	if !strings.Contains(compact, "code[501 of 600 lines]:") {
+		t.Fatalf("compact must show shown and total lines: %q", compact[:200])
 	}
 }
 
-func TestSnippetClipsSymbolToEightyLines(t *testing.T) {
+func TestSnippetClipsSymbolToMaxLines(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	var b strings.Builder
-	for i := 1; i <= 200; i++ {
+	for i := 1; i <= 400; i++ {
 		fmt.Fprintf(&b, "line %d\n", i)
 	}
 	if err := os.WriteFile(filepath.Join(root, "fn.go"), []byte(b.String()), 0o600); err != nil {
@@ -1847,7 +1853,7 @@ func TestSnippetClipsSymbolToEightyLines(t *testing.T) {
 		}
 		_, err := builder.PutNode(api.Node{
 			Project: "fixture", Label: "Function", Name: "wide", QualifiedName: "fn.wide",
-			Location: api.Location{File: "fn.go", StartLine: 1, EndLine: 200},
+			Location: api.Location{File: "fn.go", StartLine: 1, EndLine: 400},
 		})
 		return err
 	})
@@ -1869,18 +1875,26 @@ func TestSnippetClipsSymbolToEightyLines(t *testing.T) {
 	if !got.Clipped {
 		t.Fatalf("expected clipped function snippet, lines=%d-%d", got.Location.StartLine, got.Location.EndLine)
 	}
-	if got.Location.EndLine-got.Location.StartLine > 80 {
-		t.Fatalf("function snippet span %d-%d wider than 80", got.Location.StartLine, got.Location.EndLine)
+	if got.Location.EndLine-got.Location.StartLine > snippetMaxLines {
+		t.Fatalf("function snippet span %d-%d wider than %d", got.Location.StartLine, got.Location.EndLine, snippetMaxLines)
 	}
 	compact := format.SnippetCompact(got)
-	if !strings.Contains(compact, "omitted: L82-200") || !strings.Contains(compact, "so graph snippet fn.wide --from 82") {
-		t.Fatalf("clipped snippet must name the omitted tail: %q", compact)
+	hints := strings.Join(format.HelpForSnippet(got), "\n")
+	if !strings.Contains(compact, "code[251 of 400 lines]:") || !strings.Contains(hints, "so graph snippet fn.wide --from 252") {
+		t.Fatalf("clipped snippet must name the omitted tail: %q / %q", compact[:120], hints)
 	}
-	tail, err := store.Snippet(ctx, api.SnippetRequest{Project: "fixture", QualifiedName: "fn.wide", StartLine: 190})
+	body, err := store.Snippet(ctx, api.SnippetRequest{Project: "fixture", QualifiedName: "fn.wide", MaxLines: queryBodyMaxLines})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tail.Clipped || tail.Location.StartLine != 190 || !strings.Contains(tail.Code, "line 200") {
+	if !body.Clipped || body.Location.EndLine-body.Location.StartLine > queryBodyMaxLines {
+		t.Fatalf("query body should keep the %d-line cap, lines %d-%d", queryBodyMaxLines, body.Location.StartLine, body.Location.EndLine)
+	}
+	tail, err := store.Snippet(ctx, api.SnippetRequest{Project: "fixture", QualifiedName: "fn.wide", StartLine: 390})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tail.Clipped || tail.Location.StartLine != 390 || !strings.Contains(tail.Code, "line 400") {
 		t.Fatalf("from-line should return the tail, lines %d-%d clipped=%v\n%s", tail.Location.StartLine, tail.Location.EndLine, tail.Clipped, tail.Code)
 	}
 }
@@ -2030,5 +2044,119 @@ func TestSearchFindsExportedSourceConstNotJSONKey(t *testing.T) {
 		if m.QualifiedName == "config.json.title" || (m.Label == "Variable" && m.Location.File == "config.json") {
 			t.Fatalf("JSON key title was an FTS hit: %#v", m)
 		}
+	}
+}
+
+func TestQueryAnswerRowsDropsRowsWithoutSourceLocation(t *testing.T) {
+	rows := queryAnswerRows(nil, []seedCandidate{
+		{node: api.Node{ID: 1, Label: "Route", Name: "/parse_encoded_text/", QualifiedName: "__route__ANY__/parse_encoded_text/"}},
+		{node: api.Node{ID: 2, Label: "Function", Name: "f", QualifiedName: "pkg.f", Location: api.Location{File: "pkg/f.py", StartLine: 3}}},
+	}, nil, "how does f work", []string{"work"})
+	if len(rows) != 1 || rows[0].QualifiedName != "pkg.f" {
+		t.Fatalf("rows=%v", rows)
+	}
+}
+
+func TestQueryAnswerRowsPutsVendoredFilesLast(t *testing.T) {
+	js := api.Node{ID: 1, Label: "Function", Name: "property", QualifiedName: "themes.static.underscore.property", Location: api.Location{File: "sphinx/themes/basic/static/underscore.js", StartLine: 1}}
+	py := api.Node{ID: 2, Label: "Function", Name: "isproperty", QualifiedName: "sphinx.util.inspect.isproperty", Location: api.Location{File: "sphinx/util/inspect.py", StartLine: 386}}
+	rows := queryAnswerRows(nil, []seedCandidate{{node: js}, {node: py}}, nil, "where is property detected", []string{"property"})
+	if len(rows) != 2 || rows[0].QualifiedName != py.QualifiedName {
+		t.Fatalf("vendored row must sort last: %v", rows)
+	}
+	rows = queryAnswerRows(nil, []seedCandidate{{node: js}, {node: py}}, nil, "how does the static underscore helper work", []string{"static", "underscore"})
+	if rows[0].QualifiedName != js.QualifiedName {
+		t.Fatalf("a question that names static keeps it in place: %v", rows)
+	}
+}
+
+func TestQueryAnswerRowsSkipsExpansionOnlyModules(t *testing.T) {
+	mod := api.Node{ID: 1, Label: "Module", Name: "cpp", QualifiedName: "sphinx.domains.cpp", Location: api.Location{File: "sphinx/domains/cpp.py", StartLine: 1, EndLine: 7901}}
+	fn := api.Node{ID: 2, Label: "Function", Name: "f", QualifiedName: "pkg.f", Location: api.Location{File: "pkg/f.py", StartLine: 3}}
+	seedMod := api.Node{ID: 3, Label: "Module", Name: "inspect", QualifiedName: "sphinx.util.inspect", Location: api.Location{File: "sphinx/util/inspect.py", StartLine: 1, EndLine: 865}}
+	ordered := []queryNodeHit{{node: mod}, {node: fn}, {node: seedMod, seed: true}}
+	rows := queryAnswerRows(nil, nil, ordered, "how does f work", []string{"work"})
+	got := []string{}
+	for _, r := range rows {
+		got = append(got, r.QualifiedName)
+	}
+	if len(got) != 2 || got[0] != "pkg.f" || got[1] != "sphinx.util.inspect" {
+		t.Fatalf("expansion-only Module must drop, seeded Module must stay: %v", got)
+	}
+}
+
+func TestQuerySeedPoolSetsTestsAsideBeforeTheCut(t *testing.T) {
+	ctx := context.Background()
+	path := t.TempDir() + "/graph.db"
+	store, err := OpenWritable(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.Build(ctx, func(builder *Builder) error {
+		if err := builder.PutProject(ProjectRecord{Name: "fixture", RootPath: t.TempDir(), Generation: "one", EngineVersion: "test", IndexedAt: time.Now().UTC()}); err != nil {
+			return err
+		}
+		// 60 tests whose long names match every generic word in the question,
+		// and one real function that matches only the rare one.
+		for i := 0; i < 60; i++ {
+			name := fmt.Sprintf("test_ordering_not_other_filter_annotation_%d", i)
+			if _, err := builder.PutNode(api.Node{Project: "fixture", Label: "Function", Name: name, QualifiedName: "tests.q." + name,
+				Location: api.Location{File: "tests/queries/tests.py", StartLine: i + 1}}); err != nil {
+				return err
+			}
+		}
+		for i := 0; i < 12; i++ {
+			name := "get_aggregation"
+			if i > 0 {
+				name = fmt.Sprintf("aggregation_helper_%d", i)
+			}
+			if _, err := builder.PutNode(api.Node{Project: "fixture", Label: "Method", Name: name, QualifiedName: "pkg.query.Query." + name,
+				Location: api.Location{File: "pkg/query.py", StartLine: 10 + i*20, EndLine: 28 + i*20}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if closeErr := store.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err = OpenReadOnly(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	q := "drop aggregation that is not referenced by other ordering filter annotation"
+	cands, _, err := store.querySeedCandidates(ctx, "fixture", q, queryTerms(q, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var real bool
+	for _, c := range cands {
+		if c.node.Name == "get_aggregation" {
+			real = true
+		}
+		if queryNodeLooksLikeTest(c.node) {
+			t.Fatalf("tests must be set aside when the question does not ask for them: %s", c.node.Name)
+		}
+	}
+	if !real {
+		t.Fatalf("the real function must survive the cut, got %d candidates", len(cands))
+	}
+	asked := "test ordering not other filter annotation"
+	cands, _, err = store.querySeedCandidates(ctx, "fixture", asked, queryTerms(asked, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := 0
+	for _, c := range cands {
+		if queryNodeLooksLikeTest(c.node) {
+			tests++
+		}
+	}
+	if tests == 0 {
+		t.Fatal("a question that mentions tests must keep them")
 	}
 }

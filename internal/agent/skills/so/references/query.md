@@ -3,9 +3,9 @@
 Load this only when the task needs a recipe below. The stop-early loop in `SKILL.md`
 answers most structural questions without it.
 
-`__SO_BIN__` is the binary path from `SKILL.md`. Graph commands default to
-compact `NODE` / `EDGE` text, not AXI TOON. `--json` is the full
-envelope.
+`__SO_BIN__` is the binary path from `SKILL.md`. Graph commands print AXI TOON:
+`count: N of M`, `name[N]{cols}:` tables, and `help[]` next steps. `--json` is
+the same page as JSON; `--full` adds every field.
 
 ## Callers, callees, and paths
 

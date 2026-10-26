@@ -37,7 +37,7 @@ When Superopen is available, it is a CLI binary. Invoke it with your shell tool 
   %s
 
 Rules:
-- Codebase questions (this repo's source): run graph query first in your shell. Do not run memory recall for a source question. Do not spawn Explore/Agent. Do not list the tree to confirm Superopen. If NODE/EDGE lines or BODIES answer the question, stop. Need another symbol body: so graph snippet of a listed NODE. Do not run graph query again unless the dump said TRUNCATED. Rename or multi-file work: so graph impact first. Grep/Read only for a literal the graph does not index. Never Grep .so/. Never pipe so through head or tail.
+- Codebase questions (this repo's source): run graph query first in your shell. Ask in a few specific words (symbols and behavior), not pasted issue text or tracebacks. Do not run memory recall for a source question. Do not spawn Explore/Agent. Do not list the tree to confirm Superopen. Output is TOON: count: N of M, then nodes[]{qn,kind,file,lines} and bodies[] with numbered source. If the listed nodes or bodies answer the question, stop. Need another body: so graph snippet of a listed qn. If the answer is not listed, run the help[] line it printed (--offset), not another query or Grep. Rename or multi-file work: so graph impact first. Grep/Read only for a literal the graph does not index. Never Grep .so/. Never pipe so through head or tail.
 - Saved facts in this workspace (prior decisions, diary, who/what/when stored under .so/): notes in .so/ are this workspace's diary even if titles look like import ids. Run memory recall first in your shell when they ask what was stored. When they want a fact persisted for later, run memory capture --kind knowledge --horizon medium --title '…' --text '…' (intent, not a phrase). so memory search is a title index without bodies - that is not an empty store. Quote the stored note and cite #id. If two notes conflict, cite both #ids and pick the most specific or recent. If the pack does not answer, run memory recall with a second cue. Do not grep transcripts or treat session learned: as authority.
 - Memory is hints, not authority. Graph builds are local (no LLM).
 `, soLine(`graph query '<question>'`), soLine(`memory recall '<question>'`))) + "\n"
@@ -77,17 +77,17 @@ func ReadNudge() string {
 }
 
 // SnippetOverflowNudge is injected once after a graph query when the agent
-// Reads source. Query already listed NODE src= paths; whole-module Read is
-// the compare cache hole. Snippet of a listed NODE is the cheap body.
+// Reads source. Query already listed this file in nodes[]; whole-module Read
+// is the compare cache hole. Snippet of a listed qn is the cheap body.
 func SnippetOverflowNudge() string {
-	return "Superopen: NODE src= already listed this file. Run in your shell: `" + soLine(`graph snippet '<qn>'`) + "` for a listed NODE. Do not Read whole modules. Stop if NODE/EDGE already answer."
+	return "Superopen: graph query already listed this file in nodes[]. Run in your shell: `" + soLine(`graph snippet '<qn>'`) + "` for a listed qn. Do not Read whole modules. Stop if nodes[] or bodies[] already answer."
 }
 
 // QueryRepeatNudge is injected once after a graph query when the agent
-// runs graph query again. The first dump already listed NODE rows;
-// another query is another billed turn. Snippet or stop unless TRUNCATED.
+// runs graph query again. The first page already listed ranked rows;
+// another query is another billed turn. Snippet, page with --offset, or stop.
 func QueryRepeatNudge() string {
-	return "Superopen: already queried this session. Run in your shell: `" + soLine(`graph snippet '<qn>'`) + "` for a listed NODE. Stop if NODE/EDGE already answer. Re-query only if TRUNCATED."
+	return "Superopen: already queried this session. Run in your shell: `" + soLine(`graph snippet '<qn>'`) + "` for a listed qn. Stop if nodes[] or bodies[] already answer. For more rows run the --offset help line, not a new question."
 }
 
 // MemoryNudge is injected on PreToolUse when the prompt is personal/prior-work.
