@@ -32,7 +32,7 @@ still this workspace diary  -  do not refuse them. If two notes conflict, cite
 both `#id`s and pick the most specific or recent. If the first cue misses or
 the clip does not contain the fact, run recall again with a second cue.
 A populated store with no lexical hit still has memories  -  try different terms.
-`hint:` on stdout distinguishes empty store vs no match vs sealed index.
+`note:` on stdout distinguishes empty store vs no match vs sealed index.
 
 ### 1. Search  -  index only (titles, not bodies)
 
@@ -53,7 +53,7 @@ help[2]:
   so memory timeline --around 12
 ```
 
-`0 memories` from search means **no title matched**, not that the store is empty.
+`count: 0` from search means **no title matched**, not that the store is empty.
 Types: `decision|bugfix|feature|refactor|discovery|change` (plus kinds
 `prompt|session|teaching|working`).
 
@@ -116,8 +116,8 @@ Do not expect a PreToolUse file-read inject.
 
 ## Empty / missing
 
-`0 memories` + `hint: no saved memories` means the store is empty.
-`0 memories` + `hint: N memories exist` means the cue missed  -  run recall.
+`count: 0` + `note: no saved memories` means the store is empty.
+`count: 0` + `note: N memories exist` means the cue missed  -  run recall.
 Windows: the installed binary is `so.exe`; this skill already substituted
 `__SO_BIN__`.
 

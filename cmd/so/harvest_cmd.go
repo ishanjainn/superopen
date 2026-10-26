@@ -21,6 +21,17 @@ func cmdHarvest() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "harvest",
 		Short: "Stage playbook patches from coding sessions until you approve them",
+		Args:  cobra.NoArgs,
+	}
+	// With no subcommand the group lists the open proposals (AXI §8).
+	cmd.RunE = func(c *cobra.Command, _ []string) error {
+		for _, sub := range cmd.Commands() {
+			if sub.Name() == "list" {
+				sub.SetContext(c.Context())
+				return sub.RunE(sub, nil)
+			}
+		}
+		return c.Help()
 	}
 	cmd.AddCommand(
 		harvestInventoryCmd(),
@@ -93,11 +104,14 @@ func harvestProposeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return out().HumanOrJSON("harvest_propose", func() {
-				for _, p := range items {
-					fmt.Fprintf(cmd.OutOrStdout(), "#%d %s %s %s\n", p.ID, p.Status, p.Kind, p.Title)
-				}
-			}, items)
+			rows := make([]map[string]any, 0, len(items))
+			for _, p := range items {
+				rows = append(rows, map[string]any{"id": p.ID, "status": p.Status, "kind": p.Kind, "title": p.Title})
+			}
+			if len(rows) > 0 {
+				out().Next("so harvest show <id>", "so harvest apply <id>", "so harvest decline <id>")
+			}
+			return out().HumanOrJSONRows("proposals", []string{"id", "status", "kind", "title"}, rows, items)
 		},
 	}
 	cmd.Flags().StringVar(&file, "file", "", "JSON file instead of stdin")
@@ -121,10 +135,10 @@ func harvestScanCmd() *cobra.Command {
 			res := harvest.Generate(root, id)
 			return out().HumanOrJSON("harvest_scan", func() {
 				if res.Skipped != "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "skipped %s %s\n", res.SessionID, res.Skipped)
+					fmt.Fprintf(cmd.OutOrStdout(), "skipped: ok\nsession: %s\nreason: %s\n", res.SessionID, cli.ToonQuote(res.Skipped, false))
 					return
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "session %s provider=%s inserted=%d\n", res.SessionID, res.Provider, res.Inserted)
+				fmt.Fprintf(cmd.OutOrStdout(), "harvested: ok\nsession: %s\nprovider: %s\ninserted: %d\n", res.SessionID, res.Provider, res.Inserted)
 			}, res)
 		},
 	}
@@ -170,7 +184,7 @@ func harvestSkipCmd() *cobra.Command {
 				return err
 			}
 			return out().HumanOrJSON("harvest_skip", func() {
-				fmt.Fprintf(cmd.OutOrStdout(), "skipped %s\n", args[0])
+				fmt.Fprintf(cmd.OutOrStdout(), "skipped: ok\nsession: %s\n", args[0])
 			}, map[string]any{"session_id": args[0], "status": "skipped"})
 		},
 	}
@@ -275,17 +289,24 @@ func harvestShowCmd() *cobra.Command {
 				return cli.NotFound("proposal not found", "so harvest list")
 			}
 			return out().HumanOrJSON("proposal", func() {
-				fmt.Fprintf(cmd.OutOrStdout(), "#%d %s %s %s\n", p.ID, p.Status, p.Kind, p.Target)
-				fmt.Fprintf(cmd.OutOrStdout(), "title: %s\n", p.Title)
-				fmt.Fprintf(cmd.OutOrStdout(), "reason: %s\n", p.Reason)
+				w := cmd.OutOrStdout()
+				fmt.Fprintf(w, "id: %d\nstatus: %s\nkind: %s\ntarget: %s\n", p.ID, p.Status, p.Kind, p.Target)
+				fmt.Fprintf(w, "title: %s\nreason: %s\n", cli.ToonQuote(p.Title, false), cli.ToonQuote(p.Reason, false))
 				if p.SessionID != "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "session: %s\n", p.SessionID)
+					fmt.Fprintf(w, "session: %s\n", p.SessionID)
 				}
-				for _, e := range p.Evidence {
-					fmt.Fprintf(cmd.OutOrStdout(), "evidence: %s %s %s\n", e.Kind, e.ID, e.Label)
+				if len(p.Evidence) > 0 {
+					rows := make([]string, 0, len(p.Evidence))
+					for _, e := range p.Evidence {
+						rows = append(rows, fmt.Sprintf("  %s,%s,%s", cli.ToonQuote(e.Kind, true), cli.ToonQuote(e.ID, true), cli.ToonQuote(e.Label, true)))
+					}
+					fmt.Fprintf(w, "evidence[%d]{kind,id,label}:\n%s\n", len(rows), strings.Join(rows, "\n"))
 				}
 				if p.Diff != "" {
-					fmt.Fprintln(cmd.OutOrStdout(), p.Diff)
+					fmt.Fprintf(w, "diff: |\n")
+					for _, line := range strings.Split(strings.TrimRight(p.Diff, "\n"), "\n") {
+						fmt.Fprintf(w, "  %s\n", line)
+					}
 				}
 			}, p)
 		},
@@ -312,7 +333,7 @@ func harvestApplyCmd() *cobra.Command {
 				return err
 			}
 			return out().HumanOrJSON("harvest_apply", func() {
-				fmt.Fprintf(cmd.OutOrStdout(), "applied #%d %s %s\n", p.ID, p.Kind, p.Target)
+				fmt.Fprintf(cmd.OutOrStdout(), "applied: ok\nid: %d\nkind: %s\ntarget: %s\n", p.ID, p.Kind, p.Target)
 			}, p)
 		},
 	}
@@ -339,7 +360,7 @@ func harvestDeclineCmd() *cobra.Command {
 				return err
 			}
 			return out().HumanOrJSON("harvest_decline", func() {
-				fmt.Fprintf(cmd.OutOrStdout(), "declined #%d\n", p.ID)
+				fmt.Fprintf(cmd.OutOrStdout(), "declined: ok\nid: %d\n", p.ID)
 			}, p)
 		},
 	}
@@ -380,10 +401,10 @@ func harvestJevCmd() *cobra.Command {
 			}
 			return out().HumanOrJSON("harvest_jev", func() {
 				if decision.Note != "" && decision.Choice == "" {
-					fmt.Fprintln(cmd.OutOrStdout(), decision.Note)
+					fmt.Fprintf(cmd.OutOrStdout(), "jev: skipped\nnote: %s\n", cli.ToonQuote(decision.Note, false))
 					return
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s evidence=%.1f correction=%.0f%% session=%s\n",
+				fmt.Fprintf(cmd.OutOrStdout(), "jev: %s\nevidence: %.1f\ncorrection_pct: %.0f\nsession: %s\n",
 					decision.Choice, decision.Evidence, decision.CorrectionProb*100, decision.SessionID)
 			}, decision)
 		},
@@ -427,9 +448,9 @@ func harvestJevSettingsCmd() *cobra.Command {
 			status := map[string]any{"enabled": on, "key_set": keySet}
 			return out().HumanOrJSON("harvest_jev_settings", func() {
 				if on {
-					fmt.Fprintln(cmd.OutOrStdout(), "jev harvest on")
+					fmt.Fprintln(cmd.OutOrStdout(), "jev_harvest: on")
 				} else {
-					fmt.Fprintln(cmd.OutOrStdout(), "jev harvest off")
+					fmt.Fprintln(cmd.OutOrStdout(), "jev_harvest: off")
 				}
 			}, status)
 		},

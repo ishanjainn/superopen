@@ -123,8 +123,7 @@ func maybeOpenUI(url string, noOpen bool) {
 func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen, hot bool) error {
 	url := fmt.Sprintf("http://127.0.0.1:%d", uiPort)
 	if st, err := readDevStatus(layout, uiPort); err == nil && st.alive {
-		fmt.Printf("Already running (pid %d) at %s\n", st.pid, st.url)
-		fmt.Printf("Stop with: so dev stop\n")
+		fmt.Printf("dev: already running\npid: %d\nurl: %s\nhelp[1]:\n  so dev stop\n", st.pid, st.url)
 		maybeOpenUI(url+"/graph", noOpen)
 		return nil
 	}
@@ -181,7 +180,7 @@ func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen, hot b
 }
 
 func printDevURL(url string) {
-	fmt.Printf("Running on: %s\n", url)
+	fmt.Printf("dev: running\nurl: %s\n", url)
 }
 
 func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot bool) error {
@@ -225,7 +224,7 @@ func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot b
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
-	fmt.Println("\nShutting down…")
+	fmt.Println("dev: stopped")
 	return nil
 }
 
@@ -236,7 +235,7 @@ func stopDev() error {
 	raw, err := os.ReadFile(pf)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Println("No Superopen UI pid file - nothing to stop.")
+			fmt.Println("dev: not running; nothing to stop")
 			return nil
 		}
 		return err
@@ -248,14 +247,14 @@ func stopDev() error {
 	}
 	if !processAlive(pid) {
 		_ = os.Remove(pf)
-		fmt.Println("UI was not running (stale pid file removed).")
+		fmt.Println("dev: not running; stale pid file removed")
 		return nil
 	}
 	if err := killProcessTree(pid); err != nil {
 		return fmt.Errorf("stop pid %d: %w", pid, err)
 	}
 	_ = os.Remove(pf)
-	fmt.Printf("Stopped Superopen UI (pid %d)\n", pid)
+	fmt.Printf("dev: stopped\npid: %d\n", pid)
 	return nil
 }
 
@@ -298,13 +297,13 @@ func statusDev(uiPort int) error {
 
 	switch {
 	case err == nil && st.alive && reachable:
-		fmt.Printf("running  pid=%d  %s\n", st.pid, url)
+		fmt.Printf("dev: running\npid: %d\nurl: %s\n", st.pid, url)
 	case reachable:
-		fmt.Printf("reachable  %s  (no tracked pid)\n", url)
+		fmt.Printf("dev: running\nurl: %s\nnote: no tracked pid\n", url)
 	case err == nil && st.alive:
-		fmt.Printf("pid %d alive but UI not reachable yet (%s)\n", st.pid, url)
+		fmt.Printf("dev: starting\npid: %d\nurl: %s\nnote: not reachable yet\n", st.pid, url)
 	default:
-		fmt.Println("stopped")
+		fmt.Println("dev: stopped")
 	}
 	return nil
 }

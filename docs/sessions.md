@@ -28,7 +28,7 @@ Observability for coding-agent sessions. Installed hooks record what happened.
 | `so sessions demo` | Synthetic session for UI testing |
 | `so scan` | Detection rules over those tool calls. See [scan.md](scan.md). |
 
-Output uses TOON lists, a definitive empty state (`0 sessions`) with `help[]`,
+Output uses TOON lists, a definitive empty state (`count: 0` / `sessions: none`) with `help[]`,
 and a `--json` envelope when asked.
 
 ## What is recorded (and what is not)

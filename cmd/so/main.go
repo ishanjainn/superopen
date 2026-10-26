@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -106,15 +107,14 @@ func cmdProjects() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return out().HumanOrJSON("projects", func() {
-				if len(list) == 0 {
-					fmt.Fprintln(cmd.OutOrStdout(), "No projects registered. Run so init in a repository.")
-					return
-				}
-				for _, p := range list {
-					fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  (%s)\n", p.ID, p.Name, p.RepoRoot)
-				}
-			}, map[string]any{"projects": list})
+			rows := make([]map[string]any, 0, len(list))
+			for _, p := range list {
+				rows = append(rows, map[string]any{"id": p.ID, "name": p.Name, "root": p.RepoRoot})
+			}
+			if len(rows) == 0 {
+				out().Next("so init  (in a repository)")
+			}
+			return out().HumanOrJSONRows("projects", []string{"id", "name", "root"}, rows, map[string]any{"projects": list})
 		},
 	}
 	command.AddCommand(&cobra.Command{
@@ -125,16 +125,16 @@ func cmdProjects() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return out().HumanOrJSON("projects_prune", func() {
-				if len(removed) == 0 {
-					fmt.Fprintln(cmd.OutOrStdout(), "Nothing to prune.")
-					return
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Removed %d project(s):\n", len(removed))
-				for _, res := range removed {
-					fmt.Fprintf(cmd.OutOrStdout(), "  %s  %s\n", res.Project.ID, res.Project.RepoRoot)
-				}
-			}, map[string]any{"pruned": len(removed), "results": removed})
+			rows := make([]map[string]any, 0, len(removed))
+			for _, res := range removed {
+				rows = append(rows, map[string]any{"id": res.Project.ID, "root": res.Project.RepoRoot})
+			}
+			if len(rows) == 0 {
+				return out().HumanOrJSON("projects_prune", func() {
+					fmt.Fprintln(cmd.OutOrStdout(), "pruned: 0; every registered project is valid")
+				}, map[string]any{"pruned": 0, "results": removed})
+			}
+			return out().HumanOrJSONRows("pruned", []string{"id", "root"}, rows, map[string]any{"pruned": len(removed), "results": removed})
 		},
 	})
 	return command
@@ -156,9 +156,22 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		graphErr = client.Call(cmd.Context(), api.OpStatus, api.StatusRequest{RepoRoot: root}, &graphStatus)
 	}
 	graphReady := graphErr == nil && graphStatus.State != "missing"
+	if graphReady {
+		out().Next(`so graph query "<question>"`, `so memory recall "<cue>"`, "so sessions list")
+	} else {
+		out().Next("so init")
+	}
 	return out().HumanOrJSON("status", func() {
-		fmt.Fprintf(out().W, "sessions  %d  active=%d\n", len(sessions), active)
-		fmt.Fprintf(out().W, "graph  %v  engine=%s nodes=%d edges=%d\n", graphReady, api.EngineName, graphStatus.NodeCount, graphStatus.EdgeCount)
+		w := out().W
+		fmt.Fprintf(w, "bin: %s\n", cli.BinPath())
+		fmt.Fprintln(w, "description: Code graph, session memory and playbook harvest for coding agents")
+		fmt.Fprintf(w, "repo: %s\n", root)
+		fmt.Fprintf(w, "sessions: %d\nactive_sessions: %d\n", len(sessions), active)
+		if graphReady {
+			fmt.Fprintf(w, "graph: ready\nnodes: %d\nedges: %d\n", graphStatus.NodeCount, graphStatus.EdgeCount)
+		} else {
+			fmt.Fprintln(w, "graph: none; run so init to index this repository")
+		}
 	}, map[string]any{
 		"repo": root, "sessions": len(sessions), "active_sessions": active,
 		"graph": graphReady, "graph_status": graphStatus,
@@ -274,7 +287,7 @@ must query the graph first.`,
 			_ = memory.FetchModels()
 			report.Write(cmd.OutOrStdout())
 			if findWebDir("") == "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "note: web UI is not in %s; reinstall Superopen (release tarball, brew, or install.ps1) so `so dev` works from any repo.\n", expectedWebDir())
+				fmt.Fprintf(cmd.OutOrStdout(), "note: %s\n", cli.ToonQuote(fmt.Sprintf("web UI is not in %s; reinstall Superopen (release tarball, brew, or install.ps1) so so dev works from any repo", expectedWebDir()), false))
 			}
 			return nil
 		},
@@ -313,16 +326,36 @@ Chocolatey). Use that manager's uninstall after this command.
 			if vendor != "" {
 				return codinguninstall.Run(cmd, vendor, false, dryRun)
 			}
-			_, warnings := codinguninstall.RemoveAll(true, keepData, dryRun, os.Stdout, os.Stderr)
-			for _, w := range warnings {
-				fmt.Fprintf(os.Stderr, "so uninstall: %s\n", w)
+			// A person at a terminal gets the progress checklist; piped output
+			// (an agent, CI) gets one structured result.
+			tty := writerIsTerminal(os.Stdout)
+			sink := io.Discard
+			if tty {
+				sink = os.Stdout
 			}
+			removed, warnings := codinguninstall.RemoveAll(true, keepData, dryRun, sink, io.Discard)
+			manager := ""
 			if exe, err := os.Executable(); err == nil {
-				if hint := paths.PackageManagerUninstallHint(exe); hint != "" {
-					fmt.Printf("The so binary is still provided by a package manager. Remove it with: %s\n", hint)
-				}
+				manager = paths.PackageManagerUninstallHint(exe)
 			}
-			fmt.Println("  Restart the coding agent so it drops in-memory hooks.")
+			if tty {
+				for _, w := range warnings {
+					fmt.Fprintf(os.Stderr, "so uninstall: %s\n", w)
+				}
+				if manager != "" {
+					fmt.Printf("The so binary is still provided by a package manager. Remove it with: %s\n", manager)
+				}
+				fmt.Println("  Restart the coding agent so it drops in-memory hooks.")
+				return nil
+			}
+			result := map[string]any{"uninstall": "done", "dry_run": dryRun, "removed": removed, "restart_required": true}
+			if len(warnings) > 0 {
+				result["warnings"] = warnings
+			}
+			if manager != "" {
+				out().Next("remove the binary with your package manager: " + manager)
+			}
+			out().Object("uninstall", result)
 			return nil
 		},
 	}
@@ -353,12 +386,7 @@ existing graph unless --force is passed.
 Does not start so dev by default. Pass --dev to start the UI after init.
 Pass --cursor-rules to also write this repo's .cursor/rules/superopen.mdc.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			out := cmd.OutOrStdout()
 			root := initRoot()
-			fmt.Fprintf(out, "so init: %s\n", root)
-			if f, ok := out.(*os.File); ok {
-				_ = f.Sync()
-			}
 			layout := paths.Resolve(root)
 			if err := layout.EnsureDirs(); err != nil {
 				return err
@@ -366,56 +394,47 @@ Pass --cursor-rules to also write this repo's .cursor/rules/superopen.mdc.`,
 			if err := writeInitGitignores(root); err != nil {
 				return err
 			}
+			result := map[string]any{"root": root, "sessions": layout.SessionsDir, "database": layout.Database}
 			if cursorRules {
 				path, err := steer.InstallProjectCursorRule(root)
 				if err != nil {
 					return err
 				}
-				fmt.Fprintf(out, "Cursor rule:  %s\n", path)
+				result["cursor_rule"] = path
 			}
 			_, dbErr := os.Stat(layout.Database)
-			already := dbErr == nil
-			if already && !force {
-				fmt.Fprintf(out, "Already initialized. Graph DB: %s\n", layout.Database)
-				fmt.Fprintf(out, "Session data: %s\n", layout.SessionsDir)
-				fmt.Fprintf(out, "Rebuild with: so init --force\n")
+			if dbErr == nil && !force {
 				_ = projects.TouchInit(root)
+				result["init"] = "already initialized"
+				out().Next("so graph status", "so init --force  (rebuild)")
+				out().Object("init", result)
 				return nil
 			}
 			client, err := client.Resolve()
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(out, "Building native graph...\n")
-			if f, ok := out.(*os.File); ok {
-				_ = f.Sync()
-			}
-			var result api.BuildResult
-			if err := client.Call(cmd.Context(), api.OpBuild, api.BuildRequest{RepoRoot: root, Mode: "full", Force: force}, &result); err != nil {
+			var build api.BuildResult
+			if err := client.Call(cmd.Context(), api.OpBuild, api.BuildRequest{RepoRoot: root, Mode: "full", Force: force}, &build); err != nil {
 				return err
 			}
 			_ = engine.WriteFingerprint(cmd.Context(), root, nil)
 			_ = projects.TouchInit(root)
 			_ = projects.TouchGraphRefresh(root)
-			if result.Status != "" && result.Status != "ok" {
-				fmt.Fprintf(out, "Initialized native graph: %d nodes, %d edges (%s)\n", result.NodeCount, result.EdgeCount, result.Status)
-			} else {
-				fmt.Fprintf(out, "Initialized native graph: %d nodes, %d edges\n", result.NodeCount, result.EdgeCount)
-			}
-			fmt.Fprintf(out, "Repo root:    %s\n", root)
+			result["init"] = "done"
+			result["graph"] = map[string]any{"status": build.Status, "nodes": build.NodeCount, "edges": build.EdgeCount, "files": build.FileCount}
 			if top := gitTopLevel(root); top != "" && filepath.Clean(top) != filepath.Clean(root) {
-				fmt.Fprintf(out, "Package-scoped graph (git top-level is %s)\n", top)
+				result["package_scoped_under"] = top
 			}
-			fmt.Fprintf(out, "Session data: %s\n", layout.SessionsDir)
-			fmt.Fprintf(out, "Shared DB:    %s\n", layout.Database)
 			if withDev {
-				fmt.Fprintln(out, "Starting so dev -d (UI + live watcher)...")
 				prev := cliFlags.Root
 				cliFlags.Root = root
 				defer func() { cliFlags.Root = prev }()
+				out().Object("init", result)
 				return runDev(4444, true, true, false)
 			}
-			fmt.Fprintln(out, "Optional: so dev -d  (UI + live watcher)")
+			out().Next(`so graph query "<question>"`, "so dev -d  (UI + live watcher)")
+			out().Object("init", result)
 			return nil
 		},
 	}

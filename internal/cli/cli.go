@@ -42,6 +42,10 @@ type Out struct {
 	W     io.Writer
 	ErrW  io.Writer
 	hints []string
+	notes []string
+	// hold defers help[] until ReleaseHelp, for a command that prints more
+	// after its table (help stays last, AXI §9).
+	hold bool
 }
 
 // Bind attaches --json / --full / --root to the root command (persistent).
@@ -203,7 +207,33 @@ func (o *Out) Next(hints ...string) {
 	}
 }
 
+// Note queues a one-line explanation printed before help[], for example why
+// a result is empty.
+func (o *Out) Note(note string) {
+	if note = strings.TrimSpace(note); note != "" {
+		o.notes = append(o.notes, note)
+	}
+}
+
+// HoldHelp defers notes and help[] until ReleaseHelp.
+func (o *Out) HoldHelp() { o.hold = true }
+
+// ReleaseHelp prints the deferred notes and help[].
+func (o *Out) ReleaseHelp() {
+	o.hold = false
+	o.flushHints()
+}
+
 func (o *Out) flushHints() {
+	if o.hold {
+		return
+	}
+	if !o.Flags.JSON {
+		for _, note := range o.notes {
+			fmt.Fprintf(o.W, "note: %s\n", ToonQuote(note, false))
+		}
+	}
+	o.notes = nil
 	if o.Flags.JSON || len(o.hints) == 0 {
 		return
 	}
@@ -234,18 +264,23 @@ func (o *Out) Empty(kind string) {
 		})
 		return
 	}
-	fmt.Fprintf(o.W, "0 %s\n", kind)
+	fmt.Fprintf(o.W, "count: 0\n%s: none\n", kind)
 	o.flushHints()
 }
 
 // Rows prints a compact table (text) or JSON list.
 // Each row is a map; cols defines column order and keys.
 func (o *Out) Rows(kind string, cols []string, rows []map[string]any) {
+	o.RowsOf(kind, cols, rows, len(rows))
+}
+
+// RowsOf is Rows for a page of a longer list: count reads "shown of total".
+func (o *Out) RowsOf(kind string, cols []string, rows []map[string]any, total int) {
 	if o.Flags.JSON {
 		_ = json.NewEncoder(o.W).Encode(map[string]any{
 			"ok":    true,
 			"kind":  kind,
-			"count": len(rows),
+			"count": total,
 			"items": rows,
 			"next":  o.takeHints(),
 		})
@@ -255,6 +290,10 @@ func (o *Out) Rows(kind string, cols []string, rows []map[string]any) {
 		o.Empty(kind)
 		return
 	}
+	if total < len(rows) {
+		total = len(rows)
+	}
+	fmt.Fprintf(o.W, "count: %d of %d\n", len(rows), total)
 	fmt.Fprintf(o.W, "%s[%d]{%s}:\n", kind, len(rows), strings.Join(cols, ","))
 	for _, row := range rows {
 		parts := make([]string, 0, len(cols))
@@ -267,22 +306,11 @@ func (o *Out) Rows(kind string, cols []string, rows []map[string]any) {
 					s = fmt.Sprintf("%s (truncated, %d chars — use --full)", s, orig)
 				}
 			}
-			parts = append(parts, toonField(s))
+			parts = append(parts, ToonQuote(strings.ReplaceAll(s, "\n", " "), true))
 		}
 		fmt.Fprintf(o.W, "  %s\n", strings.Join(parts, ","))
 	}
-	fmt.Fprintf(o.W, "count: %d of %d\n", len(rows), len(rows))
 	o.flushHints()
-}
-
-func toonField(s string) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
-	if s == "" || strings.ContainsAny(s, ",\"") {
-		s = strings.ReplaceAll(s, `"`, `""`)
-		return `"` + s + `"`
-	}
-	return s
 }
 
 // Home prints an AXI content-first dashboard (bin, description, body, help[]).
@@ -310,7 +338,7 @@ func (o *Out) Home(description string, lines []string) {
 	o.flushHints()
 }
 
-// Object prints one JSON object or key=value lines.
+// Object prints one record as TOON (sorted keys, nested maps indented).
 func (o *Out) Object(kind string, v any) {
 	if o.Flags.JSON {
 		_ = json.NewEncoder(o.W).Encode(map[string]any{
@@ -321,37 +349,25 @@ func (o *Out) Object(kind string, v any) {
 		})
 		return
 	}
-	switch m := v.(type) {
-	case map[string]any:
-		for k, val := range m {
-			fmt.Fprintf(o.W, "%s: %v\n", k, val)
-		}
-	default:
-		enc := json.NewEncoder(o.W)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(v)
-	}
+	fmt.Fprint(o.W, Toon(v, o.Flags.Full))
 	o.flushHints()
 }
 
-// OK prints a small success payload.
+// OK prints a small success payload as TOON fields.
 func (o *Out) OK(kind string, fields map[string]any) {
 	if fields == nil {
 		fields = map[string]any{}
 	}
 	if o.Flags.JSON {
-		payload := map[string]any{"ok": true, "kind": kind, "next": o.hints}
+		payload := map[string]any{"ok": true, "kind": kind, "next": o.takeHints()}
 		for k, v := range fields {
 			payload[k] = v
 		}
 		_ = json.NewEncoder(o.W).Encode(payload)
 		return
 	}
-	parts := []string{kind}
-	for k, v := range fields {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
-	}
-	fmt.Fprintln(o.W, strings.Join(parts, "  "))
+	fmt.Fprintf(o.W, "ok: %s\n", kind)
+	fmt.Fprint(o.W, Toon(fields, o.Flags.Full))
 	o.flushHints()
 }
 
@@ -420,7 +436,7 @@ func (o *Out) WriteError(err error) {
 	}
 	fmt.Fprintf(o.W, "error: %s\n", ae.Message)
 	if ae.Hint != "" {
-		fmt.Fprintf(o.W, "hint: %s\n", ae.Hint)
+		fmt.Fprintf(o.W, "help[1]:\n  %s\n", ae.Hint)
 	}
 }
 
@@ -542,3 +558,12 @@ func NotFound(msg, hint string) error { return Fail(ExitNotFound, msg, hint) }
 // Continuation tells a coding-agent caller that the command made durable
 // progress and must be resumed through the machine-readable protocol.
 func Continuation(msg, hint string) error { return Fail(ExitContinuationRequired, msg, hint) }
+
+// HumanOrJSONRows prints rows as a TOON table, or the JSON envelope with data.
+func (o *Out) HumanOrJSONRows(kind string, cols []string, rows []map[string]any, data any) error {
+	if o.Flags.JSON {
+		return o.HumanOrJSON(kind, nil, data)
+	}
+	o.Rows(kind, cols, rows)
+	return nil
+}

@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
@@ -32,16 +31,6 @@ func querySymbolNames(n api.Node) (name, last string) {
 		}
 	}
 	return name, last
-}
-
-func pickQueryAttachNodes(ordered []queryNodeHit) []api.Node {
-	out := make([]api.Node, 0, len(ordered))
-	for _, hit := range ordered {
-		if queryAttachableLabel(hit.node.Label) {
-			out = append(out, hit.node)
-		}
-	}
-	return out
 }
 
 func fileRoundRobinNodes(ordered []queryNodeHit) []queryNodeHit {
@@ -90,12 +79,6 @@ func fileRoundRobinNodes(ordered []queryNodeHit) []queryNodeHit {
 	return out
 }
 
-// appendQueryBodies reads clipped source for listed callables until leftover
-// chars are exhausted. Fail-open per symbol. Not Class/Module/File dumps.
-func (s *Store) appendQueryBodies(ctx context.Context, project string, nodes []api.Node, leftover int) string {
-	return renderQueryBodies(s.collectQueryBodies(ctx, project, nodes, leftover))
-}
-
 // queryBodyLineBudget is the source lines a page attaches across all bodies.
 // Bodies follow the ranking and a long one is clipped to what is left, never
 // skipped: skipping the second-ranked, 109-line method for a short one
@@ -108,8 +91,8 @@ const queryMinBodyLines = 10
 
 // collectQueryBodies is appendQueryBodies as data: bodies of the listed
 // callables in listed order, clipped to the line budget left.
-func (s *Store) collectQueryBodies(ctx context.Context, project string, nodes []api.Node, leftover int) []api.QueryBody {
-	if len(nodes) == 0 || leftover <= 0 {
+func (s *Store) collectQueryBodies(ctx context.Context, project string, nodes []api.Node) []api.QueryBody {
+	if len(nodes) == 0 {
 		return nil
 	}
 	var parts []api.QueryBody
@@ -153,22 +136,4 @@ func (s *Store) collectQueryBodies(ctx context.Context, project string, nodes []
 		remaining -= got.Location.EndLine - got.Location.StartLine + 1
 	}
 	return parts
-}
-
-func queryBodyTitle(display api.Node, file string) string {
-	return fmt.Sprintf("%s [%s src=%s loc=%s]", queryNodeDisplayName(display), display.Label, file, queryNodeLoc(display))
-}
-
-func renderQueryBodies(parts []api.QueryBody) string {
-	if len(parts) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "\nBODIES: %d matching callables (80-line cap). If this answers, stop. Else snippet another listed qn.\n", len(parts))
-	for _, p := range parts {
-		display := api.Node{Label: p.Label, Name: p.Name, QualifiedName: p.QualifiedName,
-			Location: api.Location{File: p.File, StartLine: p.StartLine, EndLine: p.EndLine}}
-		fmt.Fprintf(&b, "\n--- %s ---\n%s\n", queryBodyTitle(display, p.File), p.Code)
-	}
-	return b.String()
 }

@@ -9,7 +9,7 @@ Parent index: [../../AGENTS.md](../../AGENTS.md)
 | Goal | Implementation |
 |------|----------------|
 | **Effective** | `so graph query` prints a ranked TOON page (`count: N of M`, `nodes[]`, `edges[]`, numbered `bodies[]`) with `--offset` paging. |
-| **Cheap** | Default stdout is compact text under `--budget`; agent JSON omits full node arrays (`format/compact.go`). |
+| **Cheap** | Default stdout is one TOON page (15 rows, at most 3 bodies and 120 source lines); agent JSON carries the same page, not full node arrays (`format/compact.go`). |
 | **Accurate** | Full-index FTS/BM25 seeds; structural boosts. File/Variable stay out of query seeds. |
 
 ## Key files
@@ -17,8 +17,9 @@ Parent index: [../../AGENTS.md](../../AGENTS.md)
 | Concern | Files |
 |---------|--------|
 | Store + FTS search | `engine/store.go`, `engine/search_pattern.go` |
-| Query seeds + scoring | `engine/query_seed.go`, `engine/analysis.go` |
-| BFS + legacy text | `engine/query_expand.go` |
+| Query ranking (BM25F over name, module, path, docstring, body) | `engine/query_rank.go` |
+| Query seeds + scoring (exact names, dotted qualifiers) | `engine/query_seed.go`, `engine/analysis.go` |
+| BFS neighbors | `engine/query_expand.go` |
 | Ranked rows + paging | `engine/analysis.go` (`queryAnswerRows`, `pageQueryRows`) |
 | Index pipeline | `engine/index_*.go`, `engine/store_dump.go` |
 | Agent output | `format/compact.go`, `format/help.go` |
@@ -29,8 +30,8 @@ Parent index: [../../AGENTS.md](../../AGENTS.md)
 1. **Seeds:** FTS via `Search` (limit ~50), not `ORDER BY id LIMIT N` over callables. Do not File-prepend; BFS `DEFINES` from File would spray Variables.
 2. **Search vs query:** `so graph search` filters File/Folder/Module/Section and data-language Variables. Exported source consts stay searchable. Query uses the same FTS pool.
 3. **Expand:** Bounded BFS; hub skip for non-seed transit nodes; per-hop neighbor cap (same-file / same-package / question-name overlap / CALLS first). Header counts listed nodes, not the raw walk.
-4. **Render:** the CLI renders `api.QueryResult.Rows/Bodies/Edges` as TOON (`format/compact.go`, `format/toon.go`). `Text` is the legacy rendering kept for API callers.
-5. **Page + budget:** 15 ranked rows (`--limit`), `--offset` pages; `count` is the true total. Query attaches Method/Function/Constructor bodies for the top **listed** rows in rank order, up to 3 bodies and 120 lines in total (`queryBodyLineBudget`); a long body is clipped to the lines left (80 at most, `queryBodyMaxLines`), never skipped, and the help line names `--from` for the rest; `so graph snippet` itself clips at 250 (`snippetMaxLines`). Not Class/Module/File dumps. Do not lead with `--budget` or Cypher.
+4. **Render:** the CLI renders `api.QueryResult.Rows/Bodies/Edges` as TOON (`format/compact.go`, `format/toon.go`). There is no second text rendering.
+5. **Page + bodies:** 15 ranked rows (`--limit`), `--offset` pages; `count` is the true total. Query attaches Method/Function/Constructor bodies for the top **listed** rows in rank order, up to 3 bodies and 120 lines in total (`queryBodyLineBudget`); a long body is clipped to the lines left (80 at most, `queryBodyMaxLines`), never skipped, and the help line names `--from` for the rest; `so graph snippet` itself clips at 250 (`snippetMaxLines`). Not Class/Module/File dumps. Do not lead with Cypher.
 
 ## Graph contracts (G)
 

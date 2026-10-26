@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -63,11 +64,10 @@ func ensureFreshGraph(cmd *cobra.Command, root string) (string, error) {
 	if err != nil || !dirty {
 		return "", nil
 	}
-	// Without a usable previous index (first build, or a schema change that
-	// forces a full rebuild) there is nothing stale to answer from, so the
-	// read waits for the build instead.
+	// The first build of a repository has no previous index to answer from, so
+	// that read waits for it instead of timing out into an error.
 	refreshCtx, cancel := context.WithCancel(ctx)
-	if engine.HasUsableIndex(root) {
+	if indexExists(root) {
 		refreshCtx, cancel = context.WithTimeout(ctx, readRefreshBudget)
 	}
 	err = refreshGraphForRead(refreshCtx, root)
@@ -134,4 +134,14 @@ func refreshGraphForRead(ctx context.Context, root string) error {
 			return fmt.Errorf("graph refresh status %s", result.Status)
 		}
 	}
+}
+
+// indexExists is true when root already has a graph database.
+func indexExists(root string) bool {
+	paths, err := engine.CachePaths(root)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(paths.Database)
+	return err == nil
 }

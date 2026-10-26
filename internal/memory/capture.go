@@ -52,6 +52,9 @@ func (s *Store) Capture(in CaptureInput) (Episode, error) {
 		Concepts:         in.Concepts,
 		Horizon:          in.Horizon,
 		KeepUntilSession: in.KeepUntilSession,
+		// The same capture (session, kind, source, title, text) is one memory:
+		// repeating it returns the stored episode instead of adding a copy.
+		ContentHash: contentHashUID("capture", in.SessionID, in.Kind, in.Source, title, text),
 	}
 	id, _, err := s.storeEpisode(ep)
 	if err != nil {
@@ -65,6 +68,14 @@ func (s *Store) Capture(in CaptureInput) (Episode, error) {
 	got, err := s.Get(id)
 	if err != nil {
 		return Episode{}, err
+	}
+	if got.Faded {
+		// Capturing text that was forgotten brings it back, not a stale copy.
+		if err := s.Rescue(id); err == nil {
+			if revived, err := s.Get(id); err == nil {
+				got = revived
+			}
+		}
 	}
 	if in.Kind == KindSession && in.SessionID != "" {
 		_ = s.linkRollup(id, in.SessionID)

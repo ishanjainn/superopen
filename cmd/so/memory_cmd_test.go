@@ -31,8 +31,11 @@ func TestMemorySearchEmptyAXI(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(stdout, "0 memories") {
+	if !strings.Contains(stdout, "count: 0\nmemories: none\n") {
 		t.Fatalf("empty state missing: %q", stdout)
+	}
+	if strings.Index(stdout, "note:") > strings.Index(stdout, "help[") {
+		t.Fatalf("help[] must come last: %q", stdout)
 	}
 	if !strings.Contains(stdout, "help[") {
 		t.Fatalf("AXI help[] missing: %q", stdout)
@@ -316,7 +319,7 @@ func TestMemoryForgetHidesAXI(t *testing.T) {
 		}
 	})
 	combined := stdout + cobraOut.String()
-	if !strings.Contains(combined, "forget #") {
+	if !strings.Contains(combined, "forgotten: ok\nid: ") {
 		t.Fatalf("forget line missing: %q", combined)
 	}
 	if !strings.Contains(combined, "help[") {

@@ -90,7 +90,7 @@ help[1]:
 - A clipped body or snippet prints `code[<shown> of <total> lines]` and a
   `help[]` line with `so graph snippet <qn> --from <line>`.
 - `count: 0` plus one line stating what was searched is a definite answer.
-  Errors print `error:` and `hint:` on stdout; unknown symbols exit 3, usage
+  Errors print `error:` and `help[1]:` on stdout; unknown symbols exit 3, usage
   errors exit 2 and list the command's flags.
 - Hints are omitted when the answer is self-contained (a complete snippet).
 - `--json` / `--full` are script escape hatches. Agent piping relies on the

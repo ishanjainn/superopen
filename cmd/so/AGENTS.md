@@ -18,10 +18,10 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). Graph output: [../graph/AGENTS
 |-----|--------|
 | Stable exit codes | `internal/cli/cli.go` (0/1/2 + 3 not-found / 4 continuation) |
 | `--json` / `--full` | Root persistent flags; env `SO_JSON`, `SUPEROPEN_JSON` |
-| TOON lists | `cli.Rows()`: `kind[n]{cols}:` plus `count:` |
-| Content-first home | `so memory` (no-args dashboard); `so sessions` lists |
-| Definitive empty states | `0 memories` / `0 sessions` plus `help[]` |
-| Structured errors | stdout `error:` / `hint:` (JSON `{ok:false,code,error,hint}`) |
+| TOON output | `cli.Rows()` (tables, `count:` first), `cli.Toon()` (any record: sorted keys, nested maps, clipped lists with `--full`), `internal/graph/format` (graph views) |
+| Content-first home | `so`, `so graph`, `so memory`, `so sessions`, `so harvest` show live state with no arguments, never help text |
+| Definitive empty states | `count: 0` plus `<kind>: none` (memories, sessions, proposals, findings) and `help[]` |
+| Structured errors | stdout `error:` plus `help[1]:` (JSON `{ok:false,code,error,hint}`); unknown flag exits 2 |
 | Next-step `help[]` | `cli.Next` flushed after primary output |
 
 `--json` envelope stays `{ok, kind, data|items, count, next}` for the web BFF.
@@ -30,8 +30,14 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). Graph output: [../graph/AGENTS
 
 | Topic | Superopen |
 |-------|-----------|
-| Memory / sessions | **axi.md TOON** + dashboards; `--json` opt-in envelope |
+| Every other command | **axi.md TOON** by default (`cli.Toon` renders any result the same way); `--json` opt-in envelope |
 | Hook stdout | Host control JSON, not AXI |
+| `so install` / `so uninstall` on a terminal | Human checklist and banner. Piped (an agent, CI) they print one TOON result |
+| `so dev` | Long-running server: prints `dev: running` and `url:`, then serves |
+| `so version` | `so <version>`, the form every tool uses |
+| Not a Superopen repo | Exits 0 with a plain line, so an agent in another checkout is not told to `so init` |
+
+`cmd/so/axi_contract_test.go` enforces the flag contract on every command: an unknown flag exits 2 with `error:` and a `help[1]:` line naming usage and valid flags.
 
 Do not revert to JSON-first without explicit product decision.
 

@@ -15,7 +15,7 @@ so scan --rules <dir>           # use this directory instead of stored rules
 ```
 
 Text output is one tab-separated line per finding: severity, rule id, session id, reason.
-No matches prints `no findings`.
+No matches prints `count: 0` and `findings: none`.
 
 Ranks, low to high: `info`, `low`, `medium`, `high`, `critical`.
 

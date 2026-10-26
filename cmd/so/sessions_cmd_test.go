@@ -71,7 +71,7 @@ func TestSessionsEmpty(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(stdout, "0 sessions") {
+	if !strings.Contains(stdout, "count: 0\nsessions: none\n") {
 		t.Fatalf("empty state missing: %q", stdout)
 	}
 	if !strings.Contains(stdout, "help[") {
@@ -122,7 +122,7 @@ func TestSessionsShowCompactVsFull(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(full, `"id": "ses1"`) && !strings.Contains(full, `"id":"ses1"`) {
+	if !strings.Contains(full, "id: ses1") {
 		t.Fatalf("full show should dump document: %q", full)
 	}
 
@@ -201,7 +201,7 @@ func TestSessionsTokensEmpty(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(stdout, "0 sessions") {
+	if !strings.Contains(stdout, "count: 0\nsessions: none\n") {
 		t.Fatalf("tokens empty state missing: %q", stdout)
 	}
 }

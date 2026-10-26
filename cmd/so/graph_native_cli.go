@@ -217,6 +217,48 @@ func renderGraphResult(operation api.Operation, request any, result json.RawMess
 			return "", nil, nil, false
 		}
 		return format.ArchitectureCompact(architecture), nil, architecture, true
+	case api.OpStatus:
+		var status api.Status
+		if json.Unmarshal(result, &status) != nil {
+			return "", nil, nil, false
+		}
+		return format.StatusCompact(status), format.HelpForStatus(status), status, true
+	case api.OpBuild:
+		var build api.BuildResult
+		if json.Unmarshal(result, &build) != nil {
+			return "", nil, nil, false
+		}
+		return format.BuildCompact(build), format.HelpForBuild(build), build, true
+	case api.OpProjects:
+		var list api.ProjectsResult
+		if json.Unmarshal(result, &list) != nil {
+			return "", nil, nil, false
+		}
+		return format.ProjectsCompact(list), nil, list, true
+	case api.OpCoverage:
+		var coverage api.Coverage
+		if json.Unmarshal(result, &coverage) != nil {
+			return "", nil, nil, false
+		}
+		return format.CoverageCompact(coverage), format.HelpForCoverage(coverage), coverage, true
+	case api.OpSchema:
+		var schema api.SchemaResult
+		if json.Unmarshal(result, &schema) != nil {
+			return "", nil, nil, false
+		}
+		return format.SchemaCompact(schema), nil, schema, true
+	case api.OpDiagnostics:
+		var diagnostics api.DiagnosticsResult
+		if json.Unmarshal(result, &diagnostics) != nil {
+			return "", nil, nil, false
+		}
+		return format.DiagnosticsCompact(diagnostics), format.HelpForDiagnostics(diagnostics), diagnostics, true
+	case api.OpCypher:
+		var cypher api.CypherResult
+		if json.Unmarshal(result, &cypher) != nil {
+			return "", nil, nil, false
+		}
+		return format.CypherCompact(cypher), format.HelpForCypher(cypher), cypher, true
 	case api.OpCodeSearch:
 		var search api.CodeSearchResult
 		if json.Unmarshal(result, &search) != nil {
@@ -250,9 +292,10 @@ func applyStale(stale, text string) string {
 	return b.String() + text
 }
 
+// compactGraphText renders an operation without a dedicated view as generic
+// TOON, so no command falls back to raw JSON on the default path.
 func compactGraphText(_ api.Operation, result json.RawMessage) string {
-	var pretty any
-	_ = json.Unmarshal(result, &pretty)
-	body, _ := json.MarshalIndent(pretty, "", "  ")
-	return string(body) + "\n"
+	var value any
+	_ = json.Unmarshal(result, &value)
+	return cli.Toon(value, out().Flags.Full)
 }

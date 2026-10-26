@@ -131,21 +131,6 @@ func queryOverlapTerms(question string, extra []string) []string {
 	return out
 }
 
-func queryNodeDisplayName(n api.Node) string {
-	if n.Label != "File" && n.Label != "Folder" {
-		return n.Name
-	}
-	p := strings.ReplaceAll(n.Location.File, "\\", "/")
-	if p == "" {
-		return n.Name
-	}
-	parts := strings.Split(p, "/")
-	if len(parts) >= 2 {
-		return parts[len(parts)-2] + "/" + parts[len(parts)-1]
-	}
-	return parts[len(parts)-1]
-}
-
 const (
 	queryFTSSeedLimit = 50
 	// queryFTSOverfetch widens the search so test hits can be set aside

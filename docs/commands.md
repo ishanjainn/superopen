@@ -15,7 +15,7 @@ Global flags, the config file, and environment variables are listed in
 | `--root` | Repository root override (env: `SUPEROPEN_ROOT`; otherwise walk up to git top-level or nearest `.so/`) |
 
 Exit codes are stable: `0` ok, `1` error, `2` usage, `3` not found,
-`4` continuation. Errors print `error:` / `hint:` on stdout.
+`4` continuation. Errors print `error:` and a `help[1]:` fix on stdout; an unknown flag exits `2` and lists the valid flags.
 
 ## Top-level commands
 

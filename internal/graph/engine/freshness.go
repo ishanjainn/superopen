@@ -48,20 +48,6 @@ func fingerprintPath(repoRoot string) string {
 	return filepath.Join(paths.Root, fingerprintName)
 }
 
-// HasUsableIndex is true when root has an index this build can read: one
-// written by a build with the same assets and schema. A first build or a
-// format change has nothing to answer from until the rebuild finishes.
-func HasUsableIndex(repoRoot string) bool {
-	paths, err := CachePaths(repoRoot)
-	if err != nil {
-		return false
-	}
-	if _, err := os.Stat(paths.Database); err != nil {
-		return false
-	}
-	return loadFingerprint(repoRoot) != nil
-}
-
 func loadFingerprint(repoRoot string) *fingerprintDoc {
 	path := fingerprintPath(repoRoot)
 	if path == "" {
@@ -213,7 +199,7 @@ func PlanIncrementalFromProbe(ctx context.Context, repoRoot, project string, exc
 	}
 	prior := incrementalSnapshot{files: map[string]string{}}
 	store, err := OpenReadOnly(paths.Database)
-	if os.IsNotExist(err) || errors.Is(err, ErrIncompatibleSchema) {
+	if os.IsNotExist(err) {
 		return api.ChangeSet{RequiresFull: true, Reason: "no compatible prior generation", SourceRevision: gitRevision(ctx, root)}, nil
 	}
 	if err != nil {

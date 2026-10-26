@@ -122,11 +122,11 @@ func (r *Runner) Run() {
 	if len(trace.Paths) != 1 || len(trace.Unresolved) != 1 || trace.Unresolved[0].TargetText != "external:fmt.Println" {
 		t.Fatalf("unexpected trace: %+v", trace)
 	}
-	query, err := store.Query(context.Background(), api.QueryRequest{Project: "sample", Question: "Runner Run", Depth: 1, Budget: 200})
+	query, err := store.Query(context.Background(), api.QueryRequest{Project: "sample", Question: "Runner Run", Depth: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if query.Text == "" || len(query.Nodes) == 0 || len(query.Edges) == 0 {
+	if len(query.Rows) == 0 || len(query.Edges) == 0 {
 		t.Fatalf("unexpected query: %+v", query)
 	}
 	snippet, err := store.Snippet(context.Background(), api.SnippetRequest{

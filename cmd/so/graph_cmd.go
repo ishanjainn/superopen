@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph/buildpool"
 	"github.com/ishanjainn/superopen/internal/graph/client"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
+	"github.com/ishanjainn/superopen/internal/graph/format"
 	"github.com/ishanjainn/superopen/internal/projects"
 )
 
@@ -19,6 +21,17 @@ func newGraphCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "graph",
 		Short: "Build and query the native repository graph",
+		// With no subcommand the group shows live state (AXI §8), not help.
+		Args: cobra.NoArgs,
+	}
+	command.RunE = func(cmd *cobra.Command, _ []string) error {
+		for _, c := range command.Commands() {
+			if c.Name() == "status" {
+				c.SetContext(cmd.Context())
+				return c.RunE(c, nil)
+			}
+		}
+		return cmd.Help()
 	}
 	command.PersistentFlags().Bool("no-refresh", false, "Skip query-path graph freshness (CI)")
 	command.AddCommand(graphNativeCommands()...)
@@ -39,19 +52,21 @@ func runGraphRefresh(cmd *cobra.Command, root string, force, fromProbe bool) err
 		return err
 	}
 	if result.Status == "pool_full" || result.Status == "refresh_in_progress" {
+		reason := "already in progress"
+		if result.Status == "pool_full" {
+			n := buildpool.SlotCount()
+			reason = fmt.Sprintf("build pool full (%d/%d)", n, n)
+		}
+		out().Next("so graph status")
 		return out().HumanOrJSON("graph_refresh", func() {
-			if result.Status == "pool_full" {
-				n := buildpool.SlotCount()
-				fmt.Fprintf(cmd.OutOrStdout(), "graph refresh skipped: build pool full (%d/%d)\n", n, n)
-				return
-			}
-			fmt.Fprintln(cmd.OutOrStdout(), "graph refresh skipped: already in progress")
+			fmt.Fprintf(cmd.OutOrStdout(), "refresh: skipped\nreason: %s\n", reason)
 		}, result)
 	}
 	_ = engine.WriteFingerprint(cmd.Context(), root, nil)
 	_ = projects.TouchGraphRefresh(root)
+	out().Next(format.HelpForBuild(result)...)
 	return out().HumanOrJSON("graph_refresh", func() {
-		fmt.Fprintf(cmd.OutOrStdout(), "graph refresh: status=%s nodes=%d edges=%d\n", result.Status, result.NodeCount, result.EdgeCount)
+		fmt.Fprint(cmd.OutOrStdout(), format.BuildCompact(result))
 	}, result)
 }
 
@@ -103,7 +118,6 @@ func graphNativeCommands() []*cobra.Command {
 
 	query := nativeGraphLeaf("query <question>", "Retrieve focused graph context", api.OpQuery, func(cmd *cobra.Command, args []string) any {
 		depth, _ := cmd.Flags().GetInt("depth")
-		budget, _ := cmd.Flags().GetInt("budget")
 		terms, _ := cmd.Flags().GetStringSlice("term")
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
@@ -112,14 +126,12 @@ func graphNativeCommands() []*cobra.Command {
 			Question: args[0],
 			Terms:    terms,
 			Depth:    depth,
-			Budget:   budget,
 			Limit:    limit,
 			Offset:   offset,
 		}
 	})
 	query.Args = cobra.ExactArgs(1)
 	query.Flags().Int("depth", 2, "Traversal depth")
-	query.Flags().Int("budget", 1200, "Approximate output token budget")
 	query.Flags().StringSlice("term", nil, "Additional exact graph seed")
 	query.Flags().Int("limit", 0, "Ranked rows per page (default 15)")
 	query.Flags().Int("offset", 0, "Skip this many ranked rows (from a previous page's hint)")
@@ -169,20 +181,36 @@ func graphBuildsCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			active := slots[:0:0]
+			for _, sl := range slots {
+				if sl.PID != 0 || sl.Repo != "" {
+					active = append(active, sl)
+				}
+			}
+			slots = active
 			n := buildpool.SlotCount()
 			return out().HumanOrJSON("graph_builds", func() {
+				w := cmd.OutOrStdout()
 				if n == 0 {
-					fmt.Fprintln(cmd.OutOrStdout(), "build pool unlimited")
+					fmt.Fprintln(w, "pool: unlimited")
+				} else {
+					fmt.Fprintf(w, "pool: %d of %d slots in use\n", len(slots), n)
+				}
+				if len(slots) == 0 {
+					fmt.Fprintln(w, "builds: none running")
 					return
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "build pool %d/%d in use\n", len(slots), n)
-				for _, s := range slots {
+				rows := make([][]string, 0, len(slots))
+				for _, sl := range slots {
 					started := ""
-					if !s.StartedAt.IsZero() {
-						started = " started=" + s.StartedAt.Format("15:04:05")
+					if !sl.StartedAt.IsZero() {
+						started = sl.StartedAt.Format("15:04:05")
 					}
-					fmt.Fprintf(cmd.OutOrStdout(), "  slot %d  pid=%d  %s%s\n", s.Index, s.PID, s.Repo, started)
+					rows = append(rows, []string{fmt.Sprint(sl.Index), fmt.Sprint(sl.PID), sl.Repo, started})
 				}
+				var b strings.Builder
+				format.Table(&b, "", "builds", []string{"slot", "pid", "repo", "started"}, rows)
+				fmt.Fprint(w, b.String())
 			}, map[string]any{"slots": n, "active": slots})
 		},
 	}

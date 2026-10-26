@@ -290,27 +290,19 @@ type QueryRequest struct {
 	Question string   `json:"question"`
 	Terms    []string `json:"terms,omitempty"`
 	Depth    int      `json:"depth,omitempty"`
-	Budget   int      `json:"budget,omitempty"`
-	Cursor   string   `json:"cursor,omitempty"`
 	// Limit and Offset page Rows. Zero Limit uses the default page size.
 	Limit  int `json:"limit,omitempty"`
 	Offset int `json:"offset,omitempty"`
 }
 
 type QueryResult struct {
-	Text      string       `json:"text"`
-	Question  string       `json:"question,omitempty"`
-	Seeds     []RankedNode `json:"seeds,omitempty"`
-	Nodes     []Node       `json:"nodes,omitempty"`
-	Edges     []Edge       `json:"edges,omitempty"`
-	Page      Page         `json:"page"`
-	Budget    Budget       `json:"budget"`
-	Uncertain []Evidence   `json:"uncertain,omitempty"`
-	// Rows is one page of the ranked answer: listed seeds, then search
-	// order, then graph neighbors. RowsTotal counts every ranked row.
+	Question string `json:"question,omitempty"`
+	// Rows is one page of the ranked answer: the ranked matches, then seeds,
+	// then graph neighbors. RowsTotal counts every ranked row.
 	Rows      []Node      `json:"rows,omitempty"`
 	RowsTotal int         `json:"rows_total,omitempty"`
 	Offset    int         `json:"offset,omitempty"`
+	Edges     []Edge      `json:"edges,omitempty"`
 	Bodies    []QueryBody `json:"bodies,omitempty"`
 	// CallersOf is set when the question asked for callers; Rows are callers.
 	CallersOf []string `json:"callers_of,omitempty"`

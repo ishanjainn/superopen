@@ -868,10 +868,6 @@ func (s *Store) Verify(ctx context.Context) error {
 	return s.verifySchema(ctx)
 }
 
-// ErrIncompatibleSchema marks a database another schema or protocol wrote.
-// A build treats it like a missing database and rebuilds in full.
-var ErrIncompatibleSchema = errors.New("incompatible graph database")
-
 func (s *Store) verifySchema(ctx context.Context) error {
 	var schema, protocol string
 	if err := s.db.QueryRowContext(ctx, `SELECT value FROM store_meta WHERE key='schema_version'`).Scan(&schema); err != nil {
@@ -881,7 +877,7 @@ func (s *Store) verifySchema(ctx context.Context) error {
 		return fmt.Errorf("graph protocol metadata: %w", err)
 	}
 	if schema != fmt.Sprint(api.SchemaVersion) || protocol != fmt.Sprint(api.ProtocolVersion) {
-		return fmt.Errorf("%w: schema=%s protocol=%s", ErrIncompatibleSchema, schema, protocol)
+		return fmt.Errorf("graph database was built by another version (schema=%s protocol=%s): delete .so/db and run so graph build", schema, protocol)
 	}
 	return nil
 }

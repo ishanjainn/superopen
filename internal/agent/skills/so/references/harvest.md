@@ -61,4 +61,4 @@ __SO_BIN__ harvest apply <id> --force  # simplify / create / non-additive
 __SO_BIN__ harvest decline <id>
 ```
 
-Empty: `0 proposals` - nothing to do.
+Empty: `count: 0` / `proposals: none` - nothing to do.

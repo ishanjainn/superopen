@@ -43,15 +43,11 @@ func cmdScan() *cobra.Command {
 			if found == nil {
 				found = []guards.Finding{}
 			}
-			if err := out().HumanOrJSON("scan", func() {
-				if len(found) == 0 {
-					fmt.Fprintln(cmd.OutOrStdout(), "no findings")
-					return
-				}
-				for _, f := range found {
-					fmt.Fprintf(cmd.OutOrStdout(), "%s\t%s\t%s\t%s\n", f.Severity, f.RuleID, f.SessionID, f.Reason)
-				}
-			}, found); err != nil {
+			rows := make([]map[string]any, 0, len(found))
+			for _, f := range found {
+				rows = append(rows, map[string]any{"severity": f.Severity, "rule": f.RuleID, "session": f.SessionID, "reason": f.Reason})
+			}
+			if err := out().HumanOrJSONRows("findings", []string{"severity", "rule", "session", "reason"}, rows, found); err != nil {
 				return err
 			}
 			if failRank >= 0 && guards.CountAtOrAbove(found, failRank) > 0 {
