@@ -23,7 +23,9 @@ func TestSetErrorsPointToTheLineToFix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	good := base.YAML
+	// A Windows checkout has CRLF files. Mutations are written against LF text;
+	// every case runs on both endings, so the line numbers hold on both.
+	good := strings.ReplaceAll(base.YAML, "\r\n", "\n")
 	cases := []struct {
 		name   string
 		mutate func(string) string
@@ -45,28 +47,33 @@ func TestSetErrorsPointToTheLineToFix(t *testing.T) {
 		{"missing reason", func(s string) string { return strings.Replace(s, "  reason:", "  why:", 1) }, nil, ""},
 	}
 	for _, c := range cases {
-		bad := c.mutate(good)
-		_, err := Set(store, []byte(bad))
-		if err == nil {
-			t.Fatalf("%s: an invalid rule must be rejected", c.name)
-		}
-		var re *RuleError
-		if e, ok := err.(*RuleError); ok {
-			re = e
-		} else {
-			t.Fatalf("%s: want a RuleError with a line, got %T %v", c.name, err, err)
-		}
-		if re.Line <= 0 {
-			t.Fatalf("%s: the error must say which line: %v", c.name, err)
-		}
-		if c.line != nil && re.Line != c.line(bad) {
-			t.Fatalf("%s: line %d, want %d (%v)", c.name, re.Line, c.line(bad), err)
-		}
-		if c.msg != "" && !strings.Contains(re.Msg, c.msg) {
-			t.Fatalf("%s: message %q should contain %q", c.name, re.Msg, c.msg)
-		}
-		if strings.HasPrefix(err.Error(), "line ") == false {
-			t.Fatalf("%s: text form must lead with the line: %q", c.name, err.Error())
+		for _, ending := range []string{"\n", "\r\n"} {
+			bad := c.mutate(good)
+			if bad == good {
+				t.Fatalf("%s: the mutation changed nothing", c.name)
+			}
+			bad = strings.ReplaceAll(bad, "\n", ending)
+			name := c.name + " (" + strings.NewReplacer("\r", "CR", "\n", "LF").Replace(ending) + ")"
+			_, err := Set(store, []byte(bad))
+			if err == nil {
+				t.Fatalf("%s: an invalid rule must be rejected", name)
+			}
+			re, ok := err.(*RuleError)
+			if !ok {
+				t.Fatalf("%s: want a RuleError with a line, got %T %v", name, err, err)
+			}
+			if re.Line <= 0 {
+				t.Fatalf("%s: the error must say which line: %v", name, err)
+			}
+			if c.line != nil && re.Line != c.line(bad) {
+				t.Fatalf("%s: line %d, want %d (%v)", name, re.Line, c.line(bad), err)
+			}
+			if c.msg != "" && !strings.Contains(re.Msg, c.msg) {
+				t.Fatalf("%s: message %q should contain %q", name, re.Msg, c.msg)
+			}
+			if !strings.HasPrefix(err.Error(), "line ") {
+				t.Fatalf("%s: text form must lead with the line: %q", name, err.Error())
+			}
 		}
 	}
 	if entries, _ := os.ReadDir(store); len(entries) != 0 {
