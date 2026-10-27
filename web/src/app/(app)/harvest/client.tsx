@@ -4,6 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
 import HarvestDiff from "@/components/harvest-diff";
+import Onboarding from "@/components/ui/onboarding";
+import Tabs from "@/components/ui/tabs";
+import HarvestConfig from "./config";
 import { diffStats } from "@/lib/harvest-diff";
 
 type Evidence = {
@@ -33,7 +36,7 @@ type Proposal = {
   created_at?: string;
 };
 
-type Tab = "open" | "history";
+type Tab = "open" | "history" | "config";
 
 type JevDecision = {
   enabled?: boolean;
@@ -58,6 +61,7 @@ export default function HarvestPage() {
   const [latest, setLatest] = useState<Proposal | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<number | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -90,6 +94,8 @@ export default function HarvestPage() {
       setHistory(Array.isArray(histBody.items) ? histBody.items : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load harvest");
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -123,74 +129,85 @@ export default function HarvestPage() {
   const skippedEmpty =
     items.length === 0 && (latest?.status === "skipped" || history[0]?.status === "skipped");
 
+  const empty = loaded && !error && !jevOn && items.length === 0 && history.length === 0;
+  const tabs: { value: Tab; label: string }[] = jevOn
+    ? [
+        { value: "open", label: "Review" },
+        { value: "config", label: "Configuration" },
+      ]
+    : [
+        { value: "open", label: "Open" },
+        { value: "history", label: "History" },
+        { value: "config", label: "Configuration" },
+      ];
+  const active: Tab = jevOn && tab === "history" ? "open" : tab;
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <FeaturePageHeader title="Harvest" />
-      {jevOn ? (
+      <Tabs label="Harvest views" items={tabs} value={active} onChange={setTab} />
+      {active === "config" ? (
+        <div className="min-h-0 flex-1 overflow-auto p-5">
+          <HarvestConfig onChanged={() => void load()} />
+        </div>
+      ) : jevOn ? (
         <div className="min-h-0 flex-1 overflow-auto p-5">
           {error ? <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
           <JevPanel decision={jev} />
         </div>
+      ) : empty ? (
+        <Onboarding
+          title="No proposals yet"
+          description="Harvest runs on its own. After a coding session finishes in a repository set up with so init, it proposes small edits to your playbook files (AGENTS.md, skills). You approve each one before anything is written."
+          stepsLabel="Or run it yourself"
+          steps={[
+            { label: "Review the latest finished session now.", command: "so harvest scan" },
+            { label: "List open proposals from the terminal.", command: "so harvest list" },
+          ]}
+          note="Nothing appearing after real work? Check the agent hooks with so install, then restart the agent."
+        />
       ) : (
-      <>
-      <div className="flex shrink-0 gap-2 border-b border-neutral-200 px-5 py-2">
-        <button
-          type="button"
-          className={tab === "open" ? "rounded-full bg-neutral-900 px-3 py-1 text-xs text-white" : "rounded-full border border-neutral-300 px-3 py-1 text-xs text-neutral-700"}
-          onClick={() => setTab("open")}
-        >
-          Open
-        </button>
-        <button
-          type="button"
-          className={tab === "history" ? "rounded-full bg-neutral-900 px-3 py-1 text-xs text-white" : "rounded-full border border-neutral-300 px-3 py-1 text-xs text-neutral-700"}
-          onClick={() => setTab("history")}
-        >
-          History
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto p-5">
-        {error ? (
-          <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </div>
-        ) : null}
-        {tab === "open" ? (
-          items.length === 0 ? (
+        <div className="min-h-0 flex-1 overflow-auto p-5">
+          {error ? (
+            <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              {error}
+            </div>
+          ) : null}
+          {active === "open" ? (
+            items.length === 0 ? (
+              <p className="text-sm text-neutral-500">
+                {skippedEmpty
+                  ? "No patches waiting. Last review skipped — nothing to change."
+                  : "No open playbook proposals."}
+              </p>
+            ) : (
+              <div className="mx-auto flex max-w-3xl flex-col gap-4">
+                {items.map((p) => (
+                  <ProposalCard
+                    key={p.id}
+                    proposal={p}
+                    busy={busy === p.id}
+                    onApply={(force) => void act(p.id, "apply", force)}
+                    onDecline={() => void act(p.id, "decline")}
+                  />
+                ))}
+              </div>
+            )
+          ) : history.length === 0 ? (
             <p className="text-sm text-neutral-500">
-              {skippedEmpty
-                ? "No patches waiting. Last review skipped — nothing to change."
-                : "No open playbook proposals."}
+              No harvest history in the session retention window (default 7 days).
             </p>
           ) : (
-            <div className="mx-auto flex max-w-3xl flex-col gap-4">
-              {items.map((p) => (
-                <ProposalCard
-                  key={p.id}
-                  proposal={p}
-                  busy={busy === p.id}
-                  onApply={(force) => void act(p.id, "apply", force)}
-                  onDecline={() => void act(p.id, "decline")}
-                />
+            <div className="mx-auto flex max-w-3xl flex-col gap-3">
+              <p className="text-xs text-neutral-500">
+                Closed reviews from the session retention window (default 7 days).
+              </p>
+              {history.map((p) => (
+                <HistoryCard key={`${p.source || "item"}-${p.id}`} item={p} />
               ))}
             </div>
-          )
-        ) : history.length === 0 ? (
-          <p className="text-sm text-neutral-500">
-            No harvest history in the session retention window (default 7 days).
-          </p>
-        ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-3">
-            <p className="text-xs text-neutral-500">
-              Closed reviews from the session retention window (default 7 days).
-            </p>
-            {history.map((p) => (
-              <HistoryCard key={`${p.source || "item"}-${p.id}`} item={p} />
-            ))}
-          </div>
-        )}
-      </div>
-      </>
+          )}
+        </div>
       )}
     </div>
   );

@@ -18,6 +18,7 @@ import {
   Settings2,
   Sparkles,
 } from "lucide-react";
+import Onboarding from "@/components/ui/onboarding";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
 import { useProject } from "@/components/shell/project-context";
 import {
@@ -165,47 +166,30 @@ function GraphNotIndexed({
   repoRoot?: string;
   onRetry: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
   const command = repoRoot
     ? `cd ${quoteForShell(repoRoot)} && so graph build`
     : "so graph build";
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard access is optional; the command stays selectable.
-    }
-  };
-
   return (
-    <div className="graph-empty">
-      <h2 className="graph-empty-title">No graph for {repo} yet</h2>
-      <p className="graph-empty-body">
-        Superopen has this repository registered but has not indexed its code.
-        Build the graph once — it runs locally and refreshes on its own from
-        then on.
-      </p>
-      <div className="graph-empty-command">
-        <code>{command}</code>
+    <Onboarding
+      title={`No graph for ${repo} yet`}
+      description="Superopen has this repository registered but has not indexed its code. Build the graph once. It runs locally and refreshes on its own from then on."
+      steps={[{ label: "Index the repository.", command }]}
+      note={
+        <>
+          In a coding agent, <code>/so init</code> does the same and also creates <code>.so/</code>{" "}
+          if the repository has never been set up.
+        </>
+      }
+      actions={
         <button
           type="button"
-          className="graph-empty-copy"
-          onClick={() => void copy()}
+          onClick={onRetry}
+          className="rounded border border-neutral-300 px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
         >
-          {copied ? "Copied" : "Copy"}
+          Check again
         </button>
-      </div>
-      <p className="graph-empty-note">
-        In a coding agent, <code>/so init</code> does the same and also creates{" "}
-        <code>.so/</code> if the repository has never been set up.
-      </p>
-      <button type="button" className="graph-retry" onClick={onRetry}>
-        Retry
-      </button>
-    </div>
+      }
+    />
   );
 }
 

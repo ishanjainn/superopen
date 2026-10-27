@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { User } from "lucide-react";
 import { useSoftPoll } from "@/hooks/use-soft-poll";
+import Onboarding from "@/components/ui/onboarding";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
 import { useProject } from "@/components/shell/project-context";
 import SessionSearchBar from "@/components/session-search-bar";
@@ -218,12 +219,17 @@ export default function SessionsPage() {
 
       <div className="min-h-0 flex-1 overflow-auto">
         {error && <p className="px-4 py-3 text-sm text-red-600">{error}</p>}
-        {!error && !loading && sessions.length === 0 && (
-          <p className="px-4 py-6 text-sm text-neutral-500">
-            {debounced
-              ? `No sessions match “${debounced}”.`
-              : "No sessions yet. Run an instrumented agent or `so sessions demo`."}
-          </p>
+        {!error && !loading && sessions.length === 0 && debounced && (
+          <p className="px-4 py-6 text-sm text-neutral-500">No sessions match “{debounced}”.</p>
+        )}
+        {!error && !loading && sessions.length === 0 && !debounced && (
+          <Onboarding
+            title="No sessions yet"
+            description="Sessions are recorded automatically while you use a coding agent in a repository set up with so init. Each one shows the chat, the files it touched and a map of the run."
+            stepsLabel="Or look around first"
+            steps={[{ label: "Add a sample session.", command: "so sessions demo" }]}
+            note="Worked in this repo and still nothing here? Check the agent hooks with so install, then restart the agent."
+          />
         )}
 
         {groups.map(([label, rows]) => (

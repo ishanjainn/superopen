@@ -355,75 +355,11 @@
 
 /* The stage status layer is click-through so the canvas keeps its drag
    handling; the setup card has to opt back in for copy and retry. */
-.graph-empty {
-  max-width: 420px;
-  padding: 20px 22px;
-  border: 1px solid var(--hairline-strong);
-  border-radius: 8px;
-  background: var(--panel);
-  text-align: left;
-  pointer-events: auto;
-}
 
-.graph-empty-title {
-  margin: 0 0 8px;
-  color: var(--ink);
-  font-size: var(--text-sm);
-  font-weight: 600;
-}
 
-.graph-empty-body {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--text-xs);
-  line-height: 1.5;
-}
 
-.graph-empty-command {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 14px 0 10px;
-  padding: 8px 10px;
-  border: 1px solid var(--hairline);
-  border-radius: 5px;
-  background: var(--panel-raised);
-}
 
-.graph-empty-command code {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ink);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
-.graph-empty-copy {
-  flex: none;
-  padding: 3px 8px;
-  border: 1px solid var(--hairline-strong);
-  border-radius: 4px;
-  color: var(--muted);
-  font-size: var(--text-xs);
-}
 
-.graph-empty-copy:hover {
-  color: var(--ink);
-}
 
-.graph-empty-note {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--text-xs);
-  line-height: 1.5;
-}
 
-.graph-empty-note code {
-  padding: 1px 4px;
-  border-radius: 3px;
-  background: var(--panel-raised);
-  font-family: var(--font-mono);
-}
