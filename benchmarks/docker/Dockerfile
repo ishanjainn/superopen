@@ -1,5 +1,5 @@
 # Superopen CLI is NOT in this image. Product benches bind-mount the locally
-# built `so` (Linux ELF) at /usr/local/bin/so. Image = isolated Claude/OpenCode.
+# built `so` (Linux ELF) at /usr/local/bin/so. Image = isolated Claude/OpenCode/Cursor.
 FROM golang:1.26-bookworm
 
 ARG CLAUDE_CODE_VERSION=2.1.241
@@ -32,6 +32,24 @@ RUN npm install -g \
        fi \
     && NPM_G="$(npm root -g)" \
     && chmod -R a+rX "$NPM_G/@anthropic-ai" "$NPM_G/opencode-ai" || true
+
+# Cursor CLI. Same tarball the official install script downloads; linked onto
+# the container PATH because arm containers run as the host uid.
+ARG CURSOR_CLI_VERSION=2026.10.22-27dcf5f
+RUN arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+         arm64) arch=arm64 ;; \
+         amd64) arch=x64 ;; \
+         *) echo "unsupported arch $arch" >&2; exit 1 ;; \
+       esac \
+    && curl -fSL "https://downloads.cursor.com/lab/${CURSOR_CLI_VERSION}/linux/${arch}/agent-cli-package.tar.gz" \
+         -o /tmp/cursor-agent.tar.gz \
+    && mkdir -p /opt/cursor-agent \
+    && tar --strip-components=1 -xzf /tmp/cursor-agent.tar.gz -C /opt/cursor-agent \
+    && ln -sf /opt/cursor-agent/cursor-agent /usr/local/bin/agent \
+    && ln -sf /opt/cursor-agent/cursor-agent /usr/local/bin/cursor-agent \
+    && chmod -R a+rX /opt/cursor-agent \
+    && rm /tmp/cursor-agent.tar.gz
 
 RUN useradd -m -u 1000 -s /bin/bash eval \
     && mkdir -p /work /eval/home /eval/claude \

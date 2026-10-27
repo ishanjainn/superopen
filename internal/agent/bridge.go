@@ -20,6 +20,8 @@ import (
 // Options controls optional pieces of `so install`.
 type Options struct {
 	Strict bool
+	// Voice installs the opt-in short-reply skill. Default install leaves it off.
+	Voice bool
 }
 
 // InstallReport lists paths written by a successful `so install`.
@@ -55,6 +57,13 @@ func Install(repoRoot string, selected []string, opts Options) (InstallReport, e
 		return report, fmt.Errorf("install skill: %w", err)
 	}
 	report.Skills = skillPaths
+	if opts.Voice {
+		voicePaths, err := skills.InstallVoice(soBin)
+		if err != nil {
+			return report, fmt.Errorf("install short skill: %w", err)
+		}
+		report.Skills = append(report.Skills, voicePaths...)
+	}
 	steerPaths, err := steer.InstallAll()
 	if err != nil {
 		return report, fmt.Errorf("install durable guidance: %w", err)

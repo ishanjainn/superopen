@@ -9,16 +9,22 @@ from pathlib import Path
 from typing import Any
 
 import isolate
-from hosts import claude_code, opencode
+from hosts import load as load_host
 from grade import grade_answer, grade_gold_files, load_questions, wrap_code_prompt
 from resume import load_baseline_rows, merge_arm_rows, selected_arms
 from spend import SpendLedger
 
 
 def _host_module(name: str):
-    if name != "claude-code":
-        return opencode
-    return claude_code
+    return load_host(name)
+
+
+def install_vendor(host: str) -> str:
+    vendors = {"claude-code": "claude-code", "opencode": "opencode", "cursor": "cursor"}
+    try:
+        return vendors[host]
+    except KeyError:
+        raise RuntimeError(f"no install vendor for host {host}") from None
 
 
 def _prepare_superopen(
@@ -29,7 +35,7 @@ def _prepare_superopen(
     *,
     init: bool = True,
 ) -> None:
-    vendor = "claude-code" if host == "claude-code" else "opencode"
+    vendor = install_vendor(host)
     if init:
         isolate.run([so_bin, "init", "--root", str(paths["worktree"])], cwd=paths["worktree"], env=env)
     isolate.run(
@@ -109,10 +115,7 @@ def run_compare_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> 
     if True in arms.values():
         seed_paths = isolate.arm_paths(work / "_seed", "superopen")
         isolate.ensure_dirs(seed_paths, args.host)
-        if args.host == "opencode":
-            isolate.copy_auth(seed_paths["opencode"])
-        else:
-            isolate.copy_auth(seed_paths["claude"])
+        isolate.copy_host_auth(args.host, seed_paths)
         seed_env = isolate.arm_env(seed_paths, {"SUPEROPEN_SO_BIN": so_bin})
         isolate.add_worktree(mirror, seed_paths["worktree"])
         isolate.ensure_container(seed_paths, so_bin)
@@ -129,10 +132,7 @@ def run_compare_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> 
                 break
             paths = isolate.arm_paths(work / str(q["id"]), arm_name)
             isolate.ensure_dirs(paths, args.host)
-            if args.host == "opencode":
-                isolate.copy_auth(paths["opencode"])
-            else:
-                isolate.copy_auth(paths["claude"])
+            isolate.copy_host_auth(args.host, paths)
             env = isolate.arm_env(paths, {"SUPEROPEN_SO_BIN": so_bin})
             isolate.add_worktree(mirror, paths["worktree"])
             if use_so:

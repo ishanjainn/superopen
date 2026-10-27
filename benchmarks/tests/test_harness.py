@@ -216,6 +216,55 @@ class HarnessTests(unittest.TestCase):
                 require_agent_credentials(modes=["memory"], phase=3, max_spend=0.0)
             require_agent_credentials(modes=["memory"], phase=3, max_spend=15.0)
 
+    def test_cursor_host_uses_api_key_and_stream(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        from compare import install_vendor
+        from hosts.cursor import metrics_from_stream
+        from scale import default_model, require_agent_credentials, require_coding_host
+
+        self.assertEqual(require_coding_host("cursor"), "cursor")
+        self.assertEqual(default_model("cursor", ""), "default")
+        self.assertEqual(default_model("cursor", "composer-2"), "composer-2")
+        self.assertEqual(install_vendor("cursor"), "cursor")
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "", "CURSOR_API_KEY": ""}, clear=False):
+            with self.assertRaises(SystemExit):
+                require_agent_credentials(modes=["swe"], phase=2, max_spend=50.0, host="cursor")
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "", "CURSOR_API_KEY": "crsr_test"}, clear=False):
+            require_agent_credentials(modes=["swe"], phase=2, max_spend=50.0, host="cursor")
+            with self.assertRaises(SystemExit):
+                require_agent_credentials(modes=["memory"], phase=3, max_spend=15.0, host="cursor")
+        sample = "\n".join(
+            [
+                '{"type":"tool_call","subtype":"started","tool_call":{"shellToolCall":{"args":{"command":"so graph query foo"}}}}',
+                '{"type":"tool_call","subtype":"completed","tool_call":{"shellToolCall":{"args":{"command":"so graph query foo"}}}}',
+                '{"type":"assistant","message":{"content":[{"type":"text","text":"next"}]}}',
+                '{"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{"path":"a.py"}}}}',
+                '{"type":"result","subtype":"success","is_error":false,"result":"done","usage":{"input_tokens":11,"output_tokens":4,"cost":0.02}}',
+            ]
+        )
+        metrics = metrics_from_stream(sample, returncode=0)
+        self.assertTrue(metrics["ok"])
+        self.assertEqual(metrics["tool_calls"], 2)
+        self.assertEqual(metrics["graph_calls"], 1)
+        self.assertTrue(metrics["so_invoked"])
+        self.assertEqual(metrics["source_reads"], 1)
+        self.assertTrue(metrics["read_after_bodies"])
+        self.assertEqual(metrics["input_tokens"], 11)
+        self.assertEqual(metrics["output_tokens"], 4)
+        self.assertEqual(metrics["cost_usd"], 0.02)
+        self.assertEqual(metrics["turns"], 1)
+        closed = metrics_from_stream(
+            '{"type":"result","subtype":"success","is_error":false,"result":"done","usage":{"inputTokens":100,"outputTokens":7,"cacheReadTokens":40,"cacheWriteTokens":5,"chargedCents":12}}',
+            returncode=0,
+        )
+        self.assertEqual(closed["input_tokens"], 100)
+        self.assertEqual(closed["cache_read_tokens"], 40)
+        self.assertEqual(closed["cache_creation_tokens"], 5)
+        self.assertEqual(closed["cost_usd"], 0.12)
+        self.assertEqual(closed["output_tokens"], 7)
+
     def test_load_repo_env(self) -> None:
         import os
         import tempfile

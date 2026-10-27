@@ -31,6 +31,7 @@ The file is `KEY=VALUE` lines, mode `0600`. Comments start with `#`. Unknown key
 | `SUPEROPEN_SESSION_RETENTION_HOURS` | `168` (7 days) | Age after which session transcripts and closed harvest history are deleted. `0` keeps them forever. |
 | `SUPEROPEN_MEMORY_RETENTION_HOURS` | `168` | Age after which unpinned prompts and session rollups are deleted. `0` keeps them forever. Teachings, pins, and `never_decay` rows are never deleted by age. |
 | `SUPEROPEN_HOOK_STRICT` | unset | `1` / `true` / `on`: deny the first in-repo source Read once per session (same as `so install --strict`). |
+| `SUPEROPEN_CCR_MAX_BYTES` | `536870912` (512 MiB) | Cap on original bytes kept for `so shrink`. At the cap, new transforms pass the original through. Existing handles stay. |
 | `SUPEROPEN_HARVEST_JEV` | unset | `1`: Harvest decisions run in the UI through Jev. Coding agents are not asked to propose. |
 | `TYPESAFE_API_KEY` | unset | Key for `https://api.typesafe.ai/v1/systemone`. Required when Jev harvest is on. |
 | `SUPEROPEN_BUILD_SLOTS` | `2` | How many graph builds may run at once across repos. `0` means unlimited. |
