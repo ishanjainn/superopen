@@ -89,3 +89,12 @@ func TestRowsPrintCountFirstThenTable(t *testing.T) {
 		t.Fatalf("got %q want %q", buf.String(), want)
 	}
 }
+
+func TestRowsLeaveBooleansAndNumbersUnquoted(t *testing.T) {
+	var buf strings.Builder
+	o := &Out{W: &buf, ErrW: &buf}
+	o.Rows("rules", []string{"id", "enabled", "n", "note"}, []map[string]any{{"id": "a", "enabled": true, "n": 3, "note": "true"}})
+	if !strings.Contains(buf.String(), "  a,true,3,\"true\"\n") {
+		t.Fatalf("got %q", buf.String())
+	}
+}

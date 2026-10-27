@@ -31,6 +31,10 @@
       "type": "string",
       "enum": ["experimental", "stable", "deprecated"]
     },
+    "disabled": {
+      "type": "boolean",
+      "description": "Keep the rule on file but out of every scan."
+    },
     "posture": {
       "type": "string",
       "enum": ["detect", "enforce-capable"]

@@ -5,6 +5,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
+import Onboarding from "@/components/ui/onboarding";
+import Tabs from "@/components/ui/tabs";
+import RulesPanel from "./rules";
 import { useProject } from "@/components/shell/project-context";
 
 type Finding = {
@@ -36,6 +39,8 @@ function ScanList() {
   const session = useSearchParams().get("session") || "";
   const [items, setItems] = useState<Finding[]>([]);
   const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [tab, setTab] = useState<"findings" | "rules">("findings");
 
   const load = useCallback(async () => {
     try {
@@ -50,6 +55,8 @@ function ScanList() {
       setItems(rows);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load scan");
+    } finally {
+      setLoaded(true);
     }
   }, [projectId, session]);
 
@@ -58,13 +65,23 @@ function ScanList() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <FeaturePageHeader title="Scan" />
+  const findings =
+    loaded && !error && items.length === 0 && !session ? (
+      <Onboarding
+        title="No findings"
+        description="Scan checks what your coding agent did (commands it ran, files it read and edited) against detection rules, for example curl piped into a shell, a recursive delete from /, or a secret file read followed by a network call. It only reports; it never blocks the agent. Nothing has matched in this repository's sessions."
+        stepsLabel="Or run it yourself"
+        steps={[
+          { label: "Scan every session now.", command: "so scan" },
+          { label: "Only show serious findings.", command: "so scan --min-severity high" },
+        ]}
+        note="This page runs the scan each time it loads. See, edit, disable or add rules on the Rules tab."
+      />
+    ) : (
       <div className="min-h-0 flex-1 overflow-auto p-5">
         {error ? <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div> : null}
         {items.length === 0 ? (
-          <p className="text-sm text-neutral-500">No findings</p>
+          <p className="text-sm text-neutral-500">{session ? "No findings in this session." : "No findings"}</p>
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-3">
             {items.map((item, i) => (
@@ -90,6 +107,21 @@ function ScanList() {
           </div>
         )}
       </div>
+    );
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <FeaturePageHeader title="Scan" />
+      <Tabs
+        label="Scan views"
+        items={[
+          { value: "findings", label: "Findings" },
+          { value: "rules", label: "Rules" },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
+      {tab === "rules" ? <RulesPanel /> : findings}
     </div>
   );
 }

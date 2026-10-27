@@ -56,7 +56,8 @@ func cmdScan() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&rulesDir, "rules", "", "Rule directory to scan with, instead of the stored rules")
+	cmd.AddCommand(cmdScanRules())
+	cmd.Flags().StringVar(&rulesDir, "rules", "", "Rule directory to scan with, instead of the built-in and stored rules")
 	cmd.Flags().StringVar(&minSeverity, "min-severity", "", "Drop findings below this severity")
 	cmd.Flags().StringVar(&sessionID, "session", "", "Scan one session id")
 	cmd.Flags().StringVar(&failOn, "fail-on", "", "Exit with an error when a finding is at or above this severity")

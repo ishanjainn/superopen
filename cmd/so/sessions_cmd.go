@@ -184,25 +184,51 @@ func runSessionsList(cmd *cobra.Command, _ []string) error {
 }
 
 func cmdSessionCheckpoint() *cobra.Command {
-	command := &cobra.Command{Use: "checkpoint", Short: "Manage restorable session checkpoints"}
+	command := &cobra.Command{
+		Use:   "checkpoint",
+		Short: "Manage restorable session checkpoints",
+		Long:  "With no subcommand, lists the checkpoints of the most recent session.",
+		Args:  cobra.NoArgs,
+	}
+	listFor := func(id string) error {
+		list, err := checkpoint.NewStore(paths.Resolve(repoRoot())).List(id)
+		if err != nil {
+			return err
+		}
+		rows := make([]map[string]any, 0, len(list))
+		for _, item := range list {
+			rows = append(rows, map[string]any{"id": item.ID, "created": item.CreatedAt.Format(time.RFC3339), "label": item.Label, "files": len(item.Files)})
+		}
+		if len(rows) > 0 {
+			out().Next("so sessions checkpoint restore " + id + " <checkpoint-id>")
+		} else {
+			out().Next("so sessions checkpoint create " + id)
+		}
+		return out().HumanOrJSONRows("checkpoints", []string{"id", "created", "label", "files"}, rows, list)
+	}
+	command.RunE = func(*cobra.Command, []string) error {
+		all, err := session.NewStore(paths.Resolve(repoRoot())).List()
+		if err != nil {
+			return cli.Err(err)
+		}
+		if len(all) == 0 {
+			out().Next("so sessions list")
+			out().Empty("checkpoints")
+			return nil
+		}
+		latest := all[0]
+		for _, m := range all {
+			if m.StartedAt.After(latest.StartedAt) {
+				latest = m
+			}
+		}
+		return listFor(latest.ID)
+	}
 	command.AddCommand(&cobra.Command{
 		Use:   "list <session-id>",
 		Short: "List checkpoints for a session",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			list, err := checkpoint.NewStore(paths.Resolve(repoRoot())).List(args[0])
-			if err != nil {
-				return err
-			}
-			rows := make([]map[string]any, 0, len(list))
-			for _, item := range list {
-				rows = append(rows, map[string]any{"id": item.ID, "created": item.CreatedAt.Format(time.RFC3339), "label": item.Label, "files": len(item.Files)})
-			}
-			if len(rows) > 0 {
-				out().Next("so sessions checkpoint restore <session-id> <checkpoint-id>")
-			}
-			return out().HumanOrJSONRows("checkpoints", []string{"id", "created", "label", "files"}, rows, list)
-		},
+		RunE:  func(_ *cobra.Command, args []string) error { return listFor(args[0]) },
 	})
 	command.AddCommand(&cobra.Command{
 		Use:   "create <session-id> [label]",

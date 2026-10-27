@@ -76,7 +76,7 @@ func TestLoadActiveRulesDirOverride(t *testing.T) {
 	}
 }
 
-func TestInstallThenLoadActiveUsesStore(t *testing.T) {
+func TestInstallThenLoadActiveMergesWithBuiltIns(t *testing.T) {
 	store := t.TempDir()
 
 	src := filepath.Join(t.TempDir(), "my.rule.yaml")
@@ -95,8 +95,21 @@ func TestInstallThenLoadActiveUsesStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load active: %v", err)
 	}
-	if len(loaded) != 1 || loaded[0].Source != SourceStore || loaded[0].Rule.ID != "custom-rule" {
-		t.Fatalf("expected store rule, got %+v", loaded)
+	base, err := Baseline()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != len(base)+1 {
+		t.Fatalf("a custom rule must add to the built-ins, not replace them: %d rules, %d built-in", len(loaded), len(base))
+	}
+	found := false
+	for _, l := range loaded {
+		if l.Rule.ID == "custom-rule" {
+			found = l.Source == SourceStore
+		}
+	}
+	if !found {
+		t.Fatalf("custom rule missing or mis-sourced: %v", srcOf(loaded))
 	}
 }
 
@@ -282,4 +295,86 @@ func srcOf(l []LoadedRule) []Source {
 		s[i] = l[i].Source
 	}
 	return s
+}
+
+func TestSetOverridesABuiltInAndRemoveRestoresIt(t *testing.T) {
+	store := t.TempDir()
+	base, err := Baseline()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := base[0].ID
+	builtin, err := Get(store, id)
+	if err != nil || builtin.Source != SourceBaseline {
+		t.Fatalf("a fresh store shows the built-in: %+v %v", builtin, err)
+	}
+	edited := strings.Replace(builtin.YAML, "title:", "title: EDITED ", 1)
+	got, err := Set(store, []byte(edited))
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if got.Source != SourceOverride || !strings.Contains(got.Rule.Title, "EDITED") {
+		t.Fatalf("an edited built-in becomes an override: %+v", got)
+	}
+	if _, err := Remove(store, id); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	back, _ := Get(store, id)
+	if back.Source != SourceBaseline || strings.Contains(back.Rule.Title, "EDITED") {
+		t.Fatalf("removing the override restores the built-in: %+v", back)
+	}
+	if _, err := Remove(store, id); err == nil || !strings.Contains(err.Error(), "built in") {
+		t.Fatalf("a built-in cannot be removed, only disabled: %v", err)
+	}
+}
+
+func TestSetRejectsBadRulesWithoutWriting(t *testing.T) {
+	store := t.TempDir()
+	if _, err := Set(store, []byte("id: Bad ID\n")); err == nil {
+		t.Fatal("an invalid rule must be rejected")
+	}
+	failing := strings.Replace(ruleWithID("fixture-lies"), "verdict: match", "verdict: no_match", 1)
+	if _, err := Set(store, []byte(failing)); err == nil {
+		t.Fatal("a fixture that disagrees with its verdict must be rejected")
+	}
+	if entries, _ := os.ReadDir(store); len(entries) != 0 {
+		t.Fatalf("a rejected rule must leave no file behind: %v", entries)
+	}
+}
+
+func TestSetDisabledDisablesBuiltInAndCustomRules(t *testing.T) {
+	store := t.TempDir()
+	base, err := Baseline()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := base[0].ID
+
+	off, err := SetDisabled(store, id, true)
+	if err != nil || off.Enabled() || off.Source != SourceOverride {
+		t.Fatalf("disabling a built-in writes an override: %+v %v", off, err)
+	}
+	active, _ := LoadActive(store, "")
+	if len(active) != len(base)-1 {
+		t.Fatalf("a disabled rule must not run: %d active of %d", len(active), len(base))
+	}
+	on, err := SetDisabled(store, id, false)
+	if err != nil || !on.Enabled() || on.Source != SourceBaseline {
+		t.Fatalf("enabling an unchanged override restores the built-in: %+v %v", on, err)
+	}
+	if entries, _ := os.ReadDir(store); len(entries) != 0 {
+		t.Fatalf("no override file should remain: %v", entries)
+	}
+
+	if _, err := Set(store, []byte(ruleWithID("mine"))); err != nil {
+		t.Fatal(err)
+	}
+	custom, err := SetDisabled(store, "mine", true)
+	if err != nil || custom.Enabled() || custom.Source != SourceStore {
+		t.Fatalf("disabling a custom rule: %+v %v", custom, err)
+	}
+	custom, err = SetDisabled(store, "mine", false)
+	if err != nil || !custom.Enabled() || strings.Contains(custom.YAML, "disabled") {
+		t.Fatalf("enabling a custom rule drops the flag: %+v %v", custom, err)
+	}
 }

@@ -92,13 +92,17 @@ func graphNativeReadCommands() []*cobra.Command {
 	deleteProject.Args = cobra.ExactArgs(1)
 	projects.AddCommand(deleteProject)
 	artifact := &cobra.Command{Use: "artifact", Short: "Export, import, or verify a content-addressed graph artifact"}
-	artifact.AddCommand(nativeArtifactLeaf("export <path>", api.OpArtifactExport), nativeArtifactLeaf("import <path>", api.OpArtifactImport), nativeArtifactLeaf("verify <path>", api.OpArtifactVerify))
+	artifact.AddCommand(
+		nativeArtifactLeaf("export <path>", "Write this repository's graph to a content-addressed artifact file", api.OpArtifactExport),
+		nativeArtifactLeaf("import <path>", "Load a graph from an artifact file, after verifying it", api.OpArtifactImport),
+		nativeArtifactLeaf("verify <path>", "Check an artifact file's integrity without importing it", api.OpArtifactVerify),
+	)
 	diagnostics := nativeGraphLeaf("diagnostics", "Verify graph database integrity", api.OpDiagnostics, func(*cobra.Command, []string) any { return api.DiagnosticsRequest{RepoRoot: repoRoot()} })
 	return []*cobra.Command{status, schema, search, cypher, trace, snippet, architecture, layout, impact, coverage, projects, artifact, diagnostics}
 }
 
-func nativeArtifactLeaf(use string, operation api.Operation) *cobra.Command {
-	command := nativeGraphLeaf(use, "Operate on a verified Zstandard graph artifact", operation, func(_ *cobra.Command, args []string) any {
+func nativeArtifactLeaf(use, short string, operation api.Operation) *cobra.Command {
+	command := nativeGraphLeaf(use, short, operation, func(_ *cobra.Command, args []string) any {
 		path, _ := filepath.Abs(args[0])
 		return api.ArtifactRequest{RepoRoot: repoRoot(), Path: path}
 	})

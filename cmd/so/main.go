@@ -95,6 +95,7 @@ func newRootCommand() *cobra.Command {
 		cmdGC(),
 		version.NewCmd(),
 	)
+	wireGroupHomes(root)
 	return root
 }
 

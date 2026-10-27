@@ -306,7 +306,13 @@ func (o *Out) RowsOf(kind string, cols []string, rows []map[string]any, total in
 					s = fmt.Sprintf("%s (truncated, %d chars — use --full)", s, orig)
 				}
 			}
-			parts = append(parts, ToonQuote(strings.ReplaceAll(s, "\n", " "), true))
+			switch row[c].(type) {
+			case bool, int, int64, float64:
+				// A real boolean or number is not a string that looks like one.
+				parts = append(parts, s)
+			default:
+				parts = append(parts, ToonQuote(strings.ReplaceAll(s, "\n", " "), true))
+			}
 		}
 		fmt.Fprintf(o.W, "  %s\n", strings.Join(parts, ","))
 	}
@@ -477,6 +483,18 @@ func WithUsageHint(err error, cmd *cobra.Command) error {
 	cmd.LocalFlags().VisitAll(add)
 	cmd.InheritedFlags().VisitAll(add)
 	hint := "usage: " + cmd.UseLine()
+	if strings.Contains(ae.Message, "unknown command") {
+		// An unknown subcommand: say which ones exist, not just the usage line.
+		var names []string
+		for _, c := range cmd.Commands() {
+			if !c.Hidden && c.Name() != "help" && c.Name() != "completion" {
+				names = append(names, c.Name())
+			}
+		}
+		if len(names) > 0 {
+			return &Error{Code: ae.Code, Message: ae.Message, Hint: "commands: " + strings.Join(names, ", ")}
+		}
+	}
 	if len(flags) > 0 {
 		hint += "; flags: " + strings.Join(flags, ", ")
 	}

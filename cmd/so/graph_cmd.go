@@ -172,6 +172,16 @@ func graphBuildsCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "builds",
 		Short: "Show the global graph build pool",
+		Args:  cobra.NoArgs,
+	}
+	command.RunE = func(cmd *cobra.Command, _ []string) error {
+		for _, c := range command.Commands() {
+			if c.Name() == "status" {
+				c.SetContext(cmd.Context())
+				return c.RunE(c, nil)
+			}
+		}
+		return cmd.Help()
 	}
 	status := &cobra.Command{
 		Use:   "status",

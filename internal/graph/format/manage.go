@@ -104,9 +104,9 @@ func ProjectsCompact(r api.ProjectsResult) string {
 	Count(&b, len(r.Projects), maxInt(r.Page.Total, len(r.Projects)))
 	rows := make([][]string, 0, len(r.Projects))
 	for _, p := range r.Projects {
-		rows = append(rows, []string{p.Name, p.RootPath, p.IndexedAt.UTC().Format(time.RFC3339), shortGeneration(p.Generation)})
+		rows = append(rows, []string{p.Name, p.RootPath, p.IndexedAt.UTC().Format(time.RFC3339)})
 	}
-	Table(&b, "", "projects", []string{"name", "root", "indexed_at", "generation"}, rows)
+	Table(&b, "", "projects", []string{"name", "root", "indexed_at"}, rows)
 	return b.String()
 }
 

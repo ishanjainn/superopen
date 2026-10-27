@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"encoding/json"
 	"github.com/spf13/cobra"
+
+	"github.com/ishanjainn/superopen/internal/cli"
 )
 
 // Version is the CLI's semver string without a leading "v" (e.g. "0.1.0").
@@ -37,6 +40,14 @@ func NewCmd() *cobra.Command {
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			out := cmd.OutOrStdout()
+			if cli.FlagsFromCmd(cmd).JSON {
+				// --json is honored here like everywhere else: the shared envelope.
+				return json.NewEncoder(out).Encode(map[string]any{
+					"ok": true, "kind": "version",
+					"data": map[string]any{"version": Display(), "commit": Commit},
+					"next": []string{},
+				})
+			}
 			if Commit != "" {
 				_, err := fmt.Fprintf(out, "so %s (%s)\n", Display(), Commit)
 				return err

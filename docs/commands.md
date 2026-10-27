@@ -91,6 +91,7 @@ session and the agent is not asked to propose.
 ```bash
 so scan
 so scan --session <id> --min-severity high --fail-on high
+so scan rules                 # list, then: show | set <file|-> | enable | disable | remove
 so scan --json
 so scan --rules <dir>
 ```

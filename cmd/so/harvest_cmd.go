@@ -53,7 +53,7 @@ func cmdHarvest() *cobra.Command {
 func harvestInventoryCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "inventory",
-		Short: "List playbook files (hash, protected)",
+		Short: "List playbook files (size, protected); --json adds each file hash",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			root := repoRoot()
 			if err := failIfUnmanaged(root); err != nil {
@@ -74,7 +74,7 @@ func harvestInventoryCmd() *cobra.Command {
 				return nil
 			}
 			out().Next("so harvest scan [session]")
-			out().Rows("playbooks", []string{"path", "hash", "bytes", "protected"}, rows)
+			out().Rows("playbooks", []string{"path", "bytes", "protected"}, rows)
 			return nil
 		},
 	}

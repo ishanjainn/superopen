@@ -19,7 +19,7 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). Graph output: [../graph/AGENTS
 | Stable exit codes | `internal/cli/cli.go` (0/1/2 + 3 not-found / 4 continuation) |
 | `--json` / `--full` | Root persistent flags; env `SO_JSON`, `SUPEROPEN_JSON` |
 | TOON output | `cli.Rows()` (tables, `count:` first), `cli.Toon()` (any record: sorted keys, nested maps, clipped lists with `--full`), `internal/graph/format` (graph views) |
-| Content-first home | `so`, `so graph`, `so memory`, `so sessions`, `so harvest` show live state with no arguments, never help text |
+| Content-first home | Every command group shows live state or a table of its subcommands with no arguments, never help text (`group_home.go` wires the ones with no data; a test fails if a group has no bare behavior) |
 | Definitive empty states | `count: 0` plus `<kind>: none` (memories, sessions, proposals, findings) and `help[]` |
 | Structured errors | stdout `error:` plus `help[1]:` (JSON `{ok:false,code,error,hint}`); unknown flag exits 2 |
 | Next-step `help[]` | `cli.Next` flushed after primary output |
@@ -34,7 +34,7 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). Graph output: [../graph/AGENTS
 | Hook stdout | Host control JSON, not AXI |
 | `so install` / `so uninstall` on a terminal | Human checklist and banner. Piped (an agent, CI) they print one TOON result |
 | `so dev` | Long-running server: prints `dev: running` and `url:`, then serves |
-| `so version` | `so <version>`, the form every tool uses |
+| `so version` | `so <version>` as text, the form every tool uses; `--json` gives the shared envelope |
 | Not a Superopen repo | Exits 0 with a plain line, so an agent in another checkout is not told to `so init` |
 
 `cmd/so/axi_contract_test.go` enforces the flag contract on every command: an unknown flag exits 2 with `error:` and a `help[1]:` line naming usage and valid flags.

@@ -67,3 +67,51 @@ func TestEveryCommandHasShortHelp(t *testing.T) {
 		}
 	})
 }
+
+// Run bare, a command group shows data or a table of its subcommands, never
+// cobra's help text (AXI: content first).
+func TestEveryCommandGroupHasABareBehavior(t *testing.T) {
+	walkCommands(newRootCommand(), func(path []string, cmd *cobra.Command) {
+		if len(path) == 0 || !cmd.HasSubCommands() {
+			return
+		}
+		if cmd.RunE == nil && cmd.Run == nil {
+			t.Errorf("so %s is a group with no bare behavior; cobra would print help", strings.Join(path, " "))
+		}
+	})
+}
+
+// An unknown subcommand names the valid ones (AXI §6).
+func TestUnknownSubcommandListsTheValidOnes(t *testing.T) {
+	root := newRootCommand()
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"graph", "artifact", "nope"})
+	cmd, err := root.ExecuteC()
+	err = cli.WithUsageHint(cli.NormalizeExit(err), cmd)
+	var buf bytes.Buffer
+	(&cli.Out{W: &buf, ErrW: io.Discard}).WriteError(err)
+	for _, want := range []string{"error: unknown command", "help[1]:\n  commands: export, import, verify"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Fatalf("missing %q in:\n%s", want, buf.String())
+		}
+	}
+	if cli.ExitCode(err) != cli.ExitUsage {
+		t.Fatalf("exit %d", cli.ExitCode(err))
+	}
+}
+
+// --json is honored by every command, version included.
+func TestVersionHonorsJSON(t *testing.T) {
+	root := newRootCommand()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"--json", "version"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"kind":"version"`) || !strings.Contains(buf.String(), `"ok":true`) {
+		t.Fatalf("version --json must print the shared envelope: %q", buf.String())
+	}
+}
