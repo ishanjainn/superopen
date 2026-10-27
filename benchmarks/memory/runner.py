@@ -410,12 +410,12 @@ def _run_qa_llm(
     from judge import judge as llm_judge
 
     host_name = getattr(args, "host", "claude-code")
-    try:
-        from hosts import load as load_host
-
-        llm_host = load_host(host_name)
-    except RuntimeError:
-        return {"skipped": "coding-agent host required (claude-code, opencode, or cursor)"}
+    if host_name == "claude-code":
+        from hosts import claude_code as llm_host
+    elif host_name == "opencode":
+        from hosts import opencode as llm_host
+    else:
+        return {"skipped": "coding-agent host required (claude-code or opencode)"}
     if not llm_host.available():
         return {"skipped": f"{host_name} not on PATH"}
 
@@ -426,7 +426,10 @@ def _run_qa_llm(
         paths = isolate.arm_paths(work, "superopen")
         paths["worktree"] = store
         isolate.ensure_dirs(paths, host_name)
-        isolate.copy_host_auth(host_name, paths)
+        if host_name == "opencode":
+            isolate.copy_auth(paths["opencode"])
+        else:
+            isolate.copy_auth(paths["claude"])
         env = isolate.arm_env(paths, {"SUPEROPEN_SO_BIN": so_bin})
         isolate.ensure_container(paths, so_bin)
     _prepare_superopen(so_bin, paths, env, host_name)
@@ -569,7 +572,10 @@ def _memory_arm(out: Path, split: str, so_bin: str, host_name: str, store: Path)
     paths = isolate.arm_paths(out / "memory_iso" / split, "superopen")
     paths["worktree"] = store
     isolate.ensure_dirs(paths, host_name)
-    isolate.copy_host_auth(host_name, paths)
+    if host_name == "opencode":
+        isolate.copy_auth(paths["opencode"])
+    else:
+        isolate.copy_auth(paths["claude"])
     env = isolate.arm_env(paths, {"SUPEROPEN_SO_BIN": so_bin})
     isolate.ensure_container(paths, so_bin)
     return paths, env

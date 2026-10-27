@@ -107,34 +107,32 @@ func RemoveAll() []string {
 	return removed
 }
 
-func skillDirs() []string { return skillDirsNamed(skillName) }
-
-func skillDirsNamed(name string) []string {
+func skillDirs() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
 	codexHome, _ := paths.CodexHome()
 	dirs := []string{
-		filepath.Join(home, ".claude", "skills", name),
-		filepath.Join(home, ".cursor", "skills", name),
-		filepath.Join(home, ".agents", "skills", name),
-		filepath.Join(codexHome, "skills", name),
-		filepath.Join(home, ".gemini", "skills", name),
-		filepath.Join(home, ".pi", "agent", "skills", name),
+		filepath.Join(home, ".claude", "skills", skillName),
+		filepath.Join(home, ".cursor", "skills", skillName),
+		filepath.Join(home, ".agents", "skills", skillName),
+		filepath.Join(codexHome, "skills", skillName),
+		filepath.Join(home, ".gemini", "skills", skillName),
+		filepath.Join(home, ".pi", "agent", "skills", skillName),
 	}
 	if cfg, err := paths.ClaudeConfigDir(); err == nil && cfg != "" {
-		dirs = append(dirs, filepath.Join(cfg, "skills", name))
+		dirs = append(dirs, filepath.Join(cfg, "skills", skillName))
 	}
 	if oc, err := paths.OpenCodeConfigDir(); err == nil && oc != "" {
-		dirs = append(dirs, filepath.Join(oc, "skills", name))
+		dirs = append(dirs, filepath.Join(oc, "skills", skillName))
 	}
 	if copilot, err := paths.CopilotHome(); err == nil && copilot != "" {
-		dirs = append(dirs, filepath.Join(copilot, "skills", name))
+		dirs = append(dirs, filepath.Join(copilot, "skills", skillName))
 	}
 	if runtime.GOOS == "windows" {
 		if local := os.Getenv("LOCALAPPDATA"); local != "" {
-			dirs = append(dirs, filepath.Join(local, "claude", "skills", name))
+			dirs = append(dirs, filepath.Join(local, "claude", "skills", skillName))
 		}
 	}
 	return uniqueExistingParents(dirs)

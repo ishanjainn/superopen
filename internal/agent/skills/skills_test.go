@@ -141,52 +141,6 @@ func TestMemoryReferenceIsTOON(t *testing.T) {
 	}
 }
 
-func TestInstallVoiceIsOptIn(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
-	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
-	t.Setenv("COPILOT_HOME", "")
-
-	written, err := skills.InstallAll("/usr/local/bin/so")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range written {
-		if strings.Contains(path, string(filepath.Separator)+"short"+string(filepath.Separator)) {
-			t.Fatalf("default install wrote the short skill: %s", path)
-		}
-	}
-	voice, err := skills.InstallVoice("/usr/local/bin/so")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(voice) == 0 {
-		t.Fatal("expected short skill paths")
-	}
-	var saw bool
-	for _, path := range voice {
-		if filepath.Base(path) != "SKILL.md" {
-			continue
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Contains(body, []byte("Never rewrite the user prompt")) {
-			t.Fatalf("short skill missing the prompt rule: %s", path)
-		}
-		saw = true
-	}
-	if !saw {
-		t.Fatal("short SKILL.md was not written")
-	}
-	if removed := skills.RemoveVoice(); len(removed) == 0 {
-		t.Fatal("expected the short skill to be removed")
-	}
-}
-
 func TestInstallAllHonorsAgentConfigDirs(t *testing.T) {
 	home := t.TempDir()
 	claudeCfg := filepath.Join(home, "claude-cfg")

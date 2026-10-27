@@ -15,7 +15,7 @@ MIN_LOCOMO = SMALL["locomo"]
 MIN_LME = SMALL["longmemeval"]
 MIN_COMPARE = SMALL["compare"]
 
-CODING_HOSTS = ("claude-code", "opencode", "cursor")
+CODING_HOSTS = ("claude-code", "opencode")
 
 
 def apply_scale(args: Any) -> None:
@@ -63,8 +63,8 @@ def require_coding_host(host: str) -> str:
     name = (host or "").strip()
     if name not in CODING_HOSTS:
         raise SystemExit(
-            "benchmarks use a real coding-agent host only: --host claude-code, --host opencode, "
-            "or --host cursor. HTTP Messages APIs are not Superopen users."
+            "benchmarks use a real coding-agent host only: --host claude-code or --host opencode. "
+            "HTTP Messages APIs are not Superopen users."
         )
     return name
 
@@ -75,40 +75,20 @@ def default_model(host: str, model: str) -> str:
         return "claude-sonnet-5"
     if host == "opencode" and (not model or model.startswith("claude")):
         return "opencode/big-pickle"
-    if host == "cursor" and not model:
-        return "default"
     return model
 
 
-def require_agent_credentials(
-    *,
-    modes: list[str],
-    phase: int,
-    max_spend: float,
-    host: str = "claude-code",
-) -> None:
+def require_agent_credentials(*, modes: list[str], phase: int, max_spend: float) -> None:
     """Fail fast before Docker/agent work when compare or phase-3 QA will run."""
     need = "compare" in modes or "swe" in modes or ("memory" in modes and int(phase) >= 3)
     if not need:
         return
-    if host == "cursor":
-        cursor_key = (os.environ.get("CURSOR_API_KEY") or "").strip()
-        if not cursor_key:
-            raise SystemExit(
-                "CURSOR_API_KEY is required for --host cursor "
-                "(Cursor CLI sessions). Export it before running. Do not pass the key on the command line."
-            )
-        if "memory" in modes and int(phase) >= 3 and not (os.environ.get("ANTHROPIC_API_KEY") or "").strip():
-            raise SystemExit(
-                "ANTHROPIC_API_KEY is still required for the memory QA judge when --host cursor."
-            )
-    else:
-        key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
-        if not key:
-            raise SystemExit(
-                "ANTHROPIC_API_KEY is required for compare, swe, and memory phase 3 "
-                "(Claude Code sessions and the QA judge). Export it or `source .env` before running."
-            )
+    key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not key:
+        raise SystemExit(
+            "ANTHROPIC_API_KEY is required for compare, swe, and memory phase 3 "
+            "(Claude Code sessions and the QA judge). Export it or `source .env` before running."
+        )
     if max_spend <= 0:
         raise SystemExit(
             "compare, swe, and memory phase 3 require --max-spend > 0 (USD cap for agent sessions)."

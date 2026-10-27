@@ -10,7 +10,7 @@ Action: `.github/workflows/bench.yml` (`workflow_dispatch`).
 Superopen is a CLI for any coding agent on Linux, macOS, and Windows. Benchmarks
 must look like that product:
 
-- Real **Claude Code**, **OpenCode**, or **Cursor CLI** chats in isolated Docker HOMEs (`so init` + `so install`).
+- Real **Claude Code** or **OpenCode** chats in isolated Docker HOMEs (`so init` + `so install`).
 - Bind-mount the locally built Superopen CLI (`--so-bin`); do not bake `so` into the image.
 - **No benchmark-only hacks** in `so` (no gold-id rankers, dataset packing, API pack-readers).
 - Superopen **modes** (`--mode`, `--scale`). Do not port another product's harness into `so`.
@@ -89,11 +89,10 @@ SWE headline tokens, cost, tool calls, API requests, and wall-clock cover every 
 | `memory` (LME QA) | `python3 benchmarks/run.py --mode memory --phase 3 --split longmemeval --scale small --host claude-code --model claude-sonnet-5 --max-spend 15` |
 | `compare` | `python3 benchmarks/run.py --mode compare --scale small --host claude-code --model claude-sonnet-5 --max-spend 20` |
 | `swe` | `python3 benchmarks/run.py --mode swe --scale small --host claude-code --model claude-sonnet-5 --max-spend 50` |
-| `swe` (Cursor CLI) | `python3 benchmarks/run.py --mode swe --scale small --host cursor --max-spend 50` |
 | `temporal` | `python3 benchmarks/run.py --mode temporal --repo django` |
 | `all` | `python3 benchmarks/run.py --mode all --repo django --phase 2 --max-spend 70` |
 
-OpenCode: `--host opencode --model opencode/big-pickle`. Cursor CLI: `--host cursor` with `CURSOR_API_KEY` set (the account default model is used unless you pass `--model`). Never `--host anthropic-api`. Rebuild `so-bench` after this image change (`docker rmi so-bench`) so the container has `agent`.
+OpenCode: `--host opencode --model opencode/big-pickle`. Never `--host anthropic-api`.
 
 Build `so` first if needed: `make build-native` or pass `--so-bin ./bin/so`. Product modes bind-mount that CLI into Docker. If Docker is down: `--isolate host`.
 
@@ -118,8 +117,7 @@ Linux `so`, runs the same `benchmarks/run.py` with `--isolate docker`, and
 uploads `BENCHMARKS.md` as an artifact. It does not commit.
 
 Secrets: **`ANTHROPIC_API_KEY` required** for `compare`, `swe`, and memory `--phase 3`
-when the host is Claude Code or OpenCode (Claude Code billing + QA judge), plus `--max-spend > 0`.
-`--host cursor` uses **`CURSOR_API_KEY`** instead. Memory phase 3 with Cursor still needs `ANTHROPIC_API_KEY` for the QA judge. Optional `CLAUDE_CREDENTIALS_JSON`,
+(Claude Code billing + QA judge), plus `--max-spend > 0`. Optional `CLAUDE_CREDENTIALS_JSON`,
 `SUPEROPEN_LOCOMO_URL` / `SUPEROPEN_LME_URL` (https) for datasets that are not in
 the Actions cache.
 

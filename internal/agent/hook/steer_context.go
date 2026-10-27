@@ -13,8 +13,6 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/sessionstate"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
 	"github.com/ishanjainn/superopen/internal/agent/vendors"
-	"github.com/ishanjainn/superopen/internal/blocks"
-	"github.com/ishanjainn/superopen/internal/compact"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/guards"
 	"github.com/ishanjainn/superopen/internal/harvest"
@@ -43,8 +41,6 @@ func emitSteerContext(vendor, event, kind string, payload []byte) {
 		if decision.deny {
 			hso["permissionDecision"] = "deny"
 			hso["permissionDecisionReason"] = decision.text
-		} else if decision.replace != nil {
-			hso["updatedToolOutput"] = decision.replace
 		} else if decision.text != "" {
 			hso["additionalContext"] = decision.text
 		} else {
@@ -100,7 +96,6 @@ type steerDecision struct {
 	text      string
 	hookEvent string
 	deny      bool
-	replace   any
 }
 
 func steerTextFor(vendor, event string, payload []byte) (text, hookEvent string, ok bool) {
@@ -174,9 +169,6 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		return steerDecision{}, false
 	case vendor == "claude-code" && ev == "PostToolUse":
 		recordClaudeQueryFiles(payload)
-		if replaced, ok := replaceToolOutput(payload); ok {
-			return steerDecision{hookEvent: ev, replace: replaced}, true
-		}
 		return steerDecision{}, false
 	case toolEvent:
 		if reason, denied := guardDeny(payload, vendor); denied {
@@ -192,11 +184,6 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		// by the host. Session and prompt events still fire.
 		if vendor == "codex" {
 			return steerDecision{}, false
-		}
-		if cmd := bashCommandFromPayload(payload); cmd != "" && !compact.ProtectCommand(cmd) {
-			if hint := blocks.Hint(cmd); hint != "" {
-				return steerDecision{text: hint, hookEvent: ev}, true
-			}
 		}
 		return graphGate(payload, vendor, kind, ev)
 	}

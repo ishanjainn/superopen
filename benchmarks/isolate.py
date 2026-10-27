@@ -160,19 +160,8 @@ def ensure_dirs(paths: dict[str, Path], host: str) -> None:
         settings = paths["claude"] / "settings.json"
         if not settings.exists():
             settings.write_text("{}\n")
-    elif host == "opencode":
+    else:
         paths["opencode"].mkdir(parents=True, exist_ok=True)
-    elif host == "cursor":
-        (paths["home"] / ".cursor").mkdir(parents=True, exist_ok=True)
-
-
-def copy_host_auth(host: str, paths: dict[str, Path]) -> list[str]:
-    """Copy vendor auth files into the arm. Cursor uses CURSOR_API_KEY only."""
-    if host == "opencode":
-        return copy_auth(paths["opencode"])
-    if host == "claude-code":
-        return copy_auth(paths["claude"])
-    return []
 
 
 def copy_auth(dest: Path, names: tuple[str, ...] = AUTH_FILES) -> list[str]:

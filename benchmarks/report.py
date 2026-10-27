@@ -543,25 +543,6 @@ def _swe_efficiency_note(swe: dict[str, Any]) -> str:
     return note
 
 
-def _swe_tool_mix(swe: dict[str, Any]) -> str:
-    summary = swe.get("summary") or {}
-    if "superopen_graph_calls" not in summary and "native_graph_calls" not in summary:
-        return ""
-    def cell(prefix: str, key: str) -> str:
-        val = summary.get(f"{prefix}_{key}")
-        return "—" if val is None else f"{int(val):,}"
-    return "\n".join(
-        [
-            "| Tool mix | Cold | Superopen |",
-            "|---|---:|---:|",
-            f"| `so graph` calls | {cell('native', 'graph_calls')} | {cell('superopen', 'graph_calls')} |",
-            f"| File reads | {cell('native', 'read_calls')} | {cell('superopen', 'read_calls')} |",
-            f"| Grep calls | {cell('native', 'grep_calls')} | {cell('superopen', 'grep_calls')} |",
-            f"| Glob calls | {cell('native', 'glob_calls')} | {cell('superopen', 'glob_calls')} |",
-        ]
-    )
-
-
 def _swe_instance_tables(swe: dict[str, Any]) -> str:
     rows = swe.get("rows") or []
     native = {r.get("id"): r for r in rows if r.get("arm") == "native"}
@@ -572,22 +553,13 @@ def _swe_instance_tables(swe: dict[str, Any]) -> str:
     ]
     all_rows: list[str] = list(header)
     seen_any = False
-    order = list(native.keys())
-    order.extend(qid for qid in so_rows if qid not in native)
-    for qid in order:
-        nr = native.get(qid) or {}
-        sr = so_rows.get(qid) or {}
-        if not nr and not sr:
+    for qid, nr in native.items():
+        sr = so_rows.get(qid)
+        if not sr:
             continue
         all_rows.append(_instance_line(str(qid), nr, sr))
         seen_any = True
     parts = [_swe_headline_table(swe)]
-    mix = _swe_tool_mix(swe)
-    if mix:
-        parts.append(mix)
-    follow = str(swe.get("follow_up") or "").strip()
-    if follow:
-        parts.append(follow)
     if seen_any:
         parts.append(
             "\n".join(

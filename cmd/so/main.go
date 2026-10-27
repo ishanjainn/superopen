@@ -80,9 +80,6 @@ func newRootCommand() *cobra.Command {
 		cmdMemory(),
 		cmdHarvest(),
 		cmdScan(),
-		cmdShrink(),
-		cmdRetrieve(),
-		cmdBlocks(),
 		cmdDev(),
 		cmdStatus(),
 		cmdGC(),
@@ -234,7 +231,6 @@ func gitTopLevel(dir string) string {
 func cmdInstall() *cobra.Command {
 	var vendors []string
 	var strict bool
-	var voice bool
 	command := &cobra.Command{
 		Use:   "install",
 		Short: "Install /so skill and coding-agent observability hooks (user-global)",
@@ -262,7 +258,7 @@ must query the graph first.`,
 					vendors = chosen
 				}
 			}
-			report, err := agent.Install(repoRoot(), vendors, agent.Options{Strict: strict, Voice: voice})
+			report, err := agent.Install(repoRoot(), vendors, agent.Options{Strict: strict})
 			if err != nil {
 				return err
 			}
@@ -276,7 +272,6 @@ must query the graph first.`,
 	}
 	command.Flags().StringSliceVar(&vendors, "vendor", nil, "Install these harnesses only (repeatable). Omit to choose, or to install all when not a terminal")
 	command.Flags().BoolVar(&strict, "strict", false, "Deny the first in-repo source Read once per session (graph-first)")
-	command.Flags().BoolVar(&voice, "voice", false, "Also install the opt-in short-reply skill (off unless you pass this)")
 	return command
 }
 
