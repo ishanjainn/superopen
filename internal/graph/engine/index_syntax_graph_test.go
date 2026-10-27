@@ -10,15 +10,15 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph/api"
 )
 
-func TestCrossLanguageRelationshipsUseUnifiedGoPackageIdentity(t *testing.T) {
+func TestNameGuessesDoNotCrossLanguages(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	runtime := testSyntaxGrammarRuntime(t)
 	root := t.TempDir()
 	files := map[string]string{
 		"internal/session/store.go": "package session\nfunc path() string { return \"\" }\n",
-		"internal/sync/error.go":    "package sync\ntype GraphContinuationError struct{}\nfunc (*GraphContinuationError) Error() string { return \"bad\" }\n",
-		"web/app.ts":                "import { join } from \"path\";\nexport function value() { throw new Error(\"bad\"); }\n",
+		"internal/sync/error.go":    "package sync\ntype Error struct{}\ntype GraphContinuationError struct{}\nfunc (*GraphContinuationError) Message() string { return \"bad\" }\n",
+		"web/app.ts":                "import { join } from \"path\";\nexport function value() { Message(); throw new Error(\"bad\"); }\n",
 	}
 	var paths []string
 	for path, body := range files {
@@ -36,19 +36,12 @@ func TestCrossLanguageRelationshipsUseUnifiedGoPackageIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	graph, _ := AssembleSyntaxGraph(repository, "fixture")
-	wantEdge := func(edges []pendingEdge, target string) bool {
-		for _, edge := range edges {
-			if edge.source == "web.app.ts.__file__" && edge.kind == "IMPORTS" && edge.target == target {
-				return true
-			}
+	// Node's path module, the JavaScript Error builtin and a local Message()
+	// are not the Go symbols that share those names.
+	for _, edge := range graph.edges {
+		if strings.HasPrefix(edge.source, "web.") && strings.HasPrefix(edge.target, "internal.") {
+			t.Fatalf("TypeScript resolved into Go by name: %#v", edge)
 		}
-		return false
-	}
-	if !wantEdge(graph.edges, "internal.session.path") {
-		t.Fatalf("assembled cross-language import missing: %#v", graph.edges)
-	}
-	if !hasPendingEdge(graph.edges, "web.app.value", "RAISES", "internal.sync.Error") {
-		t.Fatalf("assembled cross-language raise missing: %#v", graph.edges)
 	}
 }
 
@@ -182,13 +175,17 @@ func TestLocalSyntaxImportTargetPrefersExactFolderOverIndexModule(t *testing.T) 
 	}
 }
 
-func TestLocalSyntaxImportTargetFallsBackToPinnedSymbolLookup(t *testing.T) {
+func TestLocalSyntaxImportTargetFallsBackToSymbolLookupInFamily(t *testing.T) {
 	nodes := []api.Node{
-		{Label: "Function", Name: "path", QualifiedName: "z.path", Location: api.Location{File: "z.go"}},
-		{Label: "Function", Name: "path", QualifiedName: "internal.coding.sessionstate.path", Location: api.Location{File: "internal/agent/sessionstate/store.go"}},
+		{Label: "Function", Name: "path", QualifiedName: "a.path", Location: api.Location{File: "a/store.go"}},
+		{Label: "Function", Name: "path", QualifiedName: "web.util.path", Location: api.Location{File: "web/util.ts"}},
+		{Label: "Function", Name: "path", QualifiedName: "web.z.path", Location: api.Location{File: "web/z.ts"}},
 	}
-	if got := localSyntaxImportTarget("web/src/app.ts", "node:path", nodes); got != "internal.coding.sessionstate.path" {
-		t.Fatalf("target=%q, want lexicographically first symbol", got)
+	if got := localSyntaxImportTarget("web/src/app.ts", "node:path", nodes); got != "web.util.path" {
+		t.Fatalf("target=%q, want the lexicographically first TypeScript symbol", got)
+	}
+	if got := localSyntaxImportTarget("web/src/app.ts", "node:path", nodes[:1]); got != "" {
+		t.Fatalf("a TypeScript import bound a Go function: %q", got)
 	}
 }
 
@@ -426,5 +423,60 @@ func TestAssembleSyntaxGraphFileEndLineWithoutBody(t *testing.T) {
 	}
 	if fileEnd != 75 {
 		t.Fatalf("File end_line=%d want 75 from LineCount when Body is empty", fileEnd)
+	}
+}
+
+// A member name is not a free reference, and a Python class's own method is
+// what self.name() calls.
+func TestPythonMemberNamesResolveThroughTheirReceiver(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	runtime := testSyntaxGrammarRuntime(t)
+	root := t.TempDir()
+	files := map[string]string{
+		"pkg/query.py":     "from pkg.constants import SINGLE\n\nclass Query:\n    def clone(self):\n        return self\n\n    def get_count(self, compiler):\n        obj = self.clone()\n        for connection in compiler.connections:\n            print(connection)\n        return compiler.get_converters(SINGLE)\n\nclass RawQuery:\n    def clone(self):\n        return self\n",
+		"pkg/constants.py": "SINGLE = 'single'\nconnection = None\n",
+		"pkg/urls.py":      "def get_converters():\n    return {}\n",
+		"pkg/compiler.py":  "class SQLCompiler:\n    def get_converters(self, kind):\n        return []\n",
+	}
+	var paths []string
+	for path, body := range files {
+		abs := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+	}
+	repository, err := ParseSyntaxRepository(ctx, runtime, root, "fixture", paths, nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph, _ := AssembleSyntaxGraph(repository, "fixture")
+	src := "pkg.query.Query.get_count"
+	if !hasPendingEdge(graph.edges, src, "CALLS", "pkg.query.Query.clone") {
+		t.Fatalf("self.clone() must call Query.clone: %#v", graph.edges)
+	}
+	if hasPendingEdge(graph.edges, src, "CALLS", "pkg.query.RawQuery.clone") {
+		t.Fatal("self.clone() resolved to another class")
+	}
+	if !hasPendingEdge(graph.edges, src, "USAGE", "pkg.constants.SINGLE") {
+		t.Fatalf("imported constant must resolve through the import: %#v", graph.edges)
+	}
+	// A loop variable binds its name; it is not the module-level connection.
+	for _, edge := range graph.edges {
+		if edge.source == src && edge.target == "pkg.constants.connection" {
+			t.Fatalf("loop variable read as a free name: %#v", edge)
+		}
+	}
+	// compiler.get_converters() on a parameter may still be kept as a guess
+	// for impact, but never at the confidence trace and query walk.
+	for _, edge := range graph.edges {
+		if edge.source == src && edge.target == "pkg.urls.get_converters" &&
+			(edge.kind == "USAGE" || edge.evidence == nil || edge.evidence.Confidence >= traceMinConfidence) {
+			t.Fatalf("member name resolved as a confident or free reference: %#v", edge)
+		}
 	}
 }

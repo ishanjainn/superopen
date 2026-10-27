@@ -139,12 +139,24 @@ Reuse it next time
 After `so init`, agents ask these four surfaces instead of grepping and re-reading transcripts:
 
 ```
-$ so graph query "how do session hooks steer Cursor?"
-Traversal: BFS depth=2 | Start: [emitSteerContext HookReminder] | 8 nodes
-NODE emitSteerContext [qn=internal.agent.hook.emitSteerContext src=internal/agent/hook/steer_context.go loc=L27-82]
-EDGE emitSteerContext --CALLS --> steerDecisionFor at=internal/agent/hook/steer_context.go:L28
+$ so graph query "Where is DNS_NAME used for email Message-ID?"   # on Django
+count: 15 of 101
+nodes[15]{qn,kind,file,lines}:
+  django.core.mail.utils.DNS_NAME,Variable,django/core/mail/utils.py,20
+  django.core.mail.message.EmailMessage.message,Method,django/core/mail/message.py,239-264
+  django.core.mail.utils.CachedDnsName.__str__,Method,django/core/mail/utils.py,11-12
+  django.core.mail.utils.CachedDnsName.get_fqdn,Method,django/core/mail/utils.py,14-17
+  django.core.mail.message.EmailMessage._create_message,Method,django/core/mail/message.py,329-330
+  ...
+bodies[1]:
+  - qn: django.core.mail.message.EmailMessage.message
+    file: django/core/mail/message.py
+    code[26 lines]:
+      239|     def message(self):
+      ...
+      260|             msg['Message-ID'] = make_msgid(domain=DNS_NAME)
 help[1]:
-  so graph snippet internal.agent.hook.emitSteerContext
+  86 more ranked: so graph query "Where is DNS_NAME used for email Message-ID?" --offset 15
 
 $ so memory recall "login timeout"
 hits: 1  anti_hits: 0  budget: 1500

@@ -21,16 +21,18 @@ If `.so/` is missing, still run **one** `graph query`. If stdout says `not a Sup
 
 | Situation | Command | Then |
 |-----------|---------|------|
-| Unknown location / how does X work | `__SO_BIN__ graph query "<question>"` | Stop if NODE/EDGE/BODIES answer |
-| Known symbol, need body | `__SO_BIN__ graph snippet "<qn>"` | Only a NODE already listed |
+| Unknown location / how does X work | `__SO_BIN__ graph query "<question>"` | Ranked `nodes[]` with file and lines; `bodies[]` hold source with line numbers. Answer from them |
+| Known symbol, need body | `__SO_BIN__ graph snippet "<qn>"` | A qn from `nodes[]` or `candidates[]` |
 | Callers | `__SO_BIN__ graph trace "<qn>"` | `--direction incoming` when you need callers |
 | Rename / signature / multi-file edit | `__SO_BIN__ graph impact --files <path>` or `--base main` | Check siblings before you finish; do not skip dependents |
 | Cold repo / architecture | `__SO_BIN__ graph architecture` | Stop; do not dump every hub |
 | Prior work / diary | `__SO_BIN__ memory recall "<question>"` | Quote `#id`; not graph query |
 | Persist a fact for later | `__SO_BIN__ memory capture --kind knowledge --horizon medium --title "…" --text "…"` | Intent, not a phrase; then stop |
-| Exhaustive literal | `__SO_BIN__ graph code-search "<pat>"` | Grep only if that file is unindexed |
+| Exhaustive literal | `__SO_BIN__ graph code-search "<pat>" [path]` | `matches[]` give file and line; Grep only if that file is unindexed |
 
-One call then act. Do not re-query unless the dump said TRUNCATED. Do not Read a whole file whose body is already in BODIES. Do not list the tree to confirm Superopen.
+Ask `graph query` in a few specific words: the symbols and behavior you are after (`QuerySet.count unused annotations`), not pasted issue text, code or tracebacks. Long pasted text ranks worse. A traceback's frames are already symbols: `graph snippet` them directly.
+
+Output is TOON: `count: N of M`, then `name[N]{cols}:` rows. When `count` shows more than you need, act on what is listed; when the answer is not listed, run the `help[]` line it printed (for example `--offset 15`), not Grep. `count: 0` is a definite answer. Do not Read a file whose lines are already in `bodies[]` or `code[]`; Read only the file you are about to edit. Do not list the tree to confirm Superopen.
 
 If a hook line says `HARVEST pending`, you are the live agent: run `__SO_BIN__ harvest brief <id>` then `__SO_BIN__ harvest propose` (JSON on stdin, include `session_id`) **before answering**. If that session has nothing to change, run `__SO_BIN__ harvest skip <id>`. The current user message is a memory capture, not a playbook diff for that session. Do not write a file. Same for `DISTILL pending` (`memory distill --brief <id>`, then `memory distill --apply <id>`; empty array if nothing durable). See `references/harvest.md`.
 

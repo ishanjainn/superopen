@@ -42,8 +42,8 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if !contains(first, "list the tree") {
 		t.Fatalf("block must say not to list the tree to confirm Superopen: %s", first)
 	}
-	if !contains(first, "TRUNCATED") {
-		t.Fatalf("block must allow a follow-up query only after TRUNCATED: %s", first)
+	if !contains(first, "--offset") {
+		t.Fatalf("block must send more rows to the --offset help line: %s", first)
 	}
 	if paths.MentionsCommand(first, "graph trace") || paths.MentionsCommand(first, "graph search") {
 		t.Fatalf("always-on block must not list trace/search as the default: %s", first)
@@ -51,8 +51,8 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if !paths.MentionsCommand(first, "graph snippet") {
 		t.Fatalf("block must name snippet as overflow for a listed NODE: %s", first)
 	}
-	if !contains(first, "BODIES") {
-		t.Fatalf("block must tell agents to stop on query BODIES: %s", first)
+	if !contains(first, "bodies[]") {
+		t.Fatalf("block must tell agents to stop on query bodies[]: %s", first)
 	}
 	if !paths.MentionsCommand(first, "graph impact") {
 		t.Fatalf("block must name graph impact for multi-file work: %s", first)
@@ -154,8 +154,8 @@ func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 		t.Fatalf("overflow must be one line without quotes: %q", overflow)
 	}
 	repeat := QueryRepeatNudge()
-	if !paths.MentionsCommand(repeat, "graph snippet") || !contains(repeat, "TRUNCATED") {
-		t.Fatalf("repeat-query overflow must name snippet and TRUNCATED: %q", repeat)
+	if !paths.MentionsCommand(repeat, "graph snippet") || !contains(repeat, "--offset") {
+		t.Fatalf("repeat-query overflow must name snippet and --offset: %q", repeat)
 	}
 	if contains(SearchNudge(), "Do not ls") == false {
 		t.Fatal("search nudge must discourage listing to confirm Superopen")

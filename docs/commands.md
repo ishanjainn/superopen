@@ -15,7 +15,7 @@ Global flags, the config file, and environment variables are listed in
 | `--root` | Repository root override (env: `SUPEROPEN_ROOT`; otherwise walk up to git top-level or nearest `.so/`) |
 
 Exit codes are stable: `0` ok, `1` error, `2` usage, `3` not found,
-`4` continuation. Errors print `error:` / `hint:` on stdout.
+`4` continuation. Errors print `error:` and a `help[1]:` fix on stdout; an unknown flag exits `2` and lists the valid flags.
 
 ## Top-level commands
 
@@ -41,8 +41,9 @@ architecture           coverage   diagnostics
 artifact   layout      projects
 ```
 
-Defaults: compact `NODE`/`EDGE` text under a token budget. `TRUNCATED`
-means run `snippet` or ask a narrower question. `so graph impact` prints
+Defaults: AXI TOON (`count: N of M`, `name[N]{cols}:` rows, `help[]`). A
+query prints 15 ranked rows; the `help[]` line gives the `--offset` command for
+more. `so graph impact` prints
 compact file rollups (`--files`, `--base main`). `--json` / `--full` are
 escape hatches. Cypher support is a read-only subset (`so graph cypher --help`).
 
@@ -90,6 +91,7 @@ session and the agent is not asked to propose.
 ```bash
 so scan
 so scan --session <id> --min-severity high --fail-on high
+so scan rules                 # list, then: show | set <file|-> | enable | disable | remove
 so scan --json
 so scan --rules <dir>
 ```

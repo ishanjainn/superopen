@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -50,9 +49,7 @@ func cmdSessions() *cobra.Command {
 			out.Next("so sessions finalize <id>", "so sessions tokens <id>")
 			if out.Flags.JSON || out.Flags.Full {
 				return out.HumanOrJSON("session", func() {
-					enc := json.NewEncoder(out.W)
-					enc.SetIndent("", "  ")
-					_ = enc.Encode(document)
+					fmt.Fprint(out.W, cli.Toon(document, true))
 				}, document)
 			}
 			turns := store.TurnsFor(args[0], document.Turns)
@@ -150,7 +147,7 @@ func cmdSessions() *cobra.Command {
 				return err
 			}
 			return out().HumanOrJSON("session_tokens", func() {
-				fmt.Fprintf(cmd.OutOrStdout(), "session %s\n  tokens=%d  cost=$%.4f\n", meta.ID, meta.Tokens, meta.CostUSD)
+				fmt.Fprintf(cmd.OutOrStdout(), "session: %s\ntokens: %d\ncost_usd: %.4f\n", meta.ID, meta.Tokens, meta.CostUSD)
 			}, map[string]any{"id": meta.ID, "tokens": meta.Tokens, "cost_usd": meta.CostUSD})
 		},
 	})
@@ -187,22 +184,51 @@ func runSessionsList(cmd *cobra.Command, _ []string) error {
 }
 
 func cmdSessionCheckpoint() *cobra.Command {
-	command := &cobra.Command{Use: "checkpoint", Short: "Manage restorable session checkpoints"}
+	command := &cobra.Command{
+		Use:   "checkpoint",
+		Short: "Manage restorable session checkpoints",
+		Long:  "With no subcommand, lists the checkpoints of the most recent session.",
+		Args:  cobra.NoArgs,
+	}
+	listFor := func(id string) error {
+		list, err := checkpoint.NewStore(paths.Resolve(repoRoot())).List(id)
+		if err != nil {
+			return err
+		}
+		rows := make([]map[string]any, 0, len(list))
+		for _, item := range list {
+			rows = append(rows, map[string]any{"id": item.ID, "created": item.CreatedAt.Format(time.RFC3339), "label": item.Label, "files": len(item.Files)})
+		}
+		if len(rows) > 0 {
+			out().Next("so sessions checkpoint restore " + id + " <checkpoint-id>")
+		} else {
+			out().Next("so sessions checkpoint create " + id)
+		}
+		return out().HumanOrJSONRows("checkpoints", []string{"id", "created", "label", "files"}, rows, list)
+	}
+	command.RunE = func(*cobra.Command, []string) error {
+		all, err := session.NewStore(paths.Resolve(repoRoot())).List()
+		if err != nil {
+			return cli.Err(err)
+		}
+		if len(all) == 0 {
+			out().Next("so sessions list")
+			out().Empty("checkpoints")
+			return nil
+		}
+		latest := all[0]
+		for _, m := range all {
+			if m.StartedAt.After(latest.StartedAt) {
+				latest = m
+			}
+		}
+		return listFor(latest.ID)
+	}
 	command.AddCommand(&cobra.Command{
 		Use:   "list <session-id>",
 		Short: "List checkpoints for a session",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			list, err := checkpoint.NewStore(paths.Resolve(repoRoot())).List(args[0])
-			if err != nil {
-				return err
-			}
-			return out().HumanOrJSON("checkpoints", func() {
-				for _, item := range list {
-					fmt.Fprintf(cmd.OutOrStdout(), "%d  %s  %s  files=%d\n", item.ID, item.CreatedAt.Format(time.RFC3339), item.Label, len(item.Files))
-				}
-			}, list)
-		},
+		RunE:  func(_ *cobra.Command, args []string) error { return listFor(args[0]) },
 	})
 	command.AddCommand(&cobra.Command{
 		Use:   "create <session-id> [label]",
@@ -219,7 +245,7 @@ func cmdSessionCheckpoint() *cobra.Command {
 				return fmt.Errorf("%w (checkpoints are also created automatically on session finalize)", err)
 			}
 			return out().HumanOrJSON("result", func() {
-				fmt.Fprintf(cmd.OutOrStdout(), "created checkpoint %d (%d files)\n", meta.ID, len(meta.Files))
+				fmt.Fprintf(cmd.OutOrStdout(), "checkpoint: created\nid: %d\nfiles: %d\n", meta.ID, len(meta.Files))
 			}, meta)
 		},
 	})
@@ -233,9 +259,7 @@ func cmdSessionCheckpoint() *cobra.Command {
 				return err
 			}
 			return out().HumanOrJSON("checkpoint", func() {
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				_ = enc.Encode(meta)
+				fmt.Fprint(cmd.OutOrStdout(), cli.Toon(meta, out().Flags.Full))
 			}, meta)
 		},
 	})
@@ -249,7 +273,7 @@ func cmdSessionCheckpoint() *cobra.Command {
 				return err
 			}
 			return out().HumanOrJSON("result", func() {
-				fmt.Fprintln(cmd.OutOrStdout(), "Restored.")
+				fmt.Fprintf(cmd.OutOrStdout(), "checkpoint: restored\nsession: %s\nid: %s\n", args[0], args[1])
 			}, map[string]any{"ok": true, "session_id": args[0], "checkpoint_id": args[1]})
 		},
 	})
@@ -415,7 +439,7 @@ func demoSession(root string) error {
 	if _, err := replay.BuildReplayFromSpans(paths, id, spans); err != nil {
 		return err
 	}
-	fmt.Printf("Demo session %s created\n", id)
+	fmt.Printf("demo_session: %s\nhelp[1]:\n  so sessions show %s\n", id, id)
 	return nil
 }
 

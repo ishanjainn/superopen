@@ -5,16 +5,44 @@ import { soJSON } from "@/lib/so/exec";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type QuerySeed = {
-  qualified_name?: string;
-  name?: string;
+type QueryNode = {
+  qn?: string;
+  kind?: string;
   file?: string;
+  lines?: string;
+};
+
+type QueryBody = {
+  qualified_name?: string;
+  file?: string;
+  start_line?: number;
+  total_lines?: number;
+  code?: string;
 };
 
 type QueryPayload = {
-  text?: string;
-  seeds?: QuerySeed[];
+  count?: number;
+  total?: number;
+  nodes?: QueryNode[];
+  bodies?: QueryBody[];
 };
+
+// answerText renders the ranked page the way the CLI prints it: a line per
+// symbol, then the source of the top callables with line numbers.
+function answerText(payload: QueryPayload): string {
+  const nodes = payload.nodes ?? [];
+  if (nodes.length === 0) return "No indexed symbol matches this question.";
+  const lines = [`${nodes.length} of ${payload.total ?? nodes.length} matches`];
+  for (const node of nodes) {
+    lines.push(`${node.qn ?? ""}  ${node.file ?? ""}:${node.lines ?? ""}`);
+  }
+  for (const body of payload.bodies ?? []) {
+    lines.push("", `${body.qualified_name ?? ""}  ${body.file ?? ""}`);
+    const first = body.start_line ?? 1;
+    (body.code ?? "").split("\n").forEach((line, i) => lines.push(`${first + i}| ${line}`));
+  }
+  return lines.join("\n");
+}
 
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim() || "";
@@ -33,8 +61,8 @@ export async function GET(req: NextRequest) {
     const payload = res.data ?? {};
     return NextResponse.json({
       query: q,
-      answer: payload.text ?? "",
-      seeds: Array.isArray(payload.seeds) ? payload.seeds : [],
+      answer: answerText(payload),
+      seeds: (payload.nodes ?? []).map((node) => ({ qualified_name: node.qn, file: node.file })),
     });
   });
 }

@@ -66,7 +66,7 @@ func (b *Builder) putNodeInsert(n api.Node, props string) (int64, error) {
 		file, n.Location.StartLine, n.Location.StartColumn,
 		n.Location.EndLine, n.Location.EndColumn, props,
 	})
-	b.ftsBatch = append(b.ftsBatch, []any{id, camelTerms(n.Name), camelTerms(n.QualifiedName), n.Label, file})
+	b.ftsBatch = append(b.ftsBatch, []any{id, camelTerms(n.Name), camelTerms(n.QualifiedName), n.Label, file, ftsBodyText(n.Properties)})
 	if len(b.nodeBatch) >= dumpInsertBatch {
 		if err := b.flushNodeBatch(); err != nil {
 			return 0, err
@@ -95,7 +95,7 @@ func (b *Builder) flushNodeBatch() error {
 		return err
 	}
 	b.nodeBatch = b.nodeBatch[:0]
-	if err := execInsertBatch(b.tx, `INSERT INTO nodes_fts(rowid,name,qualified_name,label,file_path) VALUES`, 5, b.ftsBatch); err != nil {
+	if err := execInsertBatch(b.tx, `INSERT INTO nodes_fts(rowid,name,qualified_name,label,file_path,body) VALUES`, 6, b.ftsBatch); err != nil {
 		return err
 	}
 	b.ftsBatch = b.ftsBatch[:0]

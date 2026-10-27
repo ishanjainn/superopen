@@ -44,17 +44,18 @@ def _graph_status(root: Path, env: dict[str, str], so_bin: str) -> dict[str, Any
 
 
 def _first_qualified_name(stdout: str) -> str | None:
+    """First qn of a `so graph search` result table: `results[N]{qn,kind,file,lines}:` rows."""
+    in_table = False
     for line in (stdout or "").splitlines():
-        line = line.strip()
-        if not line or line.startswith("total:") or line.startswith("search_mode:"):
+        if re.match(r"^\w+\[\d+\]\{qn,", line):
+            in_table = True
             continue
-        if line.startswith("results:") or line.startswith("truncated:") or line.startswith("has_more:"):
-            continue
-        if line.startswith("next_cursor:"):
-            continue
-        parts = line.split()
-        if parts and "." in parts[0]:
-            return parts[0]
+        if in_table:
+            if not line.startswith("  "):
+                break
+            qn = line.strip().split(",", 1)[0].strip('"')
+            if "." in qn:
+                return qn
     return None
 
 
@@ -83,7 +84,7 @@ def _probe_snippet(root: Path, env: dict[str, str], so_bin: str) -> tuple[bool, 
         return False, False, proc.stdout or proc.stderr or ""
     proc2 = _so(["graph", "snippet", qn], root, env, so_bin)
     out = proc2.stdout or ""
-    ok = proc2.returncode == 0 and ("src=" in out or re.search(r"L\d+", out))
+    ok = proc2.returncode == 0 and "code[" in out
     partial = proc2.returncode == 0 and not ok
     return ok, partial, out[:500]
 
@@ -111,7 +112,7 @@ def _probe_query(root: Path, env: dict[str, str], so_bin: str) -> tuple[bool, bo
         so_bin,
     )
     out = proc.stdout or ""
-    has_node = proc.returncode == 0 and "NODE" in out
+    has_node = proc.returncode == 0 and "nodes[" in out
     has_qs = "QuerySet" in out
     ok = has_node and has_qs
     partial = has_node and not has_qs
@@ -126,7 +127,7 @@ def _probe_query_register(root: Path, env: dict[str, str], so_bin: str) -> tuple
         so_bin,
     )
     out = proc.stdout or ""
-    has_node = proc.returncode == 0 and "NODE" in out
+    has_node = proc.returncode == 0 and "nodes[" in out
     has_reg = "register" in out
     ok = has_node and has_reg
     return ok, has_node and not has_reg, out[:500]

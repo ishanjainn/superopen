@@ -164,7 +164,7 @@ func startNextUI(repoRoot string, port int, hot bool) (*exec.Cmd, string, error)
 		return nil, "", fmt.Errorf("web UI missing from the Superopen prefix (%s); re-run the installer", expectedWebDir())
 	}
 	if !hot && !isStandaloneWeb(webDir) && buildStale(webDir) {
-		fmt.Println("Building the UI once (first run after a change)…")
+		fmt.Fprintln(os.Stderr, "building the UI once (first run after a change)")
 		if err := buildNextUI(webDir, repoRoot); err != nil {
 			return nil, "", fmt.Errorf("build UI: %w", err)
 		}

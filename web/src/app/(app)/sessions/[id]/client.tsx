@@ -10,6 +10,7 @@ import FeaturePageHeader, { FeatureBackLink } from "@/components/shell/feature-p
 import { useBreadcrumbCrumb } from "@/components/shell/breadcrumb-context";
 import { useProject } from "@/components/shell/project-context";
 import { useLatestRef } from "@/hooks/use-latest-ref";
+import "./session-split.css";
 
 const MapView = dynamic(() => import("@/map"), {
   ssr: false,

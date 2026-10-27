@@ -13,8 +13,8 @@ func TestEmptyText(t *testing.T) {
 	o.Next("so init")
 	o.Empty("sessions")
 	got := buf.String()
-	if !strings.Contains(got, "0 sessions") {
-		t.Fatalf("got %q", got)
+	if !strings.HasPrefix(got, "count: 0\nsessions: none\n") {
+		t.Fatalf("an empty list states the zero and what is empty: %q", got)
 	}
 	if !strings.Contains(got, "help[1]:") {
 		t.Fatalf("missing AXI help: %q", got)
@@ -70,7 +70,7 @@ func TestWriteErrorStdout(t *testing.T) {
 		t.Fatalf("errors must not go to stderr: %q", errBuf.String())
 	}
 	got := out.String()
-	if !strings.Contains(got, "error: memory 9 not found") || !strings.Contains(got, "hint:") {
+	if !strings.Contains(got, "error: memory 9 not found") || !strings.Contains(got, "help[1]:\n  so memory search") {
 		t.Fatalf("structured stdout error missing: %q", got)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -100,4 +101,42 @@ func TestEnsureFreshGraphIndexesEditBeforeRead(t *testing.T) {
 		}
 	}
 	t.Fatalf("search missed the edit: %+v", result.Matches)
+}
+
+func TestEnsureFreshGraphAnswersStaleWhenRefreshIsSlow(t *testing.T) {
+	t.Setenv("SUPEROPEN_NO_REFRESH", "")
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is required")
+	}
+	root := t.TempDir()
+	git := exec.Command("git", "init")
+	git.Dir = root
+	if out, err := git.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".so"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(root, "marker.go")
+	if err := os.WriteFile(src, []byte("package marker\n\nfunc UniqueMarker() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	if _, err := ensureFreshGraph(cmd, root); err != nil {
+		t.Fatalf("first index: %v", err)
+	}
+	if err := os.WriteFile(src, []byte("package marker\n\nfunc UniqueMarker() {}\nfunc SecondMarker() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prev := readRefreshBudget
+	readRefreshBudget = time.Nanosecond
+	t.Cleanup(func() { readRefreshBudget = prev })
+	stale, err := ensureFreshGraph(cmd, root)
+	if err != nil {
+		t.Fatalf("a slow refresh must not fail the read: %v", err)
+	}
+	if stale == "" {
+		t.Fatal("a read past the refresh budget must carry the stale header")
+	}
 }

@@ -28,7 +28,9 @@ func installPromptInput() (io.Reader, func()) {
 }
 
 func printInstallBanner(w io.Writer) {
-	if os.Getenv("SUPEROPEN_INSTALLER") != "" {
+	// The banner is for a person at a terminal; piped output (an agent, CI)
+	// gets the structured report only.
+	if os.Getenv("SUPEROPEN_INSTALLER") != "" || !writerIsTerminal(w) {
 		return
 	}
 	bold, reset := "", ""

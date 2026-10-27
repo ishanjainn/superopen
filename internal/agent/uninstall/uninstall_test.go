@@ -107,6 +107,11 @@ func TestPurgeSharedRemovesProductStateNotHomebrew(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	// Windows keeps the data and cache dirs under these, not HOME. Left alone,
+	// the purge deletes the runner's real %LOCALAPPDATA%\so, which other
+	// packages' tests are writing to at the same time.
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".local", "share"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))

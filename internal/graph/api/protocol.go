@@ -9,7 +9,7 @@ import (
 const (
 	ProtocolVersion = 1
 	EngineName      = "so-graph"
-	SchemaVersion   = 4
+	SchemaVersion   = 5
 )
 
 type Operation string
@@ -290,19 +290,35 @@ type QueryRequest struct {
 	Question string   `json:"question"`
 	Terms    []string `json:"terms,omitempty"`
 	Depth    int      `json:"depth,omitempty"`
-	Budget   int      `json:"budget,omitempty"`
-	Cursor   string   `json:"cursor,omitempty"`
+	// Limit and Offset page Rows. Zero Limit uses the default page size.
+	Limit  int `json:"limit,omitempty"`
+	Offset int `json:"offset,omitempty"`
 }
 
 type QueryResult struct {
-	Text      string       `json:"text"`
-	Question  string       `json:"question,omitempty"`
-	Seeds     []RankedNode `json:"seeds,omitempty"`
-	Nodes     []Node       `json:"nodes,omitempty"`
-	Edges     []Edge       `json:"edges,omitempty"`
-	Page      Page         `json:"page"`
-	Budget    Budget       `json:"budget"`
-	Uncertain []Evidence   `json:"uncertain,omitempty"`
+	Question string `json:"question,omitempty"`
+	// Rows is one page of the ranked answer: the ranked matches, then seeds,
+	// then graph neighbors. RowsTotal counts every ranked row.
+	Rows      []Node      `json:"rows,omitempty"`
+	RowsTotal int         `json:"rows_total,omitempty"`
+	Offset    int         `json:"offset,omitempty"`
+	Edges     []Edge      `json:"edges,omitempty"`
+	Bodies    []QueryBody `json:"bodies,omitempty"`
+	// CallersOf is set when the question asked for callers; Rows are callers.
+	CallersOf []string `json:"callers_of,omitempty"`
+}
+
+// QueryBody is source attached to a query answer, whole lines only.
+type QueryBody struct {
+	QualifiedName string `json:"qualified_name"`
+	Name          string `json:"name,omitempty"`
+	Label         string `json:"label,omitempty"`
+	File          string `json:"file"`
+	StartLine     int    `json:"start_line"`
+	EndLine       int    `json:"end_line"`
+	TotalLines    int    `json:"total_lines"`
+	Code          string `json:"code"`
+	Clipped       bool   `json:"clipped,omitempty"`
 }
 
 type CypherRequest struct {
@@ -332,6 +348,11 @@ type TraceRequest struct {
 	Depth     int      `json:"depth,omitempty"`
 	Limit     int      `json:"limit,omitempty"`
 	Parameter string   `json:"parameter,omitempty"`
+	// Uncertain also walks edges the resolver guessed below the trace
+	// confidence floor (a method name shared by many classes).
+	Uncertain bool `json:"uncertain,omitempty"`
+	// Tests also lists and walks symbols in test files.
+	Tests bool `json:"tests,omitempty"`
 }
 
 type TraceStep struct {
@@ -352,6 +373,16 @@ type TraceResult struct {
 	Suggestions     []Node                   `json:"suggestions,omitempty"`
 	UnresolvedCalls int                      `json:"unresolved_calls,omitempty"`
 	Direction       string                   `json:"direction,omitempty"`
+	// Start is the qualified name the trace began from.
+	Start string `json:"start,omitempty"`
+	// External lists builtin and library symbols reached; they are leaves,
+	// not walked and not listed as paths.
+	External []string `json:"external,omitempty"`
+	// Uncertain counts neighbors reached only through guessed edges, left
+	// out unless the request asks for them.
+	Uncertain int `json:"uncertain,omitempty"`
+	// Tests counts test-file symbols reached and left out unless asked.
+	Tests int `json:"tests,omitempty"`
 }
 
 // UnresolvedRelationship preserves a source-grounded relationship attempt
@@ -373,6 +404,8 @@ type SnippetRequest struct {
 	StartLine     int    `json:"start_line,omitempty"`
 	EndLine       int    `json:"end_line,omitempty"`
 	ContextLines  int    `json:"context_lines,omitempty"`
+	// MaxLines caps a callable's span. Zero uses the snippet default.
+	MaxLines int `json:"max_lines,omitempty"`
 }
 
 type SnippetResult struct {

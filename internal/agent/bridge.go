@@ -14,6 +14,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/skills"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
 	"github.com/ishanjainn/superopen/internal/agent/vendors"
+	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/paths"
 )
 
@@ -96,8 +97,13 @@ func Install(repoRoot string, selected []string, opts Options) (InstallReport, e
 	return report, nil
 }
 
-// Write prints a short checklist of what install finished.
+// Write prints what install finished: a checklist on a terminal, TOON when
+// the output is piped (an agent or CI reading it).
 func (r InstallReport) Write(w io.Writer) {
+	if !writerIsTTY(w) {
+		r.writeTOON(w)
+		return
+	}
 	green, reset := "", ""
 	if writerIsTTY(w) {
 		green, reset = "\033[32m", "\033[0m"
@@ -123,6 +129,25 @@ func (r InstallReport) Write(w io.Writer) {
 	fmt.Fprintln(w, "    so init        in a repository")
 	fmt.Fprintln(w, "    so dev         open the UI")
 	fmt.Fprintln(w, "  Restart the coding agent so it loads the hooks.")
+}
+
+func (r InstallReport) writeTOON(w io.Writer) {
+	fmt.Fprintln(w, "install: done")
+	if len(r.Skills) > 0 || len(r.Guidance) > 0 || r.CursorRule != "" {
+		fmt.Fprintln(w, "skill: installed")
+	}
+	if names := hookNames(r.Hooks); len(names) > 0 {
+		cells := make([]string, len(names))
+		for i, n := range names {
+			cells[i] = cli.ToonQuote(n, true)
+		}
+		fmt.Fprintf(w, "hooks[%d]: %s\n", len(names), strings.Join(cells, ","))
+	}
+	if r.Strict {
+		fmt.Fprintln(w, "strict: first source read waits for a graph query")
+	}
+	fmt.Fprintln(w, "restart_required: true")
+	fmt.Fprintln(w, "help[2]:\n  so init\n  so dev")
 }
 
 func hookNames(hooks map[string][]string) []string {

@@ -328,12 +328,15 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 	// resolves against them.
 	seedPythonBuiltinNodes(project, repository.Files, &graph)
 	registry := newSymbolRegistry(graph.nodes)
+	registry.accessors = syntaxAccessorMethods(repository.Files, byFileScope)
 	nodeQNs := make(map[string]bool, len(graph.nodes))
 	for _, node := range graph.nodes {
 		nodeQNs[node.QualifiedName] = true
 	}
 	importIndex := newImportTargetIndex(graph.nodes)
 	importsByFile := make(map[string]map[string]string, len(repository.Files))
+	// externalByFile holds names a file imports from outside the project.
+	externalByFile := map[string]map[string]bool{}
 	for _, parsed := range repository.Files {
 		rel := filepath.ToSlash(parsed.File.Path)
 		fileQN := fileQualifiedName(rel)
@@ -351,6 +354,12 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 			qn := localSyntaxImportTargetForLanguage(parsed.File.Language, rel, fact.Name, repository.GoModule, importIndex)
 			strategy := "module_path"
 			if qn == "" {
+				if fact.LocalName != "" && parsed.File.Language == "python" {
+					if externalByFile[rel] == nil {
+						externalByFile[rel] = map[string]bool{}
+					}
+					externalByFile[rel][fact.LocalName] = true
+				}
 				continue
 			}
 			if fact.LocalName != "" {
@@ -385,7 +394,7 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 					return
 				}
 				parsed := &repository.Files[index]
-				edges, unresolved := resolveSyntaxFileRelationships(project, parsed, registry, nodeQNs, byName, byFileScope, localBindings, importsByFile)
+				edges, unresolved := resolveSyntaxFileRelationships(project, parsed, registry, nodeQNs, byName, byFileScope, localBindings, importsByFile, externalByFile)
 				resolved[index] = fileResolveResult{edges: edges, unresolved: unresolved}
 				parsed.Extraction.Usages = nil
 				parsed.Extraction.Writes = nil
@@ -449,12 +458,17 @@ func resolveSyntaxFileRelationships(
 	byFileScope map[string]syntaxDefinitionRef,
 	localBindings map[string]map[string]bool,
 	importsByFile map[string]map[string]string,
+	externalByFile map[string]map[string]bool,
 ) ([]pendingEdge, []pendingEdge) {
 	rel := filepath.ToSlash(parsed.File.Path)
 	fileQN := fileQualifiedName(rel)
 	moduleQN := syntaxDefinitionModuleQN(parsed.File.Language, rel)
 	imports := importsByFile[rel]
 	session := newResolveSession(moduleQN, imports)
+	session.receiverMethods = receiverMethodLanguage(parsed.File.Language)
+	session.sourceIsProduction = !isTestPath(rel)
+	session.family = pathLanguageFamily(rel)
+	session.external = externalByFile[rel]
 	defaultSource := fileQN
 	if parsed.File.Language != "go" && parsed.File.Language != "java" && nodeQNs[moduleQN] {
 		defaultSource = moduleQN
@@ -470,9 +484,15 @@ func resolveSyntaxFileRelationships(
 				continue
 			}
 			source := syntaxOccurrenceSource(rel, fact.Scope, defaultSource, byFileScope)
-			resolution := registry.resolveWith(session, fact.Name)
+			resolution, self := registry.resolveOwnMember(parsed.File.Language, fact.Name, source)
+			if resolution.qn == "" {
+				resolution = registry.resolveWith(session, fact.Name)
+			}
 			if resolution.qn == "" || resolution.qn == source {
 				continue
+			}
+			if (self && guessStrategy(resolution.strategy)) || registry.receiverGuessIsWeak(parsed.File.Language, fact.Name, imports, resolution, false) {
+				resolution.confidence = math.Min(resolution.confidence, guessedEdgeConfidence)
 			}
 			kind := relationship.kind
 			callee := ""
@@ -512,8 +532,14 @@ func resolveSyntaxFileRelationships(
 		source := syntaxOccurrenceSource(rel, fact.Scope, defaultSource, byFileScope)
 		name := syntaxCallBase(fact.Name)
 		candidates := byName[parsed.File.Language+"\x00"+name]
-		resolution := registry.resolveWith(session, fact.Name)
-		resolution = registry.applyFieldTypeHint(fact.Name, source, resolution)
+		resolution, self := registry.resolveOwnMember(parsed.File.Language, fact.Name, source)
+		if resolution.qn == "" {
+			resolution = registry.resolveWith(session, fact.Name)
+			resolution = registry.applyFieldTypeHint(fact.Name, source, resolution)
+		}
+		if (self && guessStrategy(resolution.strategy)) || registry.receiverGuessIsWeak(parsed.File.Language, fact.Name, imports, resolution, true) {
+			resolution.confidence = math.Min(resolution.confidence, guessedEdgeConfidence)
+		}
 		if isJSXComponentCall(fact) {
 			switch resolution.strategy {
 			case "import_map", "import_map_suffix":
@@ -622,6 +648,29 @@ func syntaxOccurrenceSource(file, scope, defaultSource string, byFileScope map[s
 		scope = scope[:index]
 	}
 	return defaultSource
+}
+
+// syntaxAccessorMethods are Python methods a decorator turns into an
+// attribute: property, cached_property, functools.cached_property, and the
+// x.setter / x.getter / x.deleter forms.
+func syntaxAccessorMethods(files []ParsedSyntaxFile, byFileScope map[string]syntaxDefinitionRef) map[string]bool {
+	out := map[string]bool{}
+	for _, parsed := range files {
+		if parsed.File.Language != "python" {
+			continue
+		}
+		rel := filepath.ToSlash(parsed.File.Path)
+		for _, fact := range parsed.Extraction.Decorators {
+			base := strings.ToLower(lastDotted(syntaxCallBase(fact.Name)))
+			if !strings.Contains(base, "property") && base != "setter" && base != "getter" && base != "deleter" {
+				continue
+			}
+			if ref, ok := byFileScope[rel+"\x00"+fact.Scope]; ok {
+				out[ref.qn] = true
+			}
+		}
+	}
+	return out
 }
 
 func suppressWeakJSMethodCall(language, callee, strategy string) bool {

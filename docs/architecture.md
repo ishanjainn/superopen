@@ -59,8 +59,8 @@ Details: [configuration.md](configuration.md).
 - **Hooks fail open**: telemetry or steer failures never block the agent.
 - **Human-approved always-on rules**: harvest never writes instruction files
   without an explicit apply.
-- **Output contracts**: `so graph *` prints compact `NODE`/`EDGE`.
-  `so memory` / `so sessions` print TOON lists with `help[]`.
+- **Output contracts**: `so graph *`, `so memory` and `so sessions` print
+  AXI TOON with `help[]`.
   Hidden `so sessions hook` speaks host JSON. See [commands.md](commands.md).
 
 ## Build tags

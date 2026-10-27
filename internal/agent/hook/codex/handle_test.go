@@ -97,7 +97,7 @@ func TestCodexEndToEndOneTurn(t *testing.T) {
 	if err := handle(context.Background(), in("SessionStart", map[string]any{
 		"hook_event_name": "SessionStart",
 		"session_id":      sid,
-		"cwd":             "/tmp/work",
+		"cwd":             t.TempDir(),
 		"model":           "gpt-5",
 		"source":          "startup",
 		"timestamp":       now,
@@ -466,7 +466,9 @@ func TestCodexSubagentLinkFromSessionMeta(t *testing.T) {
 		"session_id":      "cdx-child",
 		"transcript_path": rollout,
 		"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
-		"cwd":             "/tmp",
+		// A real directory: the hook creates .so/ under its cwd, and "/tmp"
+		// would leave /tmp/.so, making every later temp dir look managed.
+		"cwd": dir,
 	})
 	if err := handle(context.Background(), normalize.Input{
 		Vendor:         "codex",

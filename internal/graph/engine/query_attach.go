@@ -2,11 +2,14 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/graph/api"
 )
+
+// queryMaxBodies bounds attached source. The ranked rows already name the
+// rest, and a body costs more than a row; snippet fetches any other one.
+const queryMaxBodies = 3
 
 func queryAttachableLabel(label string) bool {
 	switch label {
@@ -28,16 +31,6 @@ func querySymbolNames(n api.Node) (name, last string) {
 		}
 	}
 	return name, last
-}
-
-func pickQueryAttachNodes(ordered []queryNodeHit) []api.Node {
-	out := make([]api.Node, 0, len(ordered))
-	for _, hit := range ordered {
-		if queryAttachableLabel(hit.node.Label) {
-			out = append(out, hit.node)
-		}
-	}
-	return out
 }
 
 func fileRoundRobinNodes(ordered []queryNodeHit) []queryNodeHit {
@@ -86,20 +79,28 @@ func fileRoundRobinNodes(ordered []queryNodeHit) []queryNodeHit {
 	return out
 }
 
-// appendQueryBodies reads clipped source for listed callables until leftover
-// chars are exhausted. Fail-open per symbol. Not Class/Module/File dumps.
-func (s *Store) appendQueryBodies(ctx context.Context, project string, nodes []api.Node, leftover int) string {
-	if len(nodes) == 0 || leftover <= 0 {
-		return ""
+// queryBodyLineBudget is the source lines a page attaches across all bodies.
+// Bodies follow the ranking and a long one is clipped to what is left, never
+// skipped: skipping the second-ranked, 109-line method for a short one
+// further down sent the agent to Read the file the page had just located.
+const queryBodyLineBudget = 120
+
+// queryMinBodyLines is the least worth attaching; below it the page names the
+// symbol and snippet reads it.
+const queryMinBodyLines = 10
+
+// collectQueryBodies is appendQueryBodies as data: bodies of the listed
+// callables in listed order, clipped to the line budget left.
+func (s *Store) collectQueryBodies(ctx context.Context, project string, nodes []api.Node) []api.QueryBody {
+	if len(nodes) == 0 {
+		return nil
 	}
-	type body struct {
-		title string
-		code  string
-	}
-	var parts []body
-	used := 0
-	headerBudget := 80
+	var parts []api.QueryBody
+	remaining := queryBodyLineBudget
 	for _, node := range nodes {
+		if len(parts) >= queryMaxBodies || remaining < queryMinBodyLines {
+			break
+		}
 		qn := strings.TrimSpace(node.QualifiedName)
 		if qn == "" {
 			qn = strings.TrimSpace(node.Name)
@@ -107,7 +108,11 @@ func (s *Store) appendQueryBodies(ctx context.Context, project string, nodes []a
 		if qn == "" {
 			continue
 		}
-		got, err := s.Snippet(ctx, api.SnippetRequest{Project: project, QualifiedName: qn})
+		span := remaining
+		if span > queryBodyMaxLines {
+			span = queryBodyMaxLines
+		}
+		got, err := s.Snippet(ctx, api.SnippetRequest{Project: project, QualifiedName: qn, MaxLines: span})
 		if err != nil || got.Status == "ambiguous" || strings.TrimSpace(got.Code) == "" {
 			continue
 		}
@@ -115,28 +120,20 @@ func (s *Store) appendQueryBodies(ctx context.Context, project string, nodes []a
 		if strings.TrimSpace(got.Name) != "" {
 			display = api.Node{Label: got.Label, Name: got.Name, QualifiedName: got.QualifiedName, Location: got.Location}
 		}
-		title := fmt.Sprintf("%s [%s src=%s loc=%s]", queryNodeDisplayName(display), display.Label, got.Location.File, queryNodeLoc(display))
-		block := "\n--- " + title + " ---\n" + got.Code + "\n"
-		need := len(block)
-		if used == 0 {
-			need += headerBudget
+		total := got.Location.EndLine - got.Location.StartLine + 1
+		if got.OmittedEnd > got.Location.EndLine {
+			total = got.OmittedEnd - got.Location.StartLine + 1
 		}
-		if used+need > leftover {
-			continue
+		bodyQN := got.QualifiedName
+		if bodyQN == "" {
+			bodyQN = qn
 		}
-		parts = append(parts, body{title: title, code: got.Code})
-		if used == 0 {
-			used += headerBudget
-		}
-		used += len(block)
+		parts = append(parts, api.QueryBody{
+			QualifiedName: bodyQN, Name: display.Name, Label: display.Label, File: got.Location.File,
+			StartLine: got.Location.StartLine, EndLine: got.Location.EndLine,
+			TotalLines: total, Code: got.Code, Clipped: got.Clipped,
+		})
+		remaining -= got.Location.EndLine - got.Location.StartLine + 1
 	}
-	if len(parts) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "\nBODIES: %d matching callables (80-line cap). If this answers, stop. Else snippet another listed qn.\n", len(parts))
-	for _, p := range parts {
-		fmt.Fprintf(&b, "\n--- %s ---\n%s\n", p.title, p.code)
-	}
-	return b.String()
+	return parts
 }

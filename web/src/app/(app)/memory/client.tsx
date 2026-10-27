@@ -9,6 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { ChevronsLeftRight, Sparkles } from "lucide-react";
+import Onboarding from "@/components/ui/onboarding";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
 import { useProject } from "@/components/shell/project-context";
 import { StellarGraphScene } from "@/graph/StellarGraphScene";
@@ -475,13 +476,18 @@ export default function MemoryPage() {
 
           <StageViewport className="memory-stage" style={{ flexGrow: 100 - listPct, flexShrink: 1, flexBasis: 0 }}>
             {empty ? (
-              <div className="memory-empty">
-                <div>
-                  <Sparkles className="mx-auto mb-3 size-6 text-neutral-400" />
-                  <p>No saved facts yet. Capture a note or drop a teaching.</p>
-                  <p className="memory-group">Graph shows saved facts, not the session log.</p>
-                </div>
-              </div>
+              <Onboarding
+                title="No saved memory yet"
+                description="Memory is built automatically: finished sessions are distilled into facts and decisions an agent can recall later. Saved facts show up here as a graph."
+                stepsLabel="Or save something yourself"
+                steps={[
+                  {
+                    label: "Save a note.",
+                    command: 'so memory capture --kind knowledge --horizon medium --title "How we deploy" --text "We deploy with Helm."',
+                  },
+                  { label: "Recall it by a cue.", command: 'so memory recall "deploy"' },
+                ]}
+              />
             ) : (
               <>
                 <StellarGraphScene

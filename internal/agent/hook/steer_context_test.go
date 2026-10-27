@@ -756,7 +756,7 @@ func TestQueryRepeatOverflowOnceAfterStamp(t *testing.T) {
 		t.Fatalf("first graph query must run without overflow, got %q", d.text)
 	}
 	d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", queryPayload)
-	if !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") || !strings.Contains(d.text, "TRUNCATED") {
+	if !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") || !strings.Contains(d.text, "--offset") {
 		t.Fatalf("second graph query must overflow to snippet (no deny), got ok=%v deny=%v text=%q", ok, d.deny, d.text)
 	}
 	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "search", queryPayload); ok {
@@ -1236,4 +1236,15 @@ func TestCapturePromptNudgesCaptureNotRecall(t *testing.T) {
 func writeHookSession(t *testing.T, root, id string) {
 	t.Helper()
 	_ = os.MkdirAll(filepath.Join(root, ".so", "sessions", id), 0o755)
+}
+
+func TestSrcPathsFromQueryReadsTOONRows(t *testing.T) {
+	stdout := "count: 2 of 9\nnodes[2]{qn,kind,file,lines}:\n" +
+		"  django.core.mail.utils.DNS_NAME,Variable,django/core/mail/utils.py,20\n" +
+		"  pkg.weird,Function,\"dir,with/comma.py\",3-4\n" +
+		"edges[0]{from,rel,to}:\nbodies[1]:\n  - qn: x\n    file: other.py\n"
+	got := srcPathsFromQuery(stdout)
+	if len(got) != 2 || got[0] != "django/core/mail/utils.py" || got[1] != "dir,with/comma.py" {
+		t.Fatalf("got %v", got)
+	}
 }

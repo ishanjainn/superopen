@@ -41,7 +41,7 @@ and go with the session.`,
 			}
 			if show {
 				return out().HumanOrJSON("retention", func() {
-					fmt.Fprintf(cmd.OutOrStdout(), "sessions %dh\nmemories %dh\n(0 = keep forever; default 168h)\n", settings.SessionHours, settings.MemoryHours)
+					fmt.Fprintf(cmd.OutOrStdout(), "session_hours: %d\nmemory_hours: %d\nnote: 0 keeps forever; the default is 168\n", settings.SessionHours, settings.MemoryHours)
 				}, settings)
 			}
 			if err := failIfUnmanaged(root); err != nil {
@@ -55,10 +55,10 @@ and go with the session.`,
 			result.MemoryHours = settings.MemoryHours
 			return out().HumanOrJSON("gc", func() {
 				if len(result.SessionsDeleted) == 0 && result.MemoriesDeleted == 0 && result.HarvestDeleted == 0 {
-					fmt.Fprintln(cmd.OutOrStdout(), "0 expired")
+					fmt.Fprintln(cmd.OutOrStdout(), "expired: none; nothing is past retention")
 					return
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "sessions=%d memories=%d harvest=%d\n", len(result.SessionsDeleted), result.MemoriesDeleted, result.HarvestDeleted)
+				fmt.Fprintf(cmd.OutOrStdout(), "deleted:\n  sessions: %d\n  memories: %d\n  harvest: %d\n", len(result.SessionsDeleted), result.MemoriesDeleted, result.HarvestDeleted)
 			}, result)
 		},
 	}

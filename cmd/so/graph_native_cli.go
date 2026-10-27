@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/graph/api"
 	"github.com/ishanjainn/superopen/internal/graph/client"
 	"github.com/ishanjainn/superopen/internal/graph/format"
@@ -39,7 +40,9 @@ func graphNativeReadCommands() []*cobra.Command {
 		direction, _ := cmd.Flags().GetString("direction")
 		depth, _ := cmd.Flags().GetInt("depth")
 		limit, _ := cmd.Flags().GetInt("limit")
-		request := api.TraceRequest{RepoRoot: repoRoot(), Start: args[0], Direction: direction, Depth: depth, Limit: limit}
+		uncertain, _ := cmd.Flags().GetBool("uncertain")
+		tests, _ := cmd.Flags().GetBool("tests")
+		request := api.TraceRequest{RepoRoot: repoRoot(), Start: args[0], Direction: direction, Depth: depth, Limit: limit, Uncertain: uncertain, Tests: tests}
 		if len(args) > 1 {
 			request.Target = args[1]
 		}
@@ -49,6 +52,8 @@ func graphNativeReadCommands() []*cobra.Command {
 	trace.Flags().String("direction", "outgoing", "Traversal direction")
 	trace.Flags().Int("depth", 3, "Maximum traversal depth")
 	trace.Flags().Int("limit", 100, "Maximum visited results")
+	trace.Flags().Bool("uncertain", false, "Also walk edges the resolver guessed from a shared method name")
+	trace.Flags().Bool("tests", false, "Also list and walk symbols in test files")
 	snippet := nativeGraphLeaf("snippet <qualified-name>", "Read source for an indexed symbol", api.OpSnippet, func(cmd *cobra.Command, args []string) any {
 		contextLines, _ := cmd.Flags().GetInt("context")
 		fromLine, _ := cmd.Flags().GetInt("from")
@@ -87,13 +92,17 @@ func graphNativeReadCommands() []*cobra.Command {
 	deleteProject.Args = cobra.ExactArgs(1)
 	projects.AddCommand(deleteProject)
 	artifact := &cobra.Command{Use: "artifact", Short: "Export, import, or verify a content-addressed graph artifact"}
-	artifact.AddCommand(nativeArtifactLeaf("export <path>", api.OpArtifactExport), nativeArtifactLeaf("import <path>", api.OpArtifactImport), nativeArtifactLeaf("verify <path>", api.OpArtifactVerify))
+	artifact.AddCommand(
+		nativeArtifactLeaf("export <path>", "Write this repository's graph to a content-addressed artifact file", api.OpArtifactExport),
+		nativeArtifactLeaf("import <path>", "Load a graph from an artifact file, after verifying it", api.OpArtifactImport),
+		nativeArtifactLeaf("verify <path>", "Check an artifact file's integrity without importing it", api.OpArtifactVerify),
+	)
 	diagnostics := nativeGraphLeaf("diagnostics", "Verify graph database integrity", api.OpDiagnostics, func(*cobra.Command, []string) any { return api.DiagnosticsRequest{RepoRoot: repoRoot()} })
 	return []*cobra.Command{status, schema, search, cypher, trace, snippet, architecture, layout, impact, coverage, projects, artifact, diagnostics}
 }
 
-func nativeArtifactLeaf(use string, operation api.Operation) *cobra.Command {
-	command := nativeGraphLeaf(use, "Operate on a verified Zstandard graph artifact", operation, func(_ *cobra.Command, args []string) any {
+func nativeArtifactLeaf(use, short string, operation api.Operation) *cobra.Command {
+	command := nativeGraphLeaf(use, short, operation, func(_ *cobra.Command, args []string) any {
 		path, _ := filepath.Abs(args[0])
 		return api.ArtifactRequest{RepoRoot: repoRoot(), Path: path}
 	})
@@ -125,112 +134,172 @@ func nativeGraphLeaf(use, short string, operation api.Operation, params func(*co
 		if err != nil {
 			return err
 		}
+		request := params(cmd, args)
 		var result json.RawMessage
-		if err := client.Call(cmd.Context(), operation, params(cmd, args), &result); err != nil {
-			return err
+		if err := client.Call(cmd.Context(), operation, request, &result); err != nil {
+			return graphCallError(err)
 		}
-		if operation == api.OpQuery {
-			var query api.QueryResult
-			if err := json.Unmarshal(result, &query); err != nil {
+		text, hints, payload, ok := renderGraphResult(operation, request, result)
+		if !ok {
+			var display any
+			if err := json.Unmarshal(result, &display); err != nil {
 				return err
 			}
-			query.Text = applyStale(stale, query.Text)
-			payload := any(query)
-			if !out().Flags.Full {
-				payload = format.QueryAgentJSON(query)
+			payload = display
+			text = compactGraphText(operation, result)
+		}
+		if out().Flags.Full {
+			var full any
+			if err := json.Unmarshal(result, &full); err == nil {
+				payload = full
 			}
-			out().Next(format.HelpForQuery(query)...)
-			return out().HumanOrJSON("graph_query", func() {
-				fmt.Fprint(cmd.OutOrStdout(), query.Text)
-				if !strings.HasSuffix(query.Text, "\n") {
-					fmt.Fprintln(cmd.OutOrStdout())
-				}
-			}, payload)
 		}
-		var display any
-		if err := json.Unmarshal(result, &display); err != nil {
-			return err
-		}
-		out().Next(graphHelp(operation, result)...)
+		out().Next(hints...)
 		return out().HumanOrJSON("graph_"+strings.ReplaceAll(string(operation), "_", "-"), func() {
-			text := applyStale(stale, compactGraphText(operation, result))
+			text = applyStale(stale, text)
 			fmt.Fprint(cmd.OutOrStdout(), text)
 			if !strings.HasSuffix(text, "\n") {
 				fmt.Fprintln(cmd.OutOrStdout())
 			}
-		}, display)
+		}, payload)
 	}}
 }
 
+// graphCallError gives an unknown symbol AXI's not-found shape: the engine
+// message (with any nearby names) plus the command that finds the right qn.
+func graphCallError(err error) error {
+	msg := err.Error()
+	i := strings.Index(msg, "symbol not found:")
+	if i < 0 {
+		return err
+	}
+	msg = msg[i:]
+	name := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(msg, "symbol not found:"), "\n", 2)[0])
+	return cli.NotFound(msg, "so graph search "+name)
+}
+
+// renderGraphResult turns a graph result into TOON text, AXI next steps and
+// the --json payload. Operations it does not know fall back to JSON text.
+func renderGraphResult(operation api.Operation, request any, result json.RawMessage) (string, []string, any, bool) {
+	switch operation {
+	case api.OpQuery:
+		var query api.QueryResult
+		if json.Unmarshal(result, &query) != nil {
+			return "", nil, nil, false
+		}
+		req, _ := request.(api.QueryRequest)
+		return format.QueryCompact(query), format.HelpForQuery(query, req.Question, req.Limit), format.QueryAgentJSON(query), true
+	case api.OpSearch:
+		var search api.SearchResult
+		if json.Unmarshal(result, &search) != nil {
+			return "", nil, nil, false
+		}
+		req, _ := request.(api.SearchRequest)
+		return format.SearchCompact(search, req.Query), format.HelpForSearch(search, req.Query, req.Limit), search, true
+	case api.OpTrace:
+		var trace api.TraceResult
+		if json.Unmarshal(result, &trace) != nil {
+			return "", nil, nil, false
+		}
+		return format.TraceCompact(trace), format.HelpForTrace(trace), trace, true
+	case api.OpSnippet:
+		var snippet api.SnippetResult
+		if json.Unmarshal(result, &snippet) != nil {
+			return "", nil, nil, false
+		}
+		snippet.Coverage = api.Coverage{}
+		return format.SnippetCompact(snippet), format.HelpForSnippet(snippet), snippet, true
+	case api.OpImpact:
+		var impact api.ImpactResult
+		if json.Unmarshal(result, &impact) != nil {
+			return "", nil, nil, false
+		}
+		return format.ImpactCompact(impact), format.HelpForImpact(impact), impact, true
+	case api.OpArchitecture:
+		var architecture api.ArchitectureResult
+		if json.Unmarshal(result, &architecture) != nil {
+			return "", nil, nil, false
+		}
+		return format.ArchitectureCompact(architecture), nil, architecture, true
+	case api.OpStatus:
+		var status api.Status
+		if json.Unmarshal(result, &status) != nil {
+			return "", nil, nil, false
+		}
+		return format.StatusCompact(status), format.HelpForStatus(status), status, true
+	case api.OpBuild:
+		var build api.BuildResult
+		if json.Unmarshal(result, &build) != nil {
+			return "", nil, nil, false
+		}
+		return format.BuildCompact(build), format.HelpForBuild(build), build, true
+	case api.OpProjects:
+		var list api.ProjectsResult
+		if json.Unmarshal(result, &list) != nil {
+			return "", nil, nil, false
+		}
+		return format.ProjectsCompact(list), nil, list, true
+	case api.OpCoverage:
+		var coverage api.Coverage
+		if json.Unmarshal(result, &coverage) != nil {
+			return "", nil, nil, false
+		}
+		return format.CoverageCompact(coverage), format.HelpForCoverage(coverage), coverage, true
+	case api.OpSchema:
+		var schema api.SchemaResult
+		if json.Unmarshal(result, &schema) != nil {
+			return "", nil, nil, false
+		}
+		return format.SchemaCompact(schema), nil, schema, true
+	case api.OpDiagnostics:
+		var diagnostics api.DiagnosticsResult
+		if json.Unmarshal(result, &diagnostics) != nil {
+			return "", nil, nil, false
+		}
+		return format.DiagnosticsCompact(diagnostics), format.HelpForDiagnostics(diagnostics), diagnostics, true
+	case api.OpCypher:
+		var cypher api.CypherResult
+		if json.Unmarshal(result, &cypher) != nil {
+			return "", nil, nil, false
+		}
+		return format.CypherCompact(cypher), format.HelpForCypher(cypher), cypher, true
+	case api.OpCodeSearch:
+		var search api.CodeSearchResult
+		if json.Unmarshal(result, &search) != nil {
+			return "", nil, nil, false
+		}
+		req, _ := request.(api.CodeSearchRequest)
+		return format.CodeSearchCompact(search, req.Pattern, req.PathFilter), format.HelpForCodeSearch(search, req.Pattern, req.Limit), search, true
+	}
+	return "", nil, nil, false
+}
+
+// applyStale prepends the freshness state as TOON fields: the answer is from
+// the previous index, and these edited files are not in it.
 func applyStale(stale, text string) string {
 	if stale == "" {
 		return text
 	}
-	if strings.HasPrefix(strings.TrimSpace(text), stale) {
-		return text
+	var b strings.Builder
+	b.WriteString("index: stale; answer is from the previous index and may miss recent edits\n")
+	var files []string
+	for _, line := range strings.Split(stale, "\n") {
+		if strings.HasPrefix(line, "  ") && strings.TrimSpace(line) != "" {
+			files = append(files, strings.TrimSpace(line))
+		}
 	}
-	if strings.TrimSpace(text) == "" {
-		return stale + "\n"
+	if len(files) > 0 {
+		var list strings.Builder
+		format.List(&list, "", "stale_files", files)
+		b.WriteString(list.String())
 	}
-	return stale + "\n" + text
+	return b.String() + text
 }
 
-func graphHelp(operation api.Operation, result json.RawMessage) []string {
-	switch operation {
-	case api.OpSearch:
-		var search api.SearchResult
-		if json.Unmarshal(result, &search) == nil {
-			return format.HelpForSearch(search)
-		}
-	case api.OpTrace:
-		var trace api.TraceResult
-		if json.Unmarshal(result, &trace) == nil {
-			return format.HelpForTrace(trace)
-		}
-	case api.OpSnippet:
-		var snippet api.SnippetResult
-		if json.Unmarshal(result, &snippet) == nil {
-			return format.HelpForSnippet(snippet)
-		}
-	case api.OpImpact:
-		var impact api.ImpactResult
-		if json.Unmarshal(result, &impact) == nil {
-			return format.HelpForImpact(impact)
-		}
-	}
-	return nil
-}
-
-func compactGraphText(operation api.Operation, result json.RawMessage) string {
-	switch operation {
-	case api.OpSearch:
-		var search api.SearchResult
-		if json.Unmarshal(result, &search) == nil {
-			return format.SearchCompact(search)
-		}
-	case api.OpTrace:
-		var trace api.TraceResult
-		if json.Unmarshal(result, &trace) == nil {
-			return format.TraceCompact(trace)
-		}
-	case api.OpSnippet:
-		var snippet api.SnippetResult
-		if json.Unmarshal(result, &snippet) == nil {
-			return format.SnippetCompact(snippet)
-		}
-	case api.OpArchitecture:
-		var architecture api.ArchitectureResult
-		if json.Unmarshal(result, &architecture) == nil {
-			return format.ArchitectureCompact(architecture)
-		}
-	case api.OpImpact:
-		var impact api.ImpactResult
-		if json.Unmarshal(result, &impact) == nil {
-			return format.ImpactCompact(impact)
-		}
-	}
-	var pretty any
-	_ = json.Unmarshal(result, &pretty)
-	body, _ := json.MarshalIndent(pretty, "", "  ")
-	return string(body) + "\n"
+// compactGraphText renders an operation without a dedicated view as generic
+// TOON, so no command falls back to raw JSON on the default path.
+func compactGraphText(_ api.Operation, result json.RawMessage) string {
+	var value any
+	_ = json.Unmarshal(result, &value)
+	return cli.Toon(value, out().Flags.Full)
 }
