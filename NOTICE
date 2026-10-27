@@ -1,0 +1,7 @@
+Superopen
+Copyright 2026 Ishan Jain
+
+This product includes software from Caveman
+(https://github.com/JuliusBrussee/caveman), Copyright 2026 Julius Brussee,
+licensed under the Apache License, Version 2.0. The copied engine, compressors,
+and context-recovery store live under third_party/caveman/.

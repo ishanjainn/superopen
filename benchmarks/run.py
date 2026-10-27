@@ -179,7 +179,7 @@ def main() -> int:
     parser.add_argument("--adapters", default="superopen,bm25,bow,rrf")
     parser.add_argument("--max-spend", type=float, default=0.0, dest="max_spend")
     parser.add_argument("--repo", default="django")
-    parser.add_argument("--host", default="claude-code", choices=("opencode", "claude-code"))
+    parser.add_argument("--host", default="claude-code", choices=("opencode", "claude-code", "cursor"))
     parser.add_argument("--model", default=None)
     parser.add_argument("--index-timeout", type=int, default=1800, dest="index_timeout")
     parser.add_argument("--agent-timeout", type=int, default=900, dest="agent_timeout")
@@ -233,7 +233,7 @@ def main() -> int:
     host_so = resolve_so_bin(args.so_bin)
     requested = [m.strip() for m in args.mode.split(",") if m.strip()]
     modes = parse_modes(args.mode)
-    require_agent_credentials(modes=modes, phase=args.phase, max_spend=args.max_spend)
+    require_agent_credentials(modes=modes, phase=args.phase, max_spend=args.max_spend, host=args.host)
     if any(m == "memory" or m == "all" for m in requested):
         from memory.fetch_datasets import ensure_readme, maybe_fetch_from_env
 

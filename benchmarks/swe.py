@@ -1,4 +1,4 @@
-"""SWE-bench Verified: native Claude Code vs Superopen.
+"""SWE-bench Verified: native coding agent vs Superopen.
 
 `--scale small` runs 5 Verified instances (10 sessions). `--scale full` runs 50
 (28 named + 22 repo-stratified fills). Grading uses the official `swebench`
@@ -9,17 +9,19 @@ or not.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import time
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import isolate
 from compare import _prepare_superopen
 from grade import wrap_swe_prompt
-from hosts import claude_code, opencode
+from hosts import load as load_host
 from resume import load_baseline_rows, merge_arm_rows, selected_arms
 from spend import SpendLedger
 
@@ -30,9 +32,7 @@ HF_ROWS = "https://datasets-server.huggingface.co/rows?dataset=princeton-nlp/SWE
 
 
 def _host_module(name: str):
-    if name != "claude-code":
-        return opencode
-    return claude_code
+    return load_host(name)
 
 
 def load_swe_bank() -> list[dict[str, Any]]:
@@ -253,7 +253,9 @@ def summarize_swe(native: list[dict[str, Any]], so_rows: list[dict[str, Any]]) -
     n = max(len(native), len(so_rows))
     native_res = sum(1 for r in native if r.get("resolved") is True)
     so_res = sum(1 for r in so_rows if r.get("resolved") is True)
-    graded = all(r.get("resolved") is not None for r in native + so_rows) and bool(native or so_rows)
+    native_done = (not native) or all(r.get("resolved") is not None for r in native)
+    so_done = (not so_rows) or all(r.get("resolved") is not None for r in so_rows)
+    graded = bool(native or so_rows) and native_done and so_done
     eff_n, eff_s = native, so_rows
     both_n, both_s = _both_resolved(native, so_rows)
 
@@ -263,10 +265,10 @@ def summarize_swe(native: list[dict[str, Any]], so_rows: list[dict[str, Any]]) -
     summary = {
         "n": n,
         "graded": graded,
-        "native_resolved": native_res if graded else None,
-        "superopen_resolved": so_res if graded else None,
-        "native_resolved_pct": (native_res / n) if graded and n else None,
-        "superopen_resolved_pct": (so_res / n) if graded and n else None,
+        "native_resolved": native_res if graded and native else None,
+        "superopen_resolved": so_res if graded and so_rows else None,
+        "native_resolved_pct": (native_res / n) if graded and native and n else None,
+        "superopen_resolved_pct": (so_res / n) if graded and so_rows and n else None,
         "native_tokens": _tokens(eff_n),
         "superopen_tokens": _tokens(eff_s),
         "native_cost_usd": _sum(eff_n, "cost_usd"),
@@ -277,6 +279,14 @@ def summarize_swe(native: list[dict[str, Any]], so_rows: list[dict[str, Any]]) -
         "superopen_api_requests": int(_sum(eff_s, "turns")),
         "native_wall_sec": _sum(eff_n, "wall_sec"),
         "superopen_wall_sec": _sum(eff_s, "wall_sec"),
+        "native_graph_calls": int(_sum(eff_n, "graph_calls")),
+        "superopen_graph_calls": int(_sum(eff_s, "graph_calls")),
+        "native_read_calls": int(_sum(eff_n, "read_calls")),
+        "superopen_read_calls": int(_sum(eff_s, "read_calls")),
+        "native_grep_calls": int(_sum(eff_n, "grep_calls")),
+        "superopen_grep_calls": int(_sum(eff_s, "grep_calls")),
+        "native_glob_calls": int(_sum(eff_n, "glob_calls")),
+        "superopen_glob_calls": int(_sum(eff_s, "glob_calls")),
         "efficiency_over": "all_completed",
         "both_resolved_n": len(both_n),
     }
@@ -472,6 +482,75 @@ def regrade_work_dir(out: Path) -> dict[str, Any]:
     return payload
 
 
+FOLLOW_UP = (
+    "Evaluate whether MCP 2.0 would help. code-memory-mcp exposes code memory as an MCP server "
+    "instead of a CLI, and that path is very efficient. Superopen still reaches the agent through "
+    "the `so` CLI. Compare MCP against this CLI run on the same instances: graph use, grep and read "
+    "volume, tokens, cost, and resolved rate."
+)
+
+
+def _archive_root() -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    root = BENCH / "results" / f"swe-cursor-{stamp}"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "NOTES.md").write_text(
+        "\n".join(
+            [
+                "# Superopen SWE-bench transcripts",
+                "",
+                "Each arm directory keeps the full Cursor stream (`transcript.jsonl`), the CLI session",
+                "jsonl copied from the arm home, `agent.json`, and `patch.diff`.",
+                "",
+                "The closing `usage` object on the stream result event is the CLI report after the",
+                "session ends. Dollar cost is recorded when that object includes it.",
+                "",
+                "`summary.json` counts `so graph` calls against read, grep, and glob calls.",
+                "A helpful graph session uses `so graph` and does not fall back to broad grep and file reads.",
+                "",
+                "## MCP 2.0",
+                "",
+                FOLLOW_UP,
+                "",
+            ]
+        )
+    )
+    return root
+
+
+def _copy_cursor_transcripts(home: Path, dest: Path) -> list[str]:
+    root = home / ".cursor" / "projects"
+    copied: list[str] = []
+    if not root.is_dir():
+        return copied
+    for path in sorted(root.rglob("*.jsonl")):
+        if "agent-transcripts" not in path.parts:
+            continue
+        target = dest / "cursor-session" / path.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        copied.append(str(target.name))
+    return copied
+
+
+def _archive_arm(
+    archive: Path,
+    instance_id: str,
+    arm_name: str,
+    arm_dir: Path,
+    home: Path,
+    transcript: str,
+) -> None:
+    dest = archive / instance_id / arm_name
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "transcript.jsonl").write_text(transcript)
+    for name in ("agent.json", "patch.diff"):
+        src = arm_dir / name
+        if src.is_file():
+            shutil.copy2(src, dest / name)
+    _copy_cursor_transcripts(home, dest)
+
+
 def run_swe_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> dict[str, Any]:
     if not ledger.allow_llm():
         payload = {"skipped": "swe requires --max-spend > 0"}
@@ -479,6 +558,8 @@ def run_swe_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> dict
         return payload
 
     started = time.perf_counter()
+    archive = _archive_root()
+    print(f"=== swe transcripts: {archive} ===", flush=True)
     host = _host_module(args.host)
     if not host.available():
         raise RuntimeError(f"host binary not on PATH: {args.host}")
@@ -514,10 +595,7 @@ def run_swe_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> dict
             print(f"=== swe {q['id']} arm={arm_name} ===", flush=True)
             paths = isolate.arm_paths(work / instance_id, arm_name)
             isolate.ensure_dirs(paths, args.host)
-            if args.host == "opencode":
-                isolate.copy_auth(paths["opencode"])
-            else:
-                isolate.copy_auth(paths["claude"])
+            isolate.copy_host_auth(args.host, paths)
             env = isolate.arm_env(paths, {"SUPEROPEN_SO_BIN": so_bin})
             isolate.checkout_sha(mirror, paths["worktree"], sha)
             isolate.ensure_container(paths, so_bin)
@@ -537,7 +615,9 @@ def run_swe_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> dict
                     extra["stopped_on_spend"] = True
             print(
                 f"=== swe {q['id']} arm={arm_name} done ok={metrics.get('ok')} "
-                f"so_invoked={bool(metrics.get('so_invoked'))} cost={cost} "
+                f"so_invoked={bool(metrics.get('so_invoked'))} "
+                f"graph={metrics.get('graph_calls', 0)} read={metrics.get('read_calls', 0)} "
+                f"grep={metrics.get('grep_calls', 0)} cost={cost} "
                 f"spend={ledger.total_usd:.2f} ===",
                 flush=True,
             )
@@ -555,6 +635,10 @@ def run_swe_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> dict
                 "output_tokens": metrics.get("output_tokens", 0),
                 "tool_calls": metrics.get("tool_calls", 0),
                 "graph_calls": metrics.get("graph_calls", 0),
+                "read_calls": metrics.get("read_calls", 0),
+                "grep_calls": metrics.get("grep_calls", 0),
+                "glob_calls": metrics.get("glob_calls", 0),
+                "shell_calls": metrics.get("shell_calls", 0),
                 "turns": metrics.get("turns") or 0,
                 "cost_usd": cost,
                 "wall_sec": wall,
@@ -581,8 +665,13 @@ def run_swe_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> dict
                         "so_invoked": bool(metrics.get("so_invoked")),
                         "tool_calls": metrics.get("tool_calls", 0),
                         "graph_calls": metrics.get("graph_calls", 0),
+                        "read_calls": metrics.get("read_calls", 0),
+                        "grep_calls": metrics.get("grep_calls", 0),
+                        "glob_calls": metrics.get("glob_calls", 0),
+                        "shell_calls": metrics.get("shell_calls", 0),
                         "source_reads": metrics.get("source_reads", 0),
                         "read_after_bodies": bool(metrics.get("read_after_bodies")),
+                        "usage_at_close": metrics.get("usage_at_close") or {},
                         "input_tokens": metrics.get("input_tokens", 0),
                         "cache_read_tokens": metrics.get("cache_read_tokens", 0),
                         "cache_creation_tokens": metrics.get("cache_creation_tokens", 0),
@@ -591,6 +680,14 @@ def run_swe_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> dict
                     indent=2,
                 )
                 + "\n"
+            )
+            _archive_arm(
+                archive,
+                instance_id,
+                arm_name,
+                arm_dir,
+                paths["home"],
+                str(metrics.get("transcript") or ""),
             )
 
     rows = merge_swe_rows(rows, baseline)
@@ -621,6 +718,9 @@ def run_swe_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> dict
         "rows": rows,
         "summary": attach_savings(summarize_swe(native, so_rows)),
         "duration_sec": time.perf_counter() - started,
+        "transcripts": str(archive),
+        "follow_up": FOLLOW_UP,
     }
+    (archive / "summary.json").write_text(json.dumps(payload, indent=2) + "\n")
     (out / "swe.json").write_text(json.dumps(payload, indent=2) + "\n")
     return payload

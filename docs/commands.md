@@ -29,6 +29,9 @@ Exit codes are stable: `0` ok, `1` error, `2` usage, `3` not found,
 | `so status` | Show active observability sessions |
 | `so gc` | Apply retention (`--show`, `--sessions-hours`, `--memory-hours`) |
 | `so scan` | Run detection rules over recorded tool calls. See [scan.md](scan.md). |
+| `so shrink` | Shrink stdin or one command's stdout. Original bytes stay in `.so/db/ccr.db`. |
+| `so retrieve` | Print the exact original bytes for a recovery handle. |
+| `so blocks` | Stage reusable scripts and run the built-ins. Apply is the only write to `AGENTS.md`. |
 | `so version` | Print CLI version |
 
 ## so graph ([graph.md](graph.md))
@@ -97,3 +100,45 @@ so scan --rules <dir>
 Reads `.so/sessions/`. Does not block the agent. Empty stored rules fall back
 to a small built-in baseline. `--json` is the shared `{ok, kind, data}` envelope.
 The UI loads this when you open Scan or a session.
+
+## so shrink / so retrieve
+
+```bash
+so shrink < noise.json
+so shrink -- pnpm test
+so shrink --type json < rows.json
+so retrieve ccr_…
+```
+
+`so shrink` reads stdin, or the stdout of the command after `--`. Above 64 MiB
+it fails with `cave_input_too_large` and does not truncate. If the transform
+is not smaller, or the original cannot be stored, the original bytes are what
+print. `so graph`, `so memory`, and `so sessions` output is unchanged.
+
+The recovery file is `.so/db/ccr.db` (gitignored with `db/`). The default cap
+is 512 MiB (`SUPEROPEN_CCR_MAX_BYTES`). At the cap, new transforms pass the
+original through. Existing handles are not evicted. A bad handle fails.
+
+Token lines on stderr are `inferred` local estimates. They are not a provider
+bill.
+
+`so install --voice` adds an opt-in short-reply skill. A normal install does
+not. It stays off until you ask for it.
+
+## so blocks
+
+```bash
+so blocks scan
+so blocks init
+so blocks apply
+so blocks decline
+so blocks run test-summary
+so blocks run json-peek <file> [path]
+so blocks run grep-defs <file>
+```
+
+`scan` ranks shell commands retyped in local session history. Script text stays
+on the machine. `init` stages an index and does not edit `AGENTS.md`. `apply`
+writes that index. A hook may add one line telling the agent to use a block.
+It does not deny or rewrite the command. `grep-defs` can be larger than a
+plain grep. That note stays in the index.

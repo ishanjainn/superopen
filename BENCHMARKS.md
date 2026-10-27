@@ -1,29 +1,29 @@
 # Superopen Benchmarks
 
-Last updated: 2026-10-13. How to run: [benchmarks/README.md](benchmarks/README.md).
+Last updated: 2026-10-26. How to run: [benchmarks/README.md](benchmarks/README.md).
 
 ## System
 
 | | |
 |---|---|
 | Machine | MacBookPro · Apple M1 Pro · 8-core arm64 · 16 GB |
-| OS | macOS 26.6.2 (darwin) |
-| Agent | Claude Code 2.1.241 · `claude-sonnet-5` (claude-code) |
+| OS | macOS 27.0.1 (darwin) |
+| Agent | Claude Code 2.1.241 · `default` (cursor) |
 | Scale | small (LOCOMO n=100, LME n=50, compare 6, graph 12, SWE-bench 5/50 issues) |
 
 ## Run
 
 | Metric | Combined | Native | Superopen | Extras |
 |---|---|---|---|---|
-| Duration | 2h 10m (memory 48m 15s; contradict 2.8s; latency 0.6s; graph 1m 35s; compare 22m 17s; temporal 6m 34s; swe 51m 36s) | 29m 50s | 29m 8s | 1h 11m |
-| Cost | $11.62 | $5.30 | $6.30 | $0.03 (SWE eval $0.00; LOCOMO judge $0.01; LME judge $0.02) |
+| Duration | 2h 35m (swe 1h 16m; memory 48m 15s; contradict 2.8s; latency 0.6s; graph 1m 35s; compare 22m 17s; temporal 6m 34s) | 6m 2s | 1h 15m | 1h 13m |
+| Cost | $4.61 | $0.99 | $3.59 | $0.03 (SWE eval $0.00; LOCOMO judge $0.01; LME judge $0.02) |
 
 ## Results at a glance
 
 | Suite | Dataset (n) | Metric | Superopen | Compared with |
 |---|---|---|---|---|
-| SWE-bench | Verified (n=5) | Correctness | 4 / 5 (80%) | native 4 / 5 (80%) |
-| SWE-bench | Verified (n=5) | Cost | $2.70 | native $4.31 |
+| SWE-bench | Verified (n=5) | Correctness | 5 / 5 (100%) | native pending |
+| SWE-bench | Verified (n=5) | Cost | $0.00 | native $0.00 |
 | Memory | LOCOMO (n=100) | recall@10 | 92.9% (91/98) | BM25 90.8% (89/98), RRF 86.7% (85/98), bow 40.8% (40/98) |
 | Memory | LOCOMO (n=100) | QA accuracy | 50.0% (key-fact coverage); judge 88%; 8/16 scored; qa_n=20; 4 empty-gold skipped; claude-code | — |
 | Memory | LongMemEval-S (50) | recall@10 | 82.0% (41/50) | BM25 76.0% (38/50), RRF 72.0% (36/50), bow 16.0% (8/50) |
@@ -38,25 +38,34 @@ Last updated: 2026-10-13. How to run: [benchmarks/README.md](benchmarks/README.m
 
 | Correctness & efficiency | Cold Claude Code | Claude Code with Superopen | Improvement |
 |---|---|---|---|
-| Correctness | 4 / 5 (80%) | **4 / 5 (80%)** | **+0 pts** |
-| Tokens | 61.4M | **36.9M** | **+40%** |
-| Cost | $4.31 | **$2.70** | **+37%** |
-| Tool calls | 249 | **161** | **+35%** |
-| API requests | 254 | **166** | **+35%** |
-| Wall-clock | 1,429s | **933s** | **+35%** |
+| Correctness | pending | **5 / 5 (100%)** | pending |
+| Tokens | 0 | **11.3M** | **—** |
+| Cost | $0.00 | **$0.00** | **—** |
+| Tool calls | 0 | **382** | **—** |
+| API requests | 0 | **22** | **—** |
+| Wall-clock | 0s | **3,705s** | **—** |
+
+| Tool mix | Cold | Superopen |
+|---|---:|---:|
+| `so graph` calls | 0 | 87 |
+| File reads | 0 | 99 |
+| Grep calls | 0 | 26 |
+| Glob calls | 0 | 8 |
+
+Evaluate whether MCP 2.0 would help. code-memory-mcp exposes code memory as an MCP server instead of a CLI, and that path is very efficient. Superopen still reaches the agent through the `so` CLI. Compare MCP against this CLI run on the same instances: graph use, grep and read volume, tokens, cost, and resolved rate.
 
 <details>
 <summary>Correctness over all instances</summary>
 
-Correctness is scored on every instance. Tokens, cost, tool calls, API requests and wall-clock are over every completed session. Both arms passed 3 instances (cost $2.39 vs $1.25; not the headline).
+Correctness is scored on every instance. Tokens, cost, tool calls, API requests and wall-clock are over every completed session.
 
 | SWE-bench instance | Cold Claude Code | Claude Code with Superopen | Token usage vs. cold | Tool usage vs. cold |
 |---|---|---|---:|---:|
-| `django-11532` | Passed | Failed | 47% | 56% |
-| `django-16263` | Passed | **Passed** | 64% | 58% |
-| `sphinx-9461` | Failed | **Passed** | 100% | 98% |
-| `django-11400` | Passed | **Passed** | 21% | 33% |
-| `pylint-6386` | Passed | **Passed** | 91% | 97% |
+| `django-11532` | pending | **Passed** | — | — |
+| `django-16263` | pending | **Passed** | — | — |
+| `sphinx-9461` | pending | **Passed** | — | — |
+| `django-11400` | pending | **Passed** | — | — |
+| `pylint-6386` | pending | **Passed** | — | — |
 
 </details>
 
