@@ -74,6 +74,20 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 	}
 
 	switch vendor {
+	case "opencode":
+		base, baseErr := paths.OpenCodeConfigDir()
+		if baseErr == nil {
+			path := filepath.Join(base, "plugins", "superopen", "index.js")
+			if touched, removeErr := removePath(path, dryRun); touched != "" {
+				removed = append(removed, touched)
+				if removeErr != nil {
+					errs = append(errs, removeErr.Error())
+				}
+			}
+			if !dryRun {
+				_ = os.Remove(filepath.Dir(path))
+			}
+		}
 	case "claude-code":
 		// Four side effects beyond the manifest directory:
 		//   1. ~/.local/share/superopen/claude-marketplace/ - written

@@ -13,6 +13,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/headless"
 	"github.com/ishanjainn/superopen/internal/agent/hook"
 	"github.com/ishanjainn/superopen/internal/agent/hook/codex"
+	"github.com/ishanjainn/superopen/internal/agent/hook/generic"
 	"github.com/ishanjainn/superopen/internal/checkpoint"
 	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/harvest"
@@ -298,6 +299,27 @@ func finalizeSession(root, requestedID string, out *cli.Out) error {
 	if unlock != nil {
 		defer unlock()
 	}
+	copilotBackfilled := false
+	if session.VendorFromSpans(spans) == "copilot-cli" {
+		for _, sp := range spans {
+			if sp.Name != "coding_agent.session" || sp.Attributes["gen_ai.usage.total_tokens"] != "" {
+				continue
+			}
+			for attempt := 0; attempt < 20; attempt++ {
+				if generic.BackfillCopilotSessionUsage(id, spans) {
+					if err := trace.NewLocalJSONL(paths.TracesDir).UpdateUsage(id, spans); err != nil {
+						return err
+					}
+					copilotBackfilled = true
+					break
+				}
+				if attempt < 19 {
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
+			break
+		}
+	}
 	store := session.NewStore(paths)
 	if existing, existingErr := store.Get(id); existingErr == nil && existing.Status == session.StatusEnded && existing.EndedAt != nil {
 		latest := time.Time{}
@@ -310,7 +332,7 @@ func finalizeSession(root, requestedID string, out *cli.Out) error {
 				latest = at
 			}
 		}
-		if !latest.After(*existing.EndedAt) {
+		if !copilotBackfilled && !latest.After(*existing.EndedAt) {
 			if out != nil {
 				out.Next("so sessions show <id>", "so memory distill <id>")
 				out.OK("session", map[string]any{"id": id, "status": existing.Status})

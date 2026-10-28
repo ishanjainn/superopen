@@ -33,57 +33,77 @@ func emitSteerContext(vendor, event, kind string, payload []byte) {
 		return
 	}
 	var body any
-	switch hookProtocol(vendor) {
-	case "claude-code":
-		hso := map[string]any{
-			"hookEventName": decision.hookEvent,
-		}
-		if decision.deny {
-			hso["permissionDecision"] = "deny"
-			hso["permissionDecisionReason"] = decision.text
-		} else if decision.text != "" {
-			hso["additionalContext"] = decision.text
-		} else {
+	if (vendor == "copilot-cli" || vendor == "vscode") && event == "userPromptTransformed" {
+		prompt := peekContext(payload).TransformedPrompt
+		if prompt == "" || decision.text == "" {
 			return
 		}
-		body = map[string]any{"hookSpecificOutput": hso}
-	case "cursor":
-		if decision.deny && event == "beforeShellExecution" {
-			body = map[string]any{
-				"permission":    "deny",
-				"user_message":  decision.text,
-				"agent_message": decision.text,
+		body = map[string]any{"modifiedTransformedPrompt": prompt + "\n\n" + decision.text}
+	} else {
+		switch hookProtocol(vendor) {
+		case "claude-code":
+			if vendor == "factory" && event == "UserPromptSubmit" {
+				if decision.text == "" {
+					return
+				}
+				body = map[string]any{"additionalContext": decision.text}
+				break
 			}
-			break
-		}
-		if decision.deny || decision.text == "" {
-			// Cursor has no PreToolUse deny contract matching Claude.
+			hso := map[string]any{
+				"hookEventName": decision.hookEvent,
+			}
+			if decision.deny {
+				hso["permissionDecision"] = "deny"
+				hso["permissionDecisionReason"] = decision.text
+			} else if decision.text != "" {
+				hso["additionalContext"] = decision.text
+			} else {
+				return
+			}
+			body = map[string]any{"hookSpecificOutput": hso}
+		case "cursor":
+			if decision.deny && event == "beforeShellExecution" {
+				body = map[string]any{
+					"permission":    "deny",
+					"user_message":  decision.text,
+					"agent_message": decision.text,
+				}
+				break
+			}
+			if decision.deny || decision.text == "" {
+				// Cursor has no PreToolUse deny contract matching Claude.
+				if decision.text == "" {
+					return
+				}
+			}
+			body = map[string]any{"additional_context": decision.text}
+		case "codex":
+			// Codex Desktop rejects additionalContext on PreToolUse.
+			if event == "PreToolUse" {
+				return
+			}
 			if decision.text == "" {
 				return
 			}
-		}
-		body = map[string]any{"additional_context": decision.text}
-	case "codex":
-		// Codex Desktop rejects additionalContext on PreToolUse.
-		if event == "PreToolUse" {
+			body = map[string]any{
+				"hookSpecificOutput": map[string]any{
+					"hookEventName":     decision.hookEvent,
+					"additionalContext": decision.text,
+				},
+			}
+		case "context", "pi":
+			if decision.text == "" {
+				return
+			}
+			body = map[string]any{"additionalContext": decision.text}
+		case "hermes":
+			if event != "UserPromptSubmit" || decision.text == "" {
+				return
+			}
+			body = map[string]any{"context": decision.text}
+		default:
 			return
 		}
-		if decision.text == "" {
-			return
-		}
-		body = map[string]any{
-			"hookSpecificOutput": map[string]any{
-				"hookEventName":     decision.hookEvent,
-				"additionalContext": decision.text,
-			},
-		}
-	case "context", "pi":
-		if decision.text == "" {
-			return
-		}
-		body = map[string]any{"additionalContext": decision.text}
-	default:
-		return
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)
@@ -112,6 +132,17 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 	}
 	ev := strings.TrimSpace(event)
 	vendor = steerVendor(vendor)
+	if vendor == "vscode" && ev == "UserPromptSubmit" {
+		return steerDecision{}, false
+	}
+	if vendor == "openclaw" && ev == "before_prompt_build" {
+		start := sessionStartText(payload, vendor)
+		prompt := promptSubmitText(payload, vendor)
+		if text := strings.TrimSpace(strings.Join([]string{start, prompt}, "\n")); text != "" {
+			return steerDecision{text: text, hookEvent: ev}, true
+		}
+		return steerDecision{}, false
+	}
 	var sessionEvent, toolEvent bool
 	var compactEvent bool
 	switch vendor {
@@ -127,13 +158,13 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		sessionEvent = lower == "sessionstart" || lower == "beforeagent"
 		toolEvent = lower == "beforetool"
 	case "copilot-cli":
-		sessionEvent = ev == "sessionStart" || ev == "userPromptSubmitted"
+		sessionEvent = ev == "sessionStart" || ev == "userPromptTransformed"
 		toolEvent = ev == "preToolUse"
 	case "opencode":
 		lower := strings.ToLower(ev)
 		sessionEvent = strings.Contains(lower, "session.created") || strings.Contains(lower, "session.end") ||
 			strings.Contains(lower, "session.deleted") || strings.Contains(lower, "session.idle") ||
-			lower == "sessionstart" || lower == "session_start"
+			lower == "sessionstart" || lower == "session_start" || lower == "chat.message"
 		toolEvent = strings.Contains(lower, "tool.execute.before") || lower == "pretooluse"
 	case "pi":
 		lower := strings.ToLower(ev)
@@ -379,14 +410,16 @@ func isPromptSubmitEvent(vendor, ev string) bool {
 	case "cursor":
 		return ev == "beforeSubmitPrompt"
 	case "copilot-cli":
-		return ev == "userPromptSubmitted"
+		return ev == "userPromptTransformed"
 	case "gemini":
 		return lower == "beforeagent"
 	case "pi":
 		return lower == "before_agent_start"
+	case "opencode":
+		return lower == "chat.message"
 	default:
 		return strings.EqualFold(ev, "UserPromptSubmit") || strings.EqualFold(ev, "beforeSubmitPrompt") ||
-			lower == "beforeagent" || lower == "before_agent_start"
+			lower == "beforeagent" || lower == "before_agent_start" || lower == "userprompttransformed"
 	}
 }
 
@@ -456,6 +489,9 @@ func promptSubmitText(payload []byte, vendor string) string {
 		return harvest.JoinStart(steer.CaptureNudge(), live)
 	}
 	if kind != routeMemory {
+		if kind == routeCode && (vendor == "opencode" || vendor == "hermes") {
+			return harvest.JoinStart(steer.GraphStartLine(), live)
+		}
 		return live
 	}
 	if root == "" {
@@ -885,6 +921,8 @@ func hookProtocol(vendor string) string {
 		return "pi"
 	case "gemini", "copilot-cli", "opencode":
 		return "context"
+	case "hermes":
+		return "hermes"
 	default:
 		if spec, ok := vendors.ByID(vendor); ok {
 			if spec.Protocol == vendors.ProtocolPi {
@@ -910,7 +948,7 @@ func steerVendor(vendor string) string {
 func classifyExtraEvent(ev string) (session, tool, compact bool) {
 	switch strings.ToLower(strings.TrimSpace(ev)) {
 	case "sessionstart", "session_start", "on_session_start", "beforerun", "preinvocation", "session.created",
-		"userpromptsubmit", "beforesubmitprompt", "beforeagent", "userpromptsubmitted", "pre_llm_call", "before_agent_start",
+		"userpromptsubmit", "beforesubmitprompt", "beforeagent", "userpromptsubmitted", "userprompttransformed", "pre_llm_call", "before_agent_start",
 		"subagentstart", "subagent_spawned":
 		return true, false, false
 	case "pretooluse", "beforetool", "pre_tool_use", "pre_tool_call", "before_tool_call", "beforeshellexecution", "beforereadfile",

@@ -45,6 +45,17 @@ func TestOpenCodeMessageUsagePrefersHostCost(t *testing.T) {
 	}
 }
 
+func TestOpenCodeSessionEndPrefersHostRollup(t *testing.T) {
+	em := &rec{}
+	payload := []byte(`{"sessionID":"ses_v2","tokens":{"input":100,"output":20,"cache":{"read":30,"write":10}},"cost":0.042}`)
+	if err := handle(normalize.Input{Vendor: "opencode", Event: "session.end", Payload: payload, Emit: em}); err != nil {
+		t.Fatal(err)
+	}
+	if len(em.sessions) != 1 || em.sessions[0].InputTokens != 140 || em.sessions[0].TotalTokens != 160 || em.sessions[0].CostUSD != 0.042 {
+		t.Fatalf("session rollup = %+v", em.sessions)
+	}
+}
+
 func TestOpenCodeSkipsUnknownSession(t *testing.T) {
 	em := &rec{}
 	payload, _ := json.Marshal(map[string]any{

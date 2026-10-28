@@ -82,7 +82,8 @@ func TestVendorsFromArg(t *testing.T) {
 		in   string
 		want []string
 	}{
-		{"all", append([]string{"claude-code", "cursor", "codex", "gemini", "opencode", "copilot-cli", "pi"}, "antigravity", "cline", "dsh", "devin", "factory", "grok", "hermes", "kimi", "kiro", "muse", "omp", "openclaw", "openhands", "prime", "qwen", "senpi", "vscode")},
+		{"all", append([]string{"claude-code", "cursor", "codex", "gemini", "opencode", "copilot-cli", "pi"}, "antigravity", "cline", "dsh", "devin", "factory", "grok", "hermes", "kimi", "kiro", "muse", "omp", "openclaw", "openhands", "prime", "qwen", "senpi")},
+		{"vscode", []string{"copilot-cli"}},
 		{"cc", []string{"claude-code"}},
 		{"claude-code", []string{"claude-code"}},
 		{"cursor", []string{"cursor"}},

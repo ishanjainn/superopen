@@ -240,12 +240,12 @@ func (s *LocalJSONL) Query(filter QueryFilter) ([]Span, error) {
 	return out, nil
 }
 
-// UpdateUsage fills missing turn counters in the saved event stream without
-// appending a duplicate turn or dropping tool events during materialization.
+// UpdateUsage fills missing turn or session counters in the saved event stream
+// without appending a duplicate span or dropping tool events.
 func (s *LocalJSONL) UpdateUsage(sessionID string, spans []Span) error {
 	updates := make(map[string]map[string]string)
 	for _, sp := range spans {
-		if sp.Name == "coding_agent.llm.turn" && sp.SpanID != "" && hasUsageTokens(&sp) {
+		if (sp.Name == "coding_agent.llm.turn" || sp.Name == "coding_agent.session") && sp.SpanID != "" && hasUsageTokens(&sp) {
 			updates[sp.SpanID] = sp.Attributes
 		}
 	}
@@ -281,7 +281,7 @@ func (s *LocalJSONL) UpdateUsage(sessionID string, spans []Span) error {
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		var sp Span
-		if json.Unmarshal(line, &sp) == nil && sp.Name == "coding_agent.llm.turn" {
+		if json.Unmarshal(line, &sp) == nil && (sp.Name == "coding_agent.llm.turn" || sp.Name == "coding_agent.session") {
 			if attrs, ok := updates[sp.SpanID]; ok {
 				if sp.Attributes == nil {
 					sp.Attributes = make(map[string]string)
@@ -290,6 +290,9 @@ func (s *LocalJSONL) UpdateUsage(sessionID string, spans []Span) error {
 					if strings.HasPrefix(key, "gen_ai.usage.") {
 						sp.Attributes[key] = value
 					}
+				}
+				if value := attrs["coding_agent.session.cost_usd"]; value != "" && sp.Name == "coding_agent.session" {
+					sp.Attributes["coding_agent.session.cost_usd"] = value
 				}
 				line, err = json.Marshal(sp)
 				if err != nil {

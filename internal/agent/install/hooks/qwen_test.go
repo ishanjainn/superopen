@@ -458,8 +458,8 @@ func TestQwenHooksDeclareTheShellTheirQuotingRequires(t *testing.T) {
 // would put an unrecognized field into a file Superopen does not own.
 func TestOnlyQwenDeclaresAHookShell(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := installFactorySettings(path, "/tmp/so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installFactorySettings returned error: %v", err)
+	if err := installFactoryHooks(path, "/tmp/so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installFactoryHooks returned error: %v", err)
 	}
 	if got := readFileString(t, path); strings.Contains(got, `"shell"`) {
 		t.Fatalf("Claude settings carry a shell field:\n%s", got)

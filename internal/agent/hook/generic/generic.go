@@ -34,6 +34,9 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 	if payload == nil {
 		payload = map[string]any{}
 	}
+	if a.name == "openclaw" {
+		flattenOpenClawPayload(payload)
+	}
 	sid := str(payload, "session_id", "sessionId", "sessionID", "conversation_id", "taskId", "task_id", "sessionKey", "id")
 	if sid == "" || strings.EqualFold(sid, "unknown") {
 		return nil
@@ -41,12 +44,17 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 	cwd := str(payload, "cwd", "working_directory")
 	model := str(payload, "model", "model_id")
 	prompt := str(payload, "prompt", "message", "content", "text")
+	if prompt == "" && a.name == "hermes" {
+		if extra, ok := nestedMap(payload, "extra"); ok {
+			prompt = str(extra, "user_message")
+		}
+	}
 	generationID := str(payload, "generation_id", "turn_id", "message_id", "request_id")
 	ev := strings.ToLower(in.Event)
 	now := time.Now().UTC()
 
 	switch {
-	case ev == "userprompttransformed":
+	case ev == "userprompttransformed" || ev == "before_prompt_build":
 		// The submitted event is the sole authoritative prompt trace. This
 		// model-facing hook exists only to deliver locally retrieved context.
 		return nil
@@ -61,6 +69,16 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 	case ev == "sessionend" || ev == "session_end" || ev == "on_session_end" || ev == "session.deleted":
 		usage := normalize.LLMTurn{Model: model}
 		applyUsage(&usage, payload)
+		if a.name == "gemini" && usage.TotalTokens == 0 {
+			if recorded, ok := geminiTranscriptUsage(str(payload, "transcript_path"), sid, model); ok {
+				usage = recorded
+			}
+		}
+		if a.name == "copilot-cli" && usage.TotalTokens == 0 {
+			if recorded, ok := copilotTranscriptUsage(str(payload, "transcriptPath", "transcript_path"), sid); ok {
+				usage = recorded
+			}
+		}
 		return in.Emit.EmitSession(normalize.Session{
 			SessionID:    sid,
 			Vendor:       a.name,
@@ -122,6 +140,60 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 			})
 		}
 		return nil
+	}
+}
+
+// OpenClaw keeps its event under "event" so tool arguments cannot replace
+// envelope identity. Lift only the fields the common adapter understands.
+func flattenOpenClawPayload(payload map[string]any) {
+	event, ok := nestedMap(payload, "event")
+	if !ok {
+		return
+	}
+	if payload["model"] == nil && event["model"] != nil {
+		payload["model"] = event["model"]
+	}
+	for dest, names := range map[string][]string{
+		"prompt":        {"currentUserMessage", "prompt", "content", "text"},
+		"response":      {"response", "output", "text"},
+		"tool_name":     {"toolName", "tool_name", "name"},
+		"tool_input":    {"params", "tool_input", "input"},
+		"tool_response": {"result", "tool_result", "output"},
+		"tool_call_id":  {"toolCallId", "tool_call_id"},
+		"usage":         {"usage"},
+	} {
+		if payload[dest] != nil {
+			continue
+		}
+		for _, name := range names {
+			if event[name] != nil {
+				payload[dest] = event[name]
+				break
+			}
+		}
+	}
+	if payload["response"] == nil {
+		if texts, ok := event["assistantTexts"].([]any); ok {
+			parts := make([]string, 0, len(texts))
+			for _, part := range texts {
+				if s, ok := part.(string); ok {
+					parts = append(parts, s)
+				}
+			}
+			payload["response"] = strings.Join(parts, "\n")
+		}
+	}
+	if usage, ok := nestedMap(event, "usage"); ok {
+		// OpenClaw's normalized input excludes cache reads and writes.
+		// Our canonical input count includes both portions.
+		cacheRead := intFrom(usage, "cacheRead")
+		cacheWrite := intFrom(usage, "cacheWrite")
+		payload["usage"] = map[string]any{
+			"input_tokens":          intFrom(usage, "input") + cacheRead + cacheWrite,
+			"output_tokens":         intFrom(usage, "output"),
+			"cache_read_tokens":     cacheRead,
+			"cache_creation_tokens": cacheWrite,
+		}
 	}
 }
 

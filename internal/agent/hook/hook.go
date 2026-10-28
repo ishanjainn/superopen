@@ -656,7 +656,7 @@ func maybeIngestMemory(event string, payload []byte) {
 func shouldIngestPrompt(event string) bool {
 	switch strings.TrimSpace(event) {
 	case "beforeSubmitPrompt", "UserPromptSubmit", "userPromptSubmitted",
-		"user_prompt_submit", "beforeAgent", "before_agent_start", "BeforeAgent":
+		"user_prompt_submit", "beforeAgent", "before_agent_start", "BeforeAgent", "chat.message":
 		return true
 	default:
 		return false
@@ -922,7 +922,7 @@ func peekContext(payload []byte) peekedContext {
 		return ""
 	}
 	// sessionID (OpenCode) is distinct from sessionId — include both casings.
-	out.SessionID = pickString("session_id", "conversation_id", "sessionId", "sessionID", "thread_id")
+	out.SessionID = pickString("session_id", "conversation_id", "sessionId", "sessionID", "thread_id", "sessionKey")
 	// Distinct conversation id (when the vendor reports one) - this is
 	// what survives subagent spawns and, on a few vendors, IDE
 	// restarts. UI uses it as the rollup key in preference to
@@ -970,6 +970,12 @@ func peekContext(payload []byte) peekedContext {
 	)
 	out.Model = pickString("model", "request_model", "requestModel")
 	out.Prompt = pickString("prompt", "message", "text")
+	if out.Prompt == "" {
+		if extra, ok := probe["extra"].(map[string]any); ok {
+			out.Prompt, _ = extra["user_message"].(string)
+			out.Prompt = strings.TrimSpace(out.Prompt)
+		}
+	}
 	out.TransformedPrompt = pickString("transformedPrompt", "transformed_prompt")
 	out.TurnID = pickString("turn_id", "turnId", "generation_id", "generationId", "message_id", "messageId")
 	out.ToolPath = pickString("file_path", "filePath", "path")

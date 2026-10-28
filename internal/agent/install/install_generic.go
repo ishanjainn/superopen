@@ -5,12 +5,16 @@ package install
 // OpenCode/Pi TypeScript plugins, Copilot CLI hooks).
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ishanjainn/superopen/internal/paths"
 )
@@ -26,6 +30,7 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
 	}
 	var path string
 	var body string
+	var openCodeBase string
 
 	switch vendor {
 	case "gemini":
@@ -36,15 +41,18 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
 		return installGeminiHooks(path, soBin)
 
 	case "opencode":
-		// OpenCode auto-loads ~/.config/opencode/plugins/*.ts
-		// https://opencode.ai/docs/plugins/
-		// Host event model: OpenCode plugin events (session.*, message.*, tool.*).
 		base, pathErr := paths.OpenCodeConfigDir()
 		if pathErr != nil {
 			return nil, pathErr
 		}
+		openCodeBase = base
+		source := "marketplace/plugins/opencode/superopen.ts"
 		path = filepath.Join(base, "plugins", "superopen.ts")
-		raw, readErr := marketplaceFS.ReadFile("marketplace/plugins/opencode/superopen.ts")
+		if openCodeMajor() >= 2 {
+			source = "marketplace/plugins/opencode/superopen-v2/index.js"
+			path = filepath.Join(base, "plugins", "superopen", "index.js")
+		}
+		raw, readErr := marketplaceFS.ReadFile(source)
 		if readErr != nil {
 			return nil, fmt.Errorf("read embedded opencode plugin: %w", readErr)
 		}
@@ -88,6 +96,23 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
 		return nil, err
 	}
 	written := []string{path}
+	if vendor == "opencode" {
+		stale := filepath.Join(openCodeBase, "plugins", "superopen.ts")
+		if filepath.Base(path) == "superopen.ts" {
+			stale = filepath.Join(openCodeBase, "plugins", "superopen")
+		}
+		if stale != path {
+			if filepath.Base(stale) == "superopen" {
+				stale = filepath.Join(stale, "index.js")
+			}
+			if err := os.Remove(stale); err == nil {
+				written = append(written, "removed-stale:"+stale)
+				if filepath.Base(stale) == "index.js" {
+					_ = os.Remove(filepath.Dir(stale))
+				}
+			}
+		}
+	}
 	for _, stale := range staleGenericVendorPaths(home, vendor) {
 		if stale == path {
 			continue
@@ -97,6 +122,26 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
 		}
 	}
 	return written, nil
+}
+
+var openCodeVersion = regexp.MustCompile(`(?:^|[^0-9])([0-9]+)\.`)
+
+func openCodeMajor() int {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "opencode", "--version").Output()
+	if err != nil {
+		return 1
+	}
+	match := openCodeVersion.FindSubmatch(out)
+	if len(match) < 2 {
+		return 1
+	}
+	major, err := strconv.Atoi(string(match[1]))
+	if err != nil {
+		return 1
+	}
+	return major
 }
 
 func hookCommand(soBin, args string) string {

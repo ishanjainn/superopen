@@ -147,7 +147,7 @@ func vendorsFromArg(arg string) ([]string, error) {
 		return []string{"gemini"}, nil
 	case "opencode", "open-code":
 		return []string{"opencode"}, nil
-	case "copilot", "copilot-cli":
+	case "copilot", "copilot-cli", "vscode":
 		return []string{"copilot-cli"}, nil
 	case "pi":
 		return []string{"pi"}, nil

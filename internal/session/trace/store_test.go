@@ -57,6 +57,30 @@ func TestUpdateUsageReplacesTurnWithoutDuplicatingEvents(t *testing.T) {
 	}
 }
 
+func TestUpdateUsagePersistsSessionRootTotals(t *testing.T) {
+	s := trace.NewLocalJSONL(t.TempDir())
+	id := "copilot-session"
+	root := trace.Span{Name: "coding_agent.session", SpanID: "root-1", SessionID: id,
+		Attributes: map[string]string{"coding_agent.client": "copilot-cli"}}
+	if err := s.Write([]trace.Span{root}); err != nil {
+		t.Fatal(err)
+	}
+	root.Attributes["gen_ai.usage.total_tokens"] = "125"
+	root.Attributes["gen_ai.usage.cost"] = "0.08"
+	root.Attributes["coding_agent.session.cost_usd"] = "0.08"
+	if err := s.UpdateUsage(id, []trace.Span{root}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Query(trace.QueryFilter{SessionID: id})
+	if err != nil || len(got) != 1 || got[0].Attributes["gen_ai.usage.total_tokens"] != "125" {
+		t.Fatalf("saved root = %+v, err = %v", got, err)
+	}
+	tokens, cost, err := s.SessionCost(id)
+	if err != nil || tokens != 125 || cost != 0.08 {
+		t.Fatalf("tokens=%d cost=%v err=%v", tokens, cost, err)
+	}
+}
+
 func TestInboxRemovedAfterTraceResolves(t *testing.T) {
 	dir := t.TempDir()
 	s := trace.NewLocalJSONL(dir)
