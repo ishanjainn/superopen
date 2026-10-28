@@ -98,20 +98,22 @@ func attachCodeSearchNameMatches(ctx context.Context, root string, req api.CodeS
 	if req.Regex {
 		return
 	}
-	bare, quoted := "", ""
+	bare := ""
+	namespaced := false
 	if simpleLongFlag.MatchString(req.Pattern) {
 		bare = strings.TrimPrefix(req.Pattern, "--")
-		quoted = "[\"'`]" + regexp.QuoteMeta(bare) + "[\"'`]"
 	} else if strings.Contains(req.Pattern, ":") && namespacedCodeKey.MatchString(req.Pattern) {
 		bare = strings.Trim(req.Pattern[strings.LastIndex(req.Pattern, ":")+1:], ":")
 		if bare == "" {
 			bare = strings.Trim(req.Pattern, ":")
 		}
-		quoted = "[\"'`]" + regexp.QuoteMeta(bare) + "[\"'`]\\s*:\\s*[A-Z][A-Za-z0-9_]*\\s*(?:,|}|$)"
+		namespaced = true
 	} else {
 		return
 	}
-	aliasReq := api.CodeSearchRequest{Pattern: quoted, Regex: true, FileGlob: req.FileGlob, Limit: 30}
+	// Search the validated bare identifier, then inspect quoted registrations
+	// as source text. User input never becomes part of a regex expression.
+	aliasReq := api.CodeSearchRequest{Pattern: bare, Regex: true, FileGlob: req.FileGlob, Limit: codeSearchCollectCap}
 	if simpleLongFlag.MatchString(req.Pattern) {
 		aliasReq.PathFilter, aliasReq.Paths = req.PathFilter, req.Paths
 	}
@@ -127,6 +129,9 @@ func attachCodeSearchNameMatches(ctx context.Context, root string, req api.CodeS
 		if len(result.NameMatches) >= 2 {
 			break
 		}
+		if !codeSearchNameRegistration(match.Source, bare, namespaced) {
+			continue
+		}
 		file := match.Location.File
 		if seen[file] || codeSearchFileRank(file) != 0 {
 			continue
@@ -134,6 +139,30 @@ func attachCodeSearchNameMatches(ctx context.Context, root string, req api.CodeS
 		seen[file] = true
 		result.NameMatches = append(result.NameMatches, match)
 	}
+}
+
+var codeSearchRegistryValue = regexp.MustCompile(`^\s*:\s*[A-Z][A-Za-z0-9_]*\s*(?:,|}|$)`)
+
+func codeSearchNameRegistration(line, name string, namespaced bool) bool {
+	for _, quote := range []byte{'"', '\'', '`'} {
+		for start := 0; start < len(line); {
+			open := strings.IndexByte(line[start:], quote)
+			if open < 0 {
+				break
+			}
+			open += start
+			close := strings.IndexByte(line[open+1:], quote)
+			if close < 0 {
+				break
+			}
+			close += open + 1
+			if line[open+1:close] == name && (!namespaced || codeSearchRegistryValue.MatchString(line[close+1:])) {
+				return true
+			}
+			start = close + 1
+		}
+	}
+	return false
 }
 
 func isExecutableNotFound(err error) bool {
@@ -368,14 +397,11 @@ func codeSearchMatchScore(match api.CodeSearchMatch, pattern string) int {
 		score -= 30
 	}
 	if filepath.Base(match.Location.File) == "__init__.py" && !strings.Contains(line, "=") &&
-		(strings.Contains(line, "'"+needle+"'") || strings.Contains(line, "\""+needle+"\"")) {
+		codeSearchNameRegistration(line, needle, false) {
 		score -= 60 // exports are less useful than the implementation they expose
 	}
-	for _, quote := range []string{"\"", "'", "`"} {
-		if strings.Contains(line, quote+needle+quote) {
-			score += 40
-			break
-		}
+	if codeSearchNameRegistration(line, needle, false) {
+		score += 40
 	}
 	if strings.Contains(line, "--"+needle) {
 		score += 20

@@ -26,6 +26,7 @@ const (
 	queryRankPool        = 2000
 	queryRankK1          = 1.2
 	queryRankIdentBoost  = 3.0
+	queryRankOwnerBoost  = 4.0
 	queryRankVendorScale = 0.05
 )
 
@@ -177,6 +178,10 @@ func (s *Store) rankQueryRows(ctx context.Context, project, question string, wit
 }
 
 func scoreRankDocs(pool []rankDoc, terms []string, df map[string]int, total int, idents map[string]bool, question string) []api.Node {
+	words := map[string]bool{}
+	for _, word := range queryWordToken.FindAllString(question, -1) {
+		words[strings.ToLower(word)] = true
+	}
 	var avg [rankFieldCount]float64
 	for _, d := range pool {
 		for f := range d.fields {
@@ -227,6 +232,13 @@ func scoreRankDocs(pool []rankDoc, terms []string, df map[string]int, total int,
 		}
 		if idents[strings.ToLower(d.node.Name)] {
 			score *= queryRankIdentBoost
+		}
+		// A named owner and exact method are a stronger location clue than
+		// incidental mentions of the question's words in other method bodies.
+		owner := lastDotted(packagePrefix(d.node.QualifiedName))
+		if d.node.Label == "Method" && queryLooksProper(owner) &&
+			words[strings.ToLower(d.node.Name)] && words[strings.ToLower(owner)] {
+			score *= queryRankOwnerBoost
 		}
 		if seg := queryVendoredSegment(d.node.Location.File); seg != "" && !queryMentionsTerm(question, nil, seg) {
 			score *= queryRankVendorScale

@@ -125,6 +125,25 @@ func TestCodeSearchTreatsDashPatternsAsLiteral(t *testing.T) {
 	}
 }
 
+func TestCodeSearchNameRegistrationRequiresExactQuotedName(t *testing.T) {
+	for _, tc := range []struct {
+		line, name string
+		namespaced bool
+		want       bool
+	}{
+		{`"verbose"`, "verbose", false, true},
+		{"'property': PyProperty,", "property", true, true},
+		{"'property': other_handler,", "property", true, false},
+		{"'property' + suffix: PyProperty,", "property", true, false},
+		{"'other': PyProperty,", "property", true, false},
+		{"'property\"': PyProperty,", "property", true, false},
+	} {
+		if got := codeSearchNameRegistration(tc.line, tc.name, tc.namespaced); got != tc.want {
+			t.Errorf("registration %q for %q: got %v want %v", tc.line, tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestCodeSearchFallbackFindsMatchesWithoutRipgrep(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "main.go")
