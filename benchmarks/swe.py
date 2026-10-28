@@ -22,6 +22,7 @@ from grade import wrap_swe_prompt
 from hosts import claude_code, opencode
 from resume import load_baseline_rows, merge_arm_rows, selected_arms
 from spend import SpendLedger
+from tokens import refresh_codex_swe_usage, row_tokens
 
 BENCH = Path(__file__).resolve().parent
 SWE_JSON = BENCH / "questions" / "swebench_verified.json"
@@ -225,8 +226,8 @@ def prediction_row(instance_id: str, model: str, patch: str) -> dict[str, Any]:
     }
 
 
-def _pct(new: float, old: float) -> str:
-    if old <= 0:
+def _pct(new: float | None, old: float | None) -> str:
+    if new is None or old is None or old <= 0:
         return "—"
     saved = (old - new) / old * 100.0
     sign = "+" if saved >= 0 else ""
@@ -235,6 +236,18 @@ def _pct(new: float, old: float) -> str:
 
 def _sum(rows: list[dict[str, Any]], key: str) -> float:
     return sum(float(r.get(key) or 0) for r in rows)
+
+
+def _cost(rows: list[dict[str, Any]]) -> float | None:
+    if not rows or any(r.get("cost_usd") is None for r in rows):
+        return None
+    return _sum(rows, "cost_usd")
+
+
+def _estimated_credits(rows: list[dict[str, Any]]) -> float | None:
+    if not rows or any(r.get("estimated_standard_credits") is None for r in rows):
+        return None
+    return _sum(rows, "estimated_standard_credits")
 
 
 def _both_resolved(native: list[dict[str, Any]], so_rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -258,7 +271,7 @@ def summarize_swe(native: list[dict[str, Any]], so_rows: list[dict[str, Any]]) -
     both_n, both_s = _both_resolved(native, so_rows)
 
     def _tokens(rows: list[dict[str, Any]]) -> int:
-        return int(_sum(rows, "input_tokens") + _sum(rows, "output_tokens") + _sum(rows, "cache_read_tokens") + _sum(rows, "cache_creation_tokens"))
+        return sum(row_tokens(row) for row in rows)
 
     summary = {
         "n": n,
@@ -269,22 +282,30 @@ def summarize_swe(native: list[dict[str, Any]], so_rows: list[dict[str, Any]]) -
         "superopen_resolved_pct": (so_res / n) if graded and n else None,
         "native_tokens": _tokens(eff_n),
         "superopen_tokens": _tokens(eff_s),
-        "native_cost_usd": _sum(eff_n, "cost_usd"),
-        "superopen_cost_usd": _sum(eff_s, "cost_usd"),
+        "native_cost_usd": _cost(eff_n),
+        "superopen_cost_usd": _cost(eff_s),
+        "native_estimated_standard_credits": _estimated_credits(eff_n),
+        "superopen_estimated_standard_credits": _estimated_credits(eff_s),
         "native_tool_calls": int(_sum(eff_n, "tool_calls")),
         "superopen_tool_calls": int(_sum(eff_s, "tool_calls")),
         "native_api_requests": int(_sum(eff_n, "turns")),
         "superopen_api_requests": int(_sum(eff_s, "turns")),
         "native_wall_sec": _sum(eff_n, "wall_sec"),
         "superopen_wall_sec": _sum(eff_s, "wall_sec"),
+        "native_agent_sec": _sum(eff_n, "agent_sec"),
+        "superopen_agent_sec": _sum(eff_s, "agent_sec"),
+        "native_setup_sec": _sum(eff_n, "setup_sec"),
+        "superopen_setup_sec": _sum(eff_s, "setup_sec"),
+        "native_direct_discovery_commands": int(_sum(eff_n, "direct_discovery_commands")),
+        "superopen_direct_discovery_commands": int(_sum(eff_s, "direct_discovery_commands")),
         "efficiency_over": "all_completed",
         "both_resolved_n": len(both_n),
     }
     if both_n:
         summary["both_resolved_native_tokens"] = _tokens(both_n)
         summary["both_resolved_superopen_tokens"] = _tokens(both_s)
-        summary["both_resolved_native_cost_usd"] = _sum(both_n, "cost_usd")
-        summary["both_resolved_superopen_cost_usd"] = _sum(both_s, "cost_usd")
+        summary["both_resolved_native_cost_usd"] = _cost(both_n)
+        summary["both_resolved_superopen_cost_usd"] = _cost(both_s)
     return summary
 
 
@@ -361,6 +382,10 @@ def parse_grade_report(data: dict[str, Any]) -> tuple[dict[str, bool], list[str]
 def attach_savings(summary: dict[str, Any]) -> dict[str, Any]:
     summary["token_savings"] = _pct(summary["superopen_tokens"], summary["native_tokens"])
     summary["cost_savings"] = _pct(summary["superopen_cost_usd"], summary["native_cost_usd"])
+    summary["estimated_credit_savings"] = _pct(
+        summary.get("superopen_estimated_standard_credits"),
+        summary.get("native_estimated_standard_credits"),
+    )
     summary["tool_savings"] = _pct(summary["superopen_tool_calls"], summary["native_tool_calls"])
     summary["request_savings"] = _pct(summary["superopen_api_requests"], summary["native_api_requests"])
     summary["wall_savings"] = _pct(summary["superopen_wall_sec"], summary["native_wall_sec"])
@@ -460,6 +485,7 @@ def regrade_work_dir(out: Path) -> dict[str, Any]:
         if errors:
             print(f"=== swe grade {arm_name} errors: {errors} ===", flush=True)
     payload["rows"] = rows
+    refresh_codex_swe_usage(payload, work)
     native = [r for r in rows if r.get("arm") == "native"]
     so_rows = [r for r in rows if r.get("arm") == "superopen"]
     payload["summary"] = attach_savings(summarize_swe(native, so_rows))
@@ -608,6 +634,7 @@ def run_swe_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> dict
             else:
                 apply_resolved(rows, arm_name, resolved, errors)
 
+    refresh_codex_swe_usage({"host": args.host, "rows": rows, "baseline_swe_json": getattr(args, "swe_baseline", "")}, work)
     native = [r for r in rows if r["arm"] == "native"]
     so_rows = [r for r in rows if r["arm"] == "superopen"]
     payload = {
@@ -619,6 +646,7 @@ def run_swe_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> dict
         "source": "princeton-nlp/SWE-bench_Verified",
         "n": len(questions),
         "rows": rows,
+        "baseline_swe_json": getattr(args, "swe_baseline", ""),
         "summary": attach_savings(summarize_swe(native, so_rows)),
         "duration_sec": time.perf_counter() - started,
     }

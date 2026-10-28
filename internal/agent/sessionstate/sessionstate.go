@@ -117,6 +117,10 @@ type State struct {
 	// that already received the one extra snippet reminder.
 	QueryListedFiles     []string `json:"query_listed_files,omitempty"`
 	QueryFileExtraNudged []string `json:"query_file_extra_nudged,omitempty"`
+	// GraphQuerySeen distinguishes a previous query from a literal code-search.
+	// The latter satisfies graph-first without making a later relationship
+	// query look like a repeated question.
+	GraphQuerySeen bool `json:"graph_query_seen,omitempty"`
 	// QueryRepeatReminded is true after the post-query overflow that
 	// asks the agent to snippet a listed NODE instead of running graph
 	// query again (unless the dump was TRUNCATED).

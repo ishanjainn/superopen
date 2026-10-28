@@ -788,7 +788,8 @@ func memoryDistillCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				fmt.Fprint(cmd.OutOrStdout(), text)
+				out().Next("so memory distill --apply " + id)
+				out().Object("distill_brief", map[string]any{"session": id, "brief": text})
 				return nil
 			}
 			if applyJSON {

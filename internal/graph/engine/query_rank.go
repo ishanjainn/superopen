@@ -26,6 +26,7 @@ const (
 	queryRankPool        = 2000
 	queryRankK1          = 1.2
 	queryRankIdentBoost  = 3.0
+	queryRankOwnerBoost  = 4.0
 	queryRankVendorScale = 0.05
 )
 
@@ -177,6 +178,10 @@ func (s *Store) rankQueryRows(ctx context.Context, project, question string, wit
 }
 
 func scoreRankDocs(pool []rankDoc, terms []string, df map[string]int, total int, idents map[string]bool, question string) []api.Node {
+	words := map[string]bool{}
+	for _, word := range queryWordToken.FindAllString(question, -1) {
+		words[strings.ToLower(word)] = true
+	}
 	var avg [rankFieldCount]float64
 	for _, d := range pool {
 		for f := range d.fields {
@@ -227,6 +232,13 @@ func scoreRankDocs(pool []rankDoc, terms []string, df map[string]int, total int,
 		}
 		if idents[strings.ToLower(d.node.Name)] {
 			score *= queryRankIdentBoost
+		}
+		// A named owner and exact method are a stronger location clue than
+		// incidental mentions of the question's words in other method bodies.
+		owner := lastDotted(packagePrefix(d.node.QualifiedName))
+		if d.node.Label == "Method" && queryLooksProper(owner) &&
+			words[strings.ToLower(d.node.Name)] && words[strings.ToLower(owner)] {
+			score *= queryRankOwnerBoost
 		}
 		if seg := queryVendoredSegment(d.node.Location.File); seg != "" && !queryMentionsTerm(question, nil, seg) {
 			score *= queryRankVendorScale
@@ -314,4 +326,42 @@ func queryRowEligible(n api.Node, withTests bool) bool {
 		return false
 	}
 	return withTests || !queryNodeLooksLikeTest(n)
+}
+
+// prioritizeRouteRows puts a matching route registration before generic
+// framework symbols when the question asks about an endpoint. The usual
+// ranking remains intact when no concrete path term matches.
+func prioritizeRouteRows(rows []api.Node, question string) []api.Node {
+	q := strings.ToLower(question)
+	if !strings.Contains(q, "route") && !strings.Contains(q, "endpoint") {
+		return rows
+	}
+	terms := queryRankTerms(question)
+	var matched, rest []api.Node
+	for _, n := range rows {
+		if n.Label != "Route" {
+			rest = append(rest, n)
+			continue
+		}
+		pathTokens := rankTokens(n.Name)
+		found := false
+		for _, term := range terms {
+			switch term {
+			case "route", "endpoint", "express", "handler", "regex", "registr", "test":
+				continue
+			}
+			for _, token := range pathTokens {
+				if term == token {
+					found = true
+					break
+				}
+			}
+		}
+		if found && (!strings.Contains(q, "regex") || strings.HasPrefix(n.Name, "/^")) {
+			matched = append(matched, n)
+		} else {
+			rest = append(rest, n)
+		}
+	}
+	return append(matched, rest...)
 }

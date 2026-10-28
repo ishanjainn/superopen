@@ -268,32 +268,25 @@ Installs the /so skill, observability hooks, and durable graph-first guidance
 --strict denies the first in-repo source Read once per session so the agent
 must query the graph first.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			out := cmd.OutOrStdout()
-			printInstallBanner(out)
-			if len(vendors) == 0 {
-				input, closeInput := installPromptInput()
-				if input != nil && writerIsTerminal(out) {
-					chosen, err := promptInstallVendors(input, out)
-					closeInput()
-					if err != nil {
-						return err
-					}
-					vendors = chosen
-				}
-			}
 			report, err := agent.Install(repoRoot(), vendors, agent.Options{Strict: strict})
 			if err != nil {
 				return err
 			}
 			_ = memory.FetchModels()
-			report.Write(cmd.OutOrStdout())
-			if findWebDir("") == "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "note: %s\n", cli.ToonQuote(fmt.Sprintf("web UI is not in %s; reinstall Superopen (release tarball, brew, or install.ps1) so so dev works from any repo", expectedWebDir()), false))
+			result := map[string]any{
+				"install": "done", "skills": report.Skills, "guidance": report.Guidance,
+				"cursor_rule": report.CursorRule, "hooks": report.Hooks,
+				"strict": report.Strict, "restart_required": true,
 			}
+			if findWebDir("") == "" {
+				result["note"] = fmt.Sprintf("web UI is not in %s; reinstall Superopen (release tarball, brew, or install.ps1) so so dev works from any repo", expectedWebDir())
+			}
+			out().Next("so init", "so dev")
+			out().Object("install", result)
 			return nil
 		},
 	}
-	command.Flags().StringSliceVar(&vendors, "vendor", nil, "Install these harnesses only (repeatable). Omit to choose, or to install all when not a terminal")
+	command.Flags().StringSliceVar(&vendors, "vendor", nil, "Install these harnesses only (repeatable). Omit to install all")
 	command.Flags().BoolVar(&strict, "strict", false, "Deny the first in-repo source Read once per session (graph-first)")
 	return command
 }
@@ -327,27 +320,10 @@ Chocolatey). Use that manager's uninstall after this command.
 			if vendor != "" {
 				return codinguninstall.Run(cmd, vendor, false, dryRun)
 			}
-			// A person at a terminal gets the progress checklist; piped output
-			// (an agent, CI) gets one structured result.
-			tty := writerIsTerminal(os.Stdout)
-			sink := io.Discard
-			if tty {
-				sink = os.Stdout
-			}
-			removed, warnings := codinguninstall.RemoveAll(true, keepData, dryRun, sink, io.Discard)
+			removed, warnings := codinguninstall.RemoveAll(true, keepData, dryRun, io.Discard, io.Discard)
 			manager := ""
 			if exe, err := os.Executable(); err == nil {
 				manager = paths.PackageManagerUninstallHint(exe)
-			}
-			if tty {
-				for _, w := range warnings {
-					fmt.Fprintf(os.Stderr, "so uninstall: %s\n", w)
-				}
-				if manager != "" {
-					fmt.Printf("The so binary is still provided by a package manager. Remove it with: %s\n", manager)
-				}
-				fmt.Println("  Restart the coding agent so it drops in-memory hooks.")
-				return nil
 			}
 			result := map[string]any{"uninstall": "done", "dry_run": dryRun, "removed": removed, "restart_required": true}
 			if len(warnings) > 0 {
@@ -375,7 +351,8 @@ func cmdInit() *cobra.Command {
 		Short: "Initialize .so/ session storage and the native graph for this repository",
 		Long: `Per-repository setup. Prefer so install (once, user-global) before /so init.
 
-Creates .so/sessions and .so/db, writes .so/.gitignore, builds the graph,
+Creates .so/sessions and .so/db, ignores .so/ in the local Git checkout,
+builds the graph,
 and registers the project in the user-wide Superopen index.
 
 Init defaults to the repository root (nearest existing .so or git top-level).

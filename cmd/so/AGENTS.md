@@ -10,7 +10,7 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). Graph output: [../graph/AGENTS
 
 | Surface | Format |
 |---------|--------|
-| `so graph *` success | **axi.md** TOON: `count: N of M`, `nodes[N]{qn,kind,file,lines}:`, numbered `code[]`, `help[]` (`internal/graph/format`) |
+| `so graph *` success | **axi.md** TOON: `count: N of M`, `nodes[N]{qn,kind,file,lines}:`, numbered `code[]`, `shared[]`/`uses[]` for values with multiple consumers, `tests[]`/`test_run[]` for related checks, `help[]` (`internal/graph/format`) |
 | `so memory`, `so sessions` (user) | **axi.md**: TOON lists, content-first dashboards, `help[]`, structured errors on stdout |
 | `so sessions hook` | **host JSON** (`additionalContext` / permission). Not AXI. Always exit 0 on telemetry failure. Hidden from `so sessions --help`; invoked by vendor plugin manifests |
 
@@ -32,10 +32,10 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). Graph output: [../graph/AGENTS
 |-------|-----------|
 | Every other command | **axi.md TOON** by default (`cli.Toon` renders any result the same way); `--json` opt-in envelope |
 | Hook stdout | Host control JSON, not AXI |
-| `so install` / `so uninstall` on a terminal | Human checklist and banner. Piped (an agent, CI) they print one TOON result |
+| `so install` / `so uninstall` | Structured TOON on terminal and in pipes; install defaults to all supported agents unless `--vendor` narrows it |
 | `so dev` | Long-running server: prints `dev: running` and `url:`, then serves |
-| `so version` | `so <version>` as text, the form every tool uses; `--json` gives the shared envelope |
-| Not a Superopen repo | Exits 0 with a plain line, so an agent in another checkout is not told to `so init` |
+| `so version` | One TOON record by default; `--json` gives the shared envelope |
+| Not a Superopen repo | Exits 0 with `status: not a Superopen repo`, so an agent in another checkout is not told to `so init` |
 
 `cmd/so/axi_contract_test.go` enforces the flag contract on every command: an unknown flag exits 2 with `error:` and a `help[1]:` line naming usage and valid flags.
 

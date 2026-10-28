@@ -54,7 +54,7 @@ func loadExtractCache(repoRoot, digest string) *cachedExtract {
 }
 
 func saveExtractCache(repoRoot string, file ParsedSyntaxFile, coverage *api.CoverageRow, generation string) {
-	digest := strings.TrimSpace(file.File.SHA256)
+	digest := strings.TrimSpace(file.File.Digest)
 	path := extractCachePath(repoRoot, digest)
 	if path == "" {
 		return
@@ -121,11 +121,11 @@ func dropAssemblePaths(changes api.ChangeSet) map[string]bool {
 func fileDigestForCache(root, rel string, fp *fingerprintDoc) string {
 	key := filepath.ToSlash(rel)
 	if fp != nil {
-		if entry, ok := fp.Files[key]; ok && entry.SHA256 != "" {
+		if entry, ok := fp.Files[key]; ok && entry.Digest != "" {
 			abs := filepath.Join(root, filepath.FromSlash(rel))
 			info, err := os.Stat(abs)
 			if err == nil && entry.Size == info.Size() && entry.MtimeMs == mtimeMs(info) {
-				return entry.SHA256
+				return entry.Digest
 			}
 		}
 	}

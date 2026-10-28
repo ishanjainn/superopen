@@ -1,10 +1,6 @@
 package engine
 
-import (
-	"sort"
-
-	"github.com/ishanjainn/superopen/internal/graph/api"
-)
+import "github.com/ishanjainn/superopen/internal/graph/api"
 
 var pinnedPythonBuiltins = []struct {
 	label, name, qn string
@@ -74,20 +70,6 @@ func indexPythonBuiltins(project string, files []ParsedSyntaxFile, graph *goGrap
 		return
 	}
 	seedPythonBuiltinNodes(project, files, graph)
-	targets := map[string]string{}
-	for _, builtin := range pinnedPythonBuiltins {
-		targets[builtin.name] = builtin.qn
-	}
-	byFileName := map[string][]api.Node{}
-	for _, node := range graph.nodes {
-		if node.Label == "Function" || node.Label == "Method" {
-			key := node.Location.File + "\x00" + node.Name
-			byFileName[key] = append(byFileName[key], node)
-		}
-	}
-	for key := range byFileName {
-		sort.Slice(byFileName[key], func(i, j int) bool { return byFileName[key][i].QualifiedName < byFileName[key][j].QualifiedName })
-	}
 	for _, parsed := range files {
 		if parsed.File.Language == "python" {
 			for _, builtin := range pinnedPythonBuiltins {
@@ -95,34 +77,5 @@ func indexPythonBuiltins(project string, files []ParsedSyntaxFile, graph *goGrap
 					kind: "DEFINES", evidence: &api.Evidence{Strategy: "python_builtins", Confidence: 1}})
 			}
 		}
-		for _, call := range parsed.Extraction.Calls {
-			target := targets[syntaxCallBase(call.Name)]
-			if target == "" {
-				continue
-			}
-			source := fileQualifiedName(parsed.File.Path)
-			owner := ""
-			if call.Scope != "" {
-				parts := splitSyntaxScope(call.Scope)
-				owner = parts[len(parts)-1]
-			}
-			if candidates := byFileName[parsed.File.Path+"\x00"+owner]; len(candidates) > 0 {
-				source = candidates[0].QualifiedName
-			}
-			graph.edges = append(graph.edges, pendingEdge{source: source, target: target, kind: "CALLS",
-				evidence: syntaxEvidence(parsed.File.Path, call, "python_builtin")})
-		}
 	}
-}
-
-func splitSyntaxScope(scope string) []string {
-	parts := []string{}
-	start := 0
-	for index := 0; index <= len(scope); index++ {
-		if index == len(scope) || scope[index] == '.' {
-			parts = append(parts, scope[start:index])
-			start = index + 1
-		}
-	}
-	return parts
 }

@@ -439,7 +439,8 @@ func demoSession(root string) error {
 	if _, err := replay.BuildReplayFromSpans(paths, id, spans); err != nil {
 		return err
 	}
-	fmt.Printf("demo_session: %s\nhelp[1]:\n  so sessions show %s\n", id, id)
+	out().Next("so sessions show " + id)
+	out().Object("demo_session", map[string]any{"id": id, "tokens": 1200})
 	return nil
 }
 
@@ -499,5 +500,3 @@ func cmdStatus() *cobra.Command {
 		},
 	}
 }
-
-var _ = os.Stdout

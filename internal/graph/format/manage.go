@@ -13,13 +13,6 @@ import (
 // coverage, schema, diagnostics, cypher). They print what an agent decides
 // on, in the same TOON dialect as query, and leave the rest to --json/--full.
 
-func shortGeneration(g string) string {
-	if len(g) > 12 {
-		return g[:12]
-	}
-	return g
-}
-
 func timeField(t *time.Time) string {
 	if t == nil || t.IsZero() {
 		return ""
@@ -44,7 +37,7 @@ func StatusCompact(s api.Status) string {
 	if at := timeField(s.IndexedAt); at != "" {
 		Field(&b, "", "indexed_at", at)
 	}
-	Field(&b, "", "generation", shortGeneration(s.Generation))
+	Field(&b, "", "generation", s.Generation)
 	Field(&b, "", "engine", fmt.Sprintf("%s %s schema %d", s.Engine, s.EngineVersion, s.Schema))
 	if len(s.Diagnostics) > 0 {
 		rows := make([][]string, 0, len(s.Diagnostics))
@@ -119,7 +112,7 @@ func maxInt(a, b int) int {
 
 // CoverageCompact counts what the index skipped by kind and lists the first
 // files; the full list stays behind --full.
-func CoverageCompact(c api.Coverage) string {
+func CoverageCompact(c api.Coverage, full bool) string {
 	var b strings.Builder
 	Field(&b, "", "status", c.Status)
 	if c.IndexMode != "" {
@@ -153,7 +146,7 @@ func CoverageCompact(c api.Coverage) string {
 	}
 	Table(&b, "", "by_kind", []string{"kind", "files"}, kindRows)
 	shown := c.Rows
-	if len(shown) > 15 {
+	if !full && len(shown) > 15 {
 		shown = shown[:15]
 	}
 	rows := make([][]string, 0, len(shown))

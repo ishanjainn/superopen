@@ -174,7 +174,7 @@ func seedGraphDB(t *testing.T, root string, files map[string]string) {
 				return err
 			}
 			if err := builder.PutFile(FileRecord{
-				Project: project, Path: rel, SHA256: fileContentDigest([]byte(body)),
+				Project: project, Path: rel, Digest: fileContentDigest([]byte(body)),
 				MTimeNS: info.ModTime().UnixNano(), Size: info.Size(), Language: "go",
 			}); err != nil {
 				return err

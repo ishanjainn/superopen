@@ -198,12 +198,15 @@ func graphGate(payload []byte, vendor, kind, hookEvent string) (steerDecision, b
 	cmd := bashCommandFromPayload(payload)
 	if commandLooksLikeSo(cmd) {
 		if bashLooksLikeGraphQuery(cmd) {
-			if engine.QueryStampFreshFor(stampRoot(payload), steerSessionID(payload)) {
+			if engine.QueryStampFreshFor(stampRoot(payload), steerSessionID(payload)) && graphQuerySeen(payload, vendor) {
 				if !claimQueryRepeat(payload, vendor) {
 					return steerDecision{}, false
 				}
 				return steerDecision{text: steer.QueryRepeatNudge(), hookEvent: hookEvent}, true
 			}
+			markGraphQuerySeen(payload, vendor)
+			engine.RecordQueryStampFor(stampRoot(payload), steerSessionID(payload))
+		} else if bashLooksLikeGraphCodeSearch(cmd) {
 			engine.RecordQueryStampFor(stampRoot(payload), steerSessionID(payload))
 		}
 		return steerDecision{}, false
@@ -744,6 +747,29 @@ func claimQueryRepeat(payload []byte, vendor string) bool {
 	}, "last_query_repeat")
 }
 
+func graphQuerySeen(payload []byte, vendor string) bool {
+	sessionID := steerSessionID(payload)
+	if sessionID != "" {
+		state := sessionstate.Load(sessionID, vendor)
+		return state != nil && state.GraphQuerySeen
+	}
+	return engine.QueryStampFreshAt(filepath.Join(paths.Resolve(stampRoot(payload)).DBDir, "last_graph_query_seen"))
+}
+
+func markGraphQuerySeen(payload []byte, vendor string) {
+	sessionID := steerSessionID(payload)
+	if sessionID != "" {
+		state := sessionstate.Load(sessionID, vendor)
+		if state == nil {
+			state = &sessionstate.State{}
+		}
+		state.GraphQuerySeen = true
+		sessionstate.Save(sessionID, vendor, state)
+		return
+	}
+	claimRootStamp(payload, "last_graph_query_seen")
+}
+
 // claimSessionFlag is once-per-session when the host sent an id. Missing ids
 // used to fail open and spam every tool call; fall back to a repo-scoped
 // stamp under .so/db/ (same layout QueryStampFresh uses, including Docker /work).
@@ -1059,6 +1085,10 @@ func bashLooksLikeListing(cmd string) bool {
 
 func bashLooksLikeGraphQuery(cmd string) bool {
 	return strings.Contains(strings.ToLower(cmd), "graph query")
+}
+
+func bashLooksLikeGraphCodeSearch(cmd string) bool {
+	return strings.Contains(strings.ToLower(cmd), "graph code-search")
 }
 
 // longestTerm picks the most selective identifier in a raw pattern.

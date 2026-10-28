@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -33,6 +34,10 @@ func TestSeedLinkedWorktreeCopiesParentDB(t *testing.T) {
 	}
 	if _, err := os.Stat(paths.Resolve(wt).Database); err != nil {
 		t.Fatalf("seeded db missing: %v", err)
+	}
+	cmd := exec.Command("git", "-C", wt, "status", "--porcelain")
+	if out, err := cmd.CombinedOutput(); err != nil || len(out) != 0 {
+		t.Fatalf("seeded graph should stay out of git status: %q", out)
 	}
 	after, err := os.ReadFile(parentDB)
 	if err != nil {

@@ -159,8 +159,8 @@ func indexSyntaxInheritance(_ string, files []ParsedSyntaxFile, graph *goGraph, 
 	}
 }
 
-// indexSyntaxExplicitOverrides implements Superopen: for each
-// non-Go INHERITS/IMPLEMENTS edge, emit OVERRIDE between same-named methods.
+// indexSyntaxExplicitOverrides links each method to the nearest ancestor
+// method with the same name. All declarations at the same depth are kept.
 func indexSyntaxExplicitOverrides(graph *goGraph) {
 	methodsByType := map[string]methodSet{}
 	fileByQN := map[string]string{}
@@ -179,28 +179,52 @@ func indexSyntaxExplicitOverrides(graph *goGraph) {
 			methods[graphNodeName(edge.target)] = edge.target
 		}
 	}
-	var added []pendingEdge
+	parents := map[string][]string{}
 	for _, edge := range graph.edges {
 		if edge.kind != "INHERITS" && edge.kind != "IMPLEMENTS" {
 			continue
 		}
-		if strings.HasSuffix(strings.ToLower(fileByQN[edge.source]), ".go") {
+		if _, ok := methodsByType[edge.source]; !ok {
 			continue
 		}
-		childMethods := methodsByType[edge.source]
-		baseMethods := methodsByType[edge.target]
-		if len(childMethods) == 0 || len(baseMethods) == 0 {
+		if _, ok := methodsByType[edge.target]; !ok {
 			continue
 		}
-		for name, childMethod := range childMethods {
-			baseMethod := baseMethods[name]
-			if baseMethod == "" || baseMethod == childMethod {
-				continue
+		parents[edge.source] = append(parents[edge.source], edge.target)
+	}
+	var added []pendingEdge
+	for child, childMethods := range methodsByType {
+		if len(childMethods) == 0 || len(parents[child]) == 0 || strings.HasSuffix(strings.ToLower(fileByQN[child]), ".go") {
+			continue
+		}
+		bound := map[string]bool{}
+		visited := map[string]bool{child: true}
+		level := append([]string(nil), parents[child]...)
+		for len(level) > 0 && len(bound) < len(childMethods) {
+			var next []string
+			boundNow := map[string]bool{}
+			for _, ancestor := range level {
+				if visited[ancestor] {
+					continue
+				}
+				visited[ancestor] = true
+				for name, childMethod := range childMethods {
+					baseMethod := methodsByType[ancestor][name]
+					if bound[name] || baseMethod == "" || baseMethod == childMethod {
+						continue
+					}
+					added = append(added, pendingEdge{
+						source: childMethod, target: baseMethod, kind: "OVERRIDE",
+						evidence: &api.Evidence{Strategy: "explicit_override", Confidence: 0.9},
+					})
+					boundNow[name] = true
+				}
+				next = append(next, parents[ancestor]...)
 			}
-			added = append(added, pendingEdge{
-				source: childMethod, target: baseMethod, kind: "OVERRIDE",
-				evidence: &api.Evidence{Strategy: "explicit_override", Confidence: 0.9},
-			})
+			for name := range boundNow {
+				bound[name] = true
+			}
+			level = next
 		}
 	}
 	graph.edges = append(graph.edges, added...)

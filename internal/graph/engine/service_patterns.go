@@ -186,6 +186,7 @@ var routeMethodSuffixes = []struct{ suffix, method string }{
 	{"::put", "PUT"}, {"::delete", "DELETE"}, {"::patch", "PATCH"}, {".MapGet", "GET"}, {".MapPost", "POST"},
 	{".MapPut", "PUT"}, {".MapDelete", "DELETE"}, {".include_router", "ANY"}, {".mount", "ANY"},
 	{".add_url_rule", "ANY"}, {".register_blueprint", "ANY"}, {".use", "ANY"}, {".register", "ANY"},
+	{".all", "ANY"}, {".ALL", "ANY"},
 	{".add_route", "ANY"}, {".add_api_route", "ANY"}, {".add_api_websocket_route", "ANY"},
 }
 

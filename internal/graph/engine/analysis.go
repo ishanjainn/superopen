@@ -3,9 +3,7 @@ package engine
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,6 +98,9 @@ func (s *Store) scanFindNodes(ctx context.Context, query string, args ...any) ([
 }
 
 func snippetLooksLikePath(identity string) bool {
+	if strings.HasPrefix(identity, "__route__") {
+		return false
+	}
 	if strings.ContainsAny(identity, `/\`) {
 		return true
 	}
@@ -241,7 +242,7 @@ func (s *Store) Trace(ctx context.Context, req api.TraceRequest) (api.TraceResul
 		direction = "outgoing"
 	}
 	if len(req.EdgeTypes) == 0 && (direction == "both" || direction == "incoming") {
-		req.EdgeTypes = []string{"CALLS", "USAGE", "CONFIGURES"}
+		req.EdgeTypes = []string{"CALLS", "USAGE", "CONFIGURES", "HANDLES", "HTTP_CALLS", "REDIRECTS_TO"}
 	}
 	req.Direction = direction
 	result := api.TraceResult{Direction: direction, Start: starts[0].QualifiedName}
@@ -589,6 +590,12 @@ func (s *Store) Query(ctx context.Context, req api.QueryRequest) (api.QueryResul
 		screen = fillEmptyScreen(orderedAll, req.Question, terms)
 	}
 	rows := mergeQueryRows(ranked, queryAnswerRows(screen, candidates, orderedAll, req.Question, terms))
+	rows, err = s.prioritizeQueryRelations(ctx, req.Project, rows, req.Question, overlap)
+	if err != nil {
+		return api.QueryResult{}, err
+	}
+	rows = diversifyQueryRows(rows)
+	rows = prioritizeRouteRows(rows, req.Question)
 	if err := s.fillQueryRows(ctx, &result, rows, req); err != nil {
 		return api.QueryResult{}, err
 	}
@@ -613,24 +620,20 @@ func mergeQueryRows(ranked, rest []api.Node) []api.Node {
 	return out
 }
 
-// fillQueryRows pages the rows, attaches the first callables' bodies on the
-// first page, and keeps the edges that join two listed rows.
+// fillQueryRows pages the rows, keeps edges between listed nodes, and attaches
+// focused source for the callables on that page.
 func (s *Store) fillQueryRows(ctx context.Context, result *api.QueryResult, rows []api.Node, req api.QueryRequest) error {
 	pageQueryRows(result, rows, req)
-	if result.Offset == 0 {
-		var attach []api.Node
-		for _, n := range result.Rows {
-			if queryAttachableLabel(n.Label) {
-				attach = append(attach, n)
-			}
-		}
-		result.Bodies = s.collectQueryBodies(ctx, req.Project, attach)
-	}
 	edges, err := s.edgesAmong(ctx, req.Project, result.Rows)
 	if err != nil {
 		return err
 	}
 	result.Edges = edges
+	result.Bodies = s.collectQueryBodies(ctx, req.Project, queryBodyCandidates(result.Rows, edges, queryOverlapTerms(req.Question, req.Terms)))
+	result.Linked, err = s.queryLinkedNodes(ctx, result.Rows, result.Bodies, req.Question)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -648,7 +651,7 @@ func (s *Store) edgesAmong(ctx context.Context, project string, nodes []api.Node
 	}
 	list := strings.Join(ids, ",")
 	rows, err := s.db.QueryContext(ctx, `SELECT id,source_id,target_id,type FROM edges WHERE project=? AND source_id IN (`+list+`) AND target_id IN (`+list+`)
-		AND type IN ('CALLS','USAGE','INHERITS','IMPLEMENTS','OVERRIDE','WRITES','READS','CONFIGURES')
+		AND type IN ('CALLS','USAGE','INHERITS','IMPLEMENTS','OVERRIDE','WRITES','READS','CONFIGURES','HANDLES','HTTP_CALLS','REDIRECTS_TO')
 		AND (CASE WHEN json_valid(evidence) THEN coalesce(nullif(json_extract(evidence,'$.confidence'),0),1) ELSE 1 END) >= ? ORDER BY id`, project, traceMinConfidence)
 	if err != nil {
 		return nil, err
@@ -863,7 +866,7 @@ func (s *Store) Coverage(ctx context.Context, req api.CoverageRequest) (api.Cove
 		for _, requested := range req.Paths {
 			path := filepath.ToSlash(requested)
 			var storedHash string
-			hashErr := s.db.QueryRowContext(ctx, `SELECT sha256 FROM file_hashes WHERE project=? AND rel_path=?`, req.Project, path).Scan(&storedHash)
+			hashErr := s.db.QueryRowContext(ctx, `SELECT digest FROM file_hashes WHERE project=? AND rel_path=?`, req.Project, path).Scan(&storedHash)
 			freshness := coverageFreshness(root, path, storedHash, hashErr == nil)
 			indexes := rowIndexes[path]
 			if len(indexes) == 0 {
@@ -912,8 +915,7 @@ func coverageFreshness(root, rel, storedHash string, indexed bool) string {
 	if !indexed {
 		return "not_indexed"
 	}
-	hash := sha256.Sum256(body)
-	if hex.EncodeToString(hash[:]) != storedHash {
+	if fileContentDigest(body) != storedHash {
 		return "modified"
 	}
 	return "fresh"
@@ -968,7 +970,7 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 			}
 		}
 		snippetLeftovers = leftovers
-	} else if file != "" {
+	} else if file != "" && req.StartLine <= 0 {
 		node, err := s.findFileOrCallable(ctx, req.Project, file)
 		if err != nil {
 			return api.SnippetResult{}, err
@@ -1005,7 +1007,10 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 	if req.MaxLines > 0 {
 		maxSpan = req.MaxLines
 	}
-	if fileOrModule {
+	if matched == nil && req.StartLine > 0 && req.EndLine <= 0 {
+		end = start + maxSpan - 1
+	}
+	if fileOrModule && req.MaxLines <= 0 {
 		maxSpan = 500
 	}
 	missingFileSpan := fileOrModule && matched.Location.EndLine <= matched.Location.StartLine
@@ -1013,7 +1018,7 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 		start = 1
 	}
 	if missingFileSpan {
-		end = start + maxSpan
+		end = start + maxSpan - 1
 	} else if end < start {
 		end = start
 	}
@@ -1027,8 +1032,8 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 	}
 	end += contextLines
 	clipped := false
-	if !missingFileSpan && end-start > maxSpan {
-		end = start + maxSpan
+	if !missingFileSpan && end-start+1 > maxSpan {
+		end = start + maxSpan - 1
 		clipped = true
 	}
 	handle, err := os.Open(abs)
@@ -1073,7 +1078,11 @@ func (s *Store) Snippet(ctx context.Context, req api.SnippetRequest) (api.Snippe
 		result.Name = matched.Name
 		result.Label = matched.Label
 		result.Suggestions = snippetLeftovers
-		_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM edges WHERE project=? AND target_id=? AND type='CALLS'`, req.Project, matched.ID).Scan(&result.Callers)
+		if matched.Label == "Route" {
+			_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM edges WHERE project=? AND target_id=? AND type IN ('CALLS','HANDLES','HTTP_CALLS','REDIRECTS_TO')`, req.Project, matched.ID).Scan(&result.Callers)
+		} else {
+			_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM edges WHERE project=? AND target_id=? AND type='CALLS'`, req.Project, matched.ID).Scan(&result.Callers)
+		}
 		_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM edges WHERE project=? AND source_id=? AND type='CALLS'`, req.Project, matched.ID).Scan(&result.Callees)
 		if clipped {
 			result.DirectCallees, _ = s.directCallees(ctx, req.Project, matched.ID, matched.Location.File, 8)

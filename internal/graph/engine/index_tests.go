@@ -27,10 +27,28 @@ func appendTestRelationships(graph *goGraph) {
 		}
 		source, sourceOK := nodes[edge.source]
 		target, targetOK := nodes[edge.target]
-		if !sourceOK || !targetOK || !source.test || target.test || !isTestFunctionName(source.name) {
+		if !sourceOK || !targetOK || !source.test || target.test {
 			continue
 		}
-		graph.edges = append(graph.edges, pendingEdge{source: edge.source, target: edge.target, kind: "TESTS",
+		testSource := edge.source
+		if !isTestFunctionName(source.name) {
+			if !strings.HasSuffix(source.file, ".py") {
+				continue
+			}
+			testSource = ""
+			for dot := strings.LastIndexByte(edge.source, '.'); dot >= 0; dot = strings.LastIndexByte(edge.source[:dot], '.') {
+				ancestorQN := edge.source[:dot]
+				ancestor, ok := nodes[ancestorQN]
+				if ok && ancestor.file == source.file && ancestor.test && isTestFunctionName(ancestor.name) {
+					testSource = ancestorQN
+					break
+				}
+			}
+			if testSource == "" {
+				continue
+			}
+		}
+		graph.edges = append(graph.edges, pendingEdge{source: testSource, target: edge.target, kind: "TESTS",
 			properties: edge.properties, evidence: edge.evidence})
 	}
 	for path, source := range files {

@@ -57,11 +57,13 @@ func graphNativeReadCommands() []*cobra.Command {
 	snippet := nativeGraphLeaf("snippet <qualified-name>", "Read source for an indexed symbol", api.OpSnippet, func(cmd *cobra.Command, args []string) any {
 		contextLines, _ := cmd.Flags().GetInt("context")
 		fromLine, _ := cmd.Flags().GetInt("from")
-		return api.SnippetRequest{RepoRoot: repoRoot(), QualifiedName: args[0], ContextLines: contextLines, StartLine: fromLine}
+		maxLines, _ := cmd.Flags().GetInt("lines")
+		return api.SnippetRequest{RepoRoot: repoRoot(), QualifiedName: args[0], ContextLines: contextLines, StartLine: fromLine, MaxLines: maxLines}
 	})
 	snippet.Args = cobra.ExactArgs(1)
 	snippet.Flags().Int("context", 0, "Neighboring source lines")
 	snippet.Flags().Int("from", 0, "First source line to read; use the omitted line from a clipped snippet")
+	snippet.Flags().Int("lines", 0, "Maximum source lines (use with a file path and --from after code-search)")
 	architecture := nativeGraphLeaf("architecture", "Summarize repository architecture", api.OpArchitecture, func(cmd *cobra.Command, _ []string) any {
 		path, _ := cmd.Flags().GetString("path")
 		aspects, _ := cmd.Flags().GetStringSlice("aspect")
@@ -169,6 +171,9 @@ func nativeGraphLeaf(use, short string, operation api.Operation, params func(*co
 // message (with any nearby names) plus the command that finds the right qn.
 func graphCallError(err error) error {
 	msg := err.Error()
+	if strings.Contains(msg, "graph database was built by another version") {
+		return cli.Fail(cli.ExitFail, msg, "so graph build --force")
+	}
 	i := strings.Index(msg, "symbol not found:")
 	if i < 0 {
 		return err
@@ -220,7 +225,11 @@ func renderGraphResult(operation api.Operation, request any, result json.RawMess
 		if json.Unmarshal(result, &architecture) != nil {
 			return "", nil, nil, false
 		}
-		return format.ArchitectureCompact(architecture), nil, architecture, true
+		var help []string
+		if len(architecture.Packages) > 20 && !out().Flags.Full {
+			help = []string{"so graph architecture --full"}
+		}
+		return format.ArchitectureCompact(architecture, out().Flags.Full), help, architecture, true
 	case api.OpStatus:
 		var status api.Status
 		if json.Unmarshal(result, &status) != nil {
@@ -244,7 +253,12 @@ func renderGraphResult(operation api.Operation, request any, result json.RawMess
 		if json.Unmarshal(result, &coverage) != nil {
 			return "", nil, nil, false
 		}
-		return format.CoverageCompact(coverage), format.HelpForCoverage(coverage), coverage, true
+		full := out().Flags.Full
+		var hints []string
+		if !full {
+			hints = format.HelpForCoverage(coverage)
+		}
+		return format.CoverageCompact(coverage, full), hints, coverage, true
 	case api.OpSchema:
 		var schema api.SchemaResult
 		if json.Unmarshal(result, &schema) != nil {
@@ -269,7 +283,7 @@ func renderGraphResult(operation api.Operation, request any, result json.RawMess
 			return "", nil, nil, false
 		}
 		req, _ := request.(api.CodeSearchRequest)
-		return format.CodeSearchCompact(search, req.Pattern, req.PathFilter), format.HelpForCodeSearch(search, req.Pattern, req.Limit), search, true
+		return format.CodeSearchCompact(search, req.Pattern, req.PathFilter, out().Flags.Full), format.HelpForCodeSearch(search, req.Pattern, req.Limit), search, true
 	}
 	return "", nil, nil, false
 }

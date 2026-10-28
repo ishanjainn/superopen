@@ -163,7 +163,8 @@ func harvestBriefCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), text)
+			out().Next("so harvest propose")
+			out().Object("harvest_brief", map[string]any{"session": id, "brief": text})
 			return nil
 		},
 	}
@@ -227,7 +228,7 @@ func harvestListCmd() *cobra.Command {
 				out().Empty("proposals")
 				return nil
 			}
-			out().Rows("proposals", []string{"id", "status", "kind", "target", "title", "plus", "minus"}, rows)
+			out().Rows("proposals", []string{"id", "title", "status", "target", "kind", "plus", "minus"}, rows)
 			return nil
 		},
 	}
@@ -261,7 +262,7 @@ func listHarvestHistory(_ *cobra.Command, store *harvest.Store) error {
 		out().Empty("history")
 		return nil
 	}
-	out().Rows("history", []string{"id", "status", "kind", "source", "target", "title"}, rows)
+	out().Rows("history", []string{"id", "title", "status", "target", "kind", "source"}, rows)
 	return nil
 }
 

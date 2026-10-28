@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/graph/api"
 )
 
@@ -61,6 +62,18 @@ func TestGraphCallErrorNotFoundSuggestsSearch(t *testing.T) {
 	err := graphCallError(errString("graph store_error: snippet: symbol not found: get_fqdn_nope"))
 	if err == nil || !strings.HasPrefix(err.Error(), "symbol not found: get_fqdn_nope") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestGraphCallErrorOldSchemaSuggestsRebuild(t *testing.T) {
+	err := graphCallError(errString("graph store_error: open_graph: graph database was built by another version (schema=5 protocol=1)"))
+	if err == nil || !strings.Contains(err.Error(), "schema=5") || cli.ExitCode(err) != cli.ExitFail {
+		t.Fatalf("err=%v", err)
+	}
+	var output strings.Builder
+	(&cli.Out{Flags: cli.Flags{JSON: true}, W: &output}).WriteError(err)
+	if !strings.Contains(output.String(), `"hint":"so graph build --force"`) {
+		t.Fatalf("missing rebuild hint: %s", output.String())
 	}
 }
 

@@ -11,11 +11,11 @@ import (
 // chain: import map, same module, unique name, then proximity-ranked suffix.
 // It intentionally resolves only published definition labels.
 type symbolRegistry struct {
-	exact  map[string]api.Node
-	byName map[string][]api.Node
-	// accessors are methods read as attributes (Python @property and
-	// @cached_property); reading one runs it.
-	accessors map[string]bool
+	exact          map[string]api.Node
+	byName         map[string][]api.Node
+	projectQN      string
+	packageExports map[string]string
+	decorated map[string]bool
 }
 
 // guessedEdgeConfidence caps an edge the resolver could only guess from a
@@ -162,8 +162,8 @@ func guessStrategy(strategy string) bool {
 
 // receiverGuessIsWeak is true when a name-only resolution of a Python
 // attribute access on a non-imported receiver is unlikely to be right. A
-// read or write (not a call) of obj.select is a data attribute unless the
-// method is an accessor; obj.f() names a module function only through an
+// read or write (not a call) of obj.select needs receiver type evidence even
+// when the target is an accessor; obj.f() names a module function only through an
 // imported module; obj.values() is most often a builtin type's method.
 // self and cls receivers resolve through the class hierarchy instead.
 func (registry symbolRegistry) receiverGuessIsWeak(language, callee string, imports map[string]string, resolution symbolResolution, call bool) bool {
@@ -190,7 +190,7 @@ func (registry symbolRegistry) receiverGuessIsWeak(language, callee string, impo
 	switch target.Label {
 	case "Method":
 		if !call {
-			return !registry.accessors[resolution.qn]
+			return true
 		}
 		// x.values() on a receiver of unknown type is most often the dict,
 		// list, set or str method of that name, not a project method.
@@ -210,7 +210,7 @@ type symbolResolution struct {
 // pass. It is intentionally lexical rather than type-correct: the receiver
 // variable name is capitalized and matched against candidate qualified names.
 // This quirk is part of Superopen's observable resolution behavior.
-func (registry symbolRegistry) applyFieldTypeHint(callee, source string, resolution symbolResolution) symbolResolution {
+func (registry symbolRegistry) applyFieldTypeHint(callee, source, sourceFile string, resolution symbolResolution) symbolResolution {
 	if resolution.qn == "" || resolution.candidates <= 1 {
 		return resolution
 	}
@@ -228,6 +228,9 @@ func (registry symbolRegistry) applyFieldTypeHint(callee, source string, resolut
 	interfaceName := "I" + typeName
 	method := callee[dot+1:]
 	for _, candidate := range registry.byName[method] {
+		if sourceFile != "" && !isTestPath(sourceFile) && isTestPath(candidate.Location.File) {
+			continue
+		}
 		if candidate.QualifiedName != source &&
 			(strings.Contains(candidate.QualifiedName, typeName) || strings.Contains(candidate.QualifiedName, interfaceName)) {
 			resolution.qn = candidate.QualifiedName
@@ -242,6 +245,9 @@ func (registry symbolRegistry) applyFieldTypeHint(callee, source string, resolut
 func newSymbolRegistry(nodes []api.Node) symbolRegistry {
 	registry := symbolRegistry{exact: map[string]api.Node{}, byName: map[string][]api.Node{}}
 	for _, node := range nodes {
+		if node.Label == "Project" && registry.projectQN == "" {
+			registry.projectQN = node.QualifiedName
+		}
 		if external, _ := node.Properties["external"].(bool); external || !registryDefinitionLabel(node.Label) {
 			continue
 		}
@@ -357,9 +363,21 @@ func (registry symbolRegistry) resolveUncached(callee string, session *resolveSe
 	}
 	prefix, suffix := splitRegistryCallee(callee)
 	if session != nil && session.external[prefix] {
+		if node, ok := registry.exact[joinSyntaxScope(module, callee)]; ok && jsxCallableLabel(node.Label) {
+			return symbolResolution{qn: node.QualifiedName, strategy: "same_module", confidence: .9, candidates: 1}
+		}
 		return symbolResolution{}
 	}
 	if resolved := imports[prefix]; resolved != "" {
+		if resolved == registry.projectQN {
+			rootSymbol := suffix
+			if rootSymbol == "" {
+				rootSymbol = prefix
+			}
+			if node, ok := registry.exact[rootSymbol]; ok {
+				return symbolResolution{qn: node.QualifiedName, strategy: "import_map", confidence: .95, candidates: 1}
+			}
+		}
 		if suffix == "" {
 			if _, ok := registry.exact[resolved]; ok {
 				return symbolResolution{qn: resolved, strategy: "import_map", confidence: .95, candidates: 1}
@@ -371,6 +389,15 @@ func (registry symbolRegistry) resolveUncached(callee string, session *resolveSe
 		}
 		if _, ok := registry.exact[candidate]; ok {
 			return symbolResolution{qn: candidate, strategy: "import_map", confidence: .95, candidates: 1}
+		}
+		if suffix != "" {
+			packageMember := resolved + ".__init__." + suffix
+			if node, ok := registry.exact[packageMember]; ok && jsxCallableLabel(node.Label) {
+				return symbolResolution{qn: node.QualifiedName, strategy: "import_map", confidence: .95, candidates: 1}
+			}
+			if exported := registry.packageExports[resolved+"."+suffix]; exported != "" {
+				return symbolResolution{qn: exported, strategy: "import_map", confidence: .95, candidates: 1}
+			}
 		}
 		if suffix == "" && !strings.HasSuffix(resolved, "."+prefix) {
 			// The import bound a package or module rather than the name
@@ -403,7 +430,7 @@ func (registry symbolRegistry) resolveUncached(callee string, session *resolveSe
 		if name == "" {
 			continue
 		}
-		candidate := module + "." + name
+		candidate := joinSyntaxScope(module, name)
 		if _, ok := registry.exact[candidate]; ok {
 			return symbolResolution{qn: candidate, strategy: "same_module", confidence: .9, candidates: 1}
 		}

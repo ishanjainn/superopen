@@ -62,6 +62,36 @@ func TestRowsQuotesComma(t *testing.T) {
 	}
 }
 
+func TestRowsBoundDefaultAndFullEscape(t *testing.T) {
+	rows := make([]map[string]any, 25)
+	for i := range rows {
+		rows[i] = map[string]any{
+			"id": i, "title": strings.Repeat("x", 100), "status": "open",
+			"target": "pkg.method", "kind": "code", "source": "session",
+		}
+	}
+	cols := []string{"id", "title", "status", "target", "kind", "source"}
+	var buf bytes.Buffer
+	(&Out{W: &buf, ErrW: &buf}).Rows("proposals", cols, rows)
+	got := buf.String()
+	for _, want := range []string{
+		"count: 20 of 25", "proposals[20]{id,title,status,target}:",
+		"shown: 20 of 25 rows, 4 of 6 columns (use --full for all)",
+		"truncated, 100 chars — use --full",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("default rows missing %q: %s", want, got)
+		}
+	}
+	buf.Reset()
+	(&Out{Flags: Flags{Full: true}, W: &buf, ErrW: &buf}).Rows("proposals", cols, rows)
+	if !strings.Contains(buf.String(), "count: 25 of 25") ||
+		!strings.Contains(buf.String(), "proposals[25]{id,title,status,target,kind,source}:") ||
+		strings.Contains(buf.String(), "truncated") {
+		t.Fatalf("--full did not restore complete rows: %s", buf.String())
+	}
+}
+
 func TestWriteErrorStdout(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	o := &Out{W: &out, ErrW: &errBuf}
@@ -99,7 +129,7 @@ func TestQuietUnmanagedSkipsWithoutErrorPrefix(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	(&Out{W: &buf}).WriteError(err)
-	if buf.String() != "not a Superopen repo\n" {
+	if buf.String() != "status: not a Superopen repo\n" {
 		t.Fatalf("got %q", buf.String())
 	}
 }

@@ -52,17 +52,10 @@ func readOpenHandsDocument(t *testing.T, path string) map[string]json.RawMessage
 	return document
 }
 
-// openHandsCommands returns every hook command in the file, keyed by the event it is registered
-// under, reading the document exactly as OpenHands does -- unwrapping a legacy wrapper first.
+// openHandsCommands returns every hook command in the file, keyed by event.
 func openHandsCommands(t *testing.T, path string) map[string][]string {
 	t.Helper()
 	document := readOpenHandsDocument(t, path)
-	if wrapper, ok := document[openHandsWrapperKey]; ok {
-		document = map[string]json.RawMessage{}
-		if err := json.Unmarshal(wrapper, &document); err != nil {
-			t.Fatalf("decode hooks wrapper: %v", err)
-		}
-	}
 	out := map[string][]string{}
 	for key, raw := range document {
 		var groups []struct {
@@ -248,10 +241,7 @@ func TestInstallOpenHandsIsIdempotent(t *testing.T) {
 	}
 }
 
-// The loader unwraps `{"hooks": {...}}` by replacing the whole document with what is under that
-// key. Adding a top-level event beside the wrapper does not merge -- it discards Superopen's hooks
-// with a log line nobody sees -- so Superopen writes inside the wrapper when it finds one.
-func TestInstallOpenHandsWritesInsideTheLegacyWrapper(t *testing.T) {
+func TestInstallOpenHandsRejectsWrappedHooks(t *testing.T) {
 	path := openHandsUserHooksPath(t)
 	writeOpenHandsFixture(t, path, `{
   "hooks": {
@@ -260,21 +250,8 @@ func TestInstallOpenHandsWritesInsideTheLegacyWrapper(t *testing.T) {
     ]
   }
 }`)
-	installOpenHandsFixture(t, path)
-
-	document := readOpenHandsDocument(t, path)
-	if len(document) != 1 {
-		t.Fatalf("document keys = %v, want only the hooks wrapper", document)
-	}
-	if _, ok := document[openHandsWrapperKey]; !ok {
-		t.Fatalf("document = %v, want the wrapper preserved", document)
-	}
-	commands := openHandsCommands(t, path)
-	if !openHandsHasSuperopenCommand(commands["PreToolUse"]) {
-		t.Fatalf("PreToolUse hooks = %v, want Superopen's hook inside the wrapper", commands["PreToolUse"])
-	}
-	if !openHandsHasCommand(commands["PreToolUse"], ".openhands/hooks/block_dangerous.sh") {
-		t.Fatalf("PreToolUse hooks = %v, want the user's hook preserved", commands["PreToolUse"])
+	if err := installOpenHandsHooks(path, "/tmp/so", "/tmp/runtime.jsonl", "/tmp/config.json"); err == nil {
+		t.Fatal("wrapped hooks must be rejected instead of silently accepted")
 	}
 }
 

@@ -93,14 +93,21 @@ func (e *toonEncoder) list(key string, items []any, depth int) {
 		e.line(depth, "%s[%d]: %s", key, total, strings.Join(cells, ","))
 	case cols(items) != nil:
 		columns := cols(items)
-		e.line(depth, "%s[%d]{%s}:", key, total, strings.Join(columns, ","))
+		shownColumns := columns
+		if !e.full && len(shownColumns) > 4 {
+			shownColumns = shownColumns[:4]
+		}
+		e.line(depth, "%s[%d]{%s}:", key, total, strings.Join(shownColumns, ","))
 		for _, item := range shown {
 			rec := item.(map[string]any)
-			cells := make([]string, len(columns))
-			for i, c := range columns {
+			cells := make([]string, len(shownColumns))
+			for i, c := range shownColumns {
 				cells[i] = e.scalar(rec[c], true)
 			}
 			e.line(depth+1, "%s", strings.Join(cells, ","))
+		}
+		if len(shownColumns) < len(columns) {
+			e.line(depth, "%s_fields: %d of %d (use --full for all)", key, len(shownColumns), len(columns))
 		}
 	default:
 		e.line(depth, "%s[%d]:", key, total)
@@ -153,9 +160,6 @@ func cols(items []any) []string {
 		out = append(out, k)
 	}
 	sort.Strings(out)
-	if len(out) > 8 {
-		return nil
-	}
 	return out
 }
 

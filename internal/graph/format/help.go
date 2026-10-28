@@ -16,6 +16,9 @@ func HelpForQuery(result api.QueryResult, question string, limit int) []string {
 	var hints []string
 	shownEnd := result.Offset + len(result.Rows)
 	if more := result.RowsTotal - shownEnd; more > 0 && len(result.Rows) > 0 {
+		if more > 100 && result.Offset == 0 && looksLikeLiteralQuestion(question) {
+			hints = append(hints, "exact flag or string: so graph code-search -- \"<literal>\"")
+		}
 		cmd := fmt.Sprintf("so graph query %s --offset %d", Quote(question), shownEnd)
 		if limit > 0 {
 			cmd += fmt.Sprintf(" --limit %d", limit)
@@ -29,7 +32,7 @@ func HelpForQuery(result api.QueryResult, question string, limit int) []string {
 	}
 	switch {
 	case len(result.Rows) == 0 && result.Offset == 0:
-		hints = append(hints, "so graph search <name>", "so graph code-search \"<text>\"")
+		hints = append(hints, "so graph search <name>", "so graph code-search -- \"<text>\"")
 	case len(result.Bodies) == 0 && len(result.Rows) > 0:
 		hints = append(hints, "so graph snippet <qn>")
 	}
@@ -37,6 +40,16 @@ func HelpForQuery(result api.QueryResult, question string, limit int) []string {
 		hints = append(hints, "so graph impact --files <path>")
 	}
 	return hints
+}
+
+func looksLikeLiteralQuestion(question string) bool {
+	lower := strings.ToLower(question)
+	for _, term := range []string{"option", "flag", "literal", "error message", "config value", "setting"} {
+		if strings.Contains(lower, term) {
+			return true
+		}
+	}
+	return false
 }
 
 func looksLikeImpactQuestion(q string) bool {
@@ -68,7 +81,7 @@ func HelpForSearch(result api.SearchResult, query string, limit int) []string {
 	}
 	if len(matches) == 0 {
 		// Imports, strings and stdlib names are not graph symbols.
-		return []string{fmt.Sprintf("text search (imports, strings, unindexed files): so graph code-search %s", Quote(query))}
+		return []string{fmt.Sprintf("text search (imports, strings, unindexed files): so graph code-search -- %s", Quote(query))}
 	}
 	var hints []string
 	if more := result.Page.Total - len(matches); more > 0 {
@@ -104,7 +117,7 @@ func HelpForTrace(result api.TraceResult) []string {
 		hints = append(hints, fmt.Sprintf("%d in tests: so graph trace %s --direction %s --tests", result.Tests, start, normalizeTraceDirection(result.Direction)))
 	}
 	if empty {
-		return append(hints, "dynamic or string references: so graph code-search \"<name>\"")
+		return append(hints, "dynamic or string references: so graph code-search -- \"<name>\"")
 	}
 	if result.Truncated {
 		hints = append(hints, fmt.Sprintf("so graph trace %s --direction %s --limit 300", start, normalizeTraceDirection(result.Direction)))
@@ -126,17 +139,27 @@ func HelpForSnippet(result api.SnippetResult) []string {
 
 // HelpForCodeSearch returns next steps after a text search.
 func HelpForCodeSearch(result api.CodeSearchResult, pattern string, limit int) []string {
+	var hints []string
+	if len(result.Matches) > 0 && len(result.Bodies) == 0 {
+		hit := result.Matches[0]
+		if hit.Location.File != "" && hit.Location.StartLine > 0 {
+			start := max(1, hit.Location.StartLine-8)
+			hints = append(hints, fmt.Sprintf("source around exact hit: so graph snippet %s --from %d --lines 30", Quote(hit.Location.File), start))
+		} else {
+			hints = append(hints, "source around a match: so graph snippet <file> --from <line> --lines 30")
+		}
+	}
 	if more := result.TotalGrepMatches - len(result.Matches); more > 0 {
 		next := limit * 5
 		if next <= 0 {
 			next = 100
 		}
-		return []string{
-			fmt.Sprintf("%d more: so graph code-search %s --limit %d", more, Quote(pattern), next),
-			fmt.Sprintf("narrow: so graph code-search %s <path>", Quote(pattern)),
-		}
+		hints = append(hints,
+			fmt.Sprintf("%d more: so graph code-search --limit %d -- %s", more, next, Quote(pattern)),
+			fmt.Sprintf("narrow: so graph code-search -- %s <path>", Quote(pattern)),
+		)
 	}
-	return nil
+	return hints
 }
 
 func lastSegment(qn string) string {

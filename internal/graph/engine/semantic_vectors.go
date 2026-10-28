@@ -170,7 +170,7 @@ func (corpus *semanticCorpus) Finalize(model *pretrainedVectors) {
 	for id, token := range corpus.tokens {
 		base[id] = semanticIndex(token, model)
 		pass1[id] = base[id]
-		accumulateSemanticContext(&pass1[id], occurrences[id], corpus.docs, func(neighbor int) semanticVector { return base[neighbor] })
+		accumulateSemanticContext(&pass1[id], occurrences[id], corpus.docs, base)
 		normalizeSemantic(&pass1[id])
 	}
 	quantized := make([][semanticDimensions]int8, len(pass1))
@@ -192,13 +192,7 @@ func (corpus *semanticCorpus) Finalize(model *pretrainedVectors) {
 	corpus.enriched = make([]semanticVector, len(corpus.tokens))
 	for id := range corpus.tokens {
 		var second semanticVector
-		accumulateSemanticContext(&second, occurrences[id], corpus.docs, func(neighbor int) semanticVector {
-			var decoded semanticVector
-			for dimension, value := range quantized[neighbor] {
-				decoded[dimension] = float32(value) / 127
-			}
-			return decoded
-		})
+		accumulateQuantizedContext(&second, occurrences[id], corpus.docs, quantized)
 		normalizeSemantic(&second)
 		for dimension := range second {
 			second[dimension] = .7*pass1[id][dimension] + .3*second[dimension]
@@ -209,7 +203,7 @@ func (corpus *semanticCorpus) Finalize(model *pretrainedVectors) {
 	corpus.finalized = true
 }
 
-func accumulateSemanticContext(target *semanticVector, occurrences []semanticOccurrence, docs [][]int, vector func(int) semanticVector) {
+func accumulateSemanticContext(target *semanticVector, occurrences []semanticOccurrence, docs [][]int, vectors []semanticVector) {
 	step := 1
 	if len(occurrences) > 512 {
 		step = len(occurrences) / 512
@@ -222,12 +216,38 @@ func accumulateSemanticContext(target *semanticVector, occurrences []semanticOcc
 			if distance == 0 || position < 0 || position >= len(ids) {
 				continue
 			}
-			neighbor := vector(ids[position])
+			neighbor := &vectors[ids[position]]
 			absolute := distance
 			if absolute < 0 {
 				absolute = -absolute
 			}
-			addScaledSemantic(target, &neighbor, 1/float32(absolute))
+			addScaledSemantic(target, neighbor, 1/float32(absolute))
+		}
+	}
+}
+
+func accumulateQuantizedContext(target *semanticVector, occurrences []semanticOccurrence, docs [][]int, vectors [][semanticDimensions]int8) {
+	step := 1
+	if len(occurrences) > 512 {
+		step = len(occurrences) / 512
+	}
+	for occurrence := 0; occurrence < len(occurrences); occurrence += step {
+		current := occurrences[occurrence]
+		ids := docs[current.document]
+		for distance := -5; distance <= 5; distance++ {
+			position := current.position + distance
+			if distance == 0 || position < 0 || position >= len(ids) {
+				continue
+			}
+			absolute := distance
+			if absolute < 0 {
+				absolute = -absolute
+			}
+			scale := 1 / float32(absolute)
+			neighbor := &vectors[ids[position]]
+			for dimension, value := range neighbor {
+				target[dimension] += scale * (float32(value) / 127)
+			}
 		}
 	}
 }

@@ -45,6 +45,12 @@ func TestBashLooksLikeReadAndListing(t *testing.T) {
 	if bashLooksLikeGraphQuery("/usr/local/bin/so graph snippet pkg.Foo.bar") {
 		t.Fatal("snippet must not look like graph query")
 	}
+	if !bashLooksLikeGraphCodeSearch("/usr/local/bin/so graph code-search '--verbose' pylint") {
+		t.Fatal("literal graph search should match")
+	}
+	if bashLooksLikeGraphCodeSearch("/usr/local/bin/so graph query 'verbose option'") {
+		t.Fatal("query must not look like literal graph search")
+	}
 }
 
 func TestBashCatPreToolUseEmitsGraphNudge(t *testing.T) {
@@ -773,6 +779,47 @@ func TestQueryRepeatOverflowOnceAfterStamp(t *testing.T) {
 	}
 	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "search", snippetPayload); ok {
 		t.Fatal("graph snippet after a query must stay silent")
+	}
+}
+
+func TestCodeSearchSatisfiesGraphGateWithoutBlockingFirstQuery(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".so", "db"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".so", "db", "so.db"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const session = "literal-first-session"
+	writeHookSession(t, root, session)
+	writeHookSourceFile(t, root)
+	payload := func(command string) []byte {
+		t.Helper()
+		data, err := json.Marshal(map[string]any{
+			"tool_name": "Bash", "tool_input": map[string]any{"command": command},
+			"cwd": root, "session_id": session,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	if d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", payload("/usr/local/bin/so graph code-search '--verbose' pylint")); ok {
+		t.Fatalf("code-search must run without nudge, got %q", d.text)
+	}
+	if !engine.QueryStampFreshFor(root, session) {
+		t.Fatal("code-search should satisfy the graph-first gate")
+	}
+	if d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", payload("rg verbose pylint")); ok {
+		t.Fatalf("code-search should silence the initial grep nudge, got %q", d.text)
+	}
+	query := payload("/usr/local/bin/so graph query 'verbose option construction'")
+	if d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", query); ok {
+		t.Fatalf("first relationship query after code-search must run, got %q", d.text)
+	}
+	if d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", query); !ok || !paths.MentionsCommand(d.text, "graph snippet") {
+		t.Fatalf("second relationship query should get overflow, got ok=%v text=%q", ok, d.text)
 	}
 }
 

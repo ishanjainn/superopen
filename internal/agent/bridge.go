@@ -2,11 +2,9 @@ package agent
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/agent/config"
@@ -14,7 +12,6 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/skills"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
 	"github.com/ishanjainn/superopen/internal/agent/vendors"
-	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/paths"
 )
 
@@ -38,7 +35,6 @@ type InstallReport struct {
 func Install(repoRoot string, selected []string, opts Options) (InstallReport, error) {
 	_ = repoRoot
 	report := InstallReport{Hooks: map[string][]string{}}
-	_ = removeNetworkTelemetryConfig()
 	if opts.Strict {
 		if err := enableHookStrict(); err != nil {
 			return report, fmt.Errorf("enable strict hooks: %w", err)
@@ -97,92 +93,6 @@ func Install(repoRoot string, selected []string, opts Options) (InstallReport, e
 	return report, nil
 }
 
-// Write prints what install finished: a checklist on a terminal, TOON when
-// the output is piped (an agent or CI reading it).
-func (r InstallReport) Write(w io.Writer) {
-	if !writerIsTTY(w) {
-		r.writeTOON(w)
-		return
-	}
-	green, reset := "", ""
-	if writerIsTTY(w) {
-		green, reset = "\033[32m", "\033[0m"
-	}
-	tick := func(label, detail string) {
-		if detail == "" {
-			fmt.Fprintf(w, "  %s✓%s  %s\n", green, reset, label)
-			return
-		}
-		fmt.Fprintf(w, "  %s✓%s  %-14s %s\n", green, reset, label, detail)
-	}
-	if len(r.Skills) > 0 || len(r.Guidance) > 0 || r.CursorRule != "" {
-		tick("Skill", "")
-	}
-	if names := hookNames(r.Hooks); len(names) > 0 {
-		tick("Hooks", strings.Join(names, ", "))
-	}
-	if r.Strict {
-		tick("Strict mode", "first source read waits for a graph query")
-	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  Next")
-	fmt.Fprintln(w, "    so init        in a repository")
-	fmt.Fprintln(w, "    so dev         open the UI")
-	fmt.Fprintln(w, "  Restart the coding agent so it loads the hooks.")
-}
-
-func (r InstallReport) writeTOON(w io.Writer) {
-	fmt.Fprintln(w, "install: done")
-	if len(r.Skills) > 0 || len(r.Guidance) > 0 || r.CursorRule != "" {
-		fmt.Fprintln(w, "skill: installed")
-	}
-	if names := hookNames(r.Hooks); len(names) > 0 {
-		cells := make([]string, len(names))
-		for i, n := range names {
-			cells[i] = cli.ToonQuote(n, true)
-		}
-		fmt.Fprintf(w, "hooks[%d]: %s\n", len(names), strings.Join(cells, ","))
-	}
-	if r.Strict {
-		fmt.Fprintln(w, "strict: first source read waits for a graph query")
-	}
-	fmt.Fprintln(w, "restart_required: true")
-	fmt.Fprintln(w, "help[2]:\n  so init\n  so dev")
-}
-
-func hookNames(hooks map[string][]string) []string {
-	seen := map[string]bool{}
-	var names []string
-	for _, spec := range vendors.All() {
-		if len(hooks[spec.ID]) == 0 {
-			continue
-		}
-		seen[spec.ID] = true
-		names = append(names, spec.Label)
-	}
-	var extra []string
-	for id, paths := range hooks {
-		if seen[id] || len(paths) == 0 {
-			continue
-		}
-		extra = append(extra, vendors.Label(id))
-	}
-	sort.Strings(extra)
-	return append(names, extra...)
-}
-
-func writerIsTTY(w io.Writer) bool {
-	f, ok := w.(*os.File)
-	if !ok {
-		return false
-	}
-	st, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return st.Mode()&os.ModeCharDevice != 0
-}
-
 // Status reports whether each vendor looks installed.
 func Status(repoRoot string, vendors []string) map[string]bool {
 	_ = repoRoot
@@ -201,8 +111,7 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 			out["claude-code"] = e == nil && hookBinaryAvailable(string(data), "cc")
 		case "cursor":
 			data, e := os.ReadFile(filepath.Join(home, ".cursor", "hooks.json"))
-			out["cursor"] = e == nil && (strings.Contains(string(data), "sessions hook --vendor=cursor") ||
-				strings.Contains(string(data), "coding hook --vendor=cursor"))
+			out["cursor"] = e == nil && strings.Contains(string(data), "sessions hook --vendor=cursor")
 		case "codex":
 			ok := false
 			if codexDir != "" {
@@ -214,8 +123,7 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 			out["codex"] = ok
 		case "gemini":
 			data, e := os.ReadFile(filepath.Join(home, ".gemini", "settings.json"))
-			out["gemini"] = e == nil && (strings.Contains(string(data), "sessions hook --vendor=gemini") ||
-				strings.Contains(string(data), "coding hook --vendor=gemini"))
+			out["gemini"] = e == nil && strings.Contains(string(data), "sessions hook --vendor=gemini")
 		case "opencode":
 			// Host loads ~/.config/opencode/plugins (not ~/.opencode/plugins).
 			base, _ := paths.OpenCodeConfigDir()
@@ -225,8 +133,7 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 			// Copilot CLI: ~/.copilot/hooks (not ~/.github/hooks).
 			base, _ := paths.CopilotHome()
 			data, e := os.ReadFile(filepath.Join(base, "hooks", "superopen.json"))
-			out["copilot-cli"] = e == nil && (strings.Contains(string(data), "sessions hook --vendor=copilot") ||
-				strings.Contains(string(data), "coding hook --vendor=copilot"))
+			out["copilot-cli"] = e == nil && strings.Contains(string(data), "sessions hook --vendor=copilot")
 		case "pi":
 			// Host loads ~/.pi/agent/extensions (not ~/.pi/extensions).
 			_, e := os.Stat(filepath.Join(home, ".pi", "agent", "extensions", "superopen", "index.ts"))
@@ -238,9 +145,6 @@ func Status(repoRoot string, vendors []string) map[string]bool {
 
 func hookBinaryAvailable(manifest, vendor string) bool {
 	idx := strings.Index(manifest, " sessions hook --vendor="+vendor)
-	if idx < 0 {
-		idx = strings.Index(manifest, " coding hook --vendor="+vendor)
-	}
 	if idx < 0 {
 		return false
 	}
@@ -267,41 +171,4 @@ func hookBinaryAvailable(manifest, vendor string) bool {
 func enableHookStrict() error {
 	_, err := config.Save(map[string]string{"SUPEROPEN_HOOK_STRICT": "1"})
 	return err
-}
-
-func removeNetworkTelemetryConfig() error {
-	dir, err := paths.ConfigDir()
-	if err != nil {
-		return err
-	}
-	// Older builds stored remote-export credentials here. No current command
-	// reads this file, so remove the obsolete secret during install/sync.
-	_ = os.Remove(filepath.Join(dir, "auth.json"))
-	path := filepath.Join(dir, "config.env")
-	prev, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var kept []string
-	for _, line := range strings.Split(string(prev), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "SUPEROPEN_OTLP_ENDPOINT=") ||
-			strings.HasPrefix(trimmed, "OTEL_EXPORTER_OTLP_ENDPOINT=") ||
-			strings.HasPrefix(trimmed, "OTEL_EXPORTER_OTLP_HEADERS=") ||
-			strings.HasPrefix(trimmed, "OTEL_RESOURCE_ATTRIBUTES=") ||
-			strings.HasPrefix(trimmed, "SUPEROPEN_API_KEY=") ||
-			trimmed == "# written by so init / so coding install" {
-			continue
-		}
-		if trimmed != "" {
-			kept = append(kept, line)
-		}
-	}
-	if len(kept) == 0 {
-		return os.Remove(path)
-	}
-	return os.WriteFile(path, []byte(strings.Join(kept, "\n")+"\n"), 0o600)
 }

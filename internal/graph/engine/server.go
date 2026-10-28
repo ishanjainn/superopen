@@ -327,6 +327,14 @@ func (s Server) dispatch(ctx context.Context, req api.Request) (any, *api.Error)
 		if err != nil {
 			return nil, storeError("code_search", err)
 		}
+		if paths.Managed(root) {
+			if store, openErr := openRequestStore(root); openErr == nil {
+				defer store.Close()
+				if err := store.attachCodeSearchSymbols(ctx, params.Project, &result, params.Pattern); err != nil {
+					return nil, storeError("code_search_symbols", err)
+				}
+			}
+		}
 		return result, nil
 	case api.OpIncremental:
 		var params api.IncrementalRequest

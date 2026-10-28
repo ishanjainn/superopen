@@ -15,7 +15,7 @@ text; `--json` is the envelope.
 You are the live agent. On `HARVEST pending session <id>`, **before answering**. The current user message is a note for this turn (`memory capture`). It is not a playbook diff for that session. If the session has nothing to change, skip it.
 
 ```
-__SO_BIN__ harvest brief <id>
+__SO_BIN__ harvest brief <id> --full
 __SO_BIN__ harvest propose
 ```
 

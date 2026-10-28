@@ -2,10 +2,8 @@
 package version
 
 import (
-	"fmt"
 	"strings"
 
-	"encoding/json"
 	"github.com/spf13/cobra"
 
 	"github.com/ishanjainn/superopen/internal/cli"
@@ -39,21 +37,14 @@ func NewCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			out := cmd.OutOrStdout()
-			if cli.FlagsFromCmd(cmd).JSON {
-				// --json is honored here like everywhere else: the shared envelope.
-				return json.NewEncoder(out).Encode(map[string]any{
-					"ok": true, "kind": "version",
-					"data": map[string]any{"version": Display(), "commit": Commit},
-					"next": []string{},
-				})
-			}
+			o := cli.NewFromCmd(cmd)
+			data := map[string]any{"version": Display()}
 			if Commit != "" {
-				_, err := fmt.Fprintf(out, "so %s (%s)\n", Display(), Commit)
-				return err
+				data["commit"] = Commit
 			}
-			_, err := fmt.Fprintf(out, "so %s\n", Display())
-			return err
+			o.Next("so --help")
+			o.Object("version", data)
+			return nil
 		},
 	}
 }

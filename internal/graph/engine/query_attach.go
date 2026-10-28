@@ -13,11 +13,205 @@ const queryMaxBodies = 3
 
 func queryAttachableLabel(label string) bool {
 	switch label {
-	case "Method", "Function", "Constructor":
+	case "Method", "Function", "Constructor", "Variable":
 		return true
 	default:
 		return false
 	}
+}
+
+func queryAttachableNode(n api.Node) bool {
+	return queryAttachableLabel(n.Label) && !skipDataLanguageVariable(n)
+}
+
+func queryNodeLooksLikeAuxiliary(n api.Node) bool {
+	return codeSearchFileRank(n.Location.File) != 0
+}
+
+// queryBodyCandidates reserves the first body for the best implementation
+// hit, then shows implementation symbols joined by a behavioral edge. Tests
+// and isolated symbols use any remaining slots.
+func queryBodyCandidates(rows []api.Node, edges []api.Edge, terms []string) []api.Node {
+	if len(rows) > 0 && rows[0].Label == "Route" {
+		out := []api.Node{rows[0]}
+		for _, n := range rows[1:] {
+			if !queryAttachableNode(n) {
+				continue
+			}
+			for _, edge := range edges {
+				if edge.Type == "HANDLES" && edge.SourceID == n.ID && edge.TargetID == rows[0].ID {
+					return append(out, n)
+				}
+			}
+		}
+		return out
+	}
+	byID := make(map[int64]bool, len(rows))
+	for _, n := range rows {
+		byID[n.ID] = true
+	}
+	eligible := func(n api.Node) bool {
+		if !queryAttachableNode(n) {
+			return false
+		}
+		span := n.Location.EndLine - n.Location.StartLine + 1
+		if n.Location.StartLine > 0 && span > 0 && span <= 2 {
+			if n.Label == "Variable" {
+				return false // the row itself already shows a one-line value
+			}
+			for _, e := range edges {
+				if e.SourceID == n.ID && e.Type == "CALLS" && byID[e.TargetID] {
+					return false // show the wrapper's callee body instead
+				}
+			}
+		}
+		return true
+	}
+	sharedUse := func(left, right int64) bool {
+		for _, a := range edges {
+			if a.SourceID != left || a.Type != "USAGE" {
+				continue
+			}
+			for _, b := range edges {
+				if b.SourceID == right && b.TargetID == a.TargetID && b.Type == "USAGE" {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	seen := map[int64]bool{}
+	var out []api.Node
+	add := func(n api.Node) {
+		if eligible(n) && !seen[n.ID] {
+			seen[n.ID] = true
+			out = append(out, n)
+		}
+	}
+	for _, n := range rows {
+		if !queryNodeLooksLikeAuxiliary(n) && eligible(n) {
+			add(n)
+			break
+		}
+	}
+	if len(out) > 0 {
+		primary := out[0]
+		bestScore := -1
+		var best api.Node
+		for i, n := range rows {
+			if seen[n.ID] || queryNodeLooksLikeAuxiliary(n) || !eligible(n) {
+				continue
+			}
+			score := -1
+			for _, e := range edges {
+				if e.SourceID == primary.ID && e.TargetID == n.ID || e.TargetID == primary.ID && e.SourceID == n.ID {
+					score = 40
+					if e.Type == "CALLS" {
+						score = 100
+					}
+				}
+			}
+			if score < 0 && sharedUse(primary.ID, n.ID) {
+				score = 60
+			}
+			if score < 0 {
+				continue
+			}
+			if n.Location.File != primary.Location.File {
+				score += 20
+			}
+			score += len(rows) - i
+			if score > bestScore {
+				best, bestScore = n, score
+			}
+		}
+		if best.ID != 0 {
+			add(best)
+		} else if len(terms) > 0 {
+			// When no direct edge survives the page, a method named for the
+			// question's first concept is a better second body than another
+			// broad parser or entry point.
+			bestScore = 0
+			for _, n := range rows {
+				if seen[n.ID] || queryNodeLooksLikeAuxiliary(n) || !eligible(n) {
+					continue
+				}
+				if score := queryNameOverlap(n, terms[:1]); score > bestScore {
+					best, bestScore = n, score
+				}
+			}
+			if best.ID != 0 {
+				add(best)
+			}
+		}
+	}
+	if len(out) > 0 {
+		bestScore := -1
+		var best api.Node
+		for i, n := range rows {
+			if seen[n.ID] || queryNodeLooksLikeAuxiliary(n) || !eligible(n) {
+				continue
+			}
+			// The answer row order already combines lexical and structural
+			// evidence. Keep a broad name match late in the page from taking
+			// a body slot from an earlier implementation.
+			score := (len(rows) - i) * 25
+			newFile := true
+			for _, chosen := range out {
+				if chosen.Location.File == n.Location.File {
+					newFile = false
+				}
+				if chosen.Name != "" && chosen.Name == n.Name {
+					score += 80
+				}
+			}
+			if newFile {
+				score += 50
+			}
+			score += queryNameOverlap(n, terms) * 2
+			for _, e := range edges {
+				if (e.SourceID == n.ID || e.TargetID == n.ID) && byID[e.SourceID] && byID[e.TargetID] {
+					score += 30
+					break
+				}
+			}
+			for _, e := range edges {
+				for _, chosen := range out {
+					if e.SourceID == chosen.ID && e.TargetID == n.ID || e.TargetID == chosen.ID && e.SourceID == n.ID {
+						score += 80
+					}
+				}
+			}
+			for _, chosen := range out {
+				if sharedUse(chosen.ID, n.ID) {
+					score += 80
+				}
+			}
+			if score > bestScore {
+				best, bestScore = n, score
+			}
+		}
+		if best.ID != 0 {
+			add(best)
+		}
+	}
+	for _, n := range rows {
+		if !queryNodeLooksLikeAuxiliary(n) {
+			add(n)
+		}
+	}
+	for _, n := range rows {
+		add(n)
+	}
+	// A single short wrapper or one-line variable may still be the answer.
+	// Keep it available after the larger implementations have used the budget.
+	for _, n := range rows {
+		if queryAttachableNode(n) && !seen[n.ID] {
+			seen[n.ID] = true
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func querySymbolNames(n api.Node) (name, last string) {

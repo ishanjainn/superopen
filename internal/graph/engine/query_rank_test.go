@@ -73,6 +73,58 @@ func TestScoreRankDocsBoostsNamedIdentifier(t *testing.T) {
 	}
 }
 
+func TestScoreRankDocsPrefersNamedOwnerAndMethod(t *testing.T) {
+	pool := []rankDoc{
+		rankFixtureDoc("can_fast_delete", "django.db.models.deletion.Collector.can_fast_delete", "django/db/models/deletion.py", "Check fast delete", "fast_deletes model"),
+		rankFixtureDoc("can_fast_delete", "django.contrib.admin.utils.NestedObjects.can_fast_delete", "django/contrib/admin/utils.py", "Check fast delete", "fast_deletes model"),
+		rankFixtureDoc("delete", "django.db.models.deletion.Collector.delete", "django/db/models/deletion.py", "Delete collected objects", "fast_deletes raw_delete model"),
+	}
+	q := "Collector delete combine fast deletes by model table OR predicates"
+	df := map[string]int{}
+	for _, term := range queryRankTerms(q) {
+		df[term] = 10
+	}
+	got := scoreRankDocs(pool, queryRankTerms(q), df, 1000, queryRankIdents(q), q)
+	if len(got) == 0 || got[0].QualifiedName != "django.db.models.deletion.Collector.delete" {
+		t.Fatalf("named owner and method should rank first, got %v", rankNames(got))
+	}
+}
+
+func TestQueryRowsPutNamedOwnerMethodOnFirstPage(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenWritable(t.TempDir() + "/graph.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	err = store.Build(ctx, func(builder *Builder) error {
+		if err := builder.PutProject(ProjectRecord{Name: "fixture", RootPath: t.TempDir(), Generation: "one", EngineVersion: "test", IndexedAt: time.Now().UTC()}); err != nil {
+			return err
+		}
+		for _, n := range []api.Node{
+			{Label: "Method", Name: "can_fast_delete", QualifiedName: "django.db.models.deletion.Collector.can_fast_delete", Location: api.Location{File: "django/db/models/deletion.py", StartLine: 126, EndLine: 160}, Properties: api.Properties{"docstring": "Check fast delete", "bt": "fast_deletes model"}},
+			{Label: "Method", Name: "can_fast_delete", QualifiedName: "django.contrib.admin.utils.NestedObjects.can_fast_delete", Location: api.Location{File: "django/contrib/admin/utils.py", StartLine: 214, EndLine: 219}, Properties: api.Properties{"docstring": "Check fast delete", "bt": "fast_deletes model"}},
+			{Label: "Method", Name: "delete", QualifiedName: "django.db.models.deletion.Collector.delete", Location: api.Location{File: "django/db/models/deletion.py", StartLine: 283, EndLine: 349}, Properties: api.Properties{"docstring": "Delete collected objects", "bt": "fast_deletes raw_delete model"}},
+		} {
+			n.Project = "fixture"
+			if _, err := builder.PutNode(n); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.Query(ctx, api.QueryRequest{Project: "fixture", Question: "Collector delete combine fast deletes by model table OR predicates"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Rows) == 0 || result.Rows[0].QualifiedName != "django.db.models.deletion.Collector.delete" {
+		t.Fatalf("named edit target should lead the page, got %v", rankNames(result.Rows))
+	}
+}
+
 func TestScoreRankDocsSinksVendoredTrees(t *testing.T) {
 	pool := []rankDoc{
 		rankFixtureDoc("highlight", "static.jquery.highlight", "pkg/static/jquery.js", "", "highlight text"),

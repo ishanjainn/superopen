@@ -181,6 +181,9 @@ func jsSyntaxImportTarget(sourceFile, imported string, index *importTargetIndex)
 	clean := filepath.ToSlash(imported)
 	if strings.HasPrefix(clean, ".") {
 		clean = filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(sourceFile), clean)))
+		if clean == "." {
+			return index.projectQN
+		}
 	} else {
 		clean = strings.TrimPrefix(clean, "@/")
 	}
@@ -294,23 +297,7 @@ func syntaxImportSymbolFallback(sourceFile, imported string, index *importTarget
 // a method named db and "from collections import Counter" to an unrelated
 // module called collections.
 func pythonSyntaxImportTarget(sourceFile, imported string, index *importTargetIndex) string {
-	dotted := imported
-	if strings.HasPrefix(dotted, ".") {
-		rest := strings.TrimLeft(dotted, ".")
-		pkg := path.Dir(filepath.ToSlash(sourceFile))
-		for up := len(dotted) - len(rest); up > 1; up-- {
-			pkg = path.Dir(pkg)
-		}
-		dotted = rest
-		if pkg != "." && pkg != "/" {
-			base := strings.ReplaceAll(pkg, "/", ".")
-			if dotted == "" {
-				dotted = base
-			} else {
-				dotted = base + "." + dotted
-			}
-		}
-	}
+	dotted := pythonAbsoluteImportName(sourceFile, imported)
 	if dotted == "" {
 		return ""
 	}
@@ -351,6 +338,27 @@ func pythonSyntaxImportTarget(sourceFile, imported string, index *importTargetIn
 		work = work[:dot]
 	}
 	return ""
+}
+
+func pythonAbsoluteImportName(sourceFile, imported string) string {
+	dotted := imported
+	if strings.HasPrefix(dotted, ".") {
+		rest := strings.TrimLeft(dotted, ".")
+		pkg := path.Dir(filepath.ToSlash(sourceFile))
+		for up := len(dotted) - len(rest); up > 1; up-- {
+			pkg = path.Dir(pkg)
+		}
+		dotted = rest
+		if pkg != "." && pkg != "/" {
+			base := strings.ReplaceAll(pkg, "/", ".")
+			if dotted == "" {
+				dotted = base
+			} else {
+				dotted = base + "." + dotted
+			}
+		}
+	}
+	return dotted
 }
 
 // pythonRootedModule finds the one module whose qualified name is work

@@ -44,6 +44,13 @@ func QueryCompact(result api.QueryResult) string {
 	if edges := queryEdgeRows(result.Rows, result.Edges); len(edges) > 0 {
 		Table(&b, "", "edges", []string{"from", "rel", "to"}, edges)
 	}
+	if len(result.Linked) > 0 {
+		rows := make([][]string, 0, len(result.Linked))
+		for _, link := range result.Linked {
+			rows = append(rows, []string{shortQN(link.From), link.Rel, link.To, link.File + ":" + lineRange(link.Start, link.End)})
+		}
+		Table(&b, "", "linked", []string{"from", "rel", "qn", "location"}, rows)
+	}
 	if len(result.Bodies) > 0 {
 		fmt.Fprintf(&b, "bodies[%d]:\n", len(result.Bodies))
 		for _, body := range result.Bodies {
@@ -159,7 +166,7 @@ func TraceCompact(result api.TraceResult) string {
 			if step.Via != nil {
 				via = step.Via.Type
 			}
-			if via != "" && via != "CALLS" && via != "USAGE" && via != "CONFIGURES" {
+			if via != "" && via != "CALLS" && via != "USAGE" && via != "CONFIGURES" && via != "HANDLES" && via != "HTTP_CALLS" && via != "REDIRECTS_TO" {
 				continue
 			}
 			if skipCompactVariable(step.Node) {
@@ -310,7 +317,7 @@ func SnippetCompact(result api.SnippetResult) string {
 	return b.String()
 }
 
-func ArchitectureCompact(result api.ArchitectureResult) string {
+func ArchitectureCompact(result api.ArchitectureResult, full ...bool) string {
 	var b strings.Builder
 	Field(&b, "", "total_nodes", result.TotalNodes)
 	Field(&b, "", "total_edges", result.TotalEdges)
@@ -326,15 +333,30 @@ func ArchitectureCompact(result api.ArchitectureResult) string {
 	}
 	if len(result.Packages) > 0 {
 		limit := len(result.Packages)
-		if limit > 20 {
+		if limit > 20 && (len(full) == 0 || !full[0]) {
 			limit = 20
 		}
 		Count(&b, limit, len(result.Packages))
 		rows := make([][]string, 0, limit)
+		hasFlow := false
 		for _, pkg := range result.Packages[:limit] {
-			rows = append(rows, []string{pkg.Name, fmt.Sprint(pkg.NodeCount), fmt.Sprint(pkg.FanIn), fmt.Sprint(pkg.FanOut)})
+			if pkg.FanIn != 0 || pkg.FanOut != 0 {
+				hasFlow = true
+				break
+			}
 		}
-		Table(&b, "", "packages", []string{"name", "nodes", "fan_in", "fan_out"}, rows)
+		for _, pkg := range result.Packages[:limit] {
+			row := []string{pkg.Name, fmt.Sprint(pkg.NodeCount)}
+			if hasFlow {
+				row = append(row, fmt.Sprint(pkg.FanIn), fmt.Sprint(pkg.FanOut))
+			}
+			rows = append(rows, row)
+		}
+		columns := []string{"name", "nodes"}
+		if hasFlow {
+			columns = append(columns, "fan_in", "fan_out")
+		}
+		Table(&b, "", "packages", columns, rows)
 	}
 	if len(result.Communities) > 0 {
 		rows := make([][]string, 0, len(result.Communities))
@@ -375,9 +397,10 @@ func ImpactCompact(result api.ImpactResult) string {
 
 // CodeSearchCompact lists matching lines. Text is clipped to one screen line;
 // file:line is the handle for snippet or Read.
-func CodeSearchCompact(result api.CodeSearchResult, pattern, path string) string {
+func CodeSearchCompact(result api.CodeSearchResult, pattern, path string, full ...bool) string {
+	showFull := len(full) > 0 && full[0]
 	var b strings.Builder
-	if len(result.Matches) == 0 {
+	if len(result.Matches) == 0 && len(result.NameMatches) == 0 {
 		b.WriteString("count: 0\n")
 		scope := "indexed files"
 		if path != "" {
@@ -388,16 +411,98 @@ func CodeSearchCompact(result api.CodeSearchResult, pattern, path string) string
 	}
 	total := result.TotalGrepMatches
 	Count(&b, len(result.Matches), total)
+	if len(result.Shared) > 0 {
+		shared := make([][]string, 0, len(result.Shared))
+		uses := [][]string{}
+		for _, value := range result.Shared {
+			shared = append(shared, []string{value.Value, strings.Join(value.Consumers, " | ")})
+			for _, use := range value.Uses {
+				uses = append(uses, []string{value.Value, use.Consumer, fmt.Sprintf("%s:%d", use.File, use.Line), use.Expr})
+			}
+		}
+		Table(&b, "", "shared", []string{"value", "consumers"}, shared)
+		if len(uses) > 0 {
+			Table(&b, "", "uses", []string{"value", "consumer", "location", "expr"}, uses)
+		}
+		Field(&b, "", "test_scope", "inject the issue input at the shared producer and check every consumer; mocking one consumer alias hides the others")
+	}
 	rows := make([][]string, 0, len(result.Matches))
+	hasSymbol := false
+	for _, m := range result.Matches {
+		if m.Node != nil && m.Node.QualifiedName != "" {
+			hasSymbol = true
+			break
+		}
+	}
 	for _, m := range result.Matches {
 		text := strings.TrimSpace(m.Source)
-		if r := []rune(text); len(r) > 160 {
-			text = string(r[:160]) + "…"
+		text = codeSearchLine(text, showFull)
+		row := []string{m.Location.File, fmt.Sprint(m.Location.StartLine)}
+		if hasSymbol {
+			qn := ""
+			if m.Node != nil {
+				qn = m.Node.QualifiedName
+			}
+			row = append(row, qn)
 		}
-		rows = append(rows, []string{m.Location.File, fmt.Sprint(m.Location.StartLine), text})
+		rows = append(rows, append(row, text))
 	}
-	Table(&b, "", "matches", []string{"file", "line", "text"}, rows)
+	columns := []string{"file", "line", "text"}
+	if hasSymbol {
+		columns = []string{"file", "line", "qn", "text"}
+	}
+	Table(&b, "", "matches", columns, rows)
+	if len(result.NameMatches) > 0 {
+		nameRows := make([][]string, 0, len(result.NameMatches))
+		for _, m := range result.NameMatches {
+			qn := ""
+			if m.Node != nil {
+				qn = m.Node.QualifiedName
+			}
+			line := strings.TrimSpace(m.Source)
+			line = codeSearchLine(line, showFull)
+			nameRows = append(nameRows, []string{m.Location.File, fmt.Sprint(m.Location.StartLine), qn, line})
+		}
+		Table(&b, "", "name_matches", []string{"file", "line", "qn", "text"}, nameRows)
+	}
+	if len(result.Related) > 0 {
+		links := make([][]string, 0, len(result.Related))
+		for _, link := range result.Related {
+			links = append(links, []string{link.From, link.Rel, link.To, link.File + ":" + lineRange(link.Start, link.End)})
+		}
+		Table(&b, "", "related", []string{"from", "rel", "qn", "location"}, links)
+	}
+	if len(result.Tests) > 0 {
+		rows := make([][]string, 0, len(result.Tests))
+		for _, test := range result.Tests {
+			rows = append(rows, []string{test.QualifiedName, test.Target, test.File, fmt.Sprint(test.Line)})
+		}
+		Table(&b, "", "tests", []string{"qn", "target", "file", "line"}, rows)
+	}
+	if len(result.TestRuns) > 0 {
+		runs := make([][]string, 0, len(result.TestRuns))
+		for _, command := range result.TestRuns {
+			runs = append(runs, []string{command})
+		}
+		Table(&b, "", "test_run", []string{"command"}, runs)
+	}
+	if len(result.Bodies) > 0 {
+		fmt.Fprintf(&b, "contexts[%d]:\n", len(result.Bodies))
+		for _, body := range result.Bodies {
+			Field(&b, "  - ", "qn", body.QualifiedName)
+			Field(&b, "    ", "file", body.File)
+			Code(&b, "    ", body.StartLine, body.TotalLines, body.Code)
+		}
+	}
 	return b.String()
+}
+
+func codeSearchLine(line string, full bool) string {
+	runes := []rune(line)
+	if full || len(runes) <= 160 {
+		return line
+	}
+	return fmt.Sprintf("%s… (truncated, %d chars; use --full)", string(runes[:160]), len(runes))
 }
 
 // QueryAgentJSON is the default --json graph query payload: the same page the
@@ -422,6 +527,7 @@ func QueryAgentJSON(result api.QueryResult) map[string]any {
 		"offset": result.Offset,
 		"nodes":  nodes,
 		"edges":  edges,
+		"linked": result.Linked,
 		"bodies": result.Bodies,
 	}
 	if len(result.CallersOf) > 0 {

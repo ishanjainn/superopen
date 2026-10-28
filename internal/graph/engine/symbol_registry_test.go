@@ -20,6 +20,40 @@ func TestSymbolRegistryResolutionOrder(t *testing.T) {
 	}
 }
 
+func TestRootPackageFunctionBeatsSameNamedField(t *testing.T) {
+	registry := newSymbolRegistry([]api.Node{
+		{Label: "Function", Name: "chain", QualifiedName: "chain"},
+		{Label: "Field", Name: "chain", QualifiedName: "ChainHandler.chain"},
+	})
+	if got := registry.resolve("chain", "", nil); got.qn != "chain" || got.strategy != "same_module" {
+		t.Fatalf("root package call resolved to %+v", got)
+	}
+}
+
+func TestImportedPackageResolvesInitModuleMember(t *testing.T) {
+	registry := newSymbolRegistry([]api.Node{
+		{Label: "Function", Name: "gettext", QualifiedName: "pkg.translation.__init__.gettext"},
+		{Label: "Function", Name: "gettext", QualifiedName: "pkg.translation.other.gettext"},
+	})
+	got := registry.resolve("translation.gettext", "caller", map[string]string{"translation": "pkg.translation"})
+	if got.qn != "pkg.translation.__init__.gettext" || got.strategy != "import_map" {
+		t.Fatalf("package member resolution=%+v", got)
+	}
+}
+
+func TestFieldHintDoesNotRouteProductionCallToTestFixture(t *testing.T) {
+	registry := newSymbolRegistry([]api.Node{
+		{Label: "Function", Name: "run", QualifiedName: "pkg.run", Location: api.Location{File: "pkg/run.py"}},
+		{Label: "Method", Name: "write", QualifiedName: "tests.fixture.File.write", Location: api.Location{File: "tests/fixture.py"}},
+	})
+	before := symbolResolution{qn: "other.write", strategy: "suffix_match", confidence: .2, candidates: 2}
+	for _, source := range []struct{ qn, file string }{{"pkg.run", "pkg/run.py"}, {"pkg", "pkg/__init__.py"}} {
+		if got := registry.applyFieldTypeHint("file.write", source.qn, source.file, before); got.qn != before.qn || got.strategy != before.strategy {
+			t.Fatalf("test fixture selected for production call from %s: %+v", source.file, got)
+		}
+	}
+}
+
 func TestSymbolRegistryGuessesSkipImpossibleTargets(t *testing.T) {
 	registry := newSymbolRegistry([]api.Node{
 		{Label: "Method", Name: "t", QualifiedName: "utils.dateformat.DateFormat.t", Location: api.Location{File: "utils/dateformat.py"}},
@@ -66,7 +100,6 @@ func TestReceiverGuessIsWeak(t *testing.T) {
 		{Label: "Method", Name: "values", QualifiedName: "enums.ChoicesMeta.values"},
 		{Label: "Function", Name: "get_converters", QualifiedName: "urls.converters.get_converters"},
 	})
-	registry.accessors = map[string]bool{"gis.ops.MySQLOperations.select": true}
 	guess := func(qn string) symbolResolution {
 		return symbolResolution{qn: qn, strategy: "unique_name", confidence: .75, candidates: 1}
 	}
@@ -76,8 +109,8 @@ func TestReceiverGuessIsWeak(t *testing.T) {
 	}{
 		// Reading self.query.order_by is Query's attribute, not QuerySet.order_by.
 		{"self.query.order_by", "models.query.QuerySet.order_by", false, true},
-		// Reading an accessor runs it.
-		{"inner.select", "gis.ops.MySQLOperations.select", false, false},
+		// An accessor name alone does not prove the receiver's type.
+		{"inner.select", "gis.ops.MySQLOperations.select", false, true},
 		// A call on another receiver keeps its resolver confidence...
 		{"compiler.execute_sql", "sql.compiler.SQLCompiler.execute_sql", true, false},
 		// ...unless the name is a builtin type's method or a module function.

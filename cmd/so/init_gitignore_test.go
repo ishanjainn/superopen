@@ -43,8 +43,51 @@ func TestWriteInitGitignoresHidesSO(t *testing.T) {
 	if err != nil {
 		t.Fatalf("git status: %v %s", err, out)
 	}
-	if strings.Contains(string(out), "so.db") {
-		t.Fatalf("machine-local db must stay ignored: %q", out)
+	if strings.Contains(string(out), ".so/") || strings.Contains(string(out), "so.db") {
+		t.Fatalf("machine-local graph must stay out of git status: %q", out)
+	}
+	if err := writeInitGitignores(root); err != nil {
+		t.Fatal(err)
+	}
+	excludePath := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "--git-path", "info/exclude"))
+	if !filepath.IsAbs(excludePath) {
+		excludePath = filepath.Join(root, excludePath)
+	}
+	exclude, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(exclude), "/.so/") != 1 {
+		t.Fatalf("local ignore must be idempotent: %q", exclude)
+	}
+}
+
+func TestWriteInitGitignoresNestedPackage(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	top := t.TempDir()
+	runGitInit(t, top)
+	root := filepath.Join(top, "pkg")
+	if err := paths.Resolve(root).EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeInitGitignores(root); err != nil {
+		t.Fatal(err)
+	}
+	if out := runGitOutput(t, top, "status", "--porcelain"); strings.TrimSpace(out) != "" {
+		t.Fatalf("nested machine-local graph should be ignored: %q", out)
+	}
+	excludePath := strings.TrimSpace(runGitOutput(t, top, "rev-parse", "--git-path", "info/exclude"))
+	if !filepath.IsAbs(excludePath) {
+		excludePath = filepath.Join(top, excludePath)
+	}
+	content, err := os.ReadFile(excludePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), "/pkg/.so/") {
+		t.Fatalf("nested package path missing from local exclude: %q", content)
 	}
 }
 
@@ -86,4 +129,15 @@ func runGit(t *testing.T, dir string, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v %s", strings.Join(args, " "), err, out)
 	}
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v %s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
 }

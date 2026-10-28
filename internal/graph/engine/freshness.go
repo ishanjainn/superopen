@@ -27,7 +27,7 @@ const (
 type fingerprintEntry struct {
 	Size    int64  `json:"size"`
 	MtimeMs int64  `json:"mtime_ms"`
-	SHA256  string `json:"sha256"`
+	Digest  string `json:"digest"`
 }
 
 type fingerprintDoc struct {
@@ -37,7 +37,10 @@ type fingerprintDoc struct {
 }
 
 func fingerprintStamp() string {
-	return AssetRevision + ":" + strconv.Itoa(api.SchemaVersion)
+	// Extraction semantics change independently of the grammar asset bundle.
+	// This revision also gives changed extraction facts a fresh disk cache.
+	const extractionRevision = "2"
+	return AssetRevision + ":" + strconv.Itoa(api.SchemaVersion) + ":" + extractionRevision
 }
 
 func fingerprintPath(repoRoot string) string {
@@ -206,7 +209,7 @@ func PlanIncrementalFromProbe(ctx context.Context, repoRoot, project string, exc
 		return api.ChangeSet{}, err
 	}
 	defer store.Close()
-	rows, queryErr := store.db.QueryContext(ctx, `SELECT rel_path,sha256 FROM file_hashes WHERE project=? ORDER BY rel_path`, project)
+	rows, queryErr := store.db.QueryContext(ctx, `SELECT rel_path,digest FROM file_hashes WHERE project=? ORDER BY rel_path`, project)
 	if queryErr != nil {
 		return api.ChangeSet{}, queryErr
 	}
@@ -248,8 +251,8 @@ func PlanIncrementalFromProbe(ctx context.Context, repoRoot, project string, exc
 		if fp != nil {
 			entry, ok = fp.Files[key]
 		}
-		if !forceHash && ok && entry.Size == info.Size() && entry.MtimeMs == mtimeMs(info) && entry.SHA256 != "" {
-			current[key] = entry.SHA256
+		if !forceHash && ok && entry.Size == info.Size() && entry.MtimeMs == mtimeMs(info) && entry.Digest != "" {
+			current[key] = entry.Digest
 			continue
 		}
 		body, err := os.ReadFile(abs)
@@ -257,7 +260,7 @@ func PlanIncrementalFromProbe(ctx context.Context, repoRoot, project string, exc
 			return api.ChangeSet{}, err
 		}
 		digest := fileContentDigest(body)
-		if ok && entry.SHA256 == digest {
+		if ok && entry.Digest == digest {
 			current[key] = digest
 			continue
 		}
@@ -294,7 +297,7 @@ func WriteFingerprint(ctx context.Context, repoRoot string, excludes []string) e
 		doc.Files[filepath.ToSlash(rel)] = fingerprintEntry{
 			Size:    info.Size(),
 			MtimeMs: mtimeMs(info),
-			SHA256:  fileContentDigest(body),
+			Digest:  fileContentDigest(body),
 		}
 	}
 	path := fingerprintPath(root)

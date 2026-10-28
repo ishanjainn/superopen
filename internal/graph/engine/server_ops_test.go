@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -71,6 +72,78 @@ func TestCodeSearchReturnsEmptyWithoutMatches(t *testing.T) {
 	}
 }
 
+func TestCodeSearchTreatsDashPatternsAsLiteral(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "options.py")
+	if err := os.WriteFile(path, []byte("first line\n-v = True\n--verbose = True\nflag -v here\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "registration.py"), []byte("option = (\"verbose\", {})\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, fallback := range []bool{false, true} {
+		if !fallback {
+			if _, err := exec.LookPath("rg"); err != nil {
+				continue
+			}
+		}
+		t.Run(map[bool]string{false: "ripgrep", true: "fallback"}[fallback], func(t *testing.T) {
+			if fallback {
+				t.Setenv("PATH", t.TempDir())
+			}
+			for _, tc := range []struct {
+				pattern string
+				lines   []int
+			}{
+				{"-v", []int{2, 3, 4}},
+				{"--verbose", []int{3}},
+				{" -v", []int{4}},
+			} {
+				result, err := CodeSearch(context.Background(), root, api.CodeSearchRequest{Pattern: tc.pattern, Limit: 10})
+				if err != nil {
+					t.Fatalf("pattern %q: %v", tc.pattern, err)
+				}
+				if len(result.Matches) != len(tc.lines) {
+					t.Fatalf("pattern %q: matches = %#v", tc.pattern, result.Matches)
+				}
+				found := map[int]bool{}
+				for _, match := range result.Matches {
+					found[match.Location.StartLine] = true
+				}
+				for _, line := range tc.lines {
+					if !found[line] {
+						t.Fatalf("pattern %q: missing line %d in %#v", tc.pattern, line, result.Matches)
+					}
+				}
+				if tc.pattern == "--verbose" {
+					if len(result.NameMatches) != 1 || result.NameMatches[0].Location.File != "registration.py" {
+						t.Fatalf("long flag should expose bare-name registration: %#v", result.NameMatches)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestCodeSearchNameRegistrationRequiresExactQuotedName(t *testing.T) {
+	for _, tc := range []struct {
+		line, name string
+		namespaced bool
+		want       bool
+	}{
+		{`"verbose"`, "verbose", false, true},
+		{"'property': PyProperty,", "property", true, true},
+		{"'property': other_handler,", "property", true, false},
+		{"'property' + suffix: PyProperty,", "property", true, false},
+		{"'other': PyProperty,", "property", true, false},
+		{"'property\"': PyProperty,", "property", true, false},
+	} {
+		if got := codeSearchNameRegistration(tc.line, tc.name, tc.namespaced); got != tc.want {
+			t.Errorf("registration %q for %q: got %v want %v", tc.line, tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestCodeSearchFallbackFindsMatchesWithoutRipgrep(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "main.go")
@@ -101,6 +174,9 @@ func TestCodeSearchPathFilterAndLineNumbers(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "other.py"), []byte("DNS_NAME = 2\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "excluded.py"), []byte("DNS_NAME = 3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, noRG := range []bool{false, true} {
 		if noRG {
 			t.Setenv("PATH", t.TempDir())
@@ -113,6 +189,17 @@ func TestCodeSearchPathFilterAndLineNumbers(t *testing.T) {
 			if len(result.Matches) != 1 || result.Matches[0].Location.File != "core/mail/utils.py" || result.Matches[0].Location.StartLine != 2 {
 				t.Fatalf("noRG=%v filter=%q matches=%#v", noRG, filter, result.Matches)
 			}
+		}
+		result, err := CodeSearch(context.Background(), root, api.CodeSearchRequest{Pattern: "DNS_NAME", Paths: []string{"core/mail", "other.py"}, Limit: 5})
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := map[string]bool{}
+		for _, match := range result.Matches {
+			found[match.Location.File] = true
+		}
+		if len(result.Matches) != 2 || !found["core/mail/utils.py"] || !found["other.py"] {
+			t.Fatalf("noRG=%v multi-path matches=%#v", noRG, result.Matches)
 		}
 	}
 	if _, err := CodeSearch(context.Background(), root, api.CodeSearchRequest{Pattern: "DNS_NAME", PathFilter: "../etc"}); err == nil {

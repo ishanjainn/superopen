@@ -36,6 +36,8 @@ require (
 	modernc.org/sqlite v1.56.0
 )
 
+require rsc.io/pdf v0.1.1
+
 require (
 	cel.dev/expr v0.25.1 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect

@@ -1,6 +1,10 @@
 package engine
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestDetectLanguagePinnedFilenameSurface(t *testing.T) {
 	t.Parallel()
@@ -29,6 +33,30 @@ func TestDetectLanguagePinnedFilenameSurface(t *testing.T) {
 	}
 }
 
+func TestSphinxSourceSuffixIsScopedToNearestConfig(t *testing.T) {
+	root := t.TempDir()
+	for name, body := range map[string]string{
+		"conf.py":        "source_suffix = [\n    '.rst', '.txt', '.foo',\n]\n",
+		"nested/conf.py": "source_suffix = {'.txt': 'markdown', '.foo': 'restructuredtext'}\n",
+	} {
+		abs := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{"docs/contents.txt", "docs/extra.foo", "nested/extra.foo"} {
+		if !sphinxSourceSuffix(root, path) {
+			t.Errorf("missing reST suffix for %s", path)
+		}
+	}
+	if sphinxSourceSuffix(root, "nested/contents.txt") || sphinxSourceSuffix(root, "other.csv") {
+		t.Fatal("unconfigured suffix was accepted")
+	}
+}
+
 func TestDetectLanguagePinnedDisambiguation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -44,12 +72,18 @@ func TestDetectLanguagePinnedDisambiguation(t *testing.T) {
 		{"sample.xml", "<?xml version=\"1.0\"?><Export generator=\"Cache\">", "objectscript_export", ""},
 		{"deployment.yaml", "apiVersion: apps/v1\nkind: Deployment\n", "yaml", "yaml"},
 		{"values.yaml", "replicaCount: 1\n", "yaml", "yaml"},
+		{"script.txt", "#!/usr/bin/env python3\ndef main():\n    pass\n", "python", "python"},
+		{"script", "#!/usr/bin/env -S python3.12 -u\ndef main():\n    pass\n", "python", "python"},
+		{"manage.py-tpl", "#!/usr/bin/env python\ndef main():\n    pass\n", "python", "python"},
 	}
 	for _, test := range tests {
 		got, ok := DetectLanguage(test.name, []byte(test.content), nil)
 		if !ok || got.Language != test.language || got.Grammar != test.grammar {
 			t.Errorf("DetectLanguage(%q) = %#v, %v", test.name, got, ok)
 		}
+	}
+	if _, ok := DetectLanguage("admin.py-tpl", []byte("from django.contrib import admin\n"), nil); ok {
+		t.Fatal("template without interpreter was routed as Python")
 	}
 }
 

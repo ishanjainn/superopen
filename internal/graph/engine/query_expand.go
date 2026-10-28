@@ -195,6 +195,13 @@ func queryNameOverlap(n api.Node, terms []string) int {
 		}
 		if strings.Contains(name, tl) || strings.Contains(last, tl) {
 			score += 4
+			continue
+		}
+		if strings.HasSuffix(tl, "s") && len(tl) > 5 {
+			stem := strings.TrimSuffix(tl, "s")
+			if strings.Contains(name, stem) || strings.Contains(last, stem) {
+				score += 3
+			}
 		}
 	}
 	return score

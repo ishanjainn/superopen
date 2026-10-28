@@ -71,7 +71,7 @@ edits the same files.`,
 				rows = append(rows, map[string]any{"id": e.Rule.ID, "severity": e.Rule.Severity, "source": e.Source, "enabled": e.Enabled(), "title": e.Rule.Title})
 			}
 			out().Next("so scan rules show <id>", "so scan rules set <file>")
-			return out().HumanOrJSONRows("rules", []string{"id", "severity", "source", "enabled", "title"}, rows, views)
+			return out().HumanOrJSONRows("rules", []string{"id", "title", "severity", "enabled", "source"}, rows, views)
 		},
 	}
 

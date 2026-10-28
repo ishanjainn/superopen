@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -17,15 +18,20 @@ func groupHome(cmd *cobra.Command, _ []string) error {
 			continue
 		}
 		rows = append(rows, map[string]any{"command": c.Name(), "description": c.Short})
-		next = append(next, c.UseLine())
+		if len(next) < 2 {
+			next = append(next, c.UseLine())
+		}
 	}
+	next = append(next, cmd.CommandPath()+" --help")
 	out().Next(next...)
 	return out().HumanOrJSON("group", func() {
 		w := out().W
+		fmt.Fprintf(w, "bin: %s\n", cli.BinPath())
+		fmt.Fprintf(w, "description: %s\n", cmd.Short)
 		fmt.Fprintf(w, "group: %s\n", cmd.CommandPath())
 		o := out()
 		o.Rows("commands", []string{"command", "description"}, rows)
-	}, map[string]any{"group": cmd.CommandPath(), "commands": rows})
+	}, map[string]any{"bin": cli.BinPath(), "description": cmd.Short, "group": cmd.CommandPath(), "commands": rows})
 }
 
 // wireGroupHomes gives every command group that has no behavior of its own the
