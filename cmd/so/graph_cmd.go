@@ -136,7 +136,7 @@ func graphNativeCommands() []*cobra.Command {
 	query.Flags().Int("limit", 0, "Ranked rows per page (default 15)")
 	query.Flags().Int("offset", 0, "Skip this many ranked rows (from a previous page's hint)")
 
-	codeSearch := nativeGraphLeaf("code-search <pattern> [path]", "Search indexed source code", api.OpCodeSearch, func(cmd *cobra.Command, args []string) any {
+	codeSearch := nativeGraphLeaf("code-search <pattern> [path...]", "Search indexed source code", api.OpCodeSearch, func(cmd *cobra.Command, args []string) any {
 		limit, _ := cmd.Flags().GetInt("limit")
 		regex, _ := cmd.Flags().GetBool("regex")
 		filePattern, _ := cmd.Flags().GetString("file-pattern")
@@ -144,8 +144,10 @@ func graphNativeCommands() []*cobra.Command {
 			filePattern = glob
 		}
 		path, _ := cmd.Flags().GetString("path")
+		var paths []string
 		if len(args) > 1 {
-			path = args[1]
+			paths = args[1:]
+			path = strings.Join(paths, ", ")
 		}
 		return api.CodeSearchRequest{
 			RepoRoot:   repoRoot(),
@@ -153,10 +155,11 @@ func graphNativeCommands() []*cobra.Command {
 			Regex:      regex,
 			FileGlob:   filePattern,
 			PathFilter: path,
+			Paths:      paths,
 			Limit:      limit,
 		}
 	})
-	codeSearch.Args = cobra.RangeArgs(1, 2)
+	codeSearch.Args = cobra.MinimumNArgs(1)
 	codeSearch.Flags().Int("limit", 20, "Maximum results")
 	codeSearch.Flags().Bool("regex", false, "Interpret pattern as a regular expression")
 	codeSearch.Flags().String("file-pattern", "", "Restrict source files by glob (e.g. *.py)")

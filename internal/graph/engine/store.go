@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS file_hashes (
   scope_project_id TEXT NOT NULL,
   project TEXT NOT NULL,
   rel_path TEXT NOT NULL,
-  sha256 TEXT NOT NULL,
+  digest TEXT NOT NULL,
   mtime_ns INTEGER NOT NULL DEFAULT 0,
   size INTEGER NOT NULL DEFAULT 0,
   language TEXT NOT NULL DEFAULT '',
@@ -327,7 +327,7 @@ type ProjectRecord struct {
 type FileRecord struct {
 	Project   string
 	Path      string
-	SHA256    string
+	Digest    string
 	MTimeNS   int64
 	Size      int64
 	Language  string
@@ -540,10 +540,10 @@ func (b *Builder) PutProject(p ProjectRecord) error {
 }
 
 func (b *Builder) PutFile(f FileRecord) error {
-	_, err := b.tx.Exec(`INSERT INTO file_hashes(tenant_id,scope_project_id,project,rel_path,sha256,mtime_ns,size,language)
-		VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,scope_project_id,project,rel_path) DO UPDATE SET sha256=excluded.sha256,
+	_, err := b.tx.Exec(`INSERT INTO file_hashes(tenant_id,scope_project_id,project,rel_path,digest,mtime_ns,size,language)
+		VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,scope_project_id,project,rel_path) DO UPDATE SET digest=excluded.digest,
 		mtime_ns=excluded.mtime_ns,size=excluded.size,language=excluded.language`,
-		b.tenant, b.projectID, f.Project, filepath.ToSlash(f.Path), f.SHA256, f.MTimeNS, f.Size, f.Language)
+		b.tenant, b.projectID, f.Project, filepath.ToSlash(f.Path), f.Digest, f.MTimeNS, f.Size, f.Language)
 	return err
 }
 
@@ -877,7 +877,7 @@ func (s *Store) verifySchema(ctx context.Context) error {
 		return fmt.Errorf("graph protocol metadata: %w", err)
 	}
 	if schema != fmt.Sprint(api.SchemaVersion) || protocol != fmt.Sprint(api.ProtocolVersion) {
-		return fmt.Errorf("graph database was built by another version (schema=%s protocol=%s): delete .so/db and run so graph build", schema, protocol)
+		return fmt.Errorf("graph database was built by another version (schema=%s protocol=%s)", schema, protocol)
 	}
 	return nil
 }

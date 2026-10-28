@@ -9,6 +9,9 @@ import (
 
 func writeInitGitignores(root string) error {
 	layout := paths.Resolve(root)
+	if err := paths.ExcludeGraphFromGit(root); err != nil {
+		return err
+	}
 	ignorePath := filepath.Join(layout.Root, ".gitignore")
 	if _, err := os.Stat(ignorePath); err != nil {
 		if !os.IsNotExist(err) {

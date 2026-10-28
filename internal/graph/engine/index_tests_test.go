@@ -37,3 +37,20 @@ func TestAppendTestRelationshipsMatchesPinnedNamingAndCallRules(t *testing.T) {
 		}
 	}
 }
+
+func TestAppendTestRelationshipsAttributesNestedPythonHelper(t *testing.T) {
+	graph := goGraph{nodes: []api.Node{
+		{Label: "Function", Name: "run", QualifiedName: "app.run", Location: api.Location{File: "app.py"}},
+		{Label: "Function", Name: "test_run", QualifiedName: "tests.test_app.test_run", Location: api.Location{File: "tests/test_app.py"}},
+		{Label: "Function", Name: "invoke", QualifiedName: "tests.test_app.test_run.invoke", Location: api.Location{File: "tests/test_app.py"}},
+		{Label: "Function", Name: "helper", QualifiedName: "tests.test_app.helper", Location: api.Location{File: "tests/test_app.py"}},
+	}, edges: []pendingEdge{
+		{source: "tests.test_app.test_run.invoke", target: "app.run", kind: "CALLS"},
+		{source: "tests.test_app.helper", target: "app.run", kind: "CALLS"},
+	}}
+	appendTestRelationships(&graph)
+	if !hasPendingEdge(graph.edges, "tests.test_app.test_run", "TESTS", "app.run") ||
+		hasPendingEdge(graph.edges, "tests.test_app.helper", "TESTS", "app.run") {
+		t.Fatalf("test-local helper attribution is wrong: %#v", graph.edges)
+	}
+}

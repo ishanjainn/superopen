@@ -22,11 +22,6 @@ import (
 //     marker key Superopen stamps on the files it owns elsewhere. Detection is by the hook command
 //     instead, which is the same thing every settings-file runtime already does.
 //
-//   - A legacy wrapper form, `{"hooks": {...}}`, is also accepted, and the loader unwraps it by
-//     replacing the whole document with what is under that key. So adding a top-level event
-//     alongside an existing `hooks` wrapper does not merge -- it discards Superopen's hooks with a
-//     log line nobody sees. Superopen writes inside the wrapper when it finds one.
-//
 //   - Event names may be snake_case or Claude Code's PascalCase, and providing both spellings of
 //     one event is a hard error that takes the entire file down, not just that event. So Superopen
 //     writes under whichever spelling the file already uses for an event and never introduces a
@@ -43,9 +38,6 @@ const openHandsHookFileName = "hooks.json"
 // survives validation. It is deliberately not what uninstall and status match on: a user can edit
 // it, and the command is what actually identifies a Superopen hook.
 const openHandsHookName = "superopen-endpoint-telemetry"
-
-// openHandsWrapperKey is the legacy Claude Code wrapper the loader unwraps the document into.
-const openHandsWrapperKey = "hooks"
 
 // openHandsAllToolsMatcher matches every tool.
 //
@@ -136,13 +128,10 @@ type openHandsHookRef struct {
 	Timeout int    `json:"timeout,omitempty"`
 }
 
-// openHandsHooksFile is a parsed hooks.json, remembering the shape it arrived in.
-//
-// wrapped and the per-event key spellings are both load-bearing on write: putting the events back
-// under the wrong shape is how a merge silently discards either Superopen's hooks or the user's.
+// openHandsHooksFile is a parsed hooks.json. Existing event key spellings are
+// preserved so a merge does not register the same event twice.
 type openHandsHooksFile struct {
-	wrapped bool
-	events  map[string][]openHandsHookGroup
+	events map[string][]openHandsHookGroup
 }
 
 var openHandsRuntime = hookRuntime{
@@ -249,16 +238,6 @@ func readOpenHandsHooks(path string) (openHandsHooksFile, error) {
 	if err := json.Unmarshal(data, &document); err != nil {
 		return openHandsHooksFile{}, fmt.Errorf("read %s: %w", path, err)
 	}
-	if wrapper, ok := document[openHandsWrapperKey]; ok {
-		file.wrapped = true
-		// The loader replaces the document with the wrapper's contents, so anything beside it is
-		// already being dropped by OpenHands. Superopen reads only the wrapper for the same reason,
-		// and leaves the siblings where they are rather than merging them in.
-		document = map[string]json.RawMessage{}
-		if err := json.Unmarshal(wrapper, &document); err != nil {
-			return openHandsHooksFile{}, fmt.Errorf("read %s: %w", path, err)
-		}
-	}
 	for key, raw := range document {
 		var groups []openHandsHookGroup
 		if err := json.Unmarshal(raw, &groups); err != nil {
@@ -307,13 +286,9 @@ func validateOpenHandsEventKeys(path string, events map[string][]openHandsHookGr
 	return nil
 }
 
-// writeOpenHandsHooks serializes the file back in the shape it arrived in.
+// writeOpenHandsHooks serializes the event map.
 func writeOpenHandsHooks(path string, file openHandsHooksFile) error {
-	var document any = file.events
-	if file.wrapped {
-		document = map[string]any{openHandsWrapperKey: file.events}
-	}
-	data, err := json.MarshalIndent(document, "", "  ")
+	data, err := json.MarshalIndent(file.events, "", "  ")
 	if err != nil {
 		return err
 	}

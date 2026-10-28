@@ -2,8 +2,6 @@ package engine
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -293,7 +291,7 @@ func buildFixture(t *testing.T, ctx context.Context, path, generation string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := sha256.Sum256(body)
+	digest := fileContentDigest(body)
 	store, err := OpenWritable(path)
 	if err != nil {
 		t.Fatal(err)
@@ -308,7 +306,7 @@ func buildFixture(t *testing.T, ctx context.Context, path, generation string) {
 		}); err != nil {
 			return err
 		}
-		if err := b.PutFile(FileRecord{Project: "fixture", Path: "internal/graph/graph.go", SHA256: hex.EncodeToString(digest[:]), Language: "go"}); err != nil {
+		if err := b.PutFile(FileRecord{Project: "fixture", Path: "internal/graph/graph.go", Digest: digest, Language: "go"}); err != nil {
 			return err
 		}
 		first, err := b.PutNode(api.Node{

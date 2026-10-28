@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from tokens import row_tokens
+
 BENCH = Path(__file__).resolve().parent
 REPO = BENCH.parent
 LAST_SUMMARY = BENCH / ".last-summary.json"
@@ -451,12 +453,7 @@ def _fmt_pts(so_n: Any, native_n: Any, n: int) -> str:
 
 
 def _row_tokens(row: dict[str, Any]) -> float:
-    return (
-        float(row.get("input_tokens") or 0)
-        + float(row.get("output_tokens") or 0)
-        + float(row.get("cache_read_tokens") or 0)
-        + float(row.get("cache_creation_tokens") or 0)
-    )
+    return float(row_tokens(row))
 
 
 def _resolved_label(ok: Any, *, bold_pass: bool = False) -> str:
@@ -482,6 +479,7 @@ def _instance_line(qid: str, nr: dict[str, Any], sr: dict[str, Any]) -> str:
 
 def _swe_headline_table(swe: dict[str, Any]) -> str:
     """Cold vs Superopen comparison table."""
+    host = {"claude-code": "Claude Code", "opencode": "OpenCode", "codex": "Codex"}.get(str(swe.get("host") or ""), "Agent")
     summary = swe.get("summary") or {}
     n = int(summary.get("n") or 0)
     graded = bool(summary.get("graded"))
@@ -511,7 +509,7 @@ def _swe_headline_table(swe: dict[str, Any]) -> str:
         return "pending"
     return "\n".join(
         [
-            "| Correctness & efficiency | Cold Claude Code | Claude Code with Superopen | Improvement |",
+            f"| Correctness & efficiency | Cold {host} | {host} with Superopen | Improvement |",
             "|---|---|---|---|",
             f"| Correctness | {nat_c} | {so_c} | {corr_imp} |",
             f"| Tokens | {nat_tok} | **{so_tok}** | **{tok_imp}** |",
@@ -547,8 +545,9 @@ def _swe_instance_tables(swe: dict[str, Any]) -> str:
     rows = swe.get("rows") or []
     native = {r.get("id"): r for r in rows if r.get("arm") == "native"}
     so_rows = {r.get("id"): r for r in rows if r.get("arm") == "superopen"}
+    host = {"claude-code": "Claude Code", "opencode": "OpenCode", "codex": "Codex"}.get(str(swe.get("host") or ""), "Agent")
     header = [
-        "| SWE-bench instance | Cold Claude Code | Claude Code with Superopen | Token usage vs. cold | Tool usage vs. cold |",
+        f"| SWE-bench instance | Cold {host} | {host} with Superopen | Token usage vs. cold | Tool usage vs. cold |",
         "|---|---|---|---:|---:|",
     ]
     all_rows: list[str] = list(header)

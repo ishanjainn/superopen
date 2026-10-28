@@ -18,6 +18,9 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if !paths.MentionsCommand(first, "graph query") {
 		t.Fatalf("missing graph query invocation: %s", first)
 	}
+	if !paths.MentionsCommand(first, "graph code-search") || !contains(first, "exact flag") {
+		t.Fatalf("durable block must route exact literals to code-search: %s", first)
+	}
 	if contains(first, "so-verify") || contains(first, "so-scout") || contains(first, "so-auditor") {
 		t.Fatalf("always-on block must not name subagents: %s", first)
 	}
@@ -137,6 +140,11 @@ func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 	if !contains(SearchNudge(), ".so/") || !contains(HookReminder(), ".so/") {
 		t.Fatal("search/reminder should tell agents not to Grep .so/")
 	}
+	for _, line := range []string{GraphStartLine(), HookReminder(), SearchNudge(), ReadDenyReason()} {
+		if !paths.MentionsCommand(line, "graph code-search") || !paths.MentionsCommand(line, "graph query") {
+			t.Fatalf("graph guidance must distinguish literals and relationships: %q", line)
+		}
+	}
 	if paths.MentionsCommand(ReadNudge(), "graph snippet") || paths.MentionsCommand(ReadNudge(), "graph trace") {
 		t.Fatal("read nudge must not list snippet/trace (spray menu)")
 	}
@@ -172,6 +180,9 @@ func TestCursorRuleIsShortGate(t *testing.T) {
 	}
 	if !contains(rule, "graph impact") {
 		t.Fatalf("rule must name graph impact for multi-file work: %s", rule)
+	}
+	if !paths.MentionsCommand(rule, "graph code-search") {
+		t.Fatalf("cursor rule must route exact literals to code-search: %s", rule)
 	}
 	if !contains(rule, "head or tail") {
 		t.Fatalf("rule must forbid piping so through head/tail: %s", rule)

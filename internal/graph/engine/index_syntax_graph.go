@@ -140,6 +140,7 @@ func IndexSyntaxDevelopment(ctx context.Context, request api.BuildRequest, engin
 // CALL_REFERENCE fallbacks, but the output is already deterministic and fully
 // source-grounded, making it useful for pass-by-pass golden comparison.
 func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, api.Coverage) {
+	repository.Files = preferCppMethodBodies(repository.Files)
 	graph := goGraph{files: make([]FileRecord, 0, len(repository.Files))}
 	coverage := repository.Coverage
 	projectQN := project
@@ -150,6 +151,17 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 	byFileScope := map[string]syntaxDefinitionRef{}
 	typeDefinitions := map[string]bool{}
 	localBindings := map[string]map[string]bool{}
+	for _, parsed := range repository.Files {
+		for _, fact := range parsed.Extraction.Definitions {
+			if fact.Kind != "class" || parsed.File.Language == "go" && fact.Local {
+				continue
+			}
+			label := syntaxNodeLabel(parsed.File.Language, fact)
+			if label == "Class" || label == "Interface" || label == "Struct" || label == "Trait" || label == "Enum" {
+				typeDefinitions[syntaxDefinitionFactQN(parsed.File.Language, parsed.File.Path, fact)] = true
+			}
+		}
+	}
 
 	for _, parsed := range repository.Files {
 		graph.files = append(graph.files, parsed.File)
@@ -158,7 +170,7 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 		endLine := fileEndLine(parsed)
 		graph.nodes = append(graph.nodes, api.Node{
 			Project: project, Label: "File", Name: filepath.Base(rel), QualifiedName: fileQN,
-			Location: api.Location{File: rel, StartLine: 1, EndLine: endLine},
+			Location:   api.Location{File: rel, StartLine: 1, EndLine: endLine},
 			Properties: api.Properties{"extension": filepath.Ext(filepath.Base(rel))},
 		})
 		directory := filepath.ToSlash(filepath.Dir(rel))
@@ -216,20 +228,16 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 		}
 		for _, fact := range parsed.Extraction.Sections {
 			qn := syntaxModuleQN(rel) + "." + strings.Join(strings.Fields(fact.Name), "-")
+			properties := syntaxModuleProperties(rel)
+			if fact.Docstring != "" {
+				properties["docstring"] = fact.Docstring
+			}
 			graph.nodes = append(graph.nodes, api.Node{Project: project, Label: "Section", Name: fact.Name,
-				QualifiedName: qn, Location: syntaxLocation(rel, fact), Properties: syntaxModuleProperties(rel)})
+				QualifiedName: qn, Location: syntaxLocation(rel, fact), Properties: properties})
 			graph.edges = append(graph.edges, pendingEdge{source: fileQN, target: qn, kind: "DEFINES",
 				evidence: syntaxEvidence(rel, fact, "tree_sitter_heading")})
 		}
 
-		pythonTopClasses := map[string]bool{}
-		if parsed.File.Language == "python" {
-			for _, fact := range parsed.Extraction.Definitions {
-				if fact.Kind == "class" && !fact.Local {
-					pythonTopClasses[fact.Name] = true
-				}
-			}
-		}
 		for _, fact := range parsed.Extraction.Definitions {
 			if fact.Kind == "function" {
 				scopeKey := rel + "\x00" + joinSyntaxScope(fact.Scope, fact.Name)
@@ -248,23 +256,14 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 			}
 		}
 		for _, fact := range parsed.Extraction.Definitions {
-			// Go struct fields are resolver metadata (field_defs), not graph
-			// definitions. The class extractor consumes the type_spec body and the
-			// top-level definition walker never publishes these nodes.
-			if parsed.File.Language == "go" && fact.Kind == "field" {
-				continue
-			}
 			if parsed.File.Language == "go" && fact.Kind == "class" && fact.Local {
 				continue
 			}
-			// The pinned Python resolver indexes module-level classes. Classes
-			// declared inside a function are local implementation details rather
-			// than independently addressable graph symbols.
-			if parsed.File.Language == "python" && fact.Kind == "class" && fact.Local {
-				continue
-			}
-			if parsed.File.Language == "python" && fact.Kind == "function" && fact.Local && !pythonTopClasses[fact.Scope] {
-				continue
+			if parsed.File.Language == "go" && fact.Kind == "field" {
+				owner, ok := byFileScope[rel+"\x00"+fact.Scope]
+				if !ok || owner.label != "Struct" {
+					continue
+				}
 			}
 			if parsed.File.Language == "python" && fact.Kind == "variable" && fact.Local {
 				continue
@@ -287,6 +286,12 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 				properties["fp"] = fact.MinHash
 			}
 			label := syntaxNodeLabel(parsed.File.Language, fact)
+			if parsed.File.Language == "python" && fact.Kind == "function" && fact.Scope != "" {
+				owner, ok := byFileScope[rel+"\x00"+fact.Scope]
+				if !ok || !typeDefinitions[owner.qn] {
+					label = "Function"
+				}
+			}
 			node := api.Node{Project: project, Label: label, Name: fact.Name,
 				QualifiedName: qn, Location: syntaxLocation(rel, fact), Properties: properties}
 			graph.nodes = append(graph.nodes, node)
@@ -328,12 +333,14 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 	// resolves against them.
 	seedPythonBuiltinNodes(project, repository.Files, &graph)
 	registry := newSymbolRegistry(graph.nodes)
-	registry.accessors = syntaxAccessorMethods(repository.Files, byFileScope)
+	registry.decorated = syntaxDecoratedCallables(repository.Files, byFileScope)
 	nodeQNs := make(map[string]bool, len(graph.nodes))
 	for _, node := range graph.nodes {
 		nodeQNs[node.QualifiedName] = true
 	}
 	importIndex := newImportTargetIndex(graph.nodes)
+	registry.packageExports = collectPythonPackageExports(repository.Files, registry, importIndex)
+	goRootPackage := syntaxGoRootPackage(repository.Files)
 	importsByFile := make(map[string]map[string]string, len(repository.Files))
 	// externalByFile holds names a file imports from outside the project.
 	externalByFile := map[string]map[string]bool{}
@@ -352,6 +359,16 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 				continue
 			}
 			qn := localSyntaxImportTargetForLanguage(parsed.File.Language, rel, fact.Name, repository.GoModule, importIndex)
+			if parsed.File.Language == "python" {
+				if exported := registry.packageExports[pythonAbsoluteImportName(rel, fact.Name)]; exported != "" {
+					qn = exported
+				}
+			}
+			localName := fact.LocalName
+			if parsed.File.Language == "go" && fact.Name == repository.GoModule &&
+				localName == importPathLast(fact.Name) && goRootPackage != "" {
+				localName = goRootPackage
+			}
 			strategy := "module_path"
 			if qn == "" {
 				if fact.LocalName != "" && parsed.File.Language == "python" {
@@ -362,15 +379,16 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 				}
 				continue
 			}
-			if fact.LocalName != "" {
-				imports[fact.LocalName] = qn
+			if localName != "" {
+				imports[localName] = qn
 			}
 			graph.edges = append(graph.edges, pendingEdge{source: fileQN, target: qn, kind: "IMPORTS",
-				properties: api.Properties{"local_name": fact.LocalName}, evidence: syntaxEvidence(rel, fact, strategy)})
+				properties: api.Properties{"local_name": localName}, evidence: syntaxEvidence(rel, fact, strategy)})
 		}
 		importsByFile[rel] = imports
 	}
 
+	pythonFields := collectPythonClassFields(repository.Files, registry, importsByFile)
 	reportIndexProgress("assemble usages/calls files=%d", len(repository.Files))
 	resolveStarted := time.Now()
 	type fileResolveResult struct {
@@ -394,7 +412,7 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 					return
 				}
 				parsed := &repository.Files[index]
-				edges, unresolved := resolveSyntaxFileRelationships(project, parsed, registry, nodeQNs, byName, byFileScope, localBindings, importsByFile, externalByFile)
+				edges, unresolved := resolveSyntaxFileRelationships(project, parsed, registry, nodeQNs, byName, byFileScope, localBindings, importsByFile, externalByFile, pythonFields)
 				resolved[index] = fileResolveResult{edges: edges, unresolved: unresolved}
 				parsed.Extraction.Usages = nil
 				parsed.Extraction.Writes = nil
@@ -406,28 +424,55 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 		graph.addEdges(result.edges)
 		graph.unresolved = append(graph.unresolved, result.unresolved...)
 	}
+	indexSpawnProcessNodes(project, &graph)
+	indexDockerRuntime(repository.Files, &graph)
+	indexWorkflowMakeSpawns(repository.Files, &graph)
+	indexDependencyManifests(repository.Files, project, &graph)
 	reportIndexProgress("assemble usages/calls elapsed=%s", indexElapsed(resolveStarted))
 
 	for _, parsed := range repository.Files {
 		rel := filepath.ToSlash(parsed.File.Path)
+		session := newResolveSession(syntaxDefinitionModuleQN(parsed.File.Language, rel), importsByFile[rel])
 		for _, fact := range parsed.Extraction.Decorators {
 			source, ok := byFileScope[rel+"\x00"+fact.Scope]
 			if !ok {
 				continue
 			}
 			name := syntaxCallBase(fact.Name)
-			resolvedCall, strategy, confidence := resolveSyntaxCall(rel, fact.Scope, byName[parsed.File.Language+"\x00"+name])
-			target := resolvedCall.qn
+			resolved := registry.resolveWith(session, fact.Name)
+			target, strategy, confidence := "", "", 0.0
+			if node, ok := registry.exact[resolved.qn]; ok &&
+				(node.Label == "Function" || node.Label == "Method" || node.Label == "Class") {
+				target, strategy, confidence = resolved.qn, resolved.strategy, resolved.confidence
+			}
+			if target == "" {
+				resolvedCall, fallbackStrategy, fallbackConfidence := resolveSyntaxCall(rel, fact.Scope, byName[parsed.File.Language+"\x00"+name])
+				target, strategy, confidence = resolvedCall.qn, fallbackStrategy, fallbackConfidence
+			}
 			if target == "" {
 				target = "<decorator:" + fact.Name + ">"
 				graph.nodes = append(graph.nodes, api.Node{Project: project, Label: "Decorator", Name: name,
 					QualifiedName: target, Properties: api.Properties{}})
 				strategy, confidence = "tree_sitter_synthetic_decorator", .7
 			}
+			if target == source.qn {
+				continue
+			}
+			raw := fact.DecoratorText
+			if raw == "" {
+				raw = fact.Name
+			}
 			graph.addEdge(pendingEdge{source: source.qn, target: target, kind: "DECORATES",
-				properties: api.Properties{"decorator": fact.Name}, evidence: syntaxEvidence(rel, fact, strategy, confidence)})
+				properties: api.Properties{"decorator": raw}, evidence: syntaxEvidence(rel, fact, strategy, confidence)})
+			graph.addEdge(pendingEdge{source: source.qn, target: target, kind: "USAGE",
+				evidence: syntaxEvidence(rel, fact, strategy, confidence)})
 		}
 	}
+	indexRSTMentions(repository.Files, importsByFile, &graph)
+	indexMarkdownMentions(repository.Files, &graph)
+	indexDiagramFiles(repository.Files, &graph)
+	indexRSTDiagrams(repository.Files, &graph)
+	indexPDFPages(repository.Files, &graph)
 	dropUsagesShadowedByCalls(&graph)
 	enrichTransitiveComplexity(&graph)
 	sortGraph(&graph)
@@ -449,6 +494,40 @@ func AssembleSyntaxGraph(repository SyntaxRepository, project string) (goGraph, 
 	return graph, coverage
 }
 
+func preferCppMethodBodies(files []ParsedSyntaxFile) []ParsedSyntaxFile {
+	bodies := map[string]bool{}
+	for _, parsed := range files {
+		if parsed.File.Language != "cpp" && parsed.File.Language != "cuda" {
+			continue
+		}
+		for _, fact := range parsed.Extraction.Definitions {
+			if fact.Kind == "function" && fact.NodeType == "function_definition" && fact.Scope != "" {
+				bodies[syntaxDefinitionFactQN(parsed.File.Language, parsed.File.Path, fact)] = true
+			}
+		}
+	}
+	if len(bodies) == 0 {
+		return files
+	}
+	out := append([]ParsedSyntaxFile(nil), files...)
+	for i := range out {
+		if out[i].File.Language != "cpp" && out[i].File.Language != "cuda" {
+			continue
+		}
+		definitions := out[i].Extraction.Definitions
+		filtered := make([]SyntaxFact, 0, len(definitions))
+		for _, fact := range definitions {
+			if fact.Kind == "function" && fact.NodeType != "function_definition" &&
+				bodies[syntaxDefinitionFactQN(out[i].File.Language, out[i].File.Path, fact)] {
+				continue
+			}
+			filtered = append(filtered, fact)
+		}
+		out[i].Extraction.Definitions = filtered
+	}
+	return out
+}
+
 func resolveSyntaxFileRelationships(
 	project string,
 	parsed *ParsedSyntaxFile,
@@ -459,6 +538,7 @@ func resolveSyntaxFileRelationships(
 	localBindings map[string]map[string]bool,
 	importsByFile map[string]map[string]string,
 	externalByFile map[string]map[string]bool,
+	pythonFields map[string]map[string]pythonLocalType,
 ) ([]pendingEdge, []pendingEdge) {
 	rel := filepath.ToSlash(parsed.File.Path)
 	fileQN := fileQualifiedName(rel)
@@ -469,9 +549,31 @@ func resolveSyntaxFileRelationships(
 	session.sourceIsProduction = !isTestPath(rel)
 	session.family = pathLanguageFamily(rel)
 	session.external = externalByFile[rel]
+	localTypes := newPythonLocalTypes(parsed, registry, session)
+	localTypes.globalFields = pythonFields
+	goTypes := newGoLocalTypes(parsed, registry, imports)
+	jsTypes := newJSLocalTypes(parsed)
+	parameters := map[string]map[string]bool{}
+	if parsed.File.Language == "python" {
+		for _, definition := range parsed.Extraction.Definitions {
+			if definition.Kind != "function" || len(definition.ParamNames) == 0 {
+				continue
+			}
+			scope := joinSyntaxScope(definition.Scope, definition.Name)
+			if parameters[scope] == nil {
+				parameters[scope] = map[string]bool{}
+			}
+			for _, name := range definition.ParamNames {
+				parameters[scope][name] = true
+			}
+		}
+	}
 	defaultSource := fileQN
-	if parsed.File.Language != "go" && parsed.File.Language != "java" && nodeQNs[moduleQN] {
-		defaultSource = moduleQN
+	// JavaScript index.js definitions live in the containing package scope,
+	// while top-level calls still belong to the file's Module node.
+	moduleNodeQN := syntaxModuleQN(rel)
+	if parsed.File.Language != "go" && parsed.File.Language != "java" && nodeQNs[moduleNodeQN] {
+		defaultSource = moduleNodeQN
 	}
 	edges := make([]pendingEdge, 0, len(parsed.Extraction.Usages)+len(parsed.Extraction.Calls))
 	unresolved := make([]pendingEdge, 0)
@@ -480,11 +582,28 @@ func resolveSyntaxFileRelationships(
 		kind  string
 	}{{parsed.Extraction.Usages, "USAGE"}, {parsed.Extraction.Writes, "WRITES"}} {
 		for _, fact := range relationship.facts {
-			if relationship.kind == "USAGE" && occurrenceLocallyBound(rel, fact, localBindings) {
+			lexical := symbolResolution{}
+			if relationship.kind == "USAGE" && parsed.File.Language == "python" && fact.MayBeCallReference {
+				lexical = pythonLexicalCallable(moduleQN, fact, parsed.Extraction.TypeAssignments, registry)
+			}
+			if relationship.kind == "USAGE" && lexical.qn == "" && occurrenceLocallyBound(rel, fact, localBindings) {
 				continue
 			}
 			source := syntaxOccurrenceSource(rel, fact.Scope, defaultSource, byFileScope)
-			resolution, self := registry.resolveOwnMember(parsed.File.Language, fact.Name, source)
+			if parsed.File.Language == "go" {
+				source = syntaxGoEnclosingSource(rel, fact.StartByte, parsed.Extraction.Definitions, source)
+			}
+			resolution, self := lexical, false
+			if resolution.qn == "" && relationship.kind == "USAGE" && parsed.File.Language == "python" && fact.MayBeCallReference && strings.Contains(fact.Name, ".") {
+				var bound bool
+				resolution, bound = localTypes.resolve(registry, SyntaxFact{Name: fact.Name, Scope: fact.Scope, StartByte: fact.StartByte})
+				if bound && resolution.qn == "" {
+					continue
+				}
+			}
+			if resolution.qn == "" {
+				resolution, self = registry.resolveOwnMember(parsed.File.Language, fact.Name, source)
+			}
 			if resolution.qn == "" {
 				resolution = registry.resolveWith(session, fact.Name)
 			}
@@ -500,9 +619,13 @@ func resolveSyntaxFileRelationships(
 				callee = internString(fact.Name)
 				if fact.MayBeCallReference {
 					if target, ok := registry.exact[resolution.qn]; ok &&
-						jsxCallableLabel(target.Label) &&
-						resolution.strategy == "same_module" {
-						if src, ok := registry.exact[source]; ok && jsxCallableLabel(src.Label) {
+						(parsed.File.Language == "python" && (target.Label == "Function" || target.Label == "Method") ||
+							parsed.File.Language != "python" && jsxCallableLabel(target.Label)) &&
+						!(parsed.File.Language == "python" && registry.decorated[resolution.qn]) &&
+						(resolution.strategy == "same_module" || resolution.strategy == "lexical_scope" || resolution.strategy == "import_map" ||
+							resolution.strategy == "local_constructor" || resolution.strategy == "own_member" || resolution.strategy == "inherited_member") {
+						if src, ok := registry.exact[source]; ok && jsxCallableLabel(src.Label) ||
+							parsed.File.Language == "python" && source == moduleQN {
 							kind = "CALL_REFERENCE"
 						}
 					}
@@ -516,6 +639,9 @@ func resolveSyntaxFileRelationships(
 	}
 	for _, fact := range parsed.Extraction.Throws {
 		source := syntaxOccurrenceSource(rel, fact.Scope, defaultSource, byFileScope)
+		if parsed.File.Language == "go" {
+			source = syntaxGoEnclosingSource(rel, fact.StartByte, parsed.Extraction.Definitions, source)
+		}
 		resolution := registry.resolveWith(session, fact.Name)
 		if resolution.qn == "" || resolution.qn == source {
 			continue
@@ -530,12 +656,40 @@ func resolveSyntaxFileRelationships(
 	}
 	for _, fact := range parsed.Extraction.Calls {
 		source := syntaxOccurrenceSource(rel, fact.Scope, defaultSource, byFileScope)
+		if parsed.File.Language == "go" {
+			source = syntaxGoEnclosingSource(rel, fact.StartByte, parsed.Extraction.Definitions, source)
+		}
 		name := syntaxCallBase(fact.Name)
 		candidates := byName[parsed.File.Language+"\x00"+name]
-		resolution, self := registry.resolveOwnMember(parsed.File.Language, fact.Name, source)
+		resolution := symbolResolution{}
+		if parsed.File.Language == "rust" {
+			resolution = rustResolveQualifiedCall(registry, moduleQN, fact.Name, imports)
+		}
 		if resolution.qn == "" {
+			resolution = goTypes.resolve(registry, source, fact.Name, imports, fact.StartByte)
+		}
+		locallyBound := false
+		if resolution.qn == "" {
+			resolution, locallyBound = localTypes.resolve(registry, fact)
+		}
+		if resolution.qn == "" && !locallyBound {
+			resolution, locallyBound = jsTypes.resolve(registry, session, fact)
+		}
+		self := false
+		if resolution.qn == "" && !locallyBound && parsed.File.Language == "python" && !strings.Contains(fact.Name, ".") {
+			resolution = pythonLexicalCallable(moduleQN, OccurrenceFact{Name: fact.Name, Scope: fact.Scope, StartByte: fact.StartByte, StartLine: int32(fact.StartLine)}, parsed.Extraction.TypeAssignments, registry)
+			if resolution.qn != "" {
+				resolution.strategy = "lsp_callable_alias"
+			}
+		}
+		if resolution.qn == "" && !locallyBound {
+			resolution, self = registry.resolveOwnMember(parsed.File.Language, fact.Name, source)
+		}
+		if resolution.qn == "" && !locallyBound {
 			resolution = registry.resolveWith(session, fact.Name)
-			resolution = registry.applyFieldTypeHint(fact.Name, source, resolution)
+			if parsed.File.Language != "go" {
+				resolution = registry.applyFieldTypeHint(fact.Name, source, rel, resolution)
+			}
 		}
 		if (self && guessStrategy(resolution.strategy)) || registry.receiverGuessIsWeak(parsed.File.Language, fact.Name, imports, resolution, true) {
 			resolution.confidence = math.Min(resolution.confidence, guessedEdgeConfidence)
@@ -558,6 +712,22 @@ func resolveSyntaxFileRelationships(
 			}
 		}
 		if suppressWeakJSMethodCall(parsed.File.Language, fact.Name, resolution.strategy) {
+			resolution = symbolResolution{}
+		}
+		if edge, ok := syntaxSpawnEdge(*parsed, fact, source, resolution, registry); ok {
+			edges = append(edges, edge)
+			continue
+		}
+		if rustQualifiedTypeMismatch(parsed.File.Language, fact.Name, resolution, registry) {
+			resolution = symbolResolution{}
+		}
+		if goSuppressWeakSelector(parsed.File.Language, fact.Name, resolution) {
+			resolution = symbolResolution{}
+		}
+		if parsed.File.Language == "python" && pythonSuppressWeakMemberCall(fact.Name, resolution.strategy, imports, session.external) {
+			resolution = symbolResolution{}
+		}
+		if parsed.File.Language == "python" && pythonParameterShadowsCall(fact.Scope, fact.Name, resolution.strategy, parameters) {
 			resolution = symbolResolution{}
 		}
 		if resolution.qn != "" && resolution.qn != source {
@@ -590,6 +760,51 @@ func resolveSyntaxFileRelationships(
 	}
 	_ = project
 	return edges, unresolved
+}
+
+// The Go selector guard keeps evidence-backed resolutions and reachable
+// unique-name matches, but drops receiverless short-name guesses.
+func goSuppressWeakSelector(language, callee string, resolution symbolResolution) bool {
+	if language != "go" || !strings.Contains(callee, ".") {
+		return false
+	}
+	switch resolution.strategy {
+	case "suffix_match", "field_type_hint", "fuzzy":
+		return true
+	case "unique_name":
+		return resolution.confidence < .75
+	default:
+		return false
+	}
+}
+
+// A Rust Type::method call cannot target a method of a different indexed
+// type merely because the method name matches.
+func rustQualifiedTypeMismatch(language, callee string, resolution symbolResolution, registry symbolRegistry) bool {
+	if language != "rust" || !guessStrategy(resolution.strategy) {
+		return false
+	}
+	cut := strings.LastIndex(callee, "::")
+	if cut < 0 {
+		return false
+	}
+	receiver := callee[:cut]
+	if previous := strings.LastIndex(receiver, "::"); previous >= 0 {
+		receiver = receiver[previous+2:]
+	}
+	receiver = strings.SplitN(receiver, "<", 2)[0]
+	if receiver == "Self" || receiver == "" || receiver[0] < 'A' || receiver[0] > 'Z' {
+		return false
+	}
+	target, ok := registry.exact[resolution.qn]
+	if !ok || target.Label != "Method" {
+		return false
+	}
+	parent := resolution.qn
+	if dot := strings.LastIndexByte(parent, '.'); dot >= 0 {
+		parent = parent[:dot]
+	}
+	return !strings.HasSuffix(parent, "."+receiver)
 }
 
 // dropUsagesShadowedByCalls removes a USAGE edge when the exact same
@@ -631,6 +846,33 @@ func dropUsagesShadowedByCalls(graph *goGraph) {
 // syntaxOccurrenceSource matches Superopen enclosing_func_qn ownership: only
 // Function/Method scopes own value/call occurrences. Class/Enum/Interface/Type
 // scopes qualify nested definitions but leave occurrences on the module/file.
+func pythonLexicalCallable(module string, fact OccurrenceFact, assignments []SyntaxFact, registry symbolRegistry) symbolResolution {
+	if fact.Scope == "" || strings.ContainsAny(fact.Name, ".:") {
+		return symbolResolution{}
+	}
+	for _, assignment := range assignments {
+		if assignment.Name == fact.Name && assignment.Scope == fact.Scope && assignment.EndByte <= fact.StartByte {
+			return symbolResolution{}
+		}
+	}
+	for scope := fact.Scope; scope != ""; {
+		owner := module + "." + scope
+		if node, ok := registry.exact[owner]; !ok || node.Label != "Class" || scope == fact.Scope {
+			qn := owner + "." + fact.Name
+			if node, ok := registry.exact[qn]; ok && jsxCallableLabel(node.Label) &&
+				(fact.StartLine == 0 || node.Location.StartLine <= int(fact.StartLine)) {
+				return symbolResolution{qn: qn, strategy: "lexical_scope", confidence: .97, candidates: 1}
+			}
+		}
+		cut := strings.LastIndexByte(scope, '.')
+		if cut < 0 {
+			break
+		}
+		scope = scope[:cut]
+	}
+	return symbolResolution{}
+}
+
 func syntaxOccurrenceSource(file, scope, defaultSource string, byFileScope map[string]syntaxDefinitionRef) string {
 	for scope != "" {
 		owner, ok := byFileScope[file+"\x00"+scope]
@@ -650,10 +892,24 @@ func syntaxOccurrenceSource(file, scope, defaultSource string, byFileScope map[s
 	return defaultSource
 }
 
-// syntaxAccessorMethods are Python methods a decorator turns into an
-// attribute: property, cached_property, functools.cached_property, and the
-// x.setter / x.getter / x.deleter forms.
-func syntaxAccessorMethods(files []ParsedSyntaxFile, byFileScope map[string]syntaxDefinitionRef) map[string]bool {
+// Go permits the same method name on many receivers. The AST span identifies
+// which declaration owns an occurrence when a scope name alone is ambiguous.
+func syntaxGoEnclosingSource(file string, at uint32, definitions []SyntaxFact, fallback string) string {
+	bestSpan := ^uint32(0)
+	best := fallback
+	for _, fact := range definitions {
+		if fact.Kind != "function" || fact.StartByte > at || at >= fact.EndByte {
+			continue
+		}
+		if span := fact.EndByte - fact.StartByte; span < bestSpan {
+			bestSpan = span
+			best = syntaxDefinitionFactQN("go", file, fact)
+		}
+	}
+	return best
+}
+
+func syntaxDecoratedCallables(files []ParsedSyntaxFile, byFileScope map[string]syntaxDefinitionRef) map[string]bool {
 	out := map[string]bool{}
 	for _, parsed := range files {
 		if parsed.File.Language != "python" {
@@ -661,10 +917,6 @@ func syntaxAccessorMethods(files []ParsedSyntaxFile, byFileScope map[string]synt
 		}
 		rel := filepath.ToSlash(parsed.File.Path)
 		for _, fact := range parsed.Extraction.Decorators {
-			base := strings.ToLower(lastDotted(syntaxCallBase(fact.Name)))
-			if !strings.Contains(base, "property") && base != "setter" && base != "getter" && base != "deleter" {
-				continue
-			}
 			if ref, ok := byFileScope[rel+"\x00"+fact.Scope]; ok {
 				out[ref.qn] = true
 			}
@@ -861,6 +1113,12 @@ func syntaxDefinitionQN(language, file, scope, name string) string {
 }
 
 func syntaxDefinitionFactQN(language, file string, fact SyntaxFact) string {
+	if language == "go" && fact.NodeType == "method_declaration" && fact.ParentClass != "" {
+		return syntaxDefinitionQN(language, file, fact.ParentClass, fact.Name)
+	}
+	if (language == "xml" || language == "toml") && fact.Kind == "class" {
+		return syntaxDefinitionQN(language, file, "", strings.Join(strings.Fields(fact.Name), "-"))
+	}
 	// JS/TS: class members keep Class.method; everything else is module-flat.
 	if isJSLanguage(language) && fact.Kind == "function" {
 		if fact.Scope != "" {
@@ -891,6 +1149,25 @@ func syntaxDefinitionModuleQN(language, file string) string {
 	return module
 }
 
+func syntaxGoRootPackage(files []ParsedSyntaxFile) string {
+	for _, parsed := range files {
+		if parsed.File.Language != "go" || strings.Contains(filepath.ToSlash(parsed.File.Path), "/") ||
+			strings.HasSuffix(parsed.File.Path, "_test.go") {
+			continue
+		}
+		for _, line := range strings.Split(string(parsed.Body), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "package ") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 && fields[1] != "main" {
+					return fields[1]
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func syntaxModuleQN(file string) string {
 	module := strings.TrimLeft(strings.TrimSuffix(filepath.ToSlash(file), filepath.Ext(file)), ".")
 	segments := strings.Split(module, "/")
@@ -910,6 +1187,12 @@ func joinSyntaxScope(scope, name string) string {
 func syntaxNodeLabel(language string, fact SyntaxFact) string {
 	switch fact.Kind {
 	case "function":
+		if language == "rust" {
+			if fact.ParentClass != "" {
+				return "Method"
+			}
+			return "Function"
+		}
 		if language == "go" && fact.NodeType == "method_declaration" {
 			return "Method"
 		}
@@ -939,11 +1222,15 @@ func syntaxNodeLabel(language string, fact SyntaxFact) string {
 				}
 			}
 		}
+		if (language == "rust" || language == "swift" || language == "d" || language == "arkts") &&
+			(fact.NodeType == "struct_item" || fact.NodeType == "struct_declaration") {
+			return "Struct"
+		}
 		switch fact.NodeType {
 		case "interface_declaration", "interface_definition", "interface_type", "protocol_declaration":
 			return "Interface"
 		case "trait_item", "trait_definition":
-			return "Trait"
+			return "Interface"
 		case "enum_specifier", "enum_declaration", "enum_item":
 			return "Enum"
 		case "type_alias_declaration", "type_alias", "type_item", "type_definition":

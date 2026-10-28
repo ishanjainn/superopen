@@ -238,15 +238,766 @@ func TestQueryPagesRanksAndReportsTheTrueTotal(t *testing.T) {
 	if second.Offset != queryDefaultLimit || len(second.Rows) != queryDefaultLimit || second.Rows[0].QualifiedName == first.Rows[0].QualifiedName {
 		t.Fatalf("the next page must continue the ranking: %v", queryRowQNs(second.Rows))
 	}
-	if len(second.Bodies) != 0 {
-		t.Fatal("bodies belong to the first page only")
-	}
+	// These fixture nodes have no source files, so neither page has bodies.
 	seen := map[string]bool{}
 	for _, n := range append(first.Rows, second.Rows...) {
 		if seen[n.QualifiedName] {
 			t.Fatalf("a row repeats across pages: %s", n.QualifiedName)
 		}
 		seen[n.QualifiedName] = true
+	}
+}
+
+func TestQueryPromotesDirectCalleeIntoTheFirstPage(t *testing.T) {
+	ctx := context.Background()
+	var ranked []api.Node
+	store := fixtureGraph(t, func(builder *Builder) error {
+		for i := 0; i < 24; i++ {
+			n := api.Node{Project: "fixture", Label: "Method", Name: fmt.Sprintf("choice%d", i),
+				QualifiedName: fmt.Sprintf("pkg.Filter.choice%d", i),
+				Location:      api.Location{File: fmt.Sprintf("pkg/choice%d.go", i), StartLine: 1}}
+			if i == 3 {
+				n.Name, n.QualifiedName = "field_choices", "pkg.Filter.field_choices"
+			}
+			if i == 20 {
+				n.Name, n.QualifiedName = "get_choices", "pkg.Field.get_choices"
+			}
+			id, err := builder.PutNode(n)
+			if err != nil {
+				return err
+			}
+			n.ID = id
+			ranked = append(ranked, n)
+		}
+		_, err := builder.PutEdge(api.Edge{Project: "fixture", SourceID: ranked[3].ID, TargetID: ranked[20].ID,
+			Type: "CALLS", Evidence: &api.Evidence{Confidence: 1}})
+		return err
+	})
+	defer store.Close()
+	rows, err := store.prioritizeQueryRelations(ctx, "fixture", ranked,
+		"Filter field choices ordering", []string{"filter", "choice", "ordering"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != len(ranked) || rows[3].ID != ranked[3].ID || rows[4].ID != ranked[20].ID {
+		t.Fatalf("direct callee must follow its caller without duplicating rows: %v", queryRowQNs(rows[:6]))
+	}
+	var result api.QueryResult
+	if err := store.fillQueryRows(ctx, &result, rows, api.QueryRequest{Project: "fixture", Limit: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if result.RowsTotal != len(ranked) || len(result.Edges) != 1 || result.Edges[0].Type != "CALLS" {
+		t.Fatalf("first page must expose the call edge: rows=%d edges=%+v", result.RowsTotal, result.Edges)
+	}
+	linked, err := store.queryLinkedNodes(ctx, ranked[:4], nil, "filter choices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(linked) != 1 || linked[0].To != ranked[20].QualifiedName || linked[0].Rel != "CALLS" {
+		t.Fatalf("off-page call target should keep its full qualified name: %+v", linked)
+	}
+}
+
+func TestQueryDiversifiesTheFirstPageWithoutLosingRows(t *testing.T) {
+	var rows []api.Node
+	for i := 0; i < 25; i++ {
+		file := "pkg/crowded.go"
+		if i >= 12 {
+			file = fmt.Sprintf("pkg/other%d.go", i)
+		}
+		rows = append(rows, api.Node{ID: int64(i + 1), QualifiedName: fmt.Sprintf("pkg.symbol%d", i),
+			Location: api.Location{File: file}})
+	}
+	got := diversifyQueryRows(rows)
+	if len(got) != len(rows) {
+		t.Fatalf("row count changed: %d", len(got))
+	}
+	for i := 0; i < queryDiverseLockedPrefix; i++ {
+		if got[i].ID != rows[i].ID {
+			t.Fatalf("top evidence moved: %v", queryRowQNs(got[:5]))
+		}
+	}
+	seen := map[int64]bool{}
+	for _, n := range got {
+		if seen[n.ID] {
+			t.Fatalf("duplicated row %d", n.ID)
+		}
+		seen[n.ID] = true
+	}
+	if got[4].ID != rows[12].ID || got[14].ID != rows[22].ID {
+		t.Fatalf("other source files should fill the remaining first-page slots: %v", queryRowQNs(got[:15]))
+	}
+}
+
+func TestQueryDiversificationDefersDocumentationExamples(t *testing.T) {
+	rows := []api.Node{
+		{ID: 1, Location: api.Location{File: "sphinx/ext/autodoc/__init__.py"}},
+		{ID: 2, Location: api.Location{File: "sphinx/util/inspect.py"}},
+		{ID: 3, Location: api.Location{File: "sphinx/ext/autodoc/__init__.py"}},
+		{ID: 4, Location: api.Location{File: "sphinx/ext/autodoc/__init__.py"}},
+		{ID: 5, Location: api.Location{File: "doc/development/examples/property.py"}},
+		{ID: 6, Location: api.Location{File: "sphinx/ext/autodoc/importer.py"}},
+		{ID: 7, Location: api.Location{File: "sphinx/domains/python.py"}},
+	}
+	got := diversifyQueryRows(rows)
+	if got[4].ID != 6 || got[5].ID != 7 || got[6].ID != 5 {
+		t.Fatalf("implementation should precede documentation examples: %v", queryRowQNs(got))
+	}
+}
+
+func TestQueryBodiesDeferDocumentationExamples(t *testing.T) {
+	property := api.Node{ID: 1, Label: "Method", Name: "can_document_member", Location: api.Location{File: "sphinx/ext/autodoc/__init__.py"}}
+	isProperty := api.Node{ID: 2, Label: "Function", Name: "isproperty", Location: api.Location{File: "sphinx/util/inspect.py"}}
+	example := api.Node{ID: 3, Label: "Method", Name: "can_document_member", Location: api.Location{File: "doc/development/examples/property.py"}}
+	importer := api.Node{ID: 4, Label: "Function", Name: "get_class_members", Location: api.Location{File: "sphinx/ext/autodoc/importer.py"}}
+	got := queryBodyCandidates([]api.Node{property, isProperty, example, importer}, []api.Edge{{SourceID: 1, TargetID: 2, Type: "CALLS"}}, []string{"property", "document"})
+	if len(got) != 4 || got[0].ID != 1 || got[1].ID != 2 || got[2].ID != 4 || got[3].ID != 3 {
+		t.Fatalf("documentation example should not consume an implementation body slot: %v", queryRowQNs(got))
+	}
+}
+
+func TestQueryBodiesFollowRankBeforeBroadNameMatch(t *testing.T) {
+	property := api.Node{ID: 1, Label: "Method", Name: "can_document_member", Location: api.Location{File: "sphinx/ext/autodoc/__init__.py"}}
+	isProperty := api.Node{ID: 2, Label: "Function", Name: "isproperty", Location: api.Location{File: "sphinx/util/inspect.py"}}
+	importer := api.Node{ID: 3, Label: "Function", Name: "get_class_members", Location: api.Location{File: "sphinx/ext/autodoc/importer.py"}}
+	broad := api.Node{ID: 4, Label: "Method", Name: "add_autodocumenter", Location: api.Location{File: "sphinx/application.py"}}
+	got := queryBodyCandidates([]api.Node{property, isProperty, importer, broad}, []api.Edge{{SourceID: 1, TargetID: 2, Type: "CALLS"}}, []string{"autodoc", "document", "property", "descriptor"})
+	if len(got) != 4 || got[2].ID != importer.ID {
+		t.Fatalf("earlier implementation should beat later broad name match: %v", queryRowQNs(got))
+	}
+}
+
+func TestQueryBodiesPreferConnectedImplementationOverTests(t *testing.T) {
+	test := api.Node{ID: 1, Label: "Method", Name: "test_choices", Location: api.Location{File: "tests/test_filters.py"}}
+	caller := api.Node{ID: 2, Label: "Method", Name: "field_choices", Location: api.Location{File: "pkg/filters.py"}}
+	other := api.Node{ID: 3, Label: "Method", Name: "unrelated", Location: api.Location{File: "pkg/other.py"}}
+	callee := api.Node{ID: 4, Label: "Method", Name: "get_choices", Location: api.Location{File: "pkg/fields.py"}}
+	rows := queryBodyCandidates([]api.Node{test, caller, other, callee}, []api.Edge{{SourceID: caller.ID, TargetID: callee.ID, Type: "CALLS"}}, nil)
+	if len(rows) != 4 || rows[0].ID != caller.ID || rows[1].ID != callee.ID || rows[2].ID != other.ID || rows[3].ID != test.ID {
+		t.Fatalf("source call chain must get body slots before unrelated rows: %v", queryRowQNs(rows))
+	}
+	if !queryAttachableNode(api.Node{Label: "Variable", Location: api.Location{File: "pkg/options.py"}}) ||
+		queryAttachableNode(api.Node{Label: "Variable", Location: api.Location{File: "config.json"}}) {
+		t.Fatal("source variables are attachable; data-file variables are not")
+	}
+}
+
+func TestQueryBodiesIncludeSiblingImplementationInAnotherFile(t *testing.T) {
+	root := api.Node{ID: 1, Label: "Method", Name: "field_choices", Location: api.Location{File: "admin/filters.py"}}
+	callee := api.Node{ID: 2, Label: "Method", Name: "get_choices", Location: api.Location{File: "models/fields.py"}}
+	unrelated := api.Node{ID: 3, Label: "Method", Name: "get_queryset", Location: api.Location{File: "admin/views.py"}}
+	sibling := api.Node{ID: 4, Label: "Method", Name: "get_choices", Location: api.Location{File: "models/reverse.py"}}
+	got := queryBodyCandidates([]api.Node{root, callee, unrelated, sibling},
+		[]api.Edge{{SourceID: root.ID, TargetID: callee.ID, Type: "CALLS"}}, nil)
+	if len(got) != 4 || got[0].ID != root.ID || got[1].ID != callee.ID || got[2].ID != sibling.ID {
+		t.Fatalf("sibling implementation should use the third body slot: %v", queryRowQNs(got))
+	}
+}
+
+func TestQueryBodiesUseQuestionNameWhenNoEdgeSurvives(t *testing.T) {
+	parser := api.Node{ID: 1, Label: "Method", Name: "__init__", Location: api.Location{File: "config/parser.py"}}
+	entry := api.Node{ID: 2, Label: "Method", Name: "run", Location: api.Location{File: "lint/run.py"}}
+	verbose := api.Node{ID: 3, Label: "Function", Name: "_set_verbose_mode", Location: api.Location{File: "config/utils.py"}}
+	got := queryBodyCandidates([]api.Node{parser, entry, verbose}, nil, []string{"verbose", "option"})
+	if len(got) != 3 || got[0].ID != parser.ID || got[1].ID != verbose.ID {
+		t.Fatalf("named behavior should use the next body slot: %v", queryRowQNs(got))
+	}
+}
+
+func TestQueryBodiesKeepGraphUserAheadOfUnrelatedNameMatch(t *testing.T) {
+	message := api.Node{ID: 1, Label: "Method", Name: "message", Location: api.Location{File: "core/mail/message.py"}}
+	dns := api.Node{ID: 2, Label: "Variable", Name: "DNS_NAME", Location: api.Location{File: "core/mail/utils.py", StartLine: 20, EndLine: 20}}
+	unrelated := api.Node{ID: 3, Label: "Method", Name: "normalize_email", Location: api.Location{File: "auth/user.py"}}
+	smtp := api.Node{ID: 4, Label: "Method", Name: "open", Location: api.Location{File: "core/mail/smtp.py"}}
+	got := queryBodyCandidates([]api.Node{message, dns, unrelated, smtp}, []api.Edge{
+		{SourceID: message.ID, TargetID: dns.ID, Type: "USAGE"},
+		{SourceID: smtp.ID, TargetID: dns.ID, Type: "USAGE"},
+	}, []string{"email", "message", "dns", "name"})
+	if len(got) < 3 || got[0].ID != message.ID || got[1].ID != smtp.ID {
+		t.Fatalf("body slot should follow the graph user before lexical bystander: %v", queryRowQNs(got))
+	}
+}
+
+func TestQueryBodiesSpendSourceSlotsOnImplementations(t *testing.T) {
+	wrapper := api.Node{ID: 1, Label: "Method", Name: "__str__", Location: api.Location{File: "mail/utils.py", StartLine: 10, EndLine: 11}}
+	fqdn := api.Node{ID: 2, Label: "Method", Name: "get_fqdn", Location: api.Location{File: "mail/utils.py", StartLine: 13, EndLine: 17}}
+	message := api.Node{ID: 3, Label: "Method", Name: "message", Location: api.Location{File: "mail/message.py", StartLine: 239, EndLine: 264}}
+	dns := api.Node{ID: 4, Label: "Variable", Name: "DNS_NAME", Location: api.Location{File: "mail/utils.py", StartLine: 20, EndLine: 20}}
+	smtp := api.Node{ID: 5, Label: "Method", Name: "open", Location: api.Location{File: "mail/smtp.py", StartLine: 41, EndLine: 73}}
+	unrelated := api.Node{ID: 6, Label: "Method", Name: "send_mail", Location: api.Location{File: "auth/forms.py", StartLine: 100, EndLine: 120}}
+	got := queryBodyCandidates([]api.Node{wrapper, fqdn, message, dns, smtp, unrelated}, []api.Edge{
+		{SourceID: wrapper.ID, TargetID: fqdn.ID, Type: "CALLS"},
+		{SourceID: message.ID, TargetID: dns.ID, Type: "USAGE"},
+		{SourceID: smtp.ID, TargetID: dns.ID, Type: "USAGE"},
+	}, []string{"dns", "name", "mail"})
+	if len(got) < 3 || got[0].ID != fqdn.ID || got[1].ID != message.ID || got[2].ID != smtp.ID {
+		t.Fatalf("wrapper and one-line alias should not displace the call paths: %v", queryRowQNs(got))
+	}
+}
+
+func TestQueryBodiesKeepSingleShortDefinition(t *testing.T) {
+	variable := api.Node{ID: 1, Label: "Variable", Name: "FLAG", Location: api.Location{File: "settings.py", StartLine: 8, EndLine: 8}}
+	got := queryBodyCandidates([]api.Node{variable}, nil, nil)
+	if len(got) != 1 || got[0].ID != variable.ID {
+		t.Fatalf("single-line definition must remain readable: %+v", got)
+	}
+}
+
+func TestQueryPromotesShortWrapperCalleeInSameFile(t *testing.T) {
+	ctx := context.Background()
+	var wrapper, callee api.Node
+	store := fixtureGraph(t, func(builder *Builder) error {
+		wrapper = api.Node{Project: "fixture", Label: "Method", Name: "__str__", QualifiedName: "mail.CachedDnsName.__str__", Location: api.Location{File: "mail/utils.py", StartLine: 10, EndLine: 11}}
+		callee = api.Node{Project: "fixture", Label: "Method", Name: "get_fqdn", QualifiedName: "mail.CachedDnsName.get_fqdn", Location: api.Location{File: "mail/utils.py", StartLine: 13, EndLine: 17}}
+		id, err := builder.PutNode(wrapper)
+		if err != nil {
+			return err
+		}
+		wrapper.ID = id
+		id, err = builder.PutNode(callee)
+		if err != nil {
+			return err
+		}
+		callee.ID = id
+		_, err = builder.PutEdge(api.Edge{Project: "fixture", SourceID: wrapper.ID, TargetID: callee.ID, Type: "CALLS", Evidence: &api.Evidence{Strategy: "import_map", Confidence: 0.9}})
+		return err
+	})
+	defer store.Close()
+	other := api.Node{ID: 999, Label: "Method", Name: "other", QualifiedName: "mail.other", Location: api.Location{File: "mail/message.py", StartLine: 1, EndLine: 20}}
+	got, err := store.prioritizeQueryRelations(ctx, "fixture", []api.Node{wrapper, other}, "hostname encoding", []string{"hostname", "encoding"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[1].QualifiedName != callee.QualifiedName {
+		t.Fatalf("short wrapper's callee should be beside it: %v", queryRowQNs(got))
+	}
+}
+
+func TestQueryPromotesBothRelevantCalleesOfShortEntryPoint(t *testing.T) {
+	ctx := context.Background()
+	var ranked []api.Node
+	store := fixtureGraph(t, func(builder *Builder) error {
+		for i := 0; i < 24; i++ {
+			n := api.Node{Project: "fixture", Label: "Method", Name: fmt.Sprintf("other%d", i),
+				QualifiedName: fmt.Sprintf("pkg.Query.other%d", i),
+				Location:      api.Location{File: fmt.Sprintf("pkg/other%d.py", i), StartLine: 1, EndLine: 10}}
+			switch i {
+			case 0:
+				n.Name, n.QualifiedName, n.Location = "get_count", "pkg.Query.get_count", api.Location{File: "pkg/query.py", StartLine: 548, EndLine: 554}
+			case 19:
+				n.Name, n.QualifiedName, n.Location = "clone", "pkg.Query.clone", api.Location{File: "pkg/query.py", StartLine: 314, EndLine: 357}
+			case 20:
+				n.Name, n.QualifiedName, n.Location = "add_annotation", "pkg.Query.add_annotation", api.Location{File: "pkg/query.py", StartLine: 1101, EndLine: 1111}
+			case 21:
+				n.Name, n.QualifiedName, n.Location = "get_aggregation", "pkg.Query.get_aggregation", api.Location{File: "pkg/query.py", StartLine: 438, EndLine: 546}
+			}
+			id, err := builder.PutNode(n)
+			if err != nil {
+				return err
+			}
+			n.ID = id
+			ranked = append(ranked, n)
+		}
+		for i, target := range ranked[19:22] {
+			if _, err := builder.PutEdge(api.Edge{Project: "fixture", SourceID: ranked[0].ID, TargetID: target.ID,
+				Type: "CALLS", Evidence: &api.Evidence{Confidence: 1,
+					Location: &api.Location{File: "pkg/query.py", StartLine: 552 + i}}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	defer store.Close()
+	got, err := store.prioritizeQueryRelations(ctx, "fixture", ranked, "count unused annotations", []string{"count", "unused", "annotations"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[1].QualifiedName != "pkg.Query.get_aggregation" || got[2].QualifiedName != "pkg.Query.add_annotation" {
+		t.Fatalf("the terminal call and annotation path should outrank clone: %v", queryRowQNs(got[:4]))
+	}
+}
+
+func TestCodeSearchPrefersLiteralDefinitionsAcrossFiles(t *testing.T) {
+	matches := []api.CodeSearchMatch{
+		{Location: api.Location{File: "config/init.py", StartLine: 25}, Source: "verbose_mode = False"},
+		{Location: api.Location{File: "config/init.py", StartLine: 37}, Source: "configure(verbose_mode)"},
+		{Location: api.Location{File: "lint/base_options.py", StartLine: 539}, Source: `"verbose",`},
+		{Location: api.Location{File: "config/utils.py", StartLine: 210}, Source: `"--verbose": handler`},
+		{Location: api.Location{File: "script/log.py", StartLine: 3}, Source: `"--verbose", action="store_true"`},
+		{Location: api.Location{File: "ChangeLog", StartLine: 7}, Source: `"verbose" feature`},
+		{Location: api.Location{File: "tests/test_cli.py", StartLine: 10}, Source: `"verbose"`},
+	}
+	result := codeSearchResult(matches, nil, "verbose", 3)
+	if result.TotalGrepMatches != 7 || len(result.Matches) != 3 {
+		t.Fatalf("unexpected search page: %+v", result)
+	}
+	got := []string{result.Matches[0].Location.File, result.Matches[1].Location.File, result.Matches[2].Location.File}
+	if got[0] != "lint/base_options.py" || got[1] != "config/utils.py" || got[2] != "config/init.py" {
+		t.Fatalf("want literal definition and diverse source files before incidental uses: %v", got)
+	}
+}
+
+func TestCodeSearchRanksCodeAheadOfWorkflowConfig(t *testing.T) {
+	matches := []api.CodeSearchMatch{
+		{Location: api.Location{File: ".github/workflows/release.yml", StartLine: 37}, Source: "twine upload --verbose dist/*"},
+		{Location: api.Location{File: "pylint/config/utils.py", StartLine: 209}, Source: `"--verbose": (False, _set_verbose_mode),`},
+		{Location: api.Location{File: "tests/test_self.py", StartLine: 1425}, Source: `run = Run(["--verbose"])`},
+	}
+	result := codeSearchResult(matches, nil, "--verbose", 3)
+	if result.Matches[0].Location.File != "pylint/config/utils.py" || result.Matches[1].Location.File != "tests/test_self.py" {
+		t.Fatalf("code and tests should rank before workflow config: %+v", result.Matches)
+	}
+}
+
+func TestCodeSearchRanksCodeAheadOfChangelogs(t *testing.T) {
+	matches := []api.CodeSearchMatch{
+		{Location: api.Location{File: "CHANGES", StartLine: 1493}, Source: "* autodoc classmethod coroutines are not detected"},
+		{Location: api.Location{File: "CHANGES.old", StartLine: 346}, Source: "- Added a classmethod directive"},
+		{Location: api.Location{File: "sphinx/domains/python.py", StartLine: 717}, Source: "'classmethod': directives.flag,"},
+	}
+	result := codeSearchResult(matches, nil, "classmethod", 3)
+	if result.Matches[0].Location.File != "sphinx/domains/python.py" {
+		t.Fatalf("implementation should lead changelog mentions: %+v", result.Matches)
+	}
+}
+
+func TestCodeSearchRanksDecoratorConsumersAheadOfBareDecorators(t *testing.T) {
+	matches := []api.CodeSearchMatch{
+		{Location: api.Location{File: "sphinx/util/inventory.py", StartLine: 83}, Source: "@classmethod"},
+		{Location: api.Location{File: "sphinx/ext/autodoc/importer.py", StartLine: 280}, Source: "if isinstance(descriptor, classmethod):"},
+		{Location: api.Location{File: "sphinx/domains/python.py", StartLine: 717}, Source: "'classmethod': directives.flag,"},
+	}
+	result := codeSearchResult(matches, nil, "classmethod", 3)
+	if result.Matches[0].Location.File != "sphinx/domains/python.py" || result.Matches[1].Location.File != "sphinx/ext/autodoc/importer.py" {
+		t.Fatalf("generic decorator lines should follow consumer logic: %+v", result.Matches)
+	}
+}
+
+func TestCodeSearchSharedValuesRequireMatchedUse(t *testing.T) {
+	links := []api.QueryLink{
+		{From: "sphinx.util.inventory.InventoryFile", Rel: "used_by", To: "sphinx.ext.intersphinx.fetch_inventory"},
+		{From: "mail.message", Rel: "uses", To: "mail.DNS_NAME"},
+		{From: "mail.DNS_NAME", Rel: "used_by", To: "mail.smtp.open"},
+	}
+	shared := codeSearchSharedValues(links, nil)
+	if len(shared) != 1 || shared[0].Value != "mail.DNS_NAME" {
+		t.Fatalf("only a source value at the matched line should be shared: %+v", shared)
+	}
+	direct := codeSearchSharedValues(links[2:], []api.CodeSearchMatch{{Node: &api.Node{Label: "Variable", QualifiedName: "mail.DNS_NAME"}}})
+	if len(direct) != 0 {
+		t.Fatalf("one consumer is not a shared-value summary: %+v", direct)
+	}
+	direct = codeSearchSharedValues([]api.QueryLink{
+		{From: "mail.DNS_NAME", Rel: "used_by", To: "mail.message"},
+		{From: "mail.DNS_NAME", Rel: "used_by", To: "mail.smtp.open"},
+	}, []api.CodeSearchMatch{{Node: &api.Node{Label: "Variable", QualifiedName: "mail.DNS_NAME"}}})
+	if len(direct) != 1 || len(direct[0].Consumers) != 2 {
+		t.Fatalf("direct variable matches should summarize their users: %+v", direct)
+	}
+}
+
+func TestCodeSearchRanksBehaviorAheadOfImportsAndExports(t *testing.T) {
+	matches := []api.CodeSearchMatch{
+		{Location: api.Location{File: "django/core/mail/__init__.py", StartLine: 18}, Source: "'CachedDnsName', 'DNS_NAME', 'EmailMessage',"},
+		{Location: api.Location{File: "django/core/mail/utils.py", StartLine: 20}, Source: "DNS_NAME = CachedDnsName()"},
+		{Location: api.Location{File: "django/core/mail/message.py", StartLine: 18}, Source: "from django.core.mail.utils import DNS_NAME"},
+		{Location: api.Location{File: "django/core/mail/message.py", StartLine: 259}, Source: "# Use cached DNS_NAME for performance"},
+		{Location: api.Location{File: "django/core/mail/message.py", StartLine: 260}, Source: "msg['Message-ID'] = make_msgid(domain=DNS_NAME)"},
+	}
+	result := codeSearchResult(matches, nil, "DNS_NAME", 5)
+	if result.Matches[0].Location.File != "django/core/mail/utils.py" || result.Matches[0].Location.StartLine != 20 {
+		t.Fatalf("a shared value's definition should lead, got %+v", result.Matches)
+	}
+	if result.Matches[1].Location.File != "django/core/mail/message.py" {
+		t.Fatalf("consumer should precede import/export, got %+v", result.Matches)
+	}
+	makeMsgID := codeSearchResult([]api.CodeSearchMatch{
+		{Location: api.Location{File: "django/core/mail/__init__.py", StartLine: 12}, Source: "    forbid_multi_line_headers, make_msgid,"},
+		{Location: api.Location{File: "django/core/mail/message.py", StartLine: 260}, Source: "msg['Message-ID'] = make_msgid(domain=DNS_NAME)"},
+	}, nil, "make_msgid", 2)
+	if makeMsgID.Matches[0].Location.File != "django/core/mail/message.py" {
+		t.Fatalf("a call must rank ahead of a multiline re-export: %+v", makeMsgID.Matches)
+	}
+}
+
+func TestCodeSearchHitLinksToNarrowestIndexedSymbol(t *testing.T) {
+	ctx := context.Background()
+	store := fixtureGraph(t, func(builder *Builder) error {
+		for _, n := range []api.Node{
+			{Project: "fixture", Label: "Class", Name: "Options", QualifiedName: "pkg.Options", Location: api.Location{File: "pkg/options.py", StartLine: 1, EndLine: 50}},
+			{Project: "fixture", Label: "Method", Name: "run", QualifiedName: "pkg.Options.run", Location: api.Location{File: "pkg/options.py", StartLine: 20, EndLine: 30}},
+		} {
+			if _, err := builder.PutNode(n); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	defer store.Close()
+	result := api.CodeSearchResult{Matches: []api.CodeSearchMatch{
+		{Location: api.Location{File: "pkg/options.py", StartLine: 25}},
+		{Location: api.Location{File: "pkg/options.py", StartLine: 60}},
+	}}
+	if err := store.attachCodeSearchSymbols(ctx, "fixture", &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Matches[0].Node == nil || result.Matches[0].Node.QualifiedName != "pkg.Options.run" || result.Matches[1].Node != nil {
+		t.Fatalf("line hits must identify their narrowest indexed symbol: %+v", result.Matches)
+	}
+}
+
+func TestCodeSearchShowsMatchContextAndGraphUser(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	file := filepath.Join(root, "utils.py")
+	source := "PREPROCESSABLE_OPTIONS = {\n    '--verbose': set_verbose,\n}\n\ndef preprocess(args):\n    if args[0] in PREPROCESSABLE_OPTIONS:\n        value = PREPROCESSABLE_OPTIONS[args[0]]\n"
+	for i := 0; i < 35; i++ {
+		source += fmt.Sprintf("        # parser step %d\n", i)
+	}
+	source += "        return value\n"
+	if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(t.TempDir(), "graph.db")
+	store, err := OpenWritable(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.Build(ctx, func(builder *Builder) error {
+		if err := builder.PutProject(ProjectRecord{Name: "fixture", RootPath: root, Generation: "one", EngineVersion: "test", IndexedAt: time.Now().UTC()}); err != nil {
+			return err
+		}
+		variable, err := builder.PutNode(api.Node{Project: "fixture", Label: "Variable", Name: "PREPROCESSABLE_OPTIONS", QualifiedName: "utils.PREPROCESSABLE_OPTIONS", Location: api.Location{File: "utils.py", StartLine: 1, EndLine: 3}})
+		if err != nil {
+			return err
+		}
+		function, err := builder.PutNode(api.Node{Project: "fixture", Label: "Function", Name: "preprocess", QualifiedName: "utils.preprocess", Location: api.Location{File: "utils.py", StartLine: 5, EndLine: 43}})
+		if err != nil {
+			return err
+		}
+		_, err = builder.PutEdge(api.Edge{Project: "fixture", SourceID: function, TargetID: variable, Type: "USAGE"})
+		return err
+	})
+	if closeErr := store.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err = OpenReadOnly(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	result := api.CodeSearchResult{Matches: []api.CodeSearchMatch{{Location: api.Location{File: "utils.py", StartLine: 2}, Source: "    '--verbose': set_verbose,"}}}
+	if err := store.attachCodeSearchSymbols(ctx, "fixture", &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Related) != 1 || result.Related[0].To != "utils.preprocess" || result.Related[0].Rel != "used_by" {
+		t.Fatalf("missing graph user of literal definition: %+v", result.Related)
+	}
+	if len(result.Bodies) != 2 || result.Bodies[1].QualifiedName != "utils.preprocess" ||
+		!strings.Contains(result.Bodies[0].Code, "if args[0] in PREPROCESSABLE_OPTIONS") ||
+		!strings.Contains(result.Bodies[0].Code, "return value") {
+		t.Fatalf("missing match-centered source context: %+v", result.Bodies)
+	}
+	formatted := format.CodeSearchCompact(result, "--verbose", "")
+	if !strings.Contains(formatted, "related[1]") || !strings.Contains(formatted, "contexts[2]") {
+		t.Fatalf("agent output missing relation/context: %s", formatted)
+	}
+}
+
+func TestCodeSearchShowsOtherUsersOfMatchedValue(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "tests", "mail"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	utilsSource := strings.Repeat("# package header\n", 6) +
+		"class CachedDnsName:\n    def get_fqdn(self):\n        return socket.getfqdn()\n" +
+		strings.Repeat("\n", 10) + "DNS_NAME = CachedDnsName()\n"
+	for name, source := range map[string]string{
+		"__init__.py":         "from .message import make_msgid\n__all__ = ['make_msgid']\n",
+		"message.py":          "def message():\n    return make_msgid(domain=DNS_NAME)\n",
+		"utils.py":            utilsSource,
+		"smtp.py":             "def open():\n    connection_params = {'local_hostname': DNS_NAME.get_fqdn()}\n",
+		"tests/mail/tests.py": "class MailTests:\n    def test_unicode_dns(self):\n        assert message()\n\nclass SMTPBackendTests:\n    def test_server_open(self):\n        assert open()\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := OpenWritable(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.Build(ctx, func(builder *Builder) error {
+		if err := builder.PutProject(ProjectRecord{Name: "fixture", RootPath: root, Generation: "one", EngineVersion: "test", IndexedAt: time.Now().UTC()}); err != nil {
+			return err
+		}
+		message, err := builder.PutNode(api.Node{Project: "fixture", Label: "Function", Name: "message", QualifiedName: "mail.message", Location: api.Location{File: "message.py", StartLine: 1, EndLine: 2}})
+		if err != nil {
+			return err
+		}
+		dns, err := builder.PutNode(api.Node{Project: "fixture", Label: "Variable", Name: "DNS_NAME", QualifiedName: "mail.DNS_NAME", Location: api.Location{File: "utils.py", StartLine: 20, EndLine: 20}})
+		if err != nil {
+			return err
+		}
+		smtp, err := builder.PutNode(api.Node{Project: "fixture", Label: "Function", Name: "open", QualifiedName: "mail.smtp.open", Location: api.Location{File: "smtp.py", StartLine: 1, EndLine: 2}})
+		if err != nil {
+			return err
+		}
+		guessed, err := builder.PutNode(api.Node{Project: "fixture", Label: "Function", Name: "unrelated", QualifiedName: "mail.unrelated", Location: api.Location{File: "smtp.py", StartLine: 1, EndLine: 2}})
+		if err != nil {
+			return err
+		}
+		if _, err := builder.PutEdge(api.Edge{Project: "fixture", SourceID: guessed, TargetID: dns, Type: "USAGE", Evidence: &api.Evidence{Confidence: 0.1}}); err != nil {
+			return err
+		}
+		for _, test := range []struct {
+			name, qn string
+			start    int
+			target   int64
+		}{
+			{"test_unicode_dns", "tests.mail.tests.MailTests.test_unicode_dns", 2, message},
+			{"test_server_open", "tests.mail.tests.SMTPBackendTests.test_server_open", 6, smtp},
+		} {
+			node, err := builder.PutNode(api.Node{Project: "fixture", Label: "Method", Name: test.name, QualifiedName: test.qn,
+				Location: api.Location{File: "tests/mail/tests.py", StartLine: test.start, EndLine: test.start + 1}})
+			if err != nil {
+				return err
+			}
+			if _, err := builder.PutEdge(api.Edge{Project: "fixture", SourceID: node, TargetID: test.target, Type: "TESTS"}); err != nil {
+				return err
+			}
+		}
+		for _, from := range []int64{message, smtp} {
+			if _, err := builder.PutEdge(api.Edge{Project: "fixture", SourceID: from, TargetID: dns, Type: "USAGE"}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	result := api.CodeSearchResult{TotalGrepMatches: 3, Matches: []api.CodeSearchMatch{
+		{Location: api.Location{File: "__init__.py", StartLine: 1}, Source: "from .message import make_msgid"},
+		{Location: api.Location{File: "message.py", StartLine: 2}, Source: "    return make_msgid(domain=DNS_NAME)"},
+		{Location: api.Location{File: "__init__.py", StartLine: 2}, Source: "__all__ = ['make_msgid']"},
+	}}
+	if err := store.attachCodeSearchSymbols(ctx, "fixture", &result, "DNS_NAME"); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Related) < 2 || result.Related[0].To != "mail.DNS_NAME" || result.Related[1].To != "mail.smtp.open" {
+		t.Fatalf("shared value and its other user should be linked: %+v", result.Related)
+	}
+	if len(result.Shared) != 1 || result.Shared[0].Value != "mail.DNS_NAME" ||
+		len(result.Shared[0].Consumers) != 2 || result.Shared[0].Consumers[0] != "mail.message" ||
+		result.Shared[0].Consumers[1] != "mail.smtp.open" {
+		t.Fatalf("both consumers should be explicit in the shared-value summary: %+v", result.Shared)
+	}
+	if len(result.Shared[0].Uses) != 2 ||
+		!strings.Contains(result.Shared[0].Uses[0].Expr, "make_msgid(domain=DNS_NAME)") ||
+		!strings.Contains(result.Shared[0].Uses[1].Expr, "local_hostname") {
+		t.Fatalf("shared uses should include the actual boundary expressions: %+v", result.Shared[0].Uses)
+	}
+	for _, link := range result.Related {
+		if link.To == "mail.unrelated" {
+			t.Fatalf("guessed edge must not displace source context: %+v", result.Related)
+		}
+	}
+	if len(result.Bodies) != 5 || result.Bodies[1].QualifiedName != "mail.DNS_NAME" ||
+		!strings.Contains(result.Bodies[1].Code, "class CachedDnsName:") ||
+		result.Bodies[2].QualifiedName != "mail.smtp.open" ||
+		result.Bodies[3].QualifiedName != "tests.mail.tests.MailTests.test_unicode_dns" ||
+		result.Bodies[4].QualifiedName != "tests.mail.tests.SMTPBackendTests.test_server_open" {
+		t.Fatalf("narrow literal should expose linked source windows: %+v", result.Bodies)
+	}
+	if len(result.Tests) < 2 || result.Tests[0].Target != "mail.message" || result.Tests[1].Target != "mail.smtp.open" {
+		t.Fatalf("shared consumers should each have a test: %+v", result.Tests)
+	}
+	direct := api.CodeSearchResult{Matches: []api.CodeSearchMatch{{
+		Location: api.Location{File: "utils.py", StartLine: 20}, Source: "DNS_NAME = CachedDnsName()",
+	}}}
+	if err := store.attachCodeSearchSymbols(ctx, "fixture", &direct); err != nil {
+		t.Fatal(err)
+	}
+	if len(direct.Bodies) == 0 || !strings.Contains(direct.Bodies[0].Code, "class CachedDnsName:") {
+		t.Fatalf("a direct value hit should show its nearby producer: %+v", direct.Bodies)
+	}
+}
+
+func TestCodeSearchFindsRegisteredDirectiveHandler(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "tests"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, source := range map[string]string{
+		"python.py":            "class PyProperty:\n    option_spec = {'type': str}\n    def run(self):\n        return self.options\n\nclass PythonDomain:\n    directives = {\n        'property': PyProperty,\n    }\n",
+		"flags.py":             "option_spec = {'property': directives.flag}\nobject_types = {'property': ObjType('property')}\n",
+		"tests/test_domain.py": "def test_property():\n    assert '.. py:property:: example'\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := OpenWritable(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.Build(ctx, func(builder *Builder) error {
+		if err := builder.PutProject(ProjectRecord{Name: "fixture", RootPath: root, Generation: "one", EngineVersion: "test", IndexedAt: time.Now().UTC()}); err != nil {
+			return err
+		}
+		handler, err := builder.PutNode(api.Node{Project: "fixture", Label: "Class", Name: "PyProperty", QualifiedName: "python.PyProperty", Location: api.Location{File: "python.py", StartLine: 1, EndLine: 4}})
+		if err != nil {
+			return err
+		}
+		if _, err := builder.PutNode(api.Node{Project: "fixture", Label: "Class", Name: "PythonDomain", QualifiedName: "python.PythonDomain", Location: api.Location{File: "python.py", StartLine: 6, EndLine: 9}}); err != nil {
+			return err
+		}
+		test, err := builder.PutNode(api.Node{Project: "fixture", Label: "Function", Name: "test_property", QualifiedName: "tests.test_domain.test_property", Location: api.Location{File: "tests/test_domain.py", StartLine: 1, EndLine: 2}})
+		if err != nil {
+			return err
+		}
+		_, err = builder.PutEdge(api.Edge{Project: "fixture", SourceID: test, TargetID: handler, Type: "TESTS"})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	result, err := CodeSearch(ctx, root, api.CodeSearchRequest{Pattern: "py:property", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.NameMatches) != 1 || !strings.Contains(result.NameMatches[0].Source, "'property': PyProperty") {
+		t.Fatalf("namespaced directive should find its bare registry key: %+v", result.NameMatches)
+	}
+	if err := store.attachCodeSearchSymbols(ctx, "fixture", &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Related) == 0 || result.Related[0].Rel != "registers" || result.Related[0].To != "python.PyProperty" {
+		t.Fatalf("directive key should route to the registered class: %+v", result.Related)
+	}
+	if len(result.Bodies) < 2 || result.Bodies[0].QualifiedName != "python.PyProperty" ||
+		!strings.Contains(result.Bodies[0].Code, "option_spec") {
+		t.Fatalf("parser body should be edit-ready: %+v", result.Bodies)
+	}
+	if len(result.Tests) != 1 || result.Tests[0].QualifiedName != "tests.test_domain.test_property" ||
+		len(result.TestRuns) != 1 || result.TestRuns[0] != "python3 -m pytest 'tests/test_domain.py'" {
+		t.Fatalf("matching test and runnable module should be attached: %+v / %+v", result.Tests, result.TestRuns)
+	}
+}
+
+func TestCodeSearchShowsConsumerTestsAndSuiteCommand(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "tests", "mail"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, source := range map[string]string{
+		"message.py":          "def message():\n    return make_msgid(domain=DNS_NAME)\n",
+		"tests/runtests.py":   "# test runner\n",
+		"tests/mail/tests.py": "class MailTests:\n    def test_encoding(self):\n        assert message()\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := OpenWritable(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.Build(ctx, func(builder *Builder) error {
+		if err := builder.PutProject(ProjectRecord{Name: "fixture", RootPath: root, Generation: "one", EngineVersion: "test", IndexedAt: time.Now().UTC()}); err != nil {
+			return err
+		}
+		method, err := builder.PutNode(api.Node{Project: "fixture", Label: "Function", Name: "message", QualifiedName: "mail.message", Location: api.Location{File: "message.py", StartLine: 1, EndLine: 2}})
+		if err != nil {
+			return err
+		}
+		test, err := builder.PutNode(api.Node{Project: "fixture", Label: "Method", Name: "test_encoding", QualifiedName: "tests.mail.tests.MailTests.test_encoding", Location: api.Location{File: "tests/mail/tests.py", StartLine: 2, EndLine: 3}})
+		if err != nil {
+			return err
+		}
+		_, err = builder.PutEdge(api.Edge{Project: "fixture", SourceID: test, TargetID: method, Type: "TESTS"})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	result, err := CodeSearch(ctx, root, api.CodeSearchRequest{Pattern: "make_msgid(domain=DNS_NAME)", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.attachCodeSearchSymbols(ctx, "fixture", &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tests) != 1 || result.Tests[0].Target != "mail.message" ||
+		len(result.TestRuns) != 1 || result.TestRuns[0] != "PYTHONPATH=. python3 tests/runtests.py mail.tests" {
+		t.Fatalf("graph test edge should provide a runnable module suite: %+v / %+v", result.Tests, result.TestRuns)
+	}
+	if len(result.Bodies) != 2 || result.Bodies[0].QualifiedName != "mail.message" ||
+		result.Bodies[1].QualifiedName != "tests.mail.tests.MailTests.test_encoding" {
+		t.Fatalf("implementation and test source should be paired: %+v", result.Bodies)
+	}
+}
+
+func TestCodeSearchShowsDistinctClassesInOneFile(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	lines := []string{"class RelatedFieldListFilter:"}
+	for i := 0; i < 34; i++ {
+		lines = append(lines, fmt.Sprintf("    pad_%d = None", i))
+	}
+	lines = append(lines, "    def field_choices(self):", "        return self.field.get_choices()", "",
+		"class RelatedOnlyFieldListFilter(RelatedFieldListFilter):", "    def field_choices(self):", "        return self.field.get_choices(ordering=())")
+	if err := os.WriteFile(filepath.Join(root, "filters.py"), []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "__init__.py"), []byte("from .filters import RelatedFieldListFilter\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenWritable(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.Build(ctx, func(builder *Builder) error {
+		if err := builder.PutProject(ProjectRecord{Name: "fixture", RootPath: root, Generation: "one", EngineVersion: "test", IndexedAt: time.Now().UTC()}); err != nil {
+			return err
+		}
+		for _, n := range []api.Node{
+			{Project: "fixture", Label: "Class", Name: "RelatedFieldListFilter", QualifiedName: "filters.RelatedFieldListFilter", Location: api.Location{File: "filters.py", StartLine: 1, EndLine: 37}},
+			{Project: "fixture", Label: "Class", Name: "RelatedOnlyFieldListFilter", QualifiedName: "filters.RelatedOnlyFieldListFilter", Location: api.Location{File: "filters.py", StartLine: 39, EndLine: 41}},
+		} {
+			if _, err := builder.PutNode(n); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	result := api.CodeSearchResult{Matches: []api.CodeSearchMatch{
+		{Location: api.Location{File: "__init__.py", StartLine: 1}, Source: "from .filters import RelatedFieldListFilter"},
+		{Location: api.Location{File: "filters.py", StartLine: 1}, Source: lines[0]},
+		{Location: api.Location{File: "filters.py", StartLine: 39}, Source: lines[38]},
+	}}
+	if err := store.attachCodeSearchSymbols(ctx, "fixture", &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Bodies) != 2 || result.Bodies[0].QualifiedName != "filters.RelatedFieldListFilter" ||
+		result.Bodies[1].QualifiedName != "filters.RelatedOnlyFieldListFilter" ||
+		!strings.Contains(result.Bodies[0].Code, "def field_choices") ||
+		!strings.Contains(result.Bodies[1].Code, "ordering=()") {
+		t.Fatalf("both class behaviors should be visible without package re-exports: %+v", result.Bodies)
 	}
 }
 
@@ -257,6 +1008,10 @@ func TestQueryNameOverlapUsesSymbolNameNotPackagePath(t *testing.T) {
 	}
 	if queryNameOverlap(n, []string{"queryset"}) < 10 {
 		t.Fatal("exact name queryset should score")
+	}
+	annotation := api.Node{Name: "add_annotation", QualifiedName: "django.db.models.sql.query.Query.add_annotation"}
+	if queryNameOverlap(annotation, []string{"annotations"}) == 0 {
+		t.Fatal("plural question should find singular method")
 	}
 	reg := api.Node{Name: "register", QualifiedName: "pkg.Site.register"}
 	if queryNameOverlap(reg, []string{"register", "display"}) < 10 {
@@ -1482,12 +2237,19 @@ func TestSnippetClipsWideFileRange(t *testing.T) {
 	if !got.Clipped {
 		t.Fatalf("expected clipped file snippet, lines=%d-%d code lines=%d", got.Location.StartLine, got.Location.EndLine, strings.Count(got.Code, "\n")+1)
 	}
-	if strings.Count(got.Code, "\n") > 501 {
+	if strings.Count(got.Code, "\n") > 500 {
 		t.Fatalf("clipped snippet still too large: %d newlines", strings.Count(got.Code, "\n"))
 	}
 	compact := format.SnippetCompact(got)
-	if !strings.Contains(compact, "code[501 of 600 lines]:") {
+	if !strings.Contains(compact, "code[500 of 600 lines]:") {
 		t.Fatalf("compact must show shown and total lines: %q", compact[:200])
+	}
+	short, err := store.Snippet(ctx, api.SnippetRequest{Project: "fixture", QualifiedName: "big.ts", StartLine: 535, MaxLines: 18})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if short.Location.StartLine != 535 || short.Location.EndLine != 552 || len(strings.Split(short.Code, "\n")) != 18 {
+		t.Fatalf("explicit file snippet span should be 18 lines: %+v", short.Location)
 	}
 }
 
@@ -1542,7 +2304,7 @@ func TestSnippetClipsSymbolToMaxLines(t *testing.T) {
 	}
 	compact := format.SnippetCompact(got)
 	hints := strings.Join(format.HelpForSnippet(got), "\n")
-	if !strings.Contains(compact, "code[251 of 400 lines]:") || !strings.Contains(hints, "so graph snippet fn.wide --from 252") {
+	if !strings.Contains(compact, "code[250 of 400 lines]:") || !strings.Contains(hints, "so graph snippet fn.wide --from 251") {
 		t.Fatalf("clipped snippet must name the omitted tail: %q / %q", compact[:120], hints)
 	}
 	body, err := store.Snippet(ctx, api.SnippetRequest{Project: "fixture", QualifiedName: "fn.wide", MaxLines: queryBodyMaxLines})

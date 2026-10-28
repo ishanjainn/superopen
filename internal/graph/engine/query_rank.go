@@ -315,3 +315,41 @@ func queryRowEligible(n api.Node, withTests bool) bool {
 	}
 	return withTests || !queryNodeLooksLikeTest(n)
 }
+
+// prioritizeRouteRows puts a matching route registration before generic
+// framework symbols when the question asks about an endpoint. The usual
+// ranking remains intact when no concrete path term matches.
+func prioritizeRouteRows(rows []api.Node, question string) []api.Node {
+	q := strings.ToLower(question)
+	if !strings.Contains(q, "route") && !strings.Contains(q, "endpoint") {
+		return rows
+	}
+	terms := queryRankTerms(question)
+	var matched, rest []api.Node
+	for _, n := range rows {
+		if n.Label != "Route" {
+			rest = append(rest, n)
+			continue
+		}
+		pathTokens := rankTokens(n.Name)
+		found := false
+		for _, term := range terms {
+			switch term {
+			case "route", "endpoint", "express", "handler", "regex", "registr", "test":
+				continue
+			}
+			for _, token := range pathTokens {
+				if term == token {
+					found = true
+					break
+				}
+			}
+		}
+		if found && (!strings.Contains(q, "regex") || strings.HasPrefix(n.Name, "/^")) {
+			matched = append(matched, n)
+		} else {
+			rest = append(rest, n)
+		}
+	}
+	return append(matched, rest...)
+}

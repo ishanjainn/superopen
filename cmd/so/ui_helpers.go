@@ -24,7 +24,7 @@ func openBrowser(url string) error {
 	case "linux":
 		command = exec.Command("xdg-open", url)
 	default:
-		fmt.Println(url)
+		fmt.Fprintln(os.Stderr, url)
 		return nil
 	}
 	return command.Start()
@@ -117,7 +117,7 @@ func buildNextUI(webDir, repoRoot string) error {
 	command.Dir = webDir
 	binary, _ := os.Executable()
 	command.Env = append(os.Environ(), "SUPEROPEN_ROOT="+repoRoot, "SUPEROPEN_SO_BIN="+binary, "NODE_ENV=production")
-	command.Stdout, command.Stderr = os.Stdout, os.Stderr
+	command.Stdout, command.Stderr = os.Stderr, os.Stderr
 	return command.Run()
 }
 
@@ -182,7 +182,7 @@ func startNextUI(repoRoot string, port int, hot bool) (*exec.Cmd, string, error)
 	// Hold Next's startup banner. After the UI is up, later lines (requests,
 	// errors) pass through. Foreground and detached both do this: detached
 	// stdout is the log file, so those logs land there instead of the terminal.
-	nextLog := &followWriter{out: os.Stdout}
+	nextLog := &followWriter{out: os.Stderr}
 	command.Stdout = nextLog
 	command.Stderr = nextLog
 	if err := command.Start(); err != nil {

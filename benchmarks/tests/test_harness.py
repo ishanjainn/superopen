@@ -17,6 +17,141 @@ from spend import SpendLedger  # noqa: E402
 
 
 class HarnessTests(unittest.TestCase):
+    def test_codex_home_can_offer_compatible_python_to_agent(self) -> None:
+        import subprocess
+        import tempfile
+        from unittest.mock import patch
+
+        from codex_swe import prepare_home
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            owner = base / "owner"
+            auth = owner / ".codex" / "auth.json"
+            auth.parent.mkdir(parents=True)
+            auth.write_text("test auth")
+            repo = base / "repo"
+            repo.mkdir()
+            with patch.object(Path, "home", return_value=owner):
+                env, _, _ = prepare_home(base / "agent", False, base / "so", repo, Path(sys.executable))
+            result = subprocess.run(["python3", "-c", "import sys; print(sys.version_info.major)"],
+                                    cwd=repo, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), str(sys.version_info.major))
+            self.assertIn(str(repo), env["PYTHONPATH"])
+            self.assertIn(str(Path(sys.executable).resolve()),
+                          (base / "agent" / ".codex" / "config.toml").read_text())
+
+    def test_codex_small_run_uses_five_cases(self) -> None:
+        from codex_swe import select_small_bank
+
+        default = select_small_bank()
+        self.assertEqual(len(default), 5)
+        self.assertEqual(default[0]["instance_id"], "django__django-11532")
+        self.assertEqual(select_small_bank("django__django-11885")[0]["instance_id"], "django__django-11885")
+
+    def test_codex_discovery_counts_keep_graph_and_direct_reads_separate(self) -> None:
+        import tempfile
+
+        from codex_swe import command_counts
+
+        events = Path(tempfile.mkdtemp()) / "events.jsonl"
+        commands = (
+            "sed -n '1,80p' /tmp/home/.agents/skills/so/SKILL.md",
+            "so graph code-search -- 'hostname' django/core/mail",
+            "rg -n 'hostname' django && sed -n '20,50p' django/core/mail/utils.py",
+        )
+        events.write_text("\n".join(json.dumps({"type": "item.completed", "item": {
+            "type": "command_execution", "command": command}}) for command in commands) + "\n" +
+            json.dumps({"type": "item.completed", "item": {"type": "command_execution",
+                "command": "so graph snippet pkg.Symbol", "exit_code": -1}}) + "\n")
+        counts = command_counts(events)
+        self.assertEqual(counts["graph_commands"], 2)
+        self.assertEqual(counts["failed_graph_commands"], 1)
+        self.assertEqual(counts["grep_commands"], 1)
+        self.assertEqual(counts["source_read_commands"], 1)
+        self.assertEqual(counts["direct_discovery_commands"], 1)
+
+    def test_codex_usage_counts_cache_and_reasoning_only_once(self) -> None:
+        import tempfile
+
+        from report import _row_tokens, _swe_headline_table
+        from swe import summarize_swe
+        from tokens import codex_luna_standard_credits, codex_usage_from_events, refresh_codex_swe_usage, row_tokens
+
+        work = Path(tempfile.mkdtemp())
+        events = work / "django__django-11400" / "superopen" / "artifacts" / "codex.events.jsonl"
+        events.parent.mkdir(parents=True)
+        events.write_text("\n".join(json.dumps(event) for event in [
+            {"type": "turn.completed", "usage": {"input_tokens": 1500, "cached_input_tokens": 800,
+                "cache_write_input_tokens": 600, "output_tokens": 400, "reasoning_output_tokens": 150}},
+            {"type": "item.completed", "usage": {"input_tokens": 99999}},
+            {"type": "turn.completed", "usage": {"input_tokens": 500, "cached_input_tokens": 200,
+                "cache_write_input_tokens": 250, "output_tokens": 100, "reasoning_output_tokens": 25}},
+        ]) + "\n")
+        usage = codex_usage_from_events(events)
+        self.assertEqual((usage["input_tokens"], usage["output_tokens"], usage["uncached_input_tokens"]), (2000, 500, 1000))
+        self.assertEqual(usage["reasoning_output_tokens"], 175)
+        self.assertEqual(row_tokens(usage), 2500)
+        self.assertAlmostEqual(codex_luna_standard_credits(usage), 0.0205)
+        self.assertEqual(_row_tokens(usage), 2500)
+        self.assertEqual(row_tokens({"input_tokens": 100, "cache_read_tokens": 40,
+                                     "cache_creation_tokens": 10, "output_tokens": 20}), 170)
+        row = {"arm": "superopen", "id": "django-11400", "instance_id": "django__django-11400",
+               "input_tokens": 2000, "output_tokens": 675}
+        payload = {"host": "codex", "rows": [row]}
+        refresh_codex_swe_usage(payload, work)
+        self.assertEqual(summarize_swe([], [row])["superopen_tokens"], 2500)
+        self.assertEqual(row["output_tokens"], 500)
+        self.assertIn("Cold Codex", _swe_headline_table({"host": "codex", "summary": summarize_swe([], [row])}))
+        self.assertIsNone(summarize_swe([], [row])["superopen_cost_usd"])
+        credits = summarize_swe(
+            [{"id": "case", "arm": "native", "estimated_standard_credits": 2.0}],
+            [{"id": "case", "arm": "superopen", "estimated_standard_credits": 0.8}],
+        )
+        self.assertEqual(credits["native_estimated_standard_credits"], 2.0)
+        self.assertEqual(credits["superopen_estimated_standard_credits"], 0.8)
+        baseline = work / "baseline"
+        baseline_events = baseline / "swe" / "django__django-11400" / "native" / "artifacts" / "codex.events.jsonl"
+        baseline_events.parent.mkdir(parents=True)
+        baseline_events.write_text(events.read_text())
+        baseline_swe = baseline / "swe.json"
+        baseline_swe.write_text("{}\n")
+        native = {"arm": "native", "instance_id": "django__django-11400"}
+        refresh_codex_swe_usage({"host": "codex", "rows": [native], "baseline_swe_json": str(baseline_swe)}, work)
+        self.assertEqual(row_tokens(native), 2500)
+
+    def test_swe_checkout_hides_future_git_fix(self) -> None:
+        import subprocess
+        import tempfile
+
+        from isolate import checkout_sha
+
+        root = Path(tempfile.mkdtemp())
+        mirror, worktree = root / "mirror", root / "worktree"
+        mirror.mkdir()
+
+        def git(path: Path, *args: str) -> str:
+            return subprocess.run(["git", "-C", str(path), *args], check=True,
+                                  capture_output=True, text=True).stdout.strip()
+
+        git(mirror, "init", "--quiet")
+        git(mirror, "config", "user.email", "benchmark@example.invalid")
+        git(mirror, "config", "user.name", "Benchmark")
+        (mirror / "code.py").write_text("value = 1\n")
+        git(mirror, "add", "code.py")
+        git(mirror, "commit", "--quiet", "-m", "base")
+        base = git(mirror, "rev-parse", "HEAD")
+        (mirror / "code.py").write_text("value = 2\n")
+        git(mirror, "commit", "--quiet", "-am", "future fix")
+        future = git(mirror, "rev-parse", "HEAD")
+        checkout_sha(mirror, worktree, base)
+        self.assertEqual(git(worktree, "rev-parse", "HEAD"), base)
+        self.assertEqual((worktree / "code.py").read_text(), "value = 1\n")
+        self.assertEqual(git(worktree, "log", "--all", "--format=%s"), "base")
+        self.assertNotEqual(subprocess.run(["git", "-C", str(worktree), "cat-file", "-e", future],
+                                           capture_output=True).returncode, 0)
+
     def test_grade_partial_credit(self) -> None:
         g = grade_answer(
             "django ORM QuerySet lazy SQL",
@@ -290,7 +425,7 @@ class HarnessTests(unittest.TestCase):
         self.assertIn("## System", text)
         self.assertIn("## Run", text)
         self.assertIn("## Results", text)
-        self.assertNotIn("Results at a glance", text)
+        self.assertIn("Results at a glance", text)
         self.assertNotIn("Critical notice", text)
         self.assertNotIn("Graft", text)
         self.assertNotIn("Isolate", text)

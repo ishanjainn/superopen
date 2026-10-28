@@ -293,18 +293,27 @@ func (o *Out) RowsOf(kind string, cols []string, rows []map[string]any, total in
 	if total < len(rows) {
 		total = len(rows)
 	}
-	fmt.Fprintf(o.W, "count: %d of %d\n", len(rows), total)
-	fmt.Fprintf(o.W, "%s[%d]{%s}:\n", kind, len(rows), strings.Join(cols, ","))
-	for _, row := range rows {
-		parts := make([]string, 0, len(cols))
-		for _, c := range cols {
+	shownRows, shownCols := rows, cols
+	if !o.Flags.Full {
+		if len(shownRows) > ToonMaxRows {
+			shownRows = shownRows[:ToonMaxRows]
+		}
+		if len(shownCols) > 4 {
+			shownCols = shownCols[:4]
+		}
+	}
+	fmt.Fprintf(o.W, "count: %d of %d\n", len(shownRows), total)
+	fmt.Fprintf(o.W, "%s[%d]{%s}:\n", kind, len(shownRows), strings.Join(shownCols, ","))
+	for _, row := range shownRows {
+		parts := make([]string, 0, len(shownCols))
+		for _, c := range shownCols {
 			s := fmt.Sprint(row[c])
+			limit := ToonMaxChars
 			if c == "title" || c == "detail" || c == "preview" || c == "snippet" || c == "text" {
-				orig := utf8.RuneCountInString(s)
-				s = o.Truncate(s, DefaultTruncate)
-				if !o.Flags.Full && orig > DefaultTruncate {
-					s = fmt.Sprintf("%s (truncated, %d chars — use --full)", s, orig)
-				}
+				limit = DefaultTruncate
+			}
+			if _, ok := row[c].(string); ok {
+				s = o.TruncateHint(s, limit)
 			}
 			switch row[c].(type) {
 			case bool, int, int64, float64:
@@ -315,6 +324,10 @@ func (o *Out) RowsOf(kind string, cols []string, rows []map[string]any, total in
 			}
 		}
 		fmt.Fprintf(o.W, "  %s\n", strings.Join(parts, ","))
+	}
+	if len(shownRows) < len(rows) || len(shownCols) < len(cols) {
+		fmt.Fprintf(o.W, "shown: %d of %d rows, %d of %d columns (use --full for all)\n",
+			len(shownRows), len(rows), len(shownCols), len(cols))
 	}
 	o.flushHints()
 }
@@ -424,11 +437,11 @@ func (o *Out) WriteError(err error) {
 	if ae.Code == ExitOK {
 		if o.Flags.JSON {
 			_ = json.NewEncoder(o.W).Encode(map[string]any{
-				"ok": true, "skipped": true, "message": ae.Message,
+				"ok": true, "kind": "status", "skipped": true, "message": ae.Message,
 			})
 			return
 		}
-		fmt.Fprintln(o.W, ae.Message)
+		fmt.Fprintf(o.W, "status: %s\n", ToonQuote(ae.Message, false))
 		return
 	}
 	if o.Flags.JSON {

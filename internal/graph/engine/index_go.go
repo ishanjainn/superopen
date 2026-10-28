@@ -241,15 +241,14 @@ func parseGoFilesWithRegistry(root, project string, files []string, seedNodes []
 			coverage.Rows = append(coverage.Rows, api.CoverageRow{Path: rel, Kind: "read", Detail: err.Error()})
 			continue
 		}
-		hash := sha256.Sum256(body)
 		info, _ := os.Stat(abs)
-		record := FileRecord{Project: project, Path: rel, SHA256: hex.EncodeToString(hash[:]), Language: "go"}
+		record := FileRecord{Project: project, Path: rel, Digest: fileContentDigest(body), Language: "go"}
 		if info != nil {
 			record.MTimeNS = info.ModTime().UnixNano()
 			record.Size = info.Size()
 		}
 		graph.files = append(graph.files, record)
-		generationParts = append(generationParts, rel+":"+record.SHA256)
+		generationParts = append(generationParts, rel+":"+record.Digest)
 		fset := sharedFileSet
 		file, parseErr := parser.ParseFile(fset, abs, body, parser.ParseComments|parser.AllErrors)
 		if file == nil {
@@ -1574,9 +1573,9 @@ func graphEdgeLessPair(a, b pendingEdge) bool {
 
 func nodeCollisionPriority(label string) int {
 	switch label {
-	case "Variable":
+	case "Class", "Function", "Method", "Constructor", "Interface", "Struct", "Trait":
 		return 2
-	case "Function":
+	case "Variable":
 		return 1
 	default:
 		return 0

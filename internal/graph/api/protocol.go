@@ -9,7 +9,7 @@ import (
 const (
 	ProtocolVersion = 1
 	EngineName      = "so-graph"
-	SchemaVersion   = 5
+	SchemaVersion   = 6
 )
 
 type Operation string
@@ -169,7 +169,7 @@ type FileChange struct {
 	Kind    string `json:"kind"`
 	Path    string `json:"path"`
 	OldPath string `json:"old_path,omitempty"`
-	SHA256  string `json:"sha256,omitempty"`
+	Digest  string `json:"digest,omitempty"`
 }
 
 type StatusRequest struct {
@@ -223,16 +223,17 @@ type SchemaResult struct {
 }
 
 type CodeSearchRequest struct {
-	RepoRoot   string `json:"repo_root,omitempty"`
-	Project    string `json:"project,omitempty"`
-	Pattern    string `json:"pattern"`
-	FileGlob   string `json:"file_pattern,omitempty"`
-	PathFilter string `json:"path_filter,omitempty"`
-	Mode       string `json:"mode,omitempty"`
-	Context    int    `json:"context,omitempty"`
-	Regex      bool   `json:"regex,omitempty"`
-	Debug      bool   `json:"debug,omitempty"`
-	Limit      int    `json:"limit,omitempty"`
+	RepoRoot   string   `json:"repo_root,omitempty"`
+	Project    string   `json:"project,omitempty"`
+	Pattern    string   `json:"pattern"`
+	FileGlob   string   `json:"file_pattern,omitempty"`
+	PathFilter string   `json:"path_filter,omitempty"`
+	Paths      []string `json:"paths,omitempty"`
+	Mode       string   `json:"mode,omitempty"`
+	Context    int      `json:"context,omitempty"`
+	Regex      bool     `json:"regex,omitempty"`
+	Debug      bool     `json:"debug,omitempty"`
+	Limit      int      `json:"limit,omitempty"`
 }
 
 type CodeSearchMatch struct {
@@ -246,11 +247,38 @@ type CodeSearchMatch struct {
 }
 
 type CodeSearchResult struct {
-	Matches          []CodeSearchMatch `json:"matches"`
-	Files            []string          `json:"files,omitempty"`
-	TotalGrepMatches int               `json:"total_grep_matches"`
-	TotalResults     int               `json:"total_results"`
-	Page             Page              `json:"page"`
+	Matches          []CodeSearchMatch       `json:"matches"`
+	NameMatches      []CodeSearchMatch       `json:"name_matches,omitempty"`
+	Related          []QueryLink             `json:"related,omitempty"`
+	Shared           []CodeSearchSharedValue `json:"shared,omitempty"`
+	Tests            []CodeSearchTest        `json:"tests,omitempty"`
+	TestRuns         []string                `json:"test_runs,omitempty"`
+	Bodies           []QueryBody             `json:"bodies,omitempty"`
+	Files            []string                `json:"files,omitempty"`
+	TotalGrepMatches int                     `json:"total_grep_matches"`
+	TotalResults     int                     `json:"total_results"`
+	Page             Page                    `json:"page"`
+}
+
+// CodeSearchSharedValue names the consumers of a source value found at a hit.
+type CodeSearchSharedValue struct {
+	Value     string              `json:"value"`
+	Consumers []string            `json:"consumers"`
+	Uses      []CodeSearchUseSite `json:"uses,omitempty"`
+}
+
+type CodeSearchUseSite struct {
+	Consumer string `json:"consumer"`
+	File     string `json:"file"`
+	Line     int    `json:"line"`
+	Expr     string `json:"expr"`
+}
+
+type CodeSearchTest struct {
+	QualifiedName string `json:"qualified_name"`
+	Target        string `json:"target"`
+	File          string `json:"file"`
+	Line          int    `json:"line"`
 }
 
 type SearchRequest struct {
@@ -304,8 +332,19 @@ type QueryResult struct {
 	Offset    int         `json:"offset,omitempty"`
 	Edges     []Edge      `json:"edges,omitempty"`
 	Bodies    []QueryBody `json:"bodies,omitempty"`
+	Linked    []QueryLink `json:"linked,omitempty"`
 	// CallersOf is set when the question asked for callers; Rows are callers.
 	CallersOf []string `json:"callers_of,omitempty"`
+}
+
+// QueryLink is a relevant behavioral neighbor just outside the listed page.
+type QueryLink struct {
+	From  string `json:"from"`
+	Rel   string `json:"rel"`
+	To    string `json:"to"`
+	File  string `json:"file"`
+	Start int    `json:"start_line"`
+	End   int    `json:"end_line"`
 }
 
 // QueryBody is source attached to a query answer, whole lines only.

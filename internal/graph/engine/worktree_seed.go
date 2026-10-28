@@ -70,6 +70,7 @@ func SeedLinkedWorktree(repoRoot string) {
 		}
 	}
 	cleanup = false
+	_ = paths.ExcludeGraphFromGit(root)
 }
 
 func seedDisabled() bool {

@@ -58,6 +58,18 @@ func TestToonClipsLongListsAndStringsUnlessFull(t *testing.T) {
 	}
 }
 
+func TestToonClipsWideListsUnlessFull(t *testing.T) {
+	rows := []map[string]any{{"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}}
+	clipped := Toon(map[string]any{"rows": rows}, false)
+	if !strings.Contains(clipped, "rows[1]{a,b,c,d}:") || !strings.Contains(clipped, "rows_fields: 4 of 5 (use --full for all)") {
+		t.Fatalf("default list must report clipped fields:\n%s", clipped)
+	}
+	full := Toon(map[string]any{"rows": rows}, true)
+	if !strings.Contains(full, "rows[1]{a,b,c,d,e}:") || strings.Contains(full, "rows_fields:") {
+		t.Fatalf("--full must restore every field:\n%s", full)
+	}
+}
+
 func TestToonNestedRecordsAndQuoting(t *testing.T) {
 	got := Toon(map[string]any{
 		"items": []map[string]any{{"id": 1, "tags": []string{"a"}}, {"id": 2, "tags": []string{}}},

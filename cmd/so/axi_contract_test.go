@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -24,6 +25,32 @@ func walkCommands(root *cobra.Command, visit func(path []string, cmd *cobra.Comm
 		}
 	}
 	walk(root, nil)
+}
+
+func TestEveryCommandRejectsUnknownFlagsJSON(t *testing.T) {
+	walkCommands(newRootCommand(), func(path []string, _ *cobra.Command) {
+		root := newRootCommand()
+		root.SetOut(io.Discard)
+		root.SetErr(io.Discard)
+		root.SetArgs(append(append([]string{"--json"}, path...), "--definitely-not-a-flag"))
+		cmd, err := root.ExecuteC()
+		if err == nil {
+			t.Errorf("so %s: unknown flag succeeded", strings.Join(path, " "))
+			return
+		}
+		err = cli.WithUsageHint(cli.QuietUnmanaged(cli.NormalizeExit(err)), cmd)
+		var output bytes.Buffer
+		(&cli.Out{Flags: cli.Flags{JSON: true}, W: &output, ErrW: io.Discard}).WriteError(err)
+		var response struct {
+			OK    bool   `json:"ok"`
+			Code  int    `json:"code"`
+			Error string `json:"error"`
+			Hint  string `json:"hint"`
+		}
+		if json.Unmarshal(output.Bytes(), &response) != nil || response.OK || response.Code != cli.ExitUsage || response.Error == "" || response.Hint == "" {
+			t.Errorf("so %s: unstructured JSON usage error: %s", strings.Join(path, " "), output.String())
+		}
+	})
 }
 
 // An agent that invents a flag must learn it did nothing (AXI §6): exit 2,
@@ -66,6 +93,32 @@ func TestEveryCommandHasShortHelp(t *testing.T) {
 			t.Errorf("so %s has no Short description", strings.Join(path, " "))
 		}
 	})
+}
+
+func TestEveryCommandOffersConciseHelp(t *testing.T) {
+	audited := 0
+	walkCommands(newRootCommand(), func(path []string, _ *cobra.Command) {
+		audited++
+		root := newRootCommand()
+		var output bytes.Buffer
+		root.SetOut(&output)
+		root.SetErr(&output)
+		root.SetArgs(append(append([]string(nil), path...), "--help"))
+		if err := root.Execute(); err != nil {
+			t.Errorf("so %s --help: %v", strings.Join(path, " "), err)
+			return
+		}
+		got := output.String()
+		for _, want := range []string{"Usage:", "--help", "--json", "--full"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("so %s --help lacks %q: %q", strings.Join(path, " "), want, got)
+			}
+		}
+		if lines := strings.Count(got, "\n"); lines > 60 {
+			t.Errorf("so %s --help is %d lines; keep the fallback concise", strings.Join(path, " "), lines)
+		}
+	})
+	t.Logf("AXI help contract audited %d commands", audited)
 }
 
 // Run bare, a command group shows data or a table of its subcommands, never

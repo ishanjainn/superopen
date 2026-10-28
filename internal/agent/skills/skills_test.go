@@ -40,8 +40,8 @@ func TestInstallAllWritesSkill(t *testing.T) {
 			if !bytes.Contains(body, []byte("any question about a codebase")) {
 				t.Fatalf("%s description must trip on any codebase question: %s", path, body[:300])
 			}
-			if !bytes.Contains(body, []byte("graph query first")) {
-				t.Fatalf("%s description must treat codebase questions as graph query first", path)
+			if !bytes.Contains(body, []byte("graph code-search for an exact")) || !bytes.Contains(body, []byte("graph query for unknown behavior")) {
+				t.Fatalf("%s description must route exact literals and unknown behavior separately", path)
 			}
 			if !bytes.Contains(body, []byte("CLI binary")) {
 				t.Fatalf("%s must say so is a CLI binary", path)

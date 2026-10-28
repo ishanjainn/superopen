@@ -77,3 +77,38 @@ func TestSemanticCorpusReflectiveEnrichment(t *testing.T) {
 		t.Fatal("semantic corpus finalize is not idempotent")
 	}
 }
+
+func TestQuantizedContextPreservesDecodedMath(t *testing.T) {
+	vectors := make([][semanticDimensions]int8, 2)
+	vectors[0][3], vectors[0][9] = 34, -27
+	vectors[1][3], vectors[1][9] = -13, 75
+	doc := make([]int, 620)
+	occurrences := make([]semanticOccurrence, len(doc))
+	for i := range doc {
+		doc[i] = i % 2
+		occurrences[i] = semanticOccurrence{document: 0, position: i}
+	}
+	var got, want semanticVector
+	accumulateQuantizedContext(&got, occurrences, [][]int{doc}, vectors)
+	step := len(occurrences) / 512
+	for index := 0; index < len(occurrences); index += step {
+		for distance := -5; distance <= 5; distance++ {
+			position := index + distance
+			if distance == 0 || position < 0 || position >= len(doc) {
+				continue
+			}
+			absolute := distance
+			if absolute < 0 {
+				absolute = -absolute
+			}
+			var decoded semanticVector
+			for dimension, value := range vectors[doc[position]] {
+				decoded[dimension] = float32(value) / 127
+			}
+			addScaledSemantic(&want, &decoded, 1/float32(absolute))
+		}
+	}
+	if got != want {
+		t.Fatal("quantized context changed vector values")
+	}
+}

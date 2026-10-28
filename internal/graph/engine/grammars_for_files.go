@@ -16,6 +16,11 @@ func grammarsForFiles(root string, files []string, overrides map[string]string) 
 	seen := map[string]bool{}
 	for _, rel := range files {
 		detection, ok := DetectLanguage(rel, nil, overrides)
+		if filepath.Ext(rel) == ".txt" || filepath.Ext(rel) == "" || (!ok && (sphinxSourceSuffix(root, rel) || fileMayHaveShebang(filepath.Join(root, filepath.FromSlash(rel))))) {
+			if body, err := readRepoFile(root, rel); err == nil {
+				detection, ok = detectRepositoryLanguage(root, rel, body, overrides)
+			}
+		}
 		if !ok {
 			ext := filepath.Ext(rel)
 			if candidates := ambiguousGrammarExtensions[ext]; len(candidates) > 0 {
@@ -38,6 +43,13 @@ func grammarsForFiles(root string, files []string, overrides map[string]string) 
 			continue
 		}
 		addRepoGrammar(seen, detection.Grammar)
+		switch detection.Language {
+		case "html", "vue", "svelte":
+			addRepoGrammar(seen, "javascript")
+			addRepoGrammar(seen, "typescript")
+		case "astro":
+			addRepoGrammar(seen, "typescript")
+		}
 		if detection.Language == "objectscript_export" {
 			addRepoGrammar(seen, "objectscript_udl")
 		}

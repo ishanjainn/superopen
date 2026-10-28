@@ -43,7 +43,7 @@ func PlanIncremental(ctx context.Context, repoRoot, project string, excludes []s
 		return api.ChangeSet{}, err
 	}
 	defer store.Close()
-	rows, queryErr := store.db.QueryContext(ctx, `SELECT rel_path,sha256 FROM file_hashes WHERE project=? ORDER BY rel_path`, project)
+	rows, queryErr := store.db.QueryContext(ctx, `SELECT rel_path,digest FROM file_hashes WHERE project=? ORDER BY rel_path`, project)
 	if queryErr != nil {
 		return api.ChangeSet{}, queryErr
 	}
@@ -88,7 +88,7 @@ func planIncrementalChanges(prior incrementalSnapshot, current map[string]string
 		if old, ok := prior.files[path]; !ok {
 			added[path] = digest
 		} else if old != digest {
-			result.Modified = append(result.Modified, api.FileChange{Kind: "modified", Path: path, SHA256: digest})
+			result.Modified = append(result.Modified, api.FileChange{Kind: "modified", Path: path, Digest: digest})
 		} else {
 			result.Unchanged++
 		}
@@ -105,16 +105,16 @@ func planIncrementalChanges(prior incrementalSnapshot, current map[string]string
 	for digest, newPaths := range addedByHash {
 		oldPaths := deletedByHash[digest]
 		if len(newPaths) == 1 && len(oldPaths) == 1 {
-			result.Renamed = append(result.Renamed, api.FileChange{Kind: "renamed", Path: newPaths[0], OldPath: oldPaths[0], SHA256: digest})
+			result.Renamed = append(result.Renamed, api.FileChange{Kind: "renamed", Path: newPaths[0], OldPath: oldPaths[0], Digest: digest})
 			delete(added, newPaths[0])
 			delete(deleted, oldPaths[0])
 		}
 	}
 	for path, digest := range added {
-		result.Added = append(result.Added, api.FileChange{Kind: "added", Path: path, SHA256: digest})
+		result.Added = append(result.Added, api.FileChange{Kind: "added", Path: path, Digest: digest})
 	}
 	for path, digest := range deleted {
-		result.Deleted = append(result.Deleted, api.FileChange{Kind: "deleted", Path: path, SHA256: digest})
+		result.Deleted = append(result.Deleted, api.FileChange{Kind: "deleted", Path: path, Digest: digest})
 	}
 	sortChanges := func(values []api.FileChange) {
 		sort.Slice(values, func(i, j int) bool {

@@ -229,23 +229,19 @@ def fetch_sha(mirror: Path, sha: str) -> None:
 
 
 def checkout_sha(mirror: Path, worktree: Path, sha: str) -> None:
-    host_run(["git", "-C", str(mirror), "worktree", "prune"], timeout=60)
+    """Check out only the base commit, without later fixes in Git history."""
     if worktree.is_dir():
-        host_run(
-            ["git", "-C", str(mirror), "worktree", "remove", "--force", str(worktree)],
-            timeout=120,
-        )
         shutil.rmtree(worktree, ignore_errors=True)
-    worktree.parent.mkdir(parents=True, exist_ok=True)
-    proc = host_run(
-        ["git", "-C", str(mirror), "worktree", "add", "--detach", str(worktree), sha],
-        timeout=600,
+    worktree.mkdir(parents=True, exist_ok=True)
+    commands = (
+        ["git", "-C", str(worktree), "init", "--quiet"],
+        ["git", "-C", str(worktree), "fetch", "--no-tags", "--depth=1", str(mirror.resolve()), sha],
+        ["git", "-C", str(worktree), "checkout", "--detach", "FETCH_HEAD"],
     )
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr or proc.stdout or f"worktree add failed: {sha}")
-    isolate_clean = host_run(["git", "-C", str(worktree), "clean", "-fdx"], timeout=120)
-    if isolate_clean.returncode != 0:
-        raise RuntimeError(isolate_clean.stderr or isolate_clean.stdout or "git clean failed")
+    for cmd in commands:
+        proc = host_run(cmd, timeout=600)
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stderr or proc.stdout or f"SWE checkout failed: {sha}")
 
 
 def add_worktree(mirror: Path, worktree: Path) -> None:

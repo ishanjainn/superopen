@@ -528,7 +528,7 @@ func TestExtractSyntaxFactsCommonJSRequireAndObjectMethods(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byFile := map[string]SyntaxExtraction{}
+	byFile := map[string]FileResult{}
 	for _, f := range repo.Files {
 		byFile[f.File.Path] = f.Extraction
 	}
@@ -586,7 +586,7 @@ func TestYamlJestAndEnumExtraction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byFile := map[string]SyntaxExtraction{}
+	byFile := map[string]FileResult{}
 	for _, f := range repo.Files {
 		byFile[f.File.Path] = f.Extraction
 		t.Logf("FILE %s lang=%s", f.File.Path, f.File.Language)
