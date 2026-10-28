@@ -30,6 +30,33 @@ func TestLocalJSONLWriteQuery(t *testing.T) {
 	}
 }
 
+func TestUpdateUsageReplacesTurnWithoutDuplicatingEvents(t *testing.T) {
+	s := trace.NewLocalJSONL(t.TempDir())
+	id := "usage-session"
+	turn := trace.Span{Name: "coding_agent.llm.turn", SpanID: "turn-1", SessionID: id,
+		Attributes: map[string]string{"gen_ai.response.id": "gen-1"}}
+	tool := trace.Span{Name: "coding_agent.tool.call", SpanID: "tool-1", SessionID: id}
+	if err := s.Write([]trace.Span{turn, tool}); err != nil {
+		t.Fatal(err)
+	}
+	turn.Attributes["gen_ai.usage.total_tokens"] = "110"
+	turn.Attributes["gen_ai.usage.cost"] = "0.42"
+	if err := s.UpdateUsage(id, []trace.Span{turn}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Query(trace.QueryFilter{SessionID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Attributes["gen_ai.usage.total_tokens"] != "110" || got[1].Name != tool.Name {
+		t.Fatalf("updated events = %+v", got)
+	}
+	tokens, cost, err := s.SessionCost(id)
+	if err != nil || tokens != 110 || cost != 0.42 {
+		t.Fatalf("tokens=%d cost=%v err=%v", tokens, cost, err)
+	}
+}
+
 func TestInboxRemovedAfterTraceResolves(t *testing.T) {
 	dir := t.TempDir()
 	s := trace.NewLocalJSONL(dir)

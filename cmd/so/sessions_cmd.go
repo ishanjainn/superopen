@@ -12,6 +12,7 @@ import (
 
 	"github.com/ishanjainn/superopen/internal/agent/headless"
 	"github.com/ishanjainn/superopen/internal/agent/hook"
+	"github.com/ishanjainn/superopen/internal/agent/hook/codex"
 	"github.com/ishanjainn/superopen/internal/checkpoint"
 	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/harvest"
@@ -318,7 +319,12 @@ func finalizeSession(root, requestedID string, out *cli.Out) error {
 		}
 	}
 	_ = store.Start(session.Meta{ID: id, Vendor: session.VendorFromSpans(spans), StartedAt: session.StartTimeFromSpans(spans)})
-	tokens, cost, _ := trace.NewLocalJSONL(paths.TracesDir).SessionCost(id)
+	if session.VendorFromSpans(spans) == "codex" && codex.BackfillTurnUsage(id, spans) {
+		if err := trace.NewLocalJSONL(paths.TracesDir).UpdateUsage(id, spans); err != nil {
+			return err
+		}
+	}
+	tokens, cost := trace.CostFromSpans(spans)
 	meta, err := store.MaterializeFromSpans(id, spans, tokens, cost)
 	if err != nil {
 		return err
@@ -364,7 +370,12 @@ func refreshSession(root, requestedID string, out *cli.Out) error {
 	}
 	store := session.NewStore(paths)
 	_ = store.Start(session.Meta{ID: id, Vendor: session.VendorFromSpans(spans), StartedAt: session.StartTimeFromSpans(spans)})
-	tokens, cost, _ := traceStore.SessionCost(id)
+	if session.VendorFromSpans(spans) == "codex" && codex.BackfillTurnUsage(id, spans) {
+		if err := traceStore.UpdateUsage(id, spans); err != nil {
+			return err
+		}
+	}
+	tokens, cost := trace.CostFromSpans(spans)
 	meta, err := store.MaterializeFromSpans(id, spans, tokens, cost)
 	if err != nil {
 		return err

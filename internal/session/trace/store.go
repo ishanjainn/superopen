@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/agent/pricing"
 	"github.com/ishanjainn/superopen/internal/artifact"
 )
 
@@ -238,6 +240,79 @@ func (s *LocalJSONL) Query(filter QueryFilter) ([]Span, error) {
 	return out, nil
 }
 
+// UpdateUsage fills missing turn counters in the saved event stream without
+// appending a duplicate turn or dropping tool events during materialization.
+func (s *LocalJSONL) UpdateUsage(sessionID string, spans []Span) error {
+	updates := make(map[string]map[string]string)
+	for _, sp := range spans {
+		if sp.Name == "coding_agent.llm.turn" && sp.SpanID != "" && hasUsageTokens(&sp) {
+			updates[sp.SpanID] = sp.Attributes
+		}
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	path := filepath.Join(s.Dir, safeID(sessionID), "events.jsonl")
+	src, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	info, err := src.Stat()
+	if err != nil {
+		return err
+	}
+	dst, err := os.CreateTemp(filepath.Dir(path), ".usage-*.jsonl")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(dst.Name())
+	defer dst.Close()
+	if err := dst.Chmod(info.Mode().Perm()); err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(src)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		var sp Span
+		if json.Unmarshal(line, &sp) == nil && sp.Name == "coding_agent.llm.turn" {
+			if attrs, ok := updates[sp.SpanID]; ok {
+				if sp.Attributes == nil {
+					sp.Attributes = make(map[string]string)
+				}
+				for key, value := range attrs {
+					if strings.HasPrefix(key, "gen_ai.usage.") {
+						sp.Attributes[key] = value
+					}
+				}
+				line, err = json.Marshal(sp)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		if _, err := dst.Write(append(line, '\n')); err != nil {
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if err := src.Close(); err != nil {
+		return err
+	}
+	if err := dst.Close(); err != nil {
+		return err
+	}
+	return os.Rename(dst.Name(), path)
+}
+
 // LatestSessionID returns the session owning the newest stored event without
 // applying a global result cap. Callers can then query that session exactly.
 func (s *LocalJSONL) LatestSessionID() (string, error) {
@@ -297,7 +372,17 @@ func (s *LocalJSONL) SessionCost(sessionID string) (int64, float64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	tokens, cost := CostFromSpans(spans)
+	return tokens, cost, nil
+}
+
+// CostFromSpans prefers a session rollup and falls back to individual LLM turns.
+// The fallback also prices turns captured before their model entered the rate table.
+func CostFromSpans(spans []Span) (int64, float64) {
 	var root, stop *Span
+	var turnTokens int64
+	var turnCost float64
+	seenTurns := make(map[string]bool)
 	for i := range spans {
 		sp := &spans[i]
 		if !hasUsageTokens(sp) {
@@ -310,6 +395,26 @@ func (s *LocalJSONL) SessionCost(sessionID string) (int64, float64, error) {
 			if stop == nil || sp.StartTimeUnixN >= stop.StartTimeUnixN {
 				stop = sp
 			}
+		case "coding_agent.llm.turn":
+			if sp.SpanID != "" && seenTurns[sp.SpanID] {
+				continue
+			}
+			seenTurns[sp.SpanID] = true
+			tokens, _ := strconv.ParseInt(sp.Attributes["gen_ai.usage.total_tokens"], 10, 64)
+			turnTokens += tokens
+			cost, _ := strconv.ParseFloat(sp.Attributes["gen_ai.usage.cost"], 64)
+			if cost == 0 {
+				model := sp.Attributes["gen_ai.request.model"]
+				if model == "" {
+					model = sp.Attributes["gen_ai.response.model"]
+				}
+				input, _ := strconv.ParseInt(sp.Attributes["gen_ai.usage.input_tokens"], 10, 64)
+				output, _ := strconv.ParseInt(sp.Attributes["gen_ai.usage.output_tokens"], 10, 64)
+				cacheRead, _ := strconv.ParseInt(sp.Attributes["gen_ai.usage.cache.read_input_tokens"], 10, 64)
+				cacheWrite, _ := strconv.ParseInt(sp.Attributes["gen_ai.usage.cache.creation_input_tokens"], 10, 64)
+				cost = pricing.Lookup(model).Cost(input, output, cacheRead, cacheWrite)
+			}
+			turnCost += cost
 		}
 	}
 	chosen := root
@@ -317,7 +422,7 @@ func (s *LocalJSONL) SessionCost(sessionID string) (int64, float64, error) {
 		chosen = stop
 	}
 	if chosen == nil {
-		return 0, 0, nil
+		return turnTokens, turnCost
 	}
 	var tokens int64
 	fmt.Sscanf(chosen.Attributes["gen_ai.usage.total_tokens"], "%d", &tokens)
@@ -329,7 +434,10 @@ func (s *LocalJSONL) SessionCost(sessionID string) (int64, float64, error) {
 			}
 		}
 	}
-	return tokens, cost, nil
+	if cost == 0 {
+		cost = turnCost
+	}
+	return tokens, cost
 }
 
 func hasUsageTokens(sp *Span) bool {

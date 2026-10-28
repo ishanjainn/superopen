@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/agent/normalize"
+	"github.com/ishanjainn/superopen/internal/agent/pricing"
 	"github.com/ishanjainn/superopen/internal/agent/sessionstate"
 )
 
@@ -58,6 +59,24 @@ func (e *recordingEmitter) EmitGitCommit(c normalize.GitCommit) error {
 func (e *recordingEmitter) EmitGitPullRequest(p normalize.GitPullRequest) error {
 	e.gitPRs = append(e.gitPRs, p)
 	return nil
+}
+
+func TestAssistantTurnUsageAndCost(t *testing.T) {
+	em := &recordingEmitter{}
+	emitOneAssistantTurn(normalize.Input{Vendor: "claude-code", Emit: em}, claudePayload{SessionID: "s1"}, coalescedTurn{
+		msg: assistantMessage{Model: "claude-sonnet-4-5", Usage: assistantUsage{
+			InputTokens: 100, OutputTokens: 50, CacheReadInputTokens: 200, CacheCreationInputTokens: 300,
+		}},
+	})
+	if len(em.llmTurns) != 1 {
+		t.Fatalf("turns=%d", len(em.llmTurns))
+	}
+	turn := em.llmTurns[0]
+	wantCost := pricing.Lookup("claude-sonnet-4-5").Cost(600, 50, 200, 300)
+	if turn.InputTokens != 600 || turn.OutputTokens != 50 || turn.TotalTokens != 650 ||
+		turn.CacheReadTokens != 200 || turn.CacheCreationTokens != 300 || turn.CostUSD != wantCost {
+		t.Fatalf("turn usage=%+v, want tokens=650 cost=%v", turn, wantCost)
+	}
 }
 
 // withIsolatedCache redirects sessionstate's on-disk cache to a tmp

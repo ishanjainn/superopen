@@ -59,12 +59,18 @@ func (a *Adapter) Handle(ctx context.Context, in normalize.Input) error {
 			StartedAt: now,
 		})
 	case ev == "sessionend" || ev == "session_end" || ev == "on_session_end" || ev == "session.deleted":
+		usage := normalize.LLMTurn{Model: model}
+		applyUsage(&usage, payload)
 		return in.Emit.EmitSession(normalize.Session{
-			SessionID: sid,
-			Vendor:    a.name,
-			Model:     model,
-			CWD:       cwd,
-			EndedAt:   now,
+			SessionID:    sid,
+			Vendor:       a.name,
+			Model:        model,
+			CWD:          cwd,
+			EndedAt:      now,
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			TotalTokens:  usage.TotalTokens,
+			CostUSD:      usage.CostUSD,
 		})
 	case ev == "beforeagent" || ev == "userpromptsubmitted" || ev == "userpromptsubmit" || ev == "pre_llm_call" || ev == "message_received":
 		if prompt == "" {
@@ -158,6 +164,7 @@ func applyUsage(turn *normalize.LLMTurn, payload map[string]any) {
 	turn.TotalTokens = inTok + outTok
 	if hostCost := floatFrom(payload, "cost", "cost_usd", "total_cost"); hostCost > 0 {
 		turn.CostUSD = hostCost
+		return
 	}
 	if rate := pricing.Lookup(turn.Model); rate.InputPer1M > 0 || rate.OutputPer1M > 0 {
 		turn.CostUSD = rate.Cost(inTok, outTok, cacheRead, cacheWrite)

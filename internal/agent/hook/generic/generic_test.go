@@ -9,11 +9,15 @@ import (
 )
 
 type recorder struct {
-	turns []normalize.LLMTurn
-	tools []normalize.ToolCall
+	sessions []normalize.Session
+	turns    []normalize.LLMTurn
+	tools    []normalize.ToolCall
 }
 
-func (r *recorder) EmitSession(normalize.Session) error { return nil }
+func (r *recorder) EmitSession(s normalize.Session) error {
+	r.sessions = append(r.sessions, s)
+	return nil
+}
 func (r *recorder) EmitToolCall(t normalize.ToolCall) error {
 	r.tools = append(r.tools, t)
 	return nil
@@ -84,5 +88,32 @@ func TestGenericAfterAgentAppliesUsageAndCost(t *testing.T) {
 	}
 	if turn.CostUSD != want {
 		t.Fatalf("cost=%v want %v", turn.CostUSD, want)
+	}
+}
+
+func TestGenericPrefersHostCost(t *testing.T) {
+	turn := &normalize.LLMTurn{Model: "gemini-2.5-flash"}
+	applyUsage(turn, map[string]any{
+		"usage":    map[string]any{"input_tokens": 1000, "output_tokens": 500},
+		"cost_usd": 0.42,
+	})
+	if turn.CostUSD != 0.42 {
+		t.Fatalf("cost=%v, want host-reported 0.42", turn.CostUSD)
+	}
+}
+
+func TestGenericSessionEndPreservesUsage(t *testing.T) {
+	emit := &recorder{}
+	adapter := New("other")
+	payload := []byte(`{"session_id":"s1","model":"gemini-2.5-flash","usage":{"input_tokens":1000,"output_tokens":500},"cost_usd":0.42}`)
+	if err := adapter.Handle(context.Background(), normalize.Input{Event: "sessionEnd", Payload: payload, Emit: emit}); err != nil {
+		t.Fatal(err)
+	}
+	if len(emit.sessions) != 1 {
+		t.Fatalf("sessions=%d", len(emit.sessions))
+	}
+	s := emit.sessions[0]
+	if s.InputTokens != 1000 || s.OutputTokens != 500 || s.TotalTokens != 1500 || s.CostUSD != 0.42 {
+		t.Fatalf("session usage=%+v", s)
 	}
 }
