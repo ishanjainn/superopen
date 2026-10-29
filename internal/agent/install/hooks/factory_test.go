@@ -9,15 +9,15 @@ import (
 	"testing"
 )
 
-func TestInstallFactorySettingsPreservesNonSuperopenHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	existing := `{"enabledPlugins":{"core@factory-plugins":true},"logoAnimation":"off","hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`
+func TestInstallFactoryHooksPreservesNonSuperopenHooks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	existing := `{"description":"keep","SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := installFactorySettings(path, "/tmp/superopen hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installFactorySettings returned error: %v", err)
+	if err := installFactoryHooks(path, "/tmp/superopen hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installFactoryHooks returned error: %v", err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -25,14 +25,13 @@ func TestInstallFactorySettingsPreservesNonSuperopenHooks(t *testing.T) {
 	}
 	text := string(data)
 	for _, want := range []string{
-		"enabledPlugins",
-		"logoAnimation",
+		"description",
 		"echo keep",
 		"'/tmp/superopen hooks' sessions hook --vendor=factory",
 		"SessionStart",
 		"UserPromptSubmit",
+		"PreToolUse",
 		"PostToolUse",
-		"Write|Edit|MultiEdit|Create",
 		"Stop",
 		"SessionEnd",
 	} {
@@ -40,17 +39,20 @@ func TestInstallFactorySettingsPreservesNonSuperopenHooks(t *testing.T) {
 			t.Fatalf("settings missing %q:\n%s", want, text)
 		}
 	}
+	if strings.Contains(text, "Write|Edit|MultiEdit|Create") {
+		t.Fatalf("tool telemetry must include reads and searches:\n%s", text)
+	}
 }
 
-func TestInstallFactorySettingsReplacesOldSuperopenAndSuperopenHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	existing := `{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"sessions hook old-so sessions hook --vendor=factory post-tool"}]},{"hooks":[{"type":"command","command":"/tmp/so sessions hook --vendor=factory post-tool"}]},{"hooks":[{"type":"command","command":"echo keep"}]}]}}`
+func TestInstallFactoryHooksReplacesOldSuperopenAndSuperopenHooks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	existing := `{"PostToolUse":[{"hooks":[{"type":"command","command":"sessions hook old-so sessions hook --vendor=factory post-tool"}]},{"hooks":[{"type":"command","command":"/tmp/so sessions hook --vendor=factory post-tool"}]},{"hooks":[{"type":"command","command":"echo keep"}]}]}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := installFactorySettings(path, "/tmp/new-so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installFactorySettings returned error: %v", err)
+	if err := installFactoryHooks(path, "/tmp/new-so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installFactoryHooks returned error: %v", err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -65,15 +67,15 @@ func TestInstallFactorySettingsReplacesOldSuperopenAndSuperopenHooks(t *testing.
 	}
 }
 
-func TestInstallFactorySettingsPreservesUserHookInMixedGroup(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	existing := `{"hooks":{"PostToolUse":[{"matcher":"Write|Edit","hooks":[{"type":"command","command":"echo keep"},{"type":"command","command":"sessions hook old-so sessions hook --vendor=factory post-tool"}]}]}}`
+func TestInstallFactoryHooksPreservesUserHookInMixedGroup(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	existing := `{"PostToolUse":[{"matcher":"Write|Edit","hooks":[{"type":"command","command":"echo keep"},{"type":"command","command":"sessions hook old-so sessions hook --vendor=factory post-tool"}]}]}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := installFactorySettings(path, "/tmp/new-so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installFactorySettings returned error: %v", err)
+	if err := installFactoryHooks(path, "/tmp/new-so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installFactoryHooks returned error: %v", err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -92,8 +94,8 @@ func TestInstallFactorySettingsPreservesUserHookInMixedGroup(t *testing.T) {
 }
 
 func TestRemoveFactoryEndpointHooksPreservesOtherHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	existing := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]},{"hooks":[{"type":"command","command":"sessions hook so sessions hook --vendor=factory session-start"}]}]}}`
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	existing := `{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]},{"hooks":[{"type":"command","command":"sessions hook so sessions hook --vendor=factory session-start"}]}]}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -119,8 +121,8 @@ func TestRemoveFactoryEndpointHooksPreservesOtherHooks(t *testing.T) {
 }
 
 func TestRemoveFactoryEndpointHooksPreservesUserHookInMixedGroup(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	existing := `{"hooks":{"PostToolUse":[{"matcher":"Write|Edit","hooks":[{"type":"command","command":"echo keep"},{"type":"command","command":"sessions hook so sessions hook --vendor=factory post-tool"}]}]}}`
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	existing := `{"PostToolUse":[{"matcher":"Write|Edit","hooks":[{"type":"command","command":"echo keep"},{"type":"command","command":"sessions hook so sessions hook --vendor=factory post-tool"}]}]}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -145,25 +147,25 @@ func TestRemoveFactoryEndpointHooksPreservesUserHookInMixedGroup(t *testing.T) {
 	}
 }
 
-func TestReadFactorySettingsReturnsCorruptJSONError(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
+func TestReadFactoryHooksReturnsCorruptJSONError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
 	if err := os.WriteFile(path, []byte("{not json"), 0600); err != nil {
 		t.Fatalf("write corrupt settings: %v", err)
 	}
 
-	if _, err := readFactorySettings(path); err == nil {
+	if _, err := readFactoryHooks(path); err == nil {
 		t.Fatal("expected corrupt settings error")
 	}
 }
 
-func TestInstallFactorySettingsHandlesNullHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := os.WriteFile(path, []byte(`{"hooks":null}`), 0600); err != nil {
+func TestInstallFactoryHooksHandlesEmptyFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := installFactorySettings(path, "/tmp/so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installFactorySettings returned error: %v", err)
+	if err := installFactoryHooks(path, "/tmp/so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installFactoryHooks returned error: %v", err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -174,15 +176,15 @@ func TestInstallFactorySettingsHandlesNullHooks(t *testing.T) {
 	}
 }
 
-func TestInstallFactorySettingsDoesNotReplaceUserCommandWithSuperopenEnvOnly(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	existing := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"sessions hook echo keep"}]}]}}`
+func TestInstallFactoryHooksDoesNotReplaceUserCommandWithSuperopenEnvOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hooks.json")
+	existing := `{"SessionStart":[{"hooks":[{"type":"command","command":"sessions hook echo keep"}]}]}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := installFactorySettings(path, "/tmp/so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installFactorySettings returned error: %v", err)
+	if err := installFactoryHooks(path, "/tmp/so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installFactoryHooks returned error: %v", err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -193,27 +195,27 @@ func TestInstallFactorySettingsDoesNotReplaceUserCommandWithSuperopenEnvOnly(t *
 	}
 }
 
-func TestFactorySettingsPathProjectLevel(t *testing.T) {
+func TestFactoryHooksPathProjectLevel(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
-	target, err := factorySettingsPath(LevelProject)
+	target, err := factoryHooksPath(LevelProject)
 	if err != nil {
-		t.Fatalf("factorySettingsPath returned error: %v", err)
+		t.Fatalf("factoryHooksPath returned error: %v", err)
 	}
-	if got, want := target, filepath.Join(dir, ".factory", "settings.json"); got != want {
-		t.Fatalf("project settings path = %q, want %q", got, want)
+	if got, want := target, filepath.Join(dir, ".factory", "hooks.json"); got != want {
+		t.Fatalf("project hooks path = %q, want %q", got, want)
 	}
 }
 
 func TestFactoryHookStatusDetectsInstalled(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
-	path := filepath.Join(home, ".factory", "settings.json")
+	path := filepath.Join(home, ".factory", "hooks.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"sessions hook so sessions hook --vendor=factory stop"}]}]}}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"Stop":[{"hooks":[{"type":"command","command":"sessions hook so sessions hook --vendor=factory stop"}]}]}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -221,8 +223,8 @@ func TestFactoryHookStatusDetectsInstalled(t *testing.T) {
 	if !status.Installed {
 		t.Fatalf("FactoryHookStatus installed = false, status=%#v", status)
 	}
-	if status.SettingsPath != path {
-		t.Fatalf("SettingsPath = %q, want %q", status.SettingsPath, path)
+	if status.HooksPath != path {
+		t.Fatalf("HooksPath = %q, want %q", status.HooksPath, path)
 	}
 }
 
@@ -250,7 +252,7 @@ func TestInstallFactoryWritesHookCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InstallFactory returned error: %v", err)
 	}
-	data, err := os.ReadFile(status.SettingsPath)
+	data, err := os.ReadFile(status.HooksPath)
 	if err != nil {
 		t.Fatalf("read Factory settings: %v", err)
 	}

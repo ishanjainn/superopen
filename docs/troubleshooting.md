@@ -106,13 +106,11 @@ After `git pull` or a large edit, run `so graph refresh` before asking the agent
 
 `so graph query` skips unmanaged trees. It does not create `.so/` for you.
 
-## Query output says `TRUNCATED`
+## Query output shows `count: 15 of 120`
 
-The answer is under a token budget and a hard row cap (16 NODE rows and 16 EDGE rows by default). Superopen never drops the answer silently.
+The page lists the top 15 ranked rows; the total is every node the query found. Run the `help[]` line (`--offset 15`) for the next page, or `--limit` for a larger one. Run `so graph snippet <qn>` for a listed row's body.
 
-Narrow the question, or run `so graph snippet <qn>` for a NODE already listed. Raise the cap with `SUPEROPEN_GRAPH_QUERY_MAX_ROWS` only if you need a larger dump.
-
-Do not pipe `so` through `head` or `tail`. That hides `TRUNCATED` and `help[]`.
+Do not pipe `so` through `head` or `tail`. That hides `count` and `help[]`.
 
 ## Graph skipped files you care about
 

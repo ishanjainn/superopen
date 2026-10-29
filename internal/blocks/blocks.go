@@ -46,17 +46,34 @@ func ProposalPath(root string) string {
 func IndexText() string {
 	return strings.TrimSpace(`
 `+markerBegin+`
-Reusable scripts. Run so blocks run <name>. Do not retype these.
+Reusable scripts. Run so blocks run <name> with the arguments shown below.
+For a command result, save its output to a file or pipe it into a block that accepts stdin.
 
 - json-peek <file> [path] — keys and types, not the whole document
 - jsonl-stats <file> — line count and keys
-- test-summary — counts and every failure
-- first-error — the first error line and the two lines after it
+- test-summary <report-file> — summarize JUnit, pytest JSON, or Jest JSON; other formats pass through unchanged
+- first-error <full-output-file> — the first error line and the two lines after it
 - wait-for — poll a file or a command until it matches
 - grep-defs <file> — signatures only. `+GrepDefsNote+`
 - http-json <url> — fetch JSON and shrink it
 - replace-in-file <file> <old> <new> — one literal replacement
 `+markerEnd) + "\n"
+}
+
+// IndexTextFor includes only scripts that were reused across sessions. It
+// avoids adding an unrelated command catalog to every agent turn.
+func IndexTextFor(selected map[string]bool) string {
+	var lines []string
+	for _, line := range strings.Split(strings.TrimRight(IndexText(), "\n"), "\n") {
+		if strings.HasPrefix(line, "- ") {
+			name := strings.Fields(strings.TrimPrefix(line, "- "))[0]
+			if !selected[name] {
+				continue
+			}
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // JSONPeek prints the shape of a JSON value, or of one dotted path inside it.
@@ -186,7 +203,7 @@ func TestSummary(root string, input []byte) string {
 	if out.PassedThrough {
 		return string(input)
 	}
-	return "recover so retrieve " + out.Handle + "\n" + string(out.Output)
+	return "recover: so retrieve --raw " + out.Handle + "\ncontent:\n" + string(out.Output)
 }
 
 // FirstError returns the first error-like line and the two lines after it.
@@ -211,23 +228,38 @@ func GrepDefs(root string, input []byte) (string, string) {
 	if out.PassedThrough {
 		return string(input), GrepDefsNote
 	}
-	return "recover so retrieve " + out.Handle + "\n" + string(out.Output), GrepDefsNote
+	return "recover: so retrieve --raw " + out.Handle + "\ncontent:\n" + string(out.Output), GrepDefsNote
 }
 
 // ReplaceInFile replaces the first literal old with new and writes the file back.
-func ReplaceInFile(path, old, next string) error {
+func ReplaceInFile(path, old, next string) (bool, error) {
 	if old == "" {
-		return fmt.Errorf("old text is empty")
+		return false, fmt.Errorf("old text is empty")
+	}
+	if old != next && strings.Contains(next, old) {
+		return false, fmt.Errorf("new text contains old text; replacement would repeat")
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !bytes.Contains(body, []byte(old)) {
-		return fmt.Errorf("old text not found")
+		if next != "" && bytes.Contains(body, []byte(next)) {
+			return false, nil
+		}
+		return false, fmt.Errorf("old text not found")
+	}
+	if bytes.Count(body, []byte(old)) != 1 {
+		return false, fmt.Errorf("old text must occur exactly once")
 	}
 	updated := bytes.Replace(body, []byte(old), []byte(next), 1)
-	return os.WriteFile(path, updated, 0o644)
+	if bytes.Equal(updated, body) {
+		return false, nil
+	}
+	if err := os.WriteFile(path, updated, 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // WaitFor polls until match returns true or the timeout elapses.

@@ -47,7 +47,7 @@ func Extra() []Spec {
 		{ID: "cline", Label: "Cline", Protocol: ProtocolContext, Kind: "cline", Rel: ".cline/plugins/superopen.ts"},
 		{ID: "dsh", Label: "DeepSeek Harness", Protocol: ProtocolClaude, Kind: "dsh", Rel: ".dsh/superopen-hooks.json"},
 		{ID: "devin", Label: "Devin", Protocol: ProtocolClaude, Kind: "settings", Rel: ".config/devin/config.json"},
-		{ID: "factory", Label: "Factory Droid", Protocol: ProtocolClaude, Kind: "settings", Rel: ".factory/settings.json"},
+		{ID: "factory", Label: "Factory Droid", Protocol: ProtocolClaude, Kind: "settings", Rel: ".factory/hooks.json"},
 		{ID: "grok", Label: "Grok", Protocol: ProtocolClaude, Kind: "owned", Rel: ".grok/hooks/superopen.json"},
 		{ID: "hermes", Label: "Hermes", Protocol: ProtocolContext, Kind: "hermes", Rel: ".hermes/config.yaml"},
 		{ID: "kimi", Label: "Kimi Code", Protocol: ProtocolClaude, Kind: "kimi", Rel: ".kimi-code/config.toml"},
@@ -59,7 +59,6 @@ func Extra() []Spec {
 		{ID: "prime", Label: "Prime", Protocol: ProtocolPi, Kind: "pi-fork", Rel: ".prime/agent/extensions/superopen/index.ts"},
 		{ID: "qwen", Label: "Qwen Code", Protocol: ProtocolClaude, Kind: "settings", Rel: ".qwen/settings.json"},
 		{ID: "senpi", Label: "Senpi", Protocol: ProtocolPi, Kind: "pi-fork", Rel: ".omo/agent/extensions/superopen/index.ts"},
-		{ID: "vscode", Label: "VS Code", Protocol: ProtocolClaude, Kind: "owned", Rel: ".copilot/hooks/superopen-vscode.json"},
 	}
 }
 

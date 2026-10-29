@@ -47,10 +47,14 @@ func indexRepositoryBranch(ctx context.Context, root, project string, graph *goG
 	command := exec.CommandContext(ctx, "git", "-C", root, "branch", "--show-current")
 	output, err := command.Output()
 	branch := strings.TrimSpace(string(output))
-	if err != nil || branch == "" {
+	if err != nil {
 		return
 	}
-	slug := gitBranchSlug(branch, false)
+	detached := branch == ""
+	if detached {
+		branch = "DETACHED"
+	}
+	slug := gitBranchSlug(branch, detached)
 	qn := "__branch__." + slug
 	graph.nodes = append(graph.nodes, api.Node{Project: project, Label: "Branch", Name: branch, QualifiedName: qn,
 		Location: api.Location{File: "{}"}, Properties: gitContextProperties(ctx, root, branch)})

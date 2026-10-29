@@ -66,3 +66,16 @@ func TestMatchServiceRejectsDioInsideAudio(t *testing.T) {
 		t.Fatalf("net/http must still match, got %v", kind)
 	}
 }
+
+func TestClientNavigationIsNotAnHTTPCall(t *testing.T) {
+	for _, callee := range []string{"router.push", "history.replace", "location.assign", "navigateTo", "window.history.pushState"} {
+		if !isClientNavigationCall(callee) {
+			t.Errorf("navigation call %q was not recognized", callee)
+		}
+	}
+	for _, callee := range []string{"client.get", "fetch", "cache.push", "worker.replace"} {
+		if isClientNavigationCall(callee) {
+			t.Errorf("non-navigation call %q was excluded", callee)
+		}
+	}
+}

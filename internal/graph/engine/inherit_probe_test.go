@@ -57,7 +57,7 @@ func TestAssembleSyntaxGraphEmitsImplementsInheritsOverride(t *testing.T) {
 	repository := SyntaxRepository{Files: []ParsedSyntaxFile{
 		{
 			File: FileRecord{Project: "fixture", Path: "src/base.ts", Language: "typescript"},
-			Extraction: SyntaxExtraction{RootModule: true, Definitions: []SyntaxFact{
+			Extraction: FileResult{RootModule: true, Definitions: []SyntaxFact{
 				{Kind: "class", NodeType: "interface_declaration", Name: "GuardOptions", StartLine: 1},
 				{Kind: "class", NodeType: "class_declaration", Name: "Guard", StartLine: 2},
 				{Kind: "function", NodeType: "method_definition", Name: "constructor", Scope: "Guard", StartLine: 3},
@@ -66,7 +66,7 @@ func TestAssembleSyntaxGraphEmitsImplementsInheritsOverride(t *testing.T) {
 		},
 		{
 			File: FileRecord{Project: "fixture", Path: "src/pii.ts", Language: "typescript"},
-			Extraction: SyntaxExtraction{
+			Extraction: FileResult{
 				RootModule: true,
 				Definitions: []SyntaxFact{
 					{Kind: "class", NodeType: "interface_declaration", Name: "PIIOptions", StartLine: 2, BaseClasses: []string{"GuardOptions"}},

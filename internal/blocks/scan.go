@@ -13,6 +13,7 @@ import (
 type Hit struct {
 	Command string
 	Count   int
+	Block   string
 }
 
 // Scan ranks shell commands that show up more than once in local session events.
@@ -33,7 +34,7 @@ func Scan(root string) ([]Hit, error) {
 		if n < 2 || mentionsSO(strings.ToLower(cmd)) {
 			continue
 		}
-		hits = append(hits, Hit{Command: cmd, Count: n})
+		hits = append(hits, Hit{Command: cmd, Count: n, Block: BlockFor(cmd)})
 	}
 	sort.Slice(hits, func(i, j int) bool {
 		if hits[i].Count != hits[j].Count {
@@ -52,6 +53,7 @@ func countCommands(path string, counts map[string]int) error {
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 2<<20)
+	seen := map[string]bool{}
 	for sc.Scan() {
 		var row struct {
 			Attributes map[string]string `json:"attributes"`
@@ -66,7 +68,10 @@ func countCommands(path string, counts map[string]int) error {
 		if !scriptLike(cmd) {
 			continue
 		}
-		counts[cmd]++
+		if !seen[cmd] {
+			counts[cmd]++
+			seen[cmd] = true
+		}
 	}
 	return sc.Err()
 }
@@ -80,11 +85,29 @@ func scriptLike(cmd string) bool {
 
 // Init writes the staged index and does not touch AGENTS.md.
 func Init(root string) (string, error) {
+	hits, err := Scan(root)
+	if err != nil {
+		return "", err
+	}
+	selected := map[string]bool{}
+	for _, hit := range hits {
+		if hit.Block != "" {
+			selected[hit.Block] = true
+		}
+	}
+	if len(selected) == 0 {
+		if _, err := os.Stat(ProposalPath(root)); err == nil {
+			return ProposalPath(root), nil
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		return "", nil
+	}
 	path := ProposalPath(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(path, []byte(IndexText()), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(IndexTextFor(selected)), 0o644); err != nil {
 		return "", err
 	}
 	return path, nil

@@ -139,12 +139,24 @@ Reuse it next time
 After `so init`, agents ask these four surfaces instead of grepping and re-reading transcripts:
 
 ```
-$ so graph query "how do session hooks steer Cursor?"
-Traversal: BFS depth=2 | Start: [emitSteerContext HookReminder] | 8 nodes
-NODE emitSteerContext [qn=internal.agent.hook.emitSteerContext src=internal/agent/hook/steer_context.go loc=L27-82]
-EDGE emitSteerContext --CALLS --> steerDecisionFor at=internal/agent/hook/steer_context.go:L28
+$ so graph query "Where is DNS_NAME used for email Message-ID?"   # on Django
+count: 15 of 101
+nodes[15]{qn,kind,file,lines}:
+  django.core.mail.utils.DNS_NAME,Variable,django/core/mail/utils.py,20
+  django.core.mail.message.EmailMessage.message,Method,django/core/mail/message.py,239-264
+  django.core.mail.utils.CachedDnsName.__str__,Method,django/core/mail/utils.py,11-12
+  django.core.mail.utils.CachedDnsName.get_fqdn,Method,django/core/mail/utils.py,14-17
+  django.core.mail.message.EmailMessage._create_message,Method,django/core/mail/message.py,329-330
+  ...
+bodies[1]:
+  - qn: django.core.mail.message.EmailMessage.message
+    file: django/core/mail/message.py
+    code[26 lines]:
+      239|     def message(self):
+      ...
+      260|             msg['Message-ID'] = make_msgid(domain=DNS_NAME)
 help[1]:
-  so graph snippet internal.agent.hook.emitSteerContext
+  86 more ranked: so graph query "Where is DNS_NAME used for email Message-ID?" --offset 15
 
 $ so memory recall "login timeout"
 hits: 1  anti_hits: 0  budget: 1500
@@ -179,32 +191,36 @@ applied #7 improve AGENTS.md
 
 `so install` wires all of these. Hooks only run in repos where you ran `so init`.
 
-| Agent | `--vendor` |
-| --- | --- |
-| Claude Code | `claude-code` |
-| Cursor | `cursor` |
-| Codex | `codex` |
-| Gemini | `gemini` |
-| OpenCode | `opencode` |
-| Copilot | `copilot-cli` |
-| Pi | `pi` |
-| Antigravity | `antigravity` |
-| Cline | `cline` |
-| DeepSeek Harness | `dsh` |
-| Devin | `devin` |
-| Factory Droid | `factory` |
-| Grok | `grok` |
-| Hermes | `hermes` |
-| Kimi Code | `kimi` |
-| Kiro | `kiro` |
-| Muse | `muse` |
-| Oh My Pi | `omp` |
-| OpenClaw | `openclaw` |
-| OpenHands | `openhands` |
-| Prime | `prime` |
-| Qwen Code | `qwen` |
-| Senpi | `senpi` |
-| VS Code | `vscode` |
+Every supported agent with a shell tool can use `so shrink -- <command>` and `so blocks`. Noisy test and log results can also shrink automatically in Claude Code, OpenCode, Copilot CLI, Cline, Hermes, Pi, Oh My Pi, Prime, Senpi, and OpenClaw (with conversation access enabled). Other hosts receive the same commands through installed instructions or session guidance. The original output stays locally recoverable with `so retrieve`.
+
+| Agent | `--vendor` | Automatic shrinking |
+| --- | --- | --- |
+| Claude Code | `claude-code` | Yes |
+| Cursor | `cursor` | CLI |
+| Codex | `codex` | CLI |
+| Gemini | `gemini` | CLI |
+| OpenCode | `opencode` | Yes |
+| Copilot | `copilot-cli` | Yes |
+| Pi | `pi` | Yes |
+| Antigravity | `antigravity` | CLI |
+| Cline | `cline` | Yes |
+| DeepSeek Harness | `dsh` | CLI |
+| Devin | `devin` | CLI |
+| Factory Droid | `factory` | CLI |
+| Grok | `grok` | CLI |
+| Hermes | `hermes` | Yes |
+| Kimi Code | `kimi` | CLI |
+| Kiro | `kiro` | CLI |
+| Muse | `muse` | CLI |
+| Oh My Pi | `omp` | Yes |
+| OpenClaw | `openclaw` | Yes* |
+| OpenHands | `openhands` | CLI |
+| Prime | `prime` | Yes |
+| Qwen Code | `qwen` | CLI |
+| Senpi | `senpi` | Yes |
+| VS Code | `vscode` | CLI |
+
+`CLI` means the agent uses `so shrink -- <command>` itself. *OpenClaw needs conversation access enabled for automatic shrinking.
 
 ## What a session records
 

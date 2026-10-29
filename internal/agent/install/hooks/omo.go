@@ -61,21 +61,21 @@ const (
 	// omoAgentDirEnv replaces the user-level agent directory outright.
 	//
 	// Senpi's own package.json brands this build's envPrefix as OMO, so the shipped `omo` binary
-	// reads OMO_CODING_AGENT_DIR first. Its brand profile also keeps two legacy prefixes readable
+	// reads OMO_CODING_AGENT_DIR first. Its brand profile also reads two other prefixes
 	// -- SENPI (the upstream engine's own name) and PI (pi-mono's) -- checked in that order when
 	// the OMO-prefixed variable is unset, so Superopen's install lands where the runtime actually
 	// looks even for an operator who set one of those before OMO existed. PI_CODING_AGENT_DIR is
 	// deliberately not read ahead of SENPI_CODING_AGENT_DIR: that is the runtime's own declared
 	// precedence, most specific first.
-	omoAgentDirEnv       = "OMO_CODING_AGENT_DIR"
-	omoAgentDirLegacyEnv = "SENPI_CODING_AGENT_DIR"
-	omoAgentDirPiEnv     = "PI_CODING_AGENT_DIR"
+	omoAgentDirEnv      = "OMO_CODING_AGENT_DIR"
+	omoAgentDirSenpiEnv = "SENPI_CODING_AGENT_DIR"
+	omoAgentDirPiEnv    = "PI_CODING_AGENT_DIR"
 )
 
 // omoAgentDirEnvNames lists the environment variables Senpi itself consults for its agent
 // directory, most specific first, so omoAgentDirOverride can mirror the runtime's own precedence
 // exactly rather than reading only the newest of the three.
-var omoAgentDirEnvNames = []string{omoAgentDirEnv, omoAgentDirLegacyEnv, omoAgentDirPiEnv}
+var omoAgentDirEnvNames = []string{omoAgentDirEnv, omoAgentDirSenpiEnv, omoAgentDirPiEnv}
 
 type OmoOptions struct {
 	Level    Level
@@ -167,7 +167,7 @@ func OmoExtensionPath(level Level) (string, error) {
 // Exported for inventory, which scans a home directory it was handed rather than the process's own
 // -- a scan of another user's tree, or of a fixture. Sharing the resolution rather than rebuilding
 // the path there is what keeps inventory from reporting on a file the installer does not write:
-// this path is not a fixed string, since OMO_CODING_AGENT_DIR (or its legacy fallbacks) moves it.
+// this path is not a fixed string, since the agent directory environment variables move it.
 func OmoExtensionPathForHome(home string, level Level) (string, error) {
 	dir, err := omoExtensionDir(home, level)
 	if err != nil {

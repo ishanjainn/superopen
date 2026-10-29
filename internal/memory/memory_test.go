@@ -480,6 +480,9 @@ func TestCopyIntoPreservesEpisodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := src.db.Exec(`INSERT INTO memory_passages(episode_id, ord, text, embedder_id, dimensions, quantization, vector) VALUES(?,?,?,?,?,?,?)`, ep.ID, 0, "saved passage", "test", 2, "int8", []byte{1, 2}); err != nil {
+		t.Fatal(err)
+	}
 	if err := src.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -499,6 +502,10 @@ func TestCopyIntoPreservesEpisodes(t *testing.T) {
 	}
 	if got.Title != ep.Title || got.Text != ep.Text {
 		t.Fatalf("copied %#v, want %#v", got, ep)
+	}
+	var passage string
+	if err := dst.db.QueryRow(`SELECT text FROM memory_passages WHERE episode_id=?`, ep.ID).Scan(&passage); err != nil || passage != "saved passage" {
+		t.Fatalf("copied passage=%q err=%v", passage, err)
 	}
 	hits, err := dst.Search(SearchFilter{Query: "workspace", Limit: 5})
 	if err != nil {
@@ -629,7 +636,7 @@ func TestContradictionChainSuccessorLeads(t *testing.T) {
 	}
 }
 
-func TestSleepClustersAndShapeRecall(t *testing.T) {
+func TestSleepClustersAndSearch(t *testing.T) {
 	root := testRoot(t)
 	store, err := OpenRoot(root)
 	if err != nil {
@@ -645,12 +652,12 @@ func TestSleepClustersAndShapeRecall(t *testing.T) {
 	if err := store.Sleep(); err != nil {
 		t.Fatal(err)
 	}
-	hits, err := store.RecallShape("login timeout", 5)
+	hits, err := store.Search(SearchFilter{Query: "login timeout", Limit: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(hits) == 0 {
-		t.Fatal("expected shape hits")
+		t.Fatal("expected search hits")
 	}
 }
 
@@ -1471,8 +1478,8 @@ func TestSchemaVersionIsOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.SchemaVersion != "3" {
-		t.Fatalf("schema_version=%s want 3", st.SchemaVersion)
+	if st.SchemaVersion != "1" {
+		t.Fatalf("schema_version=%s want 1", st.SchemaVersion)
 	}
 }
 

@@ -192,6 +192,9 @@ func bashCommandFromPayload(payload []byte) string {
 		input, _ = probe["args"].(map[string]any)
 	}
 	if input == nil {
+		input, _ = probe["toolArgs"].(map[string]any)
+	}
+	if input == nil {
 		input = probe
 	}
 	if cmd, ok := input["command"].(string); ok {

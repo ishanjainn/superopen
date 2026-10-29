@@ -55,16 +55,33 @@ export async function soJSON<T = unknown>(
   child.stdout?.on("data", (c) => chunks.push(c));
   child.stderr?.on("data", (c) => errChunks.push(c));
   const timeout = opts?.timeoutMs ?? 60_000;
+  let launchError = "";
+  let timedOut = false;
   const code: number = await new Promise((resolve) => {
     const t = setTimeout(() => {
+      timedOut = true;
       child.kill("SIGKILL");
       resolve(-1);
     }, timeout);
-    child.on("close", (c) => {
+    child.once("error", (error) => {
+      launchError = error.message;
+      clearTimeout(t);
+      resolve(-1);
+    });
+    child.once("close", (c) => {
       clearTimeout(t);
       resolve(c ?? 0);
     });
   });
+  if (launchError || timedOut) {
+    return {
+      schema: 1,
+      ok: false,
+      error: launchError
+        ? `Could not start so: ${launchError}`
+        : `so ${args.join(" ")} timed out after ${timeout} ms`,
+    };
+  }
   const raw = Buffer.concat(chunks).toString("utf8").trim();
   const stderr = Buffer.concat(errChunks).toString("utf8").trim();
   if (!raw) {

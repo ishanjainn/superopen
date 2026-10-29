@@ -49,10 +49,14 @@ func TestInstallClinePluginWritesManagedPlugin(t *testing.T) {
 		"afterTool",
 		"beforeRun",
 		"afterRun",
+		"managedWorkspace(context)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("plugin missing %q:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "try one graph query") {
+		t.Fatal("unmanaged Cline workspaces must not be prompted to query Superopen")
 	}
 
 	argv := clineRenderedArgv(t, text)

@@ -1,6 +1,8 @@
 package blocks
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +11,7 @@ import (
 )
 
 func TestHintOneLineNeverGraph(t *testing.T) {
-	if got := Hint(`go test ./... | tail -20`); got != "use so blocks run test-summary" {
+	if got := Hint(`go test ./... | tail -20`); got != "save full command output, then run so blocks run first-error <file>" {
 		t.Fatalf("test tail: %q", got)
 	}
 	if got := Hint(`so graph query "where is main"`); got != "" {
@@ -23,6 +25,30 @@ func TestHintOneLineNeverGraph(t *testing.T) {
 	}
 	if strings.Contains(Hint(`python -c 'import json; json.loads(open("a").read())'`), "\n") {
 		t.Fatal("hint must be one line")
+	}
+}
+
+func TestHTTPJSONRejectsFailedOrNonJSONResponses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/failed":
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":"failed"}`))
+		case "/html":
+			_, _ = w.Write([]byte("<html>not json</html>"))
+		default:
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		}
+	}))
+	defer server.Close()
+	if _, err := HTTPJSON(t.TempDir(), server.URL+"/failed"); err == nil {
+		t.Fatal("failed HTTP status must not look successful")
+	}
+	if _, err := HTTPJSON(t.TempDir(), server.URL+"/html"); err == nil {
+		t.Fatal("HTML must not look like JSON")
+	}
+	if got, err := HTTPJSON(t.TempDir(), server.URL+"/ok"); err != nil || !strings.Contains(got, `"ok":true`) {
+		t.Fatalf("valid JSON: %q %v", got, err)
 	}
 }
 
@@ -53,8 +79,11 @@ func TestFirstErrorAndReplace(t *testing.T) {
 	if err := os.WriteFile(path, []byte("alpha beta"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := ReplaceInFile(path, "beta", "gamma"); err != nil {
+	if changed, err := ReplaceInFile(path, "beta", "gamma"); err != nil || !changed {
 		t.Fatal(err)
+	}
+	if changed, err := ReplaceInFile(path, "beta", "gamma"); err != nil || changed {
+		t.Fatalf("repeat must be idempotent: changed=%v err=%v", changed, err)
 	}
 	body, _ := os.ReadFile(path)
 	if string(body) != "alpha gamma" {
@@ -64,8 +93,28 @@ func TestFirstErrorAndReplace(t *testing.T) {
 
 func TestInitDoesNotWriteAgents(t *testing.T) {
 	root := t.TempDir()
-	if _, err := Init(root); err != nil {
+	if path, err := Init(root); err != nil || path != "" {
+		t.Fatalf("empty index: %q %v", path, err)
+	}
+	for _, session := range []string{"s1", "s2"} {
+		dir := filepath.Join(root, ".so", "sessions", session)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		line := `{"attributes":{"coding_agent.tool.command":"go test ./... | tail -20"}}` + "\n"
+		if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), []byte(line), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	staged, err := Init(root)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, ".so", "sessions")); err != nil {
+		t.Fatal(err)
+	}
+	if path, err := Init(root); err != nil || path != staged {
+		t.Fatalf("existing proposal lost: %q %v", path, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "AGENTS.md")); !os.IsNotExist(err) {
 		t.Fatal("init wrote AGENTS.md")
@@ -77,26 +126,28 @@ func TestInitDoesNotWriteAgents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), GrepDefsNote) || !strings.Contains(string(body), markerBegin) {
+	if !strings.Contains(string(body), "first-error <full-output-file>") || strings.Contains(string(body), "grep-defs") || !strings.Contains(string(body), markerBegin) {
 		t.Fatalf("applied index missing note: %s", body)
 	}
 }
 
 func TestScanRanksLocalCommands(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, ".so", "sessions", "s1")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	line := `{"attributes":{"coding_agent.tool.command":"python -c 'print(1)' | head"}}` + "\n"
-	if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), []byte(line+line), 0o644); err != nil {
-		t.Fatal(err)
+	for _, session := range []string{"s1", "s2"} {
+		dir := filepath.Join(root, ".so", "sessions", session)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		line := `{"attributes":{"coding_agent.tool.command":"go test ./... | tail -20"}}` + "\n"
+		if err := os.WriteFile(filepath.Join(dir, "events.jsonl"), []byte(line+line), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	hits, err := Scan(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(hits) != 1 || hits[0].Count != 2 {
+	if len(hits) != 1 || hits[0].Count != 2 || hits[0].Block != "first-error" {
 		t.Fatalf("hits: %+v", hits)
 	}
 }

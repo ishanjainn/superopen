@@ -27,7 +27,7 @@ func installCatalogVendor(spec vendors.Spec, dryRun bool) ([]string, error) {
 		return pathsOf(st.ConfigPath), err
 	case "factory":
 		st, err := hooks.InstallFactory(hooks.FactoryOptions{Level: opts})
-		return pathsOf(st.SettingsPath), err
+		return pathsOf(st.HooksPath), err
 	case "grok":
 		st, err := hooks.InstallGrok(hooks.GrokOptions{Level: opts})
 		return pathsOf(st.HooksPath), err
@@ -61,9 +61,6 @@ func installCatalogVendor(spec vendors.Spec, dryRun bool) ([]string, error) {
 	case "senpi":
 		st, err := hooks.InstallOmo(hooks.OmoOptions{Level: opts})
 		return pathsOf(st.ExtensionPath), err
-	case "vscode":
-		st, err := hooks.InstallVSCode(hooks.VSCodeOptions{Level: opts})
-		return pathsOf(st.HooksPath), err
 	default:
 		return nil, fmt.Errorf("unsupported catalog vendor %q", spec.ID)
 	}
@@ -90,7 +87,7 @@ func UninstallCatalog(spec vendors.Spec, dryRun bool) ([]string, error) {
 		return pathsOf(st.ConfigPath), err
 	case "factory":
 		st, err := hooks.UninstallFactory(hooks.FactoryOptions{Level: opts})
-		return pathsOf(st.SettingsPath), err
+		return pathsOf(st.HooksPath), err
 	case "grok":
 		st, err := hooks.UninstallGrok(hooks.GrokOptions{Level: opts})
 		return pathsOf(st.HooksPath), err
@@ -124,9 +121,6 @@ func UninstallCatalog(spec vendors.Spec, dryRun bool) ([]string, error) {
 	case "senpi":
 		st, err := hooks.UninstallOmo(hooks.OmoOptions{Level: opts})
 		return pathsOf(st.ExtensionPath), err
-	case "vscode":
-		st, err := hooks.UninstallVSCode(hooks.VSCodeOptions{Level: opts})
-		return pathsOf(st.HooksPath), err
 	default:
 		return nil, fmt.Errorf("unsupported catalog vendor %q", spec.ID)
 	}

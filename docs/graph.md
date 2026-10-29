@@ -45,40 +45,54 @@ not indexed.
 |---------|---------|
 | `so graph query "<question>"` | Plain-language question to a ranked subgraph. Default answer surface. |
 | `so graph search <pattern>` | Find symbols by name (BM25 over FTS). |
-| `so graph snippet <qn>` | Read the source of a known symbol. Symbols clip around 80 lines. Files and modules clip around 500. `--from <line>` continues a clipped read. |
+| `so graph snippet <qn>` | Read the source of a known symbol. Symbols clip around 250 lines. Files and modules clip around 500. `--from <line>` continues a clipped read. |
 | `so graph trace <symbol>` | Callers (`--direction incoming`), callees (`outgoing`), or both. |
 | `so graph impact <symbol\|--files\|--base>` | Blast radius: callers, impls, siblings, co-change. Run this before you finish a multi-file edit. |
 | `so graph architecture` | Languages, packages, routes, hotspots, clusters. |
 | `so graph schema` | Node labels, relationship types, property patterns. Run this first when scripting. |
 | `so graph cypher "<query>"` | Read-only Cypher subset. |
-| `so graph code-search` | Text search over indexed files only. |
+| `so graph code-search <pattern> [path]` | Text search over indexed files only. `[path]` (or `--path`) limits it to a repo-relative file or directory; `--glob` (or `--file-pattern`) filters by file glob. Matches carry line numbers. |
 | `so graph coverage` | What was indexed, what was skipped and why. |
 | `so graph diagnostics` | Database integrity checks. |
 | `so graph artifact` | Export/import/verify a content-addressed graph snapshot for teammates. |
 
 ## Output contract
 
-Success output is compact text, not JSON:
+Success output is [AXI](https://axi.md) TOON, the same shape for every graph command:
 
 ```text
-NODE steerTextFor [qn=internal.agent.hook.steerTextFor src=internal/agent/hook/steer_context.go loc=L104-110]
-EDGE internal.agent.hook.steerTextFor -CALLS-> internal.agent.steer.HookReminder
-help[]:
-  so graph snippet internal.agent.hook.steerTextFor
+count: 15 of 101
+nodes[15]{qn,kind,file,lines}:
+  django.core.mail.utils.DNS_NAME,Variable,django/core/mail/utils.py,20
+  django.core.mail.message.EmailMessage.message,Method,django/core/mail/message.py,239-264
+  django.core.mail.utils.CachedDnsName.get_fqdn,Method,django/core/mail/utils.py,14-17
+  ...
+edges[1]{from,rel,to}:
+  EmailMessage.message,CALLS,EmailMessage._create_message
+bodies[1]:
+  - qn: django.core.mail.message.EmailMessage.message
+    file: django/core/mail/message.py
+    code[26 lines]:
+      239|     def message(self):
+      ...
+help[1]:
+  86 more ranked: so graph query "<question>" --offset 15
 ```
 
-- Answers stay under a token budget and a hard row cap (16 NODE / 16 EDGE
-  rows by default; override with `SUPEROPEN_GRAPH_QUERY_MAX_ROWS`). When
-  results exceed either limit the header says
-  `TRUNCATED: showing N of M listed nodes (R reachable)` and suggests
-  `snippet` or a narrower question. It never silently drops the answer.
-- The first screen prefers project source. Test files, and paths under
-  `vendor`, `node_modules`, `dist`, `third_party`, or `static`, stay off that
-  screen unless the question names them. A wide class attaches only methods
-  the question names. Extra nodes are a count plus `snippet` / `trace` hints.
-- A clipped snippet prints `omitted: L<start>-<end>`, a follow-up
-  `so graph snippet <qn> --from <start>`, and direct callees when it has them.
-- `qn=` qualified names feed `snippet` / `trace`.
+- `count: N of M` is the true total. The page is ranked: listed seeds, then
+  search order, then graph neighbors. `--limit` sets the page size (15) and the
+  `help[]` line gives the exact `--offset` command for the next page.
+- Project source comes first. Test files stay off the page unless the question
+  names tests. Folder, Section and data-file Variable rows are dropped.
+- `edges[]` lists only behavioral edges (CALLS, USAGE, INHERITS, ...) between
+  listed rows. `bodies[]` attach source for the top callables with absolute
+  line numbers, whole lines only.
+- A clipped body or snippet prints `code[<shown> of <total> lines]` and a
+  `help[]` line with `so graph snippet <qn> --from <line>`.
+- `count: 0` plus one line stating what was searched is a definite answer.
+  Errors print `error:` and `help[1]:` on stdout; unknown symbols exit 3, usage
+  errors exit 2 and list the command's flags.
+- Hints are omitted when the answer is self-contained (a complete snippet).
 - `--json` / `--full` are script escape hatches. Agent piping relies on the
   default shape.
 - Do not pipe `so` through `head` or `tail`.

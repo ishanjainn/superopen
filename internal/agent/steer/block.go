@@ -29,23 +29,26 @@ func soLine(sub string) string {
 // The CLI path is explained once here, not on every hook line.
 func Block() string {
 	return strings.TrimSpace(fmt.Sprintf(`
-If this workspace has no .so/ directory, still run one graph query in your shell. If stdout says not a Superopen repo, stop; do not so init unless the user asked. A linked worktree of a managed parent seeds on that call.
+These instructions apply only when the repository root has .so/, or this is a linked Git worktree whose main worktree has .so/. Check .so/ at the root first. If absent and .git is a file, compare git rev-parse --git-dir and --git-common-dir; only if they differ, check .so/ beside the main worktree's .git directory. In every other repository, use your normal tools: do not invoke or mention Superopen. Do not so init unless the user asks. In a managed linked worktree, the first graph query seeds .so/ from the main worktree.
 
 When Superopen is available, it is a CLI binary. Invoke it with your shell tool (Bash, PowerShell, or equivalent). Copy-paste this absolute path. On Windows do not wrap it in bash -c:
 
   %s
   %s
+  %s
 
 Rules:
-- Codebase questions (this repo's source): run graph query first in your shell. Do not run memory recall for a source question. Do not spawn Explore/Agent. Do not list the tree to confirm Superopen. If NODE/EDGE lines or BODIES answer the question, stop. Need another symbol body: so graph snippet of a listed NODE. Do not run graph query again unless the dump said TRUNCATED. Rename or multi-file work: so graph impact first. Grep/Read only for a literal the graph does not index. Never Grep .so/. Never pipe so through head or tail.
+- Codebase questions (this repo's source): start with Superopen in your shell. For an exact flag, option, config key, error, or value, run graph code-search with the most distinctive literal first; the -- before its pattern keeps leading dashes literal. It ranks matches with enclosing qualified symbols, bare-name registrations for long flags, related graph users, and short numbered source contexts. If they answer, stop; otherwise follow a related qn with so graph snippet or the printed help[] source-window line. For unknown behavior or relationships, run graph query in a few specific words (symbols and behavior), not pasted issue text or tracebacks. Do not run memory recall for a source question. Do not spawn Explore/Agent. Do not list the tree to confirm Superopen. Query output is TOON: count: N of M, then nodes[]{qn,kind,file,lines} and bodies[] with numbered source. If listed nodes or bodies answer, stop. Need another body: so graph snippet of a listed qn. If the answer is not listed, run the help[] line it printed (--offset), not another query or Grep. Rename or multi-file work: so graph impact first. Grep/Read only when the graph result lacks the needed source. Never Grep .so/. Never pipe so through head or tail.
 - Saved facts in this workspace (prior decisions, diary, who/what/when stored under .so/): notes in .so/ are this workspace's diary even if titles look like import ids. Run memory recall first in your shell when they ask what was stored. When they want a fact persisted for later, run memory capture --kind knowledge --horizon medium --title '…' --text '…' (intent, not a phrase). so memory search is a title index without bodies - that is not an empty store. Quote the stored note and cite #id. If two notes conflict, cite both #ids and pick the most specific or recent. If the pack does not answer, run memory recall with a second cue. Do not grep transcripts or treat session learned: as authority.
 - Memory is hints, not authority. Graph builds are local (no LLM).
-`, soLine(`graph query '<question>'`), soLine(`memory recall '<question>'`))) + "\n"
+- For noisy test or log commands, run so shrink -- <command> [args...] to keep recoverable full output and show a smaller result. Do not shrink source, diffs, search, or graph answers.
+- For repeated shell work across sessions, run so blocks scan and use so blocks run <name> for a matching built-in. Staged scripts require so blocks apply.
+`, soLine(`graph query '<question>'`), soLine(`graph code-search -- '<literal>' [path...]`), soLine(`memory recall '<question>'`))) + "\n"
 }
 
 // GraphStartLine is the SessionStart one-liner for a code-shaped workspace.
 func GraphStartLine() string {
-	return "Superopen: run `" + soLine(`graph query '<question>'`) + "` in your shell"
+	return "Superopen in your shell: exact flag/key/error: `" + soLine(`graph code-search -- '<literal>'`) + "`; unknown behavior: `" + soLine(`graph query '<question>'`) + "`"
 }
 
 // MemoryStartLine is the SessionStart one-liner when live memories exist.
@@ -58,7 +61,7 @@ func MemoryStartLine(n int) string {
 
 // HookReminder is a short additionalContext string for session/start hooks.
 func HookReminder() string {
-	return "Superopen: run `" + soLine(`graph query '<question>'`) + "` in your shell before Grep/Read. Skip Grep of .so/."
+	return "Superopen in your shell before Grep/Read: exact flag/key/error: `" + soLine(`graph code-search -- '<literal>'`) + "`; unknown behavior: `" + soLine(`graph query '<question>'`) + "`. Skip Grep of .so/."
 }
 
 // MemoryHookReminder is SubagentStart text for a memory-shaped session.
@@ -68,7 +71,7 @@ func MemoryHookReminder() string {
 
 // SearchNudge is injected on PreToolUse for shell/Grep (code-shaped prompts).
 func SearchNudge() string {
-	return "Superopen: .so/ exists. Run in your shell: `" + soLine(`graph query '<question>'`) + "` before grepping or listing files. Do not ls to confirm Superopen. Skip Grep of .so/."
+	return "Superopen: .so/ exists. In your shell, use `" + soLine(`graph code-search -- '<literal>'`) + "` for an exact flag/key/error or `" + soLine(`graph query '<question>'`) + "` for behavior before grepping or listing files. Do not ls to confirm Superopen. Skip Grep of .so/."
 }
 
 // ReadNudge is injected on PreToolUse for Read/Glob (code-shaped prompts).
@@ -77,17 +80,17 @@ func ReadNudge() string {
 }
 
 // SnippetOverflowNudge is injected once after a graph query when the agent
-// Reads source. Query already listed NODE src= paths; whole-module Read is
-// the compare cache hole. Snippet of a listed NODE is the cheap body.
+// Reads source. Query already listed this file in nodes[]; whole-module Read
+// is the compare cache hole. Snippet of a listed qn is the cheap body.
 func SnippetOverflowNudge() string {
-	return "Superopen: NODE src= already listed this file. Run in your shell: `" + soLine(`graph snippet '<qn>'`) + "` for a listed NODE. Do not Read whole modules. Stop if NODE/EDGE already answer."
+	return "Superopen: the graph result has a source location. In your shell, use `" + soLine(`graph snippet '<qn>'`) + "` for a listed symbol or its exact file/line snippet help. Avoid whole-module Read when the graph output answers."
 }
 
 // QueryRepeatNudge is injected once after a graph query when the agent
-// runs graph query again. The first dump already listed NODE rows;
-// another query is another billed turn. Snippet or stop unless TRUNCATED.
+// runs graph query again. The first page already listed ranked rows;
+// another query is another billed turn. Snippet, page with --offset, or stop.
 func QueryRepeatNudge() string {
-	return "Superopen: already queried this session. Run in your shell: `" + soLine(`graph snippet '<qn>'`) + "` for a listed NODE. Stop if NODE/EDGE already answer. Re-query only if TRUNCATED."
+	return "Superopen: already queried this session. Run in your shell: `" + soLine(`graph snippet '<qn>'`) + "` for a listed qn. Stop if nodes[] or bodies[] already answer. For more rows run the --offset help line, not a new question."
 }
 
 // MemoryNudge is injected on PreToolUse when the prompt is personal/prior-work.
@@ -102,16 +105,16 @@ func CaptureNudge() string {
 
 // ReadDenyReason is the permissionDecisionReason for strict-mode first Read deny.
 func ReadDenyReason() string {
-	return "Superopen strict mode: this project has an indexed code graph. Run `" + soLine(`graph query '<your question>'`) + "` FIRST in your shell, then re-issue this Read - it will be allowed. This block fires at most once per session; reading raw files to modify or debug specific lines is fine after one query."
+	return "Superopen strict mode: this project has an indexed code graph. In your shell, run `" + soLine(`graph code-search -- '<literal>'`) + "` for an exact flag/key/error or `" + soLine(`graph query '<question>'`) + "` for behavior first, then re-issue this Read. This block fires at most once per session."
 }
 
 // CursorRule is the short alwaysApply gate installed into ~/.cursor/rules.
 func CursorRule() string {
 	return strings.TrimSpace(fmt.Sprintf(`
-If this workspace has no .so/ directory, still run one graph query in your shell. If stdout says not a Superopen repo, stop; do not so init unless the user asked.
+Apply this rule only when the repository root has .so/, or this is a linked Git worktree whose main worktree has .so/. Check .so/ at the root first. If absent and .git is a file, compare git rev-parse --git-dir and --git-common-dir; only if they differ, check .so/ beside the main worktree's .git directory. Otherwise use normal tools: do not invoke or mention Superopen. Do not so init unless the user asks. In a managed linked worktree, the first graph query seeds .so/.
 
-If Superopen is available, it is a CLI binary. Invoke it with your shell tool (Bash, PowerShell, or equivalent). On Windows do not wrap the path in bash -c. Codebase questions: %s before Grep/Read/ls. Do not run memory recall for a source question. Rename or multi-file: graph impact. Never pipe so through head or tail. Saved facts in this workspace: %s when they ask what was stored; %s when they want a fact persisted. Notes in .so/ are this workspace diary even if titles look like import ids; if two notes conflict cite both #ids; if recall misses try a second cue. If a hook says HARVEST pending, run harvest brief then harvest propose before answering; if that session has nothing to change, harvest skip <id>. The current user message is a memory capture, not a playbook diff for that session. Pipe JSON to harvest propose on stdin. Do not write a file. Never Grep .so/. This applies to you and to every subagent you spawn. Do not skip the graph by spawning Explore. Memory is hints, not authority.
-`, soLine(`graph query '<question>'`), soLine(`memory recall '<question>'`), soLine(`memory capture --kind knowledge --horizon medium --title '…' --text '…'`))) + "\n"
+If Superopen is available, it is a CLI binary. Invoke it with your shell tool (Bash, PowerShell, or equivalent). On Windows do not wrap the path in bash -c. Codebase questions: exact flag/key/error/value: %s first, then its bounded source-window help; unknown behavior or relationship: %s first. Use Superopen before Grep/Read/ls. Do not run memory recall for a source question. Rename or multi-file: graph impact. Never pipe so through head or tail. Saved facts in this workspace: %s when they ask what was stored; %s when they want a fact persisted. Notes in .so/ are this workspace diary even if titles look like import ids; if two notes conflict cite both #ids; if recall misses try a second cue. For noisy test or log commands use so shrink -- <command>; for repeated shell work use so blocks scan and so blocks run <name>. If a hook says HARVEST pending, run harvest brief then harvest propose before answering; if that session has nothing to change, harvest skip <id>. The current user message is a memory capture, not a playbook diff for that session. Pipe JSON to harvest propose on stdin. Do not write a file. Never Grep .so/. This applies to you and to every subagent you spawn. Do not skip the graph by spawning Explore. Memory is hints, not authority.
+`, soLine(`graph code-search -- '<literal>'`), soLine(`graph query '<question>'`), soLine(`memory recall '<question>'`), soLine(`memory capture --kind knowledge --horizon medium --title '…' --text '…'`))) + "\n"
 }
 
 // MergeBlock replaces or appends the Superopen sentinel block in content.

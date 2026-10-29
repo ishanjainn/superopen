@@ -1,9 +1,11 @@
 package hooks
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -78,6 +80,10 @@ func installHermesConfig(path, binaryPath, logPath, configPath string) error {
 	if err != nil {
 		return err
 	}
+	if err := installHermesPlugin(filepath.Dir(path), binaryPath); err != nil {
+		return err
+	}
+	enableHermesPlugin(config.values)
 	prefix := endpointCommandPrefix("hermes", binaryPath, logPath, configPath)
 	endpointHooks := map[string]hermesHookRef{
 		"on_session_start":       {Command: hookLine(prefix, "session-start")},
@@ -177,6 +183,13 @@ func removeHermesEndpointHooks(path string) (bool, error) {
 		return false, err
 	}
 	changed := false
+	if hermesPluginManaged(filepath.Dir(path)) {
+		changed = true
+		removeHermesPlugin(config.values)
+		if err := removeHermesPluginFiles(filepath.Dir(path)); err != nil {
+			return false, err
+		}
+	}
 	for eventName, refs := range config.hooks {
 		filtered := refs[:0]
 		for _, ref := range refs {
@@ -202,6 +215,148 @@ func removeHermesEndpointHooks(path string) (bool, error) {
 		return true, os.Remove(path)
 	}
 	return true, writeHermesConfig(path, config)
+}
+
+const hermesPluginMarker = "# Managed by Superopen."
+
+const hermesPluginSource = `# Managed by Superopen.
+import json
+import os
+import subprocess
+
+SO_BINARY = __SO_BINARY__
+
+
+def _transform(tool_name="", args=None, result=None, status=None, **kwargs):
+    if tool_name != "terminal" or not isinstance(args, dict) or not isinstance(result, str) or len(result) < 2048:
+        return None
+    if status in ("error", "failed", "failure"):
+        return None
+    command = args.get("command")
+    if not isinstance(command, str):
+        return None
+    cwd = kwargs.get("cwd") or args.get("working_directory") or os.getcwd()
+    payload = {"cwd": cwd, "tool_name": "bash", "tool_input": {"command": command}, "tool_response": result}
+    try:
+        completed = subprocess.run(
+            [SO_BINARY, "sessions", "hook", "--vendor=hermes", "--event=transformToolResult"],
+            input=json.dumps(payload), text=True, capture_output=True, timeout=5,
+        )
+        if completed.returncode == 0:
+            replacement = json.loads(completed.stdout).get("output_replacement")
+            return replacement if isinstance(replacement, str) else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+def register(ctx):
+    ctx.register_hook("transform_tool_result", _transform)
+`
+
+func installHermesPlugin(home, binaryPath string) error {
+	dir := filepath.Join(home, "plugins", "superopen")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	module := filepath.Join(dir, "__init__.py")
+	if existing, err := os.ReadFile(module); err == nil && !strings.HasPrefix(string(existing), hermesPluginMarker) {
+		return fmt.Errorf("refusing to overwrite unmanaged Hermes plugin %s", module)
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	manifest := filepath.Join(dir, "plugin.yaml")
+	if _, err := os.Stat(module); os.IsNotExist(err) {
+		if _, err := os.Stat(manifest); err == nil {
+			return fmt.Errorf("refusing to overwrite unmanaged Hermes plugin %s", manifest)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	} else if existing, err := os.ReadFile(manifest); err == nil && !strings.HasPrefix(string(existing), hermesPluginMarker) {
+		return fmt.Errorf("refusing to overwrite unmanaged Hermes plugin %s", manifest)
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	quoted, err := json.Marshal(binaryPath)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(module, []byte(strings.Replace(hermesPluginSource, "__SO_BINARY__", string(quoted), 1)), 0600); err != nil {
+		return err
+	}
+	return os.WriteFile(manifest, []byte(hermesPluginMarker+"\nname: superopen\nversion: 1.0.0\ndescription: Compact noisy terminal results\nprovides_hooks:\n  - transform_tool_result\n"), 0600)
+}
+
+func enableHermesPlugin(values map[string]interface{}) {
+	plugins, _ := values["plugins"].(map[string]interface{})
+	if plugins == nil {
+		plugins = map[string]interface{}{}
+	}
+	enabled, _ := plugins["enabled"].([]interface{})
+	for _, name := range enabled {
+		if name == "superopen" {
+			values["plugins"] = plugins
+			return
+		}
+	}
+	plugins["enabled"] = append(enabled, "superopen")
+	values["plugins"] = plugins
+}
+
+func removeHermesPlugin(values map[string]interface{}) bool {
+	plugins, _ := values["plugins"].(map[string]interface{})
+	if plugins == nil {
+		return false
+	}
+	enabled, _ := plugins["enabled"].([]interface{})
+	filtered := make([]interface{}, 0, len(enabled))
+	changed := false
+	for _, name := range enabled {
+		if name == "superopen" {
+			changed = true
+			continue
+		}
+		filtered = append(filtered, name)
+	}
+	if changed {
+		if len(filtered) == 0 {
+			delete(plugins, "enabled")
+		} else {
+			plugins["enabled"] = filtered
+		}
+		if len(plugins) == 0 {
+			delete(values, "plugins")
+		}
+	}
+	return changed
+}
+
+func removeHermesPluginFiles(home string) error {
+	dir := filepath.Join(home, "plugins", "superopen")
+	module := filepath.Join(dir, "__init__.py")
+	data, err := os.ReadFile(module)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil || !strings.HasPrefix(string(data), hermesPluginMarker) {
+		return err
+	}
+	if err := os.Remove(module); err != nil {
+		return err
+	}
+	manifest := filepath.Join(dir, "plugin.yaml")
+	if body, err := os.ReadFile(manifest); err == nil && strings.HasPrefix(string(body), hermesPluginMarker) {
+		if err := os.Remove(manifest); err != nil {
+			return err
+		}
+	}
+	_ = os.Remove(dir) // Leave any user files in place.
+	return nil
+}
+
+func hermesPluginManaged(home string) bool {
+	data, err := os.ReadFile(filepath.Join(home, "plugins", "superopen", "__init__.py"))
+	return err == nil && strings.HasPrefix(string(data), hermesPluginMarker)
 }
 
 func isHermesInstalledAt(path string) bool {

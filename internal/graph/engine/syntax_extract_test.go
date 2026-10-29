@@ -528,7 +528,7 @@ func TestExtractSyntaxFactsCommonJSRequireAndObjectMethods(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byFile := map[string]SyntaxExtraction{}
+	byFile := map[string]FileResult{}
 	for _, f := range repo.Files {
 		byFile[f.File.Path] = f.Extraction
 	}
@@ -586,7 +586,7 @@ func TestYamlJestAndEnumExtraction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byFile := map[string]SyntaxExtraction{}
+	byFile := map[string]FileResult{}
 	for _, f := range repo.Files {
 		byFile[f.File.Path] = f.Extraction
 		t.Logf("FILE %s lang=%s", f.File.Path, f.File.Language)
@@ -615,5 +615,52 @@ func TestYamlJestAndEnumExtraction(t *testing.T) {
 	}
 	if len(yaml.Routes) == 0 || yaml.Routes[0].Name != "http://prometheus:9090" {
 		t.Fatalf("infra routes=%#v", yaml.Routes)
+	}
+}
+
+func TestExtractSyntaxFactsReadsPythonBodyDocstring(t *testing.T) {
+	t.Parallel()
+	source := []byte("def get_fqdn():\n    \"\"\"Return the punycode FQDN.\"\"\"\n    return 1\n")
+	nameStart := strings.Index(string(source), "get_fqdn")
+	docStart := strings.Index(string(source), `"""`)
+	docEnd := strings.LastIndex(string(source), `"""`) + 3
+	retStart := strings.Index(string(source), "return")
+	tree := SyntaxNode{Type: "module", Named: true, End: uint32(len(source)), Children: []SyntaxNode{
+		{Type: "function_definition", Named: true, Start: 0, End: uint32(len(source)), Children: []SyntaxNode{
+			{Type: "identifier", Field: "name", Named: true, Start: uint32(nameStart), End: uint32(nameStart + len("get_fqdn"))},
+			{Type: "block", Field: "body", Named: true, Start: uint32(docStart), End: uint32(len(source)), Children: []SyntaxNode{
+				{Type: "expression_statement", Named: true, Start: uint32(docStart), End: uint32(docEnd), Children: []SyntaxNode{
+					{Type: "string", Named: true, Start: uint32(docStart), End: uint32(docEnd)},
+				}},
+				{Type: "return_statement", Named: true, Start: uint32(retStart), End: uint32(len(source) - 1)},
+			}},
+		}},
+	}}
+	got, err := ExtractSyntaxFacts("python", tree, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, def := range got.Definitions {
+		if def.Name == "get_fqdn" {
+			if def.Docstring != "Return the punycode FQDN." {
+				t.Fatalf("docstring = %q", def.Docstring)
+			}
+			return
+		}
+	}
+	t.Fatalf("get_fqdn not extracted: %#v", got.Definitions)
+}
+
+func TestPythonDocstringTextStripsPrefixAndQuotes(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		`"""  Multi line.  """`: "Multi line.",
+		`r'''raw'''`:            "raw",
+		`"one"`:                 "one",
+	}
+	for raw, want := range cases {
+		if got := pythonDocstringText(raw); got != want {
+			t.Fatalf("pythonDocstringText(%q) = %q, want %q", raw, got, want)
+		}
 	}
 }

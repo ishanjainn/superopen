@@ -7,7 +7,7 @@ Superopen benchmark harness. Entry point: `python3 benchmarks/run.py`.
 Superopen is a CLI for **any coding agent on any OS**. These modes measure that
 product.
 
-1. Headline scores are isolated **Claude Code, OpenCode, or Cursor CLI** sessions (`so init` +
+1. Headline scores are isolated **Claude Code or OpenCode** sessions (`so init` +
    `so install`). Not HTTP APIs, not pasted recall packs.
 2. **No benchmark-only hacks** in `so`. Fixes must help every repo, agent, and OS.
 3. This runner is **mode-gated** (`--mode`, `--scale`). Do not copy another
@@ -34,8 +34,7 @@ and `--swe-grade`, and skips a duplicate Django `index` (`graph` already records
 2. **Same prompt.** Identical question text across compare arms. Do not mention Superopen in the prompt.
 3. **Natural product.** Superopen arm is `so init` + `so install --vendor=<host>`. No trimmed hooks. Compare uses a fresh worktree/HOME per question; `so init` runs once and `.so/` is copied.
 4. **Ephemeral work dirs.** Do not keep harness JSON. The report is `BENCHMARKS.md`.
-5. **Coding-agent hosts only.** `--host claude-code`, `--host opencode`, or `--host cursor`
-   (`CURSOR_API_KEY`, never on the command line).
+5. **Coding-agent hosts only.** `--host claude-code` or `--host opencode`.
 
 ## Modes
 
@@ -67,7 +66,6 @@ Locomo is capped at 100.
 python3 benchmarks/run.py --mode offline
 python3 benchmarks/run.py --mode compare --scale small --host claude-code --isolate docker --so-bin ./bin/so --max-spend 20
 python3 benchmarks/run.py --mode swe --scale small --host claude-code --isolate docker --so-bin ./bin/so --max-spend 50
-python3 benchmarks/run.py --mode swe --scale small --host cursor --isolate docker --so-bin ./bin/so --max-spend 50
 ./benchmarks/docker-run.sh --mode compare --scale small --host claude-code --max-spend 20
 ```
 

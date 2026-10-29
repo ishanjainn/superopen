@@ -46,7 +46,13 @@ func TestSnapshotInRepo(t *testing.T) {
 	dir := t.TempDir()
 	initRepo(t, dir)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// The production budget (500ms per git call) is for hook latency. On a
+	// loaded runner, `git status` can exceed it and report a clean tree.
+	prev := perSubcommandBudget
+	perSubcommandBudget = 30 * time.Second
+	t.Cleanup(func() { perSubcommandBudget = prev })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	got := Snapshot(ctx, dir)

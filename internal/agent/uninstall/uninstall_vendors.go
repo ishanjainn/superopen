@@ -73,22 +73,21 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 		errs = append(errs, primaryErr.Error())
 	}
 
-	if home, homeErr := os.UserHomeDir(); homeErr == nil {
-		for _, stale := range legacyVendorPaths(home, vendor) {
-			if stale == dest {
-				continue
+	switch vendor {
+	case "opencode":
+		base, baseErr := paths.OpenCodeConfigDir()
+		if baseErr == nil {
+			path := filepath.Join(base, "plugins", "superopen", "index.js")
+			if touched, removeErr := removePath(path, dryRun); touched != "" {
+				removed = append(removed, touched)
+				if removeErr != nil {
+					errs = append(errs, removeErr.Error())
+				}
 			}
-			p, e := removePath(stale, dryRun)
-			if p != "" {
-				removed = append(removed, p)
-			}
-			if e != nil {
-				errs = append(errs, e.Error())
+			if !dryRun {
+				_ = os.Remove(filepath.Dir(path))
 			}
 		}
-	}
-
-	switch vendor {
 	case "claude-code":
 		// Four side effects beyond the manifest directory:
 		//   1. ~/.local/share/superopen/claude-marketplace/ - written
@@ -381,22 +380,6 @@ func stripGeminiHooks(path string, dryRun bool) (string, error) {
 		return path, err
 	}
 	return path, os.WriteFile(path, append(out, '\n'), 0o644)
-}
-
-// legacyVendorPaths are older install locations that never matched host
-// auto-discovery (OpenCode: ~/.config/opencode/plugins; Pi: ~/.pi/agent/extensions;
-// Copilot CLI: ~/.copilot/hooks).
-func legacyVendorPaths(home, vendor string) []string {
-	switch vendor {
-	case "opencode":
-		return []string{filepath.Join(home, ".opencode", "plugins", "superopen.ts")}
-	case "pi":
-		return []string{filepath.Join(home, ".pi", "extensions", "superopen")}
-	case "copilot-cli":
-		return []string{filepath.Join(home, ".github", "hooks", "superopen.json")}
-	default:
-		return nil
-	}
 }
 
 func claudeMarketplaceRoot() (string, error) {

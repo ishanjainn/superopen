@@ -204,12 +204,12 @@ func parseSyntaxRepositoryFromProbe(ctx context.Context, parser SyntaxParser, ro
 		if item.Generation != "" {
 			generationParts = append(generationParts, item.Generation)
 		} else {
-			generationParts = append(generationParts, item.File.File.Path+":"+item.File.File.SHA256)
+			generationParts = append(generationParts, item.File.File.Path+":"+item.File.File.Digest)
 		}
 	}
 	for _, file := range parsed.Files {
 		byPath[file.File.Path] = file
-		generationParts = append(generationParts, file.File.Path+":"+file.File.SHA256)
+		generationParts = append(generationParts, file.File.Path+":"+file.File.Digest)
 	}
 	for _, row := range parsed.Coverage.Rows {
 		coverageByPath[row.Path] = row
@@ -252,7 +252,7 @@ func saveParsedExtracts(root string, repository SyntaxRepository) {
 		coverageByPath[row.Path] = &repository.Coverage.Rows[i]
 	}
 	for _, file := range repository.Files {
-		saveExtractCache(root, file, coverageByPath[file.File.Path], file.File.Path+":"+file.File.SHA256)
+		saveExtractCache(root, file, coverageByPath[file.File.Path], file.File.Path+":"+file.File.Digest)
 	}
 }
 
@@ -274,28 +274,34 @@ func parseSyntaxFile(ctx context.Context, parser SyntaxParser, root, project, re
 	if err := ctx.Err(); err != nil {
 		return syntaxOutcome{err: err}
 	}
-	if _, ok := DetectLanguage(rel, nil, overrides); !ok {
+	if _, ok := DetectLanguage(rel, nil, overrides); !ok && filepath.Ext(rel) != ".txt" && filepath.Ext(rel) != "" && !sphinxSourceSuffix(root, rel) && !specialDocumentExtension(rel) && !fileMayHaveShebang(filepath.Join(root, filepath.FromSlash(rel))) {
 		return syntaxOutcome{}
 	}
 	abs := filepath.Join(root, filepath.FromSlash(rel))
+	if info, err := os.Lstat(abs); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return syntaxOutcome{}
+	}
 	body, err := os.ReadFile(abs)
 	if err != nil {
 		return syntaxOutcome{coverage: &api.CoverageRow{Path: filepath.ToSlash(rel), Kind: "read", Detail: err.Error()}}
 	}
-	detection, ok := DetectLanguage(rel, body, overrides)
+	detection, ok := detectRepositoryLanguage(root, rel, body, overrides)
 	if !ok {
 		return syntaxOutcome{}
 	}
 	record := FileRecord{
-		Project: project, Path: filepath.ToSlash(rel), SHA256: fileContentDigest(body),
+		Project: project, Path: filepath.ToSlash(rel), Digest: fileContentDigest(body),
 		Size: int64(len(body)), Language: detection.Language, LineCount: countBodyLines(body),
 	}
 	if info, statErr := os.Stat(abs); statErr == nil {
 		record.MTimeNS = info.ModTime().UnixNano()
 		record.Size = info.Size()
 	}
-	generation := record.Path + ":" + record.SHA256
+	generation := record.Path + ":" + record.Digest
 	if detection.Grammar == "" {
+		if detection.Language == "diagram" || detection.Language == "pdf" {
+			return syntaxOutcome{file: &ParsedSyntaxFile{File: record, Detection: detection, Body: body}, generation: generation}
+		}
 		if detection.Language == "objectscript_export" {
 			return parseObjectScriptExport(ctx, parser, record, detection, generation, body)
 		}
@@ -304,7 +310,11 @@ func parseSyntaxFile(ctx context.Context, parser SyntaxParser, root, project, re
 	}
 	extraction, err := extractSyntaxFile(ctx, parser, detection.Language, detection.Grammar, body)
 	if err == nil {
+		if detection.Language == "rust" {
+			extraction = enrichRustMacroCalls(ctx, parser, body, extraction)
+		}
 		extraction = enrichCFamilyExtract(ctx, parser, detection.Language, detection.Grammar, record.Path, body, extraction)
+		extraction = enrichEmbeddedScripts(ctx, parser, detection.Language, body, extraction)
 	}
 	if err != nil {
 		if ctx.Err() != nil {

@@ -36,6 +36,7 @@ type SyntaxFact struct {
 	Arguments          []SyntaxArgument
 	Signature          string
 	ReturnType         string
+	ValueName          string
 	ParentClass        string
 	Docstring          string
 	BodyTokens         string
@@ -51,6 +52,7 @@ type SyntaxFact struct {
 	Lines              int
 	MayBeCallReference bool
 	SourceOrigin       string
+	DecoratorText      string
 }
 
 // SyntaxArgument preserves the observable call-site information consumed by
@@ -72,6 +74,7 @@ type FileResult struct {
 	Definitions         []SyntaxFact
 	Imports             []SyntaxFact
 	Calls               []SyntaxFact
+	MacroArguments      []SyntaxFact
 	Usages              []OccurrenceFact
 	CallableReferences  []SyntaxFact
 	Bindings            []OccurrenceFact
@@ -119,24 +122,20 @@ type LSPSurface struct {
 	Config      string
 }
 
-// SyntaxExtraction is retained as a source-compatible alias while callers
-// move to the unified name. It is not a second extraction representation.
-type SyntaxExtraction = FileResult
-
 // ExtractSyntaxFacts performs the language-neutral portion of Superopen's
 // extraction pipeline using its generated language specification. Family
 // resolvers enrich and resolve these grounded facts in later passes.
-func ExtractSyntaxFacts(language string, root syntaxView, source []byte) (SyntaxExtraction, error) {
+func ExtractSyntaxFacts(language string, root syntaxView, source []byte) (FileResult, error) {
 	spec, ok := PinnedLanguageSpec(language)
 	if !ok {
-		return SyntaxExtraction{}, fmt.Errorf("no pinned extraction spec for %s", language)
+		return FileResult{}, fmt.Errorf("no pinned extraction spec for %s", language)
 	}
 	return extractSyntaxFactsWithSets(language, root, source, syntaxSpecSets(spec))
 }
 
-func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte, sets specSets) (SyntaxExtraction, error) {
+func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte, sets specSets) (FileResult, error) {
 	lines := sourceLineIndex(source)
-	result := FileResult{Partial: root.HasErr(), RootModule: sets.modules[root.Kind()], ParseStatus: ParseStatus{Parsed: true, Partial: root.HasErr()}}
+	result := FileResult{Partial: root.HasErr(), RootModule: len(source) > 0 && sets.modules[root.Kind()], ParseStatus: ParseStatus{Parsed: true, Partial: root.HasErr()}}
 	var walk func(syntaxView, syntaxView, []syntaxView, []string, bool, int, bool, bool, int, bool, bool)
 	walk = func(node, parent syntaxView, ancestors []syntaxView, scope []string, local bool, variableDepth int, enclosedByVariable bool, exactCallee bool, importDepth int, inClass bool, inClassMethod bool) {
 		if node.Kind() == "ERROR" {
@@ -167,6 +166,17 @@ func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte,
 		case specHit(sets.modules, sets.moduleIDs, node) && node.StartByte() != root.StartByte():
 			definitionKind = "module"
 		}
+		if language == "go" && definitionKind == "field" {
+			// Embedded declarations have only a type; index named
+			// fields rather than inventing an embedded-field symbol.
+			if _, named := findField(node, "name"); !named {
+				definitionKind = ""
+			}
+		}
+		if language == "rust" && node.Kind() == "impl_item" {
+			// An impl extends the implementing type; it is not a second type.
+			definitionKind = ""
+		}
 		promotedName := ""
 		if definitionKind == "variable" && isJSLanguage(language) {
 			promotedName = functionVariableName(node, source)
@@ -175,6 +185,26 @@ func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte,
 			}
 		}
 		childScope := scope
+		if language == "rust" && node.Kind() == "impl_item" {
+			if implementing, ok := findField(node, "type"); ok {
+				typeName := strings.TrimSpace(nodeText(implementing, source))
+				if cut := strings.IndexByte(typeName, '<'); cut >= 0 {
+					typeName = typeName[:cut]
+				}
+				if typeName != "" {
+					childScope = append(append([]string(nil), scope...), typeName)
+					if trait, ok := findField(node, "trait"); ok {
+						traitName := strings.TrimSpace(nodeText(trait, source))
+						if cut := strings.IndexByte(traitName, '<'); cut >= 0 {
+							traitName = traitName[:cut]
+						}
+						if traitName != "" {
+							result.Inheritance = append(result.Inheritance, syntaxFact("inheritance", traitName, joinSyntaxScope(currentScope, typeName), node, lines, 1))
+						}
+					}
+				}
+			}
+		}
 		definitionEstablished := false
 		// Superopen extract_variables only walks module-level JS/TS declarators
 		// (direct program children, optionally wrapped by export_statement).
@@ -220,11 +250,36 @@ func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte,
 				// Superopen compute_func_qn only qualifies under enclosing_class_qn.
 				publishScope := currentScope
 				scopeForChildren := scope
+				if (language == "cpp" || language == "cuda") && definitionKind == "function" && node.Kind() == "function_definition" {
+					if owner, method, qualified := strings.Cut(name, "::"); qualified && owner != "" && method != "" {
+						parts := strings.Split(name, "::")
+						owner, name = parts[len(parts)-2], parts[len(parts)-1]
+						publishScope = owner
+						scopeForChildren = []string{owner}
+					}
+				}
 				if isJSLanguage(language) && definitionKind == "function" && !inClass {
 					publishScope = ""
 					scopeForChildren = nil
 				}
 				fact := syntaxFact(definitionKind, name, publishScope, node, lines, 1)
+				if language == "rust" && definitionKind == "function" {
+					for i := len(ancestors) - 1; i >= 0; i-- {
+						switch ancestors[i].Kind() {
+						case "impl_item":
+							if implementing, ok := findField(ancestors[i], "type"); ok {
+								fact.ParentClass = strings.TrimSpace(nodeText(implementing, source))
+							}
+						case "trait_item":
+							if trait, ok := findField(ancestors[i], "name"); ok {
+								fact.ParentClass = strings.TrimSpace(nodeText(trait, source))
+							}
+						}
+						if fact.ParentClass != "" {
+							break
+						}
+					}
+				}
 				fact.Local = local || (language == "bash" && definitionKind == "variable" && parent.Kind() != root.Kind())
 				fact.EnclosedByVariable = enclosedByVariable
 				fact.VariableDepth = variableDepth
@@ -242,6 +297,28 @@ func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte,
 						fact.Signature = strings.TrimSpace(nodeText(value, source))
 						parameters = syntaxParameterNames(value, source)
 						fact.ParamTypes = syntaxParameterTypes(value, source)
+						if language == "go" {
+							appendGoParameterTypes(value, source, joinSyntaxScope(publishScope, name), lines, &result.TypeAssignments)
+						}
+						if language == "python" {
+							parameterScope := joinSyntaxScope(publishScope, name)
+							for i := 0; i < value.ChildCount(); i++ {
+								parameter := value.ChildAt(i)
+								nameNode, hasName := findField(parameter, "name")
+								typeNode, hasType := findField(parameter, "type")
+								if !hasName && (parameter.Kind() == "typed_parameter" || parameter.Kind() == "typed_default_parameter") {
+									nameNode = firstNamedChild(parameter)
+									hasName = nameNode != nil
+								}
+								if !hasName || !hasType || nameNode.Kind() != "identifier" {
+									continue
+								}
+								binding := syntaxFact("type_assignment", strings.TrimSpace(nodeText(nameNode, source)), parameterScope, parameter, lines, 1)
+								binding.ReturnType = strings.TrimSpace(nodeText(typeNode, source))
+								binding.TypeKind = "annotation"
+								result.TypeAssignments = append(result.TypeAssignments, binding)
+							}
+						}
 					}
 					fact.ParamNames = parameters
 					fillCFamilyFunctionParams(language, node, source, &fact)
@@ -254,6 +331,7 @@ func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte,
 					if language == "go" && node.Kind() == "method_declaration" {
 						if receiver, ok := findField(node, "receiver"); ok {
 							fact.ParentClass = syntaxGoReceiverType(receiver, source)
+							appendGoParameterTypes(receiver, source, joinSyntaxScope(publishScope, name), lines, &result.TypeAssignments)
 						}
 					}
 					metrics := syntaxComplexity(node, sets.branches)
@@ -311,15 +389,144 @@ func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte,
 			}
 		}
 		if specHit(sets.calls, sets.callIDs, node) {
-			if name := relationshipName(node, source, []string{"function", "callee", "name", "method"}); name != "" {
-				base := name
-				if index := strings.LastIndexAny(base, ".:"); index >= 0 {
-					base = base[index+1:]
+			name := relationshipName(node, source, []string{"function", "callee", "name", "method"})
+			if language == "go" {
+				if function, ok := findField(node, "function"); ok {
+					if raw := strings.TrimSpace(nodeText(function, source)); strings.Contains(raw, "{}.") && !strings.ContainsAny(raw, "\r\n;") && len(raw) < 256 {
+						name = raw
+					}
+					if receiver, ok := findField(function, "operand"); ok && receiver.Kind() == "call_expression" {
+						callee := relationshipName(receiver, source, []string{"function"})
+						if field, ok := findField(function, "field"); ok && callee != "" && !strings.ContainsAny(callee, "(. ") {
+							name = callee + "." + strings.TrimSpace(nodeText(field, source))
+						}
+					}
 				}
-				if !isLanguageKeyword(language, base) || isResolvableBuiltin(language, base) {
+			}
+			if isJSLanguage(language) {
+				if function, ok := findField(node, "function"); ok {
+					// A chained call can put its final .get/.post on the next
+					// line. Keep the callable expression through that newline.
+					if raw := strings.TrimSpace(nodeText(function, source)); strings.Contains(raw, "\n") && len(raw) < 1024 {
+						name = raw
+					}
+				}
+			}
+			if name != "" {
+				// A member call's full name is not a language keyword: app.get()
+				// and res.set() remain calls even though get/set are keywords.
+				if !isLanguageKeyword(language, name) || isResolvableBuiltin(language, name) {
 					fact := syntaxFact("call", name, currentScope, node, lines, .8)
-					fact.Arguments, fact.FirstStringArg = syntaxCallArguments(node, source)
+					fact.Arguments, fact.FirstStringArg = syntaxCallArguments(language, node, source)
 					result.Calls = append(result.Calls, fact)
+				}
+			}
+		}
+		if language == "rust" && node.Kind() == "macro_invocation" {
+			macro, ok := findField(node, "macro")
+			if ok && rustExpressionMacro(nodeText(macro, source)) {
+				for i := 0; i < node.ChildCount(); i++ {
+					args := node.ChildAt(i)
+					if args.Kind() != "token_tree" || args.EndByte() <= args.StartByte()+2 {
+						continue
+					}
+					fact := syntaxFact("macro_arguments", nodeText(macro, source), currentScope, args, lines, 1)
+					fact.StartByte++
+					fact.EndByte--
+					result.MacroArguments = append(result.MacroArguments, fact)
+					break
+				}
+			}
+		}
+		if language == "python" && node.Kind() == "assignment" {
+			left, leftOK := findField(node, "left")
+			right, rightOK := findField(node, "right")
+			annotation, annotated := findField(node, "type")
+			if leftOK && (rightOK || annotated) {
+				name := ""
+				if left.Kind() == "identifier" {
+					name = nodeText(left, source)
+				} else if left.Kind() == "attribute" {
+					object, objectOK := findField(left, "object")
+					member, memberOK := findField(left, "attribute")
+					if objectOK && memberOK && object.Kind() == "identifier" && member.Kind() == "identifier" {
+						owner := nodeText(object, source)
+						if owner == "self" || owner == "cls" {
+							name = owner + "." + nodeText(member, source)
+						}
+					}
+				}
+				if name != "" {
+					fact := syntaxFact("type_assignment", name, currentScope, node, lines, 1)
+					if annotated {
+						fact.ReturnType = strings.TrimSpace(nodeText(annotation, source))
+						fact.TypeKind = "annotation"
+					} else if rightOK && right.Kind() == "list" {
+						fact.TypeKind = "list_literal"
+					} else if rightOK && right.Kind() == "dictionary" {
+						fact.TypeKind = "dict_literal"
+					} else if rightOK && right.Kind() == "set" {
+						fact.TypeKind = "set_literal"
+					} else if rightOK && right.Kind() == "call" {
+						fact.ReturnType = relationshipName(right, source, []string{"function", "callee", "name"})
+						if fact.ReturnType == "cast" || fact.ReturnType == "typing.cast" {
+							if args, _ := syntaxCallArguments(language, right, source); len(args) > 0 {
+								fact.ReturnType = args[0].Expr
+								fact.TypeKind = "annotation"
+							}
+						}
+					} else if rightOK && right.Kind() == "identifier" {
+						fact.ValueName = nodeText(right, source)
+					} else if rightOK && right.Kind() == "subscript" {
+						fact.ValueName = strings.TrimSpace(nodeText(right, source))
+						fact.TypeKind = "index_element"
+					}
+					result.TypeAssignments = append(result.TypeAssignments, fact)
+				}
+			}
+		}
+		if language == "go" && node.Kind() == "short_var_declaration" {
+			left, leftOK := findField(node, "left")
+			right, rightOK := findField(node, "right")
+			if leftOK && rightOK {
+				nameNode, valueNode := firstNamedChild(left), firstNamedChild(right)
+				if !viewMissing(nameNode) && !viewMissing(valueNode) && nameNode.Kind() == "identifier" {
+					binding := syntaxFact("type_assignment", strings.TrimSpace(nodeText(nameNode, source)), currentScope, node, lines, 1)
+					switch valueNode.Kind() {
+					case "call_expression":
+						binding.ReturnType = relationshipName(valueNode, source, []string{"function", "name"})
+						binding.TypeKind = "call_return"
+					case "type_assertion_expression", "composite_literal":
+						if typeNode, ok := findField(valueNode, "type"); ok {
+							binding.ReturnType = cleanSyntaxType(nodeText(typeNode, source))
+							binding.TypeKind = "annotation"
+						}
+					}
+					if binding.ReturnType != "" {
+						result.TypeAssignments = append(result.TypeAssignments, binding)
+					}
+				}
+			}
+		}
+		if language == "python" && node.Kind() == "for_statement" {
+			left, leftOK := findField(node, "left")
+			right, rightOK := findField(node, "right")
+			if leftOK && rightOK && left.Kind() == "identifier" {
+				binding := syntaxFact("type_assignment", strings.TrimSpace(nodeText(left, source)), currentScope, right, lines, 1)
+				binding.ValueName = strings.TrimSpace(nodeText(right, source))
+				binding.TypeKind = "iter_element"
+				result.TypeAssignments = append(result.TypeAssignments, binding)
+			}
+		}
+		if isJSLanguage(language) && node.Kind() == "variable_declarator" {
+			nameNode, hasName := findField(node, "name")
+			value, hasValue := findField(node, "value")
+			if hasName && hasValue && nameNode.Kind() == "identifier" && value.Kind() == "new_expression" {
+				constructor := relationshipName(value, source, []string{"constructor", "function", "name"})
+				if constructor != "" {
+					fact := syntaxFact("type_assignment", nodeText(nameNode, source), currentScope, node, lines, 1)
+					fact.ReturnType = constructor
+					result.TypeAssignments = append(result.TypeAssignments, fact)
 				}
 			}
 		}
@@ -339,6 +546,12 @@ func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte,
 			!syntaxCallArgumentLabel(node, ancestors) {
 			if name := syntaxReferenceName(language, node, source); name != "" &&
 				(!isLanguageKeyword(language, syntaxCallBase(name)) || isResolvableBuiltin(language, syntaxCallBase(name))) {
+				occurrenceScope := currentScope
+				if language == "rust" && parent.Kind() == "impl_item" && node.FieldName() == "type" && len(scope) > 0 {
+					// The implementing type is read by the module before the impl
+					// body introduces the receiver scope.
+					occurrenceScope = strings.Join(scope[:len(scope)-1], ".")
+				}
 				switch {
 				// Declarations, parameters, and assignment targets introduce a
 				// lexical binding. Superopen records the binding and emits no
@@ -346,13 +559,15 @@ func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte,
 				// bound name are then suppressed as locally shadowed.
 				case syntaxBindingOccurrence(language, node, ancestors, sets),
 					syntaxWriteOccurrence(language, node, ancestors, sets):
-					result.Bindings = append(result.Bindings, occurrenceFact(name, currentScope, node, lines, .9))
+					result.Bindings = append(result.Bindings, occurrenceFact(name, occurrenceScope, node, lines, .9))
 				default:
-					fact := occurrenceFact(name, currentScope, node, lines, .7)
+					fact := occurrenceFact(name, occurrenceScope, node, lines, .7)
 					// Superopen stamps may_be_call_reference for direct argument
 					// values so the usages pass can emit CALL_REFERENCE when the
 					// target is a proven callable.
-					fact.MayBeCallReference = syntaxDirectArgumentValue(node, ancestors)
+					fact.MayBeCallReference = syntaxDirectArgumentValue(node, ancestors) ||
+						language == "python" && parent.Kind() == "pair" && node.FieldName() == "value" ||
+						language == "python" && node.Kind() == "identifier" && parent.Kind() == "assignment" && node.FieldName() == "right"
 					result.Usages = append(result.Usages, fact)
 				}
 			}
@@ -387,8 +602,13 @@ func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte,
 				result.Throws = append(result.Throws, syntaxFact("throw", name, currentScope, node, lines, 1))
 			}
 		}
-		if language == "markdown" && node.Kind() == "atx_heading" {
-			name := strings.TrimSpace(strings.TrimLeft(nodeText(node, source), "#"))
+		if language == "markdown" && (node.Kind() == "atx_heading" || node.Kind() == "setext_heading") {
+			name := ""
+			if node.Kind() == "setext_heading" && node.ChildCount() > 0 {
+				name = strings.TrimSpace(nodeText(node.ChildAt(0), source))
+			} else {
+				name = strings.TrimSpace(strings.TrimLeft(nodeText(node, source), "#"))
+			}
 			if name != "" {
 				result.Sections = append(result.Sections, syntaxFact("section", name, "", node, lines, 1))
 			}
@@ -429,8 +649,11 @@ func extractSyntaxFactsWithSets(language string, root syntaxView, source []byte,
 		}
 	}
 	walk(root, SyntaxNode{}, nil, nil, false, 0, false, false, 0, false, false)
+	if language == "rst" {
+		result.Sections = append(result.Sections, extractRSTSections(source)...)
+	}
 	attachSyntaxDocstrings(language, root, source, result.Definitions)
-	collectSyntaxDecorators(root, source, sets.decorators, lines, result.Definitions, &result.Decorators)
+	collectSyntaxDecorators(language, root, source, sets.decorators, lines, result.Definitions, &result.Decorators)
 	sortSyntaxFacts(&result)
 	return result, nil
 }
@@ -455,11 +678,67 @@ func attachSyntaxDocstrings(language string, root syntaxView, source []byte, def
 					attachGoTypeDocstring(child, truncateSyntaxComment(nodeText(previous, source), 500), byStart, definitions)
 				}
 			}
+			if language == "python" {
+				attachPythonDocstring(parent, child, source, byStart, definitions)
+			}
 			walk(child)
 			previous = child
 		}
 	}
 	walk(root)
+}
+
+// attachPythonDocstring reads the string literal that opens a def or class
+// body. Python puts the docstring inside the body, so the preceding-comment
+// rule never sees it. A decorated def may be keyed by the decorator start.
+func attachPythonDocstring(parent, node syntaxView, source []byte, byStart map[uint32][]int, definitions []SyntaxFact) {
+	if node.Kind() != "function_definition" && node.Kind() != "class_definition" {
+		return
+	}
+	indexes := byStart[node.StartByte()]
+	if len(indexes) == 0 && !viewMissing(parent) && parent.Kind() == "decorated_definition" {
+		indexes = byStart[parent.StartByte()]
+	}
+	if len(indexes) == 0 {
+		return
+	}
+	body, ok := findField(node, "body")
+	if !ok {
+		return
+	}
+	for i := 0; i < body.ChildCount(); i++ {
+		stmt := body.ChildAt(i)
+		if !stmt.IsNamed() {
+			continue
+		}
+		if isSyntaxComment(stmt.Kind()) {
+			continue
+		}
+		if stmt.Kind() != "expression_statement" || stmt.ChildCount() == 0 || stmt.ChildAt(0).Kind() != "string" {
+			return
+		}
+		doc := pythonDocstringText(nodeText(stmt.ChildAt(0), source))
+		if doc == "" {
+			return
+		}
+		for _, index := range indexes {
+			if definitions[index].Docstring == "" {
+				definitions[index].Docstring = truncateSyntaxComment(doc, 500)
+			}
+		}
+		return
+	}
+}
+
+// pythonDocstringText strips the string prefix and quotes and trims space.
+func pythonDocstringText(raw string) string {
+	s := strings.TrimLeft(raw, "rRuUbBfF")
+	for _, q := range []string{`"""`, `'''`, `"`, `'`} {
+		if len(s) >= 2*len(q) && strings.HasPrefix(s, q) && strings.HasSuffix(s, q) {
+			return strings.TrimSpace(s[len(q) : len(s)-len(q)])
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 func attachGoTypeDocstring(node syntaxView, value string, byStart map[uint32][]int, definitions []SyntaxFact) {
@@ -863,7 +1142,7 @@ func importPathLast(value string) string {
 	return value[last:]
 }
 
-func syntaxCallArguments(call syntaxView, source []byte) ([]SyntaxArgument, string) {
+func syntaxCallArguments(language string, call syntaxView, source []byte) ([]SyntaxArgument, string) {
 	arguments, ok := findField(call, "arguments")
 	if !ok {
 		for i := 0; i < call.ChildCount(); i++ {
@@ -904,11 +1183,41 @@ func syntaxCallArguments(call syntaxView, source []byte) ([]SyntaxArgument, stri
 			if firstString == "" {
 				firstString = argument.Value
 			}
+		} else if isJSLanguage(language) && valueNode.Kind() == "binary_expression" {
+			if folded, literal := foldJSRouteExpression(valueNode, source, 0); literal && strings.HasPrefix(folded, "/") {
+				argument.Value = folded
+				if firstString == "" {
+					firstString = folded
+				}
+			}
 		}
 		result = append(result, argument)
 		position++
 	}
 	return result, firstString
+}
+
+// foldJSRouteExpression keeps literal path pieces while replacing dynamic
+// operands in a JavaScript string concatenation with a route placeholder.
+func foldJSRouteExpression(node syntaxView, source []byte, depth int) (string, bool) {
+	if node == nil || depth > 16 {
+		return "", false
+	}
+	if isStringLikeSyntaxNode(node) {
+		return trimSyntaxLiteral(nodeText(node, source)), true
+	}
+	if node.Kind() != "binary_expression" {
+		return "{}", false
+	}
+	left, leftOK := findField(node, "left")
+	right, rightOK := findField(node, "right")
+	if !leftOK || !rightOK || left.EndByte() > right.StartByte() || uint64(right.StartByte()) > uint64(len(source)) ||
+		strings.TrimSpace(string(source[left.EndByte():right.StartByte()])) != "+" {
+		return "", false
+	}
+	l, ll := foldJSRouteExpression(left, source, depth+1)
+	r, rl := foldJSRouteExpression(right, source, depth+1)
+	return l + r, ll || rl
 }
 
 func isStringLikeSyntaxNode(node syntaxView) bool {
@@ -1103,6 +1412,33 @@ func syntaxParameterTypes(parameters syntaxView, source []byte) []string {
 		result = append(result, name)
 	}
 	return result
+}
+
+func appendGoParameterTypes(parameters syntaxView, source []byte, scope string, lines []uint32, result *[]SyntaxFact) {
+	for i := 0; i < parameters.ChildCount(); i++ {
+		parameter := parameters.ChildAt(i)
+		if parameter.Kind() != "parameter_declaration" {
+			continue
+		}
+		typeNode, typed := findField(parameter, "type")
+		if !typed {
+			continue
+		}
+		typeName := cleanSyntaxType(nodeText(typeNode, source))
+		if typeName == "" {
+			continue
+		}
+		for j := 0; j < parameter.ChildCount(); j++ {
+			child := parameter.ChildAt(j)
+			if child.FieldName() != "name" || child.Kind() != "identifier" {
+				continue
+			}
+			binding := syntaxFact("type_assignment", strings.TrimSpace(nodeText(child, source)), scope, parameter, lines, 1)
+			binding.ReturnType = typeName
+			binding.TypeKind = "annotation"
+			*result = append(*result, binding)
+		}
+	}
 }
 
 func cleanSyntaxType(value string) string {
@@ -1554,7 +1890,10 @@ func syntaxSpecSets(spec LanguageSpec) specSets {
 
 func isSyntaxReferenceNode(language string, node, parent syntaxView, ancestors []syntaxView) bool {
 	kind := node.Kind()
-	if language == "python" && kind == "attribute" && syntaxDirectArgumentValue(node, ancestors) {
+	// The member name in obj.name is not a free name: the whole attribute is
+	// the reference. As a bare usage it resolved to any function so named
+	// (compiler.get_converters to urls.converters.get_converters).
+	if language == "python" && kind == "identifier" && parent.Kind() == "attribute" && node.FieldName() == "attribute" {
 		return false
 	}
 	if language == "rust" && (kind == "identifier" || kind == "scoped_identifier") && parent.Kind() == "scoped_identifier" {
@@ -1715,6 +2054,21 @@ func syntaxDirectArgumentValue(node syntaxView, ancestors []syntaxView) bool {
 	}
 	parent := ancestors[len(ancestors)-1]
 	switch parent.Kind() {
+	case "parenthesized_expression":
+		if node.FieldName() != "expression" {
+			named, same := 0, false
+			for i := 0; i < parent.ChildCount(); i++ {
+				child := parent.ChildAt(i)
+				if child.IsNamed() {
+					named++
+					same = child.StartByte() == node.StartByte() && child.EndByte() == node.EndByte()
+				}
+			}
+			if named != 1 || !same {
+				return false
+			}
+		}
+		return syntaxDirectArgumentValue(parent, ancestors[:len(ancestors)-1])
 	case "keyword_argument", "named_argument", "labeled_argument":
 		if node.FieldName() != "value" {
 			return false
@@ -1809,7 +2163,10 @@ func syntaxFieldBindingNode(kind string) bool {
 		"lexical_declaration", "short_var_declaration", "local_variable_declaration", "property_declaration",
 		"field_declaration", "value_declaration", "val_definition", "var_definition", "let_declaration",
 		"local_bind", "let_binding", "data_declaration", "net_declaration", "object_declaration",
-		"number_declaration", "typed_binding", "variable_assignment":
+		"number_declaration", "typed_binding", "variable_assignment",
+		// Loop targets bind too: for x in xs (Python, comprehensions),
+		// for (x of xs) (JavaScript), for x in xs (Rust), for (T x : xs) (Java).
+		"for_statement", "for_in_clause", "for_in_statement", "for_expression", "enhanced_for_statement":
 		return true
 	default:
 		return false
@@ -2021,7 +2378,15 @@ func syntaxNodeContains(outer, inner syntaxView) bool {
 	return outer.StartByte() <= inner.StartByte() && outer.EndByte() >= inner.EndByte()
 }
 
-func collectSyntaxDecorators(node syntaxView, source []byte, decoratorKinds map[string]bool, lines []uint32, definitions []SyntaxFact, result *[]SyntaxFact) {
+func collectSyntaxDecorators(language string, node syntaxView, source []byte, decoratorKinds map[string]bool, lines []uint32, definitions []SyntaxFact, result *[]SyntaxFact) {
+	if language == "python" {
+		collectPythonSyntaxDecorators(node, source, lines, definitions, result)
+		return
+	}
+	if language == "rust" {
+		collectRustSyntaxDecorators(node, source, lines, definitions, result)
+		return
+	}
 	var walk func(syntaxView)
 	walk = func(current syntaxView) {
 		if decoratorKinds[current.Kind()] {
@@ -2043,7 +2408,9 @@ func collectSyntaxDecorators(node syntaxView, source []byte, decoratorKinds map[
 				}
 			}
 			if name != "" && target != "" {
-				*result = append(*result, syntaxFact("decorator", name, target, current, lines, .9))
+				fact := syntaxFact("decorator", name, target, current, lines, .9)
+				fact.DecoratorText = strings.TrimSpace(nodeText(current, source))
+				*result = append(*result, fact)
 			}
 			return
 		}
@@ -2053,6 +2420,97 @@ func collectSyntaxDecorators(node syntaxView, source []byte, decoratorKinds map[
 		}
 	}
 	walk(node)
+}
+
+// Rust attributes belong to the immediately following definition.
+// Pairing by tree siblings also prevents an attribute inside an impl/module
+// from drifting to the nearest outer or unrelated definition.
+func collectRustSyntaxDecorators(root syntaxView, source []byte, lines []uint32, definitions []SyntaxFact, result *[]SyntaxFact) {
+	byStart := make(map[uint32][]SyntaxFact, len(definitions))
+	for _, definition := range definitions {
+		byStart[definition.StartByte] = append(byStart[definition.StartByte], definition)
+	}
+	var walk func(syntaxView)
+	walk = func(parent syntaxView) {
+		for i := 0; i < parent.ChildCount(); i++ {
+			child := parent.ChildAt(i)
+			if candidates := byStart[child.StartByte()]; len(candidates) != 0 {
+				for previous := i - 1; previous >= 0; previous-- {
+					attribute := parent.ChildAt(previous)
+					if attribute.Kind() != "attribute_item" {
+						if attribute.IsNamed() && !strings.Contains(attribute.Kind(), "comment") {
+							break
+						}
+						continue
+					}
+					raw := strings.TrimSpace(nodeText(attribute, source))
+					name := strings.TrimLeft(strings.TrimSuffix(raw, "]"), "#[")
+					if cut := strings.IndexAny(name, "(,[ \t\r\n"); cut >= 0 {
+						name = name[:cut]
+					}
+					if name == "" {
+						continue
+					}
+					for _, definition := range candidates {
+						fact := syntaxFact("decorator", name, joinSyntaxScope(definition.Scope, definition.Name), attribute, lines, .9)
+						fact.DecoratorText = raw
+						*result = append(*result, fact)
+					}
+				}
+			}
+			walk(child)
+		}
+	}
+	walk(root)
+}
+
+// Python's decorated_definition owns both the decorators and the definition.
+// Pairing them directly avoids attaching a method decorator to its class or
+// dropping a dotted decorator whose expression has no name field.
+func collectPythonSyntaxDecorators(root syntaxView, source []byte, lines []uint32, definitions []SyntaxFact, result *[]SyntaxFact) {
+	byStart := make(map[uint32]string, len(definitions))
+	for _, definition := range definitions {
+		if definition.Kind == "function" || definition.Kind == "class" {
+			byStart[definition.StartByte] = joinSyntaxScope(definition.Scope, definition.Name)
+		}
+	}
+	var walk func(syntaxView)
+	walk = func(current syntaxView) {
+		if current.Kind() == "decorated_definition" {
+			target := ""
+			for i := 0; i < current.ChildCount(); i++ {
+				child := current.ChildAt(i)
+				if child.Kind() == "function_definition" || child.Kind() == "class_definition" {
+					target = byStart[child.StartByte()]
+					break
+				}
+			}
+			if target != "" {
+				for i := 0; i < current.ChildCount(); i++ {
+					child := current.ChildAt(i)
+					if child.Kind() != "decorator" {
+						continue
+					}
+					name := strings.TrimLeft(compactRelationshipText(nodeText(child, source)), "@#[]")
+					if index := strings.IndexAny(name, "(,["); index >= 0 {
+						name = name[:index]
+					}
+					if name != "" {
+						fact := syntaxFact("decorator", name, target, child, lines, .9)
+						fact.DecoratorText = strings.TrimSpace(nodeText(child, source))
+						*result = append(*result, fact)
+					}
+				}
+			}
+		}
+		for i := 0; i < current.ChildCount(); i++ {
+			child := current.ChildAt(i)
+			if child.Kind() != "decorator" {
+				walk(child)
+			}
+		}
+	}
+	walk(root)
 }
 
 func stringSet(values []string) map[string]bool {
@@ -2328,6 +2786,43 @@ func findIniSettingName(node syntaxView, source []byte) string {
 }
 
 func definitionName(language string, node syntaxView, source []byte, kind string) string {
+	if language == "elisp" && kind == "function" && (node.Kind() == "function_definition" || node.Kind() == "macro_definition") {
+		text := strings.TrimSpace(nodeText(node, source))
+		if strings.HasPrefix(text, "(defun ") || strings.HasPrefix(text, "(defmacro ") {
+			fields := strings.Fields(text)
+			if len(fields) > 1 {
+				return strings.Trim(fields[1], "()")
+			}
+		}
+	}
+	if language == "toml" && (node.Kind() == "table" || node.Kind() == "table_array_element" || node.Kind() == "pair") {
+		for i := 0; i < node.ChildCount(); i++ {
+			child := node.ChildAt(i)
+			if child.Kind() == "dotted_key" || child.Kind() == "bare_key" || child.Kind() == "quoted_key" || child.Kind() == "key" {
+				return strings.TrimSpace(nodeText(child, source))
+			}
+		}
+	}
+	if language == "xml" && node.Kind() == "element" {
+		for i := 0; i < node.ChildCount(); i++ {
+			tag := node.ChildAt(i)
+			if tag.Kind() != "STag" && tag.Kind() != "EmptyElemTag" && tag.Kind() != "start_tag" && tag.Kind() != "self_closing_tag" {
+				continue
+			}
+			for j := 0; j < tag.ChildCount(); j++ {
+				name := tag.ChildAt(j)
+				if name.Kind() == "Name" || name.Kind() == "tag_name" {
+					return strings.TrimSpace(nodeText(name, source))
+				}
+			}
+		}
+		for i := 0; i < node.ChildCount(); i++ {
+			name := node.ChildAt(i)
+			if name.Kind() == "Name" {
+				return strings.TrimSpace(nodeText(name, source))
+			}
+		}
+	}
 	if language == "ini" {
 		if kind == "class" && node.Kind() == "section" {
 			return findIniSectionName(node, source)
@@ -2546,7 +3041,7 @@ func bytePosition(lines []uint32, offset uint32) (int, int) {
 	return index + 1, int(offset-lines[index]) + 1
 }
 
-func sortSyntaxFacts(result *SyntaxExtraction) {
+func sortSyntaxFacts(result *FileResult) {
 	less := func(values []SyntaxFact) {
 		sort.SliceStable(values, func(i, j int) bool {
 			if values[i].StartByte != values[j].StartByte {
@@ -2565,6 +3060,7 @@ func sortSyntaxFacts(result *SyntaxExtraction) {
 	less(result.Sections)
 	less(result.Branches)
 	less(result.Inheritance)
+	less(result.TypeAssignments)
 	sortOccurrenceFacts(result.Usages)
 	sortOccurrenceFacts(result.Writes)
 	sortOccurrenceFacts(result.Bindings)

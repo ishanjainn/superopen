@@ -175,15 +175,37 @@ function safeClone(value: unknown, depth = 0, seen = new WeakSet<object>()): unk
   }
 }
 
-async function sendToSuperopen(payload: Record<string, unknown>): Promise<void> {
+function shrinkCandidate(event: Record<string, unknown>, input: unknown) {
+  const name = typeof event.toolName === "string" ? event.toolName.toLowerCase() : ""
+  if (event.type !== "tool_result" || event.isError || (name !== "bash" && name !== "shell")) return
+  if (!input || typeof input !== "object" || Array.isArray(input)) return
+  const blocks = Array.isArray(event.content) ? event.content as Array<Record<string, unknown>> : []
+  const text = blocks.filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => block.text as string).join("")
+  if (text.length < 2048 || Buffer.byteLength(text, "utf8") > 2 * 1024 * 1024) return
+  return { text, blocks }
+}
+
+function shrinkPatch(stdout: string | undefined, blocks: Array<Record<string, unknown>>) {
+  try {
+    const response = JSON.parse(stdout || "")
+    const replacement = response?.output_replacement
+    if (typeof replacement !== "string" || !replacement) return
+    return { content: [{ type: "text", text: replacement }, ...blocks.filter((block) => block.type !== "text")] }
+  } catch {
+    return
+  }
+}
+
+async function sendToSuperopen(payload: Record<string, unknown>, capture = false): Promise<string | undefined> {
   // Flattened before anything else sees it, so every consumer of this function is handed plain
   // data rather than a live event with cycles and functions still attached.
   const safe = safeClone(payload)
 
   const testSender = (globalThis as Record<symbol, unknown>)[Symbol.for("superopen.omp.testSender")]
   if (typeof testSender === "function") {
-    await (testSender as (value: unknown) => unknown)(safe)
-    return
+    const response = await (testSender as (value: unknown) => unknown)(safe)
+    return capture && typeof response === "string" ? response : undefined
   }
 
   let body: string
@@ -194,6 +216,19 @@ async function sendToSuperopen(payload: Record<string, unknown>): Promise<void> 
     return
   }
   if (!body) return
+
+  if (capture) {
+    try {
+      const { spawnSync } = await import("node:child_process")
+      const result = spawnSync(superopenArgv[0], superopenArgv.slice(1), {
+        input: body, encoding: "utf8", timeout: 12000, maxBuffer: 2 * 1024 * 1024,
+        stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
+      })
+      return result.status === 0 && typeof result.stdout === "string" ? result.stdout : undefined
+    } catch {
+      return undefined
+    }
+  }
 
   try {
     // Imported lazily so a host without node:child_process fails to send rather than failing to
@@ -297,7 +332,7 @@ function identity(ctx: OmpContext | undefined): Record<string, unknown> {
 }
 
 type OmpExtensionAPI = {
-  on: (event: string, handler: (event: OmpEvent, ctx: OmpContext) => Promise<void> | void) => void
+  on: (event: string, handler: (event: OmpEvent, ctx: OmpContext) => Promise<unknown> | unknown) => void
 }
 
 // createSuperopenExtension is exported for tests; Oh My Pi loads the default export below.
@@ -308,6 +343,7 @@ export function createSuperopenExtension() {
       // and `user_python` both carry their own cwd, and the approval events carry their own
       // sessionId -- in each case the event's is the one that describes this action.
       const envelope: Record<string, unknown> = { ...identity(ctx), ...event }
+      const toolInput = event.type === "tool_result" ? (event.input ?? decidedToolInput(event)) : undefined
 
       if (event.type === "tool_call") {
         rememberToolCall(event)
@@ -326,7 +362,14 @@ export function createSuperopenExtension() {
         if (decided !== undefined) envelope.input = decided
       }
 
-      await sendToSuperopen(envelope)
+      const candidate = shrinkCandidate(event, toolInput)
+      if (candidate) {
+        envelope.tool_name = event.toolName
+        envelope.tool_input = toolInput
+        envelope.tool_response = candidate.text
+      }
+      const stdout = await sendToSuperopen(envelope, Boolean(candidate))
+      if (candidate) return shrinkPatch(stdout, candidate.blocks)
     } catch (err) {
       // Unreachable in practice: sendToSuperopen swallows its own failures. Kept because a handler
       // that rejects is a handler that can break the run it was observing.
@@ -337,12 +380,8 @@ export function createSuperopenExtension() {
   return {
     register(pi: OmpExtensionAPI) {
       for (const name of subscribedEvents) {
-        // Every handler returns undefined. Superopen observes; it never blocks a tool call, revises a
-        // tool's arguments, rewrites a prompt, or replaces a message. Oh My Pi reads a returned
-        // object as a request to change behavior -- `{ block: true }` or `{ input }` on tool_call,
-        // `{ result }` on user_bash and user_python, `{ content }` on tool_result -- so returning
-        // nothing is what keeps this extension an observer. Enforcement lives behind the policy
-        // provider seam in the hook adapter, not here.
+        // Only an eligible shell tool_result may return a smaller, recoverable
+        // content patch. Other events remain observation-only.
         pi.on(name, forward)
       }
     },

@@ -1,6 +1,7 @@
 // __SO_MANAGED_MARKER__
 // Superopen endpoint telemetry plugin for OpenClaw Gateway.
 // Managed by superopen endpoint hooks install --harness openclaw.
+import { spawnSync } from "node:child_process"
 
 // The argv Superopen's installer writes, as an array rather than a command line.
 //
@@ -17,25 +18,19 @@ const debugEnabled = process.env.SO_OPENCLAW_DEBUG === "1"
 // Well under OpenClaw's 15 s default hook budget on purpose, and the number only matters for the
 // observe hooks: `before_tool_call` never waits at all (see dispatch below).
 const sendTimeoutMs = 2000
+const promptTimeoutMs = 4500
 
 // How deep into an event the serializer will walk before giving up.
 const maxDepth = 8
 
 // The hooks this plugin registers, and nothing else.
 //
-// OpenClaw publishes forty-one typed hooks. These ten are the ones that describe what the agent
-// did; the rest describe how the gateway got its work done. The full reasoning for each exclusion
-// lives beside supportedOpenClawHooks() in cli/so/cmd/openclaw_event.go, which is the
-// mapper half of this contract -- a name that disagrees between the two files produces no
-// telemetry rather than an error, so both sides pin the list and a test asserts they match.
+// These eleven hooks cover model context, session activity, tool calls and usage.
 //
-// Three exclusions are worth repeating here, because they are about what this plugin is allowed to
-// be rather than about payload volume. `before_prompt_build` and `agent_turn_prepare` are prompt
-// *injection* hooks; `inbound_claim` and the claim-kind delivery hooks can swallow a message
-// outright; and `skill_proposal_evaluate` makes its handler a voting evaluator on whether a skill
-// may be installed. Superopen observes. Registering any of them would ask OpenClaw for a power Superopen
-// must not hold, and would do so silently.
+// Prompt context is supplied through before_prompt_build. Claim and gate hooks remain outside
+// this subscription because they can suppress a user message or tool call.
 const subscribedHooks = [
+  "before_prompt_build",
   "session_start",
   "session_end",
   "message_received",
@@ -320,7 +315,57 @@ function buildEnvelope(hook, event, ctx) {
     }
   }
   envelope.event = event ?? {}
+  if (hook === "before_prompt_build") {
+    // An explicit empty currentUserMessage is an image-only or continuation turn.
+    envelope.prompt = typeof event?.currentUserMessage === "string" ? event.currentUserMessage : event?.prompt ?? ""
+  }
   return envelope
+}
+
+// Prompt hooks consume the command's control JSON; observation hooks discard stdout.
+// Bound both wait time and output so an unavailable CLI never stalls the gateway.
+async function promptContext(envelope) {
+  const testReceiver = globalThis[Symbol.for("superopen.openclaw.testContextReceiver")]
+  if (typeof testReceiver === "function") return testReceiver(envelope)
+  try {
+    const body = JSON.stringify(safeClone(envelope))
+    if (!body) return undefined
+    const { spawn } = await import("node:child_process")
+    return await new Promise((resolve) => {
+      let child
+      try {
+        child = spawn(superopenArgv[0], superopenArgv.slice(1).concat(["--event=before_prompt_build"]), {
+          stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
+        })
+      } catch {
+        resolve(undefined)
+        return
+      }
+      let output = ""
+      let settled = false
+      const finish = (value) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(value)
+      }
+      const timer = setTimeout(() => { child.kill(); finish(undefined) }, promptTimeoutMs)
+      child.on("error", () => finish(undefined))
+      child.stdout?.on("data", (chunk) => {
+        output += chunk.toString()
+        if (output.length > 65536) { child.kill(); finish(undefined) }
+      })
+      child.on("close", () => {
+        try {
+          const data = JSON.parse(output)
+          const context = data?.additionalContext
+          finish(typeof context === "string" && context ? { prependContext: context } : undefined)
+        } catch { finish(undefined) }
+      })
+      child.stdin?.on("error", () => {})
+      child.stdin?.end(body)
+    })
+  } catch { return undefined }
 }
 
 // createSuperopenPlugin is exported for tests; OpenClaw loads the default export below.
@@ -328,14 +373,57 @@ export function createSuperopenPlugin() {
   // Per plugin instance rather than per module. OpenClaw loads the plugin once, so this is the
   // same lifetime in production, and it keeps one instance's in-flight calls out of another's.
   const pendingDerivedPaths = new Map()
+  const pendingShrinkInputs = new Map()
+
+  const persistShrunkResult = (event, ctx) => {
+    try {
+      const message = event?.message
+      const id = event?.toolCallId || message?.toolCallId || message?.tool_call_id
+      const input = typeof id === "string" ? pendingShrinkInputs.get(id) : undefined
+      if (typeof id === "string") pendingShrinkInputs.delete(id)
+      if (!input || !message || event?.isError || message?.isError) return
+      const blocks = Array.isArray(message.content) ? message.content : null
+      const text = typeof message.content === "string" ? message.content :
+        blocks ? blocks.filter((block) => block?.type === "text" && typeof block.text === "string")
+          .map((block) => block.text).join("") : ""
+      if (text.length < 2048 || Buffer.byteLength(text, "utf8") > 2 * 1024 * 1024) return
+      const cwd = input.params.workdir || input.params.cwd || ctx?.cwd || process.cwd()
+      const payload = JSON.stringify({
+        type: "tool_result_persist", cwd, tool_name: input.toolName,
+        tool_input: input.params, tool_response: text,
+      })
+      const result = spawnSync(superopenArgv[0], ["sessions", "hook", "--vendor=openclaw", "--event=tool_result_persist"], {
+        input: payload, encoding: "utf8", timeout: 12000, maxBuffer: 2 * 1024 * 1024,
+        stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
+      })
+      if (result.status !== 0) return
+      const replacement = JSON.parse(result.stdout)?.output_replacement
+      if (typeof replacement !== "string" || !replacement) return
+      return { message: {
+        ...message,
+        content: blocks ? [{ type: "text", text: replacement }, ...blocks.filter((block) => block?.type !== "text")] : replacement,
+      } }
+    } catch {
+      return
+    }
+  }
 
   const handlerFor = (hook) => (event, ctx) => {
     let envelope
     try {
       envelope = buildEnvelope(hook, event, ctx)
 
+      if (hook === "before_prompt_build") {
+        return promptContext(envelope)
+      }
+
       if (hook === "before_tool_call") {
         rememberDerivedPaths(pendingDerivedPaths, event)
+        if (typeof event.toolCallId === "string" && ["exec", "bash", "shell"].includes(event.toolName)) {
+          pendingShrinkInputs.delete(event.toolCallId)
+          pendingShrinkInputs.set(event.toolCallId, { toolName: event.toolName, params: event.params || {} })
+          while (pendingShrinkInputs.size > 256) pendingShrinkInputs.delete(pendingShrinkInputs.keys().next().value)
+        }
       } else if (hook === "after_tool_call") {
         // OpenClaw does not repeat `derivedPaths` on the completion, so the value remembered from
         // the proposal is attached here under the same key the mapper already reads.
@@ -364,10 +452,8 @@ export function createSuperopenPlugin() {
       void sendToSuperopen(envelope)
       return undefined
     }
-    // Returns a promise that always resolves to undefined. OpenClaw reads a returned object on its
-    // modify-kind hooks as a request to change behavior; returning nothing is what keeps this
-    // plugin an observer. Enforcement lives behind the policy provider seam in the hook adapter,
-    // not here.
+    // Observation hooks return no control result. The prompt hook above is the only handler
+    // that contributes model context.
     return sendToSuperopen(envelope).then(() => undefined)
   }
 
@@ -376,6 +462,7 @@ export function createSuperopenPlugin() {
       for (const hook of subscribedHooks) {
         api.on(hook, handlerFor(hook))
       }
+      api.on("tool_result_persist", persistShrunkResult)
     },
     // Exposed so a test can assert the subscription list without a live gateway.
     subscribedHooks: [...subscribedHooks],
@@ -385,7 +472,7 @@ export function createSuperopenPlugin() {
 export default {
   id: "superopen-endpoint",
   name: "Superopen Endpoint Telemetry",
-  description: "Records OpenClaw agent activity to the local Superopen endpoint log.",
+  description: "Records agent activity and supplies graph and memory context.",
   register(api) {
     createSuperopenPlugin().register(api)
   },

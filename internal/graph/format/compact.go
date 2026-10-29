@@ -1,5 +1,6 @@
 // Package format renders compact agent-facing text views of graph API results.
-// Full JSON remains available via CLI --json; these helpers never mutate the graph.
+// Every view is TOON (see toon.go). Full JSON remains available via CLI --json;
+// these helpers never mutate the graph.
 package format
 
 import (
@@ -10,60 +11,144 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph/api"
 )
 
-func SearchCompact(result api.SearchResult) string {
+// QueryCompact renders one page of a graph query answer: ranked nodes, the
+// edges among them, and attached bodies. An empty answer says so.
+func QueryCompact(result api.QueryResult) string {
+	var b strings.Builder
+	if len(result.CallersOf) > 0 {
+		List(&b, "", "callers_of", result.CallersOf)
+	}
+	if len(result.Rows) == 0 {
+		if result.Offset > 0 && result.RowsTotal > 0 {
+			fmt.Fprintf(&b, "count: 0 of %d\n", result.RowsTotal)
+			fmt.Fprintf(&b, "nodes: none past offset %d\n", result.Offset)
+			return b.String()
+		}
+		b.WriteString("count: 0\n")
+		if len(result.CallersOf) > 0 {
+			b.WriteString("callers: nothing in the graph calls these symbols\n")
+		} else {
+			b.WriteString("nodes: no indexed symbol matches this question\n")
+		}
+		return b.String()
+	}
+	Count(&b, len(result.Rows), result.RowsTotal)
+	if result.Offset > 0 {
+		Field(&b, "", "offset", result.Offset)
+	}
+	name := "nodes"
+	if len(result.CallersOf) > 0 {
+		name = "callers"
+	}
+	Table(&b, "", name, []string{"qn", "kind", "file", "lines"}, nodeRows(result.Rows))
+	if edges := queryEdgeRows(result.Rows, result.Edges); len(edges) > 0 {
+		Table(&b, "", "edges", []string{"from", "rel", "to"}, edges)
+	}
+	if len(result.Linked) > 0 {
+		rows := make([][]string, 0, len(result.Linked))
+		for _, link := range result.Linked {
+			rows = append(rows, []string{shortQN(link.From), link.Rel, link.To, link.File + ":" + lineRange(link.Start, link.End)})
+		}
+		Table(&b, "", "linked", []string{"from", "rel", "qn", "location"}, rows)
+	}
+	if len(result.Bodies) > 0 {
+		fmt.Fprintf(&b, "bodies[%d]:\n", len(result.Bodies))
+		for _, body := range result.Bodies {
+			Field(&b, "  - ", "qn", body.QualifiedName)
+			Field(&b, "    ", "file", body.File)
+			Code(&b, "    ", body.StartLine, body.TotalLines, body.Code)
+		}
+	}
+	return b.String()
+}
+
+func nodeRows(nodes []api.Node) [][]string {
+	rows := make([][]string, 0, len(nodes))
+	for _, n := range nodes {
+		qn := n.QualifiedName
+		if qn == "" {
+			qn = n.Name
+		}
+		rows = append(rows, []string{qn, n.Label, n.Location.File, lineRange(n.Location.StartLine, n.Location.EndLine)})
+	}
+	return rows
+}
+
+// queryEdgeRows keeps behavioral edges whose ends are both listed. Structural
+// DEFINES/CONTAINS edges restate the qn prefix and are dropped.
+func queryEdgeRows(nodes []api.Node, edges []api.Edge) [][]string {
+	byID := map[int64]api.Node{}
+	for _, n := range nodes {
+		if n.ID != 0 {
+			byID[n.ID] = n
+		}
+	}
+	seen := map[string]bool{}
+	var rows [][]string
+	for _, e := range edges {
+		switch e.Type {
+		case "CALLS", "USAGE", "INHERITS", "IMPLEMENTS", "WRITES", "READS", "CONFIGURES", "OVERRIDE", "OVERRIDES":
+		default:
+			continue
+		}
+		from, ok1 := byID[e.SourceID]
+		to, ok2 := byID[e.TargetID]
+		if !ok1 || !ok2 || e.SourceID == e.TargetID {
+			continue
+		}
+		row := []string{shortQN(from.QualifiedName), e.Type, shortQN(to.QualifiedName)}
+		key := strings.Join(row, "\x00")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// shortQN keeps the last two segments (Class.method) for edge rows; the full
+// qn is in the nodes table above.
+func shortQN(qn string) string {
+	parts := strings.Split(qn, ".")
+	if len(parts) <= 2 {
+		return qn
+	}
+	return strings.Join(parts[len(parts)-2:], ".")
+}
+
+func SearchCompact(result api.SearchResult, query string) string {
 	matches := result.Matches
 	if len(matches) == 0 && len(result.Semantic) > 0 {
 		matches = result.Semantic
 	}
 	total := result.Page.Total
-	if total == 0 {
-		total = len(matches)
-	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "total: %d\n", total)
-	mode := "bm25"
-	if len(result.Matches) == 0 && len(result.Semantic) > 0 {
-		mode = "semantic"
+	if len(matches) == 0 {
+		b.WriteString("count: 0\n")
+		fmt.Fprintf(&b, "results: no indexed symbol name matches %s\n", Quote(query))
+		return b.String()
 	}
-	fmt.Fprintf(&b, "search_mode: %s\n", mode)
-	fmt.Fprintf(&b, "results: %d  (cols: qn label file lines rank)\n", len(matches))
-	for _, match := range matches {
-		lines := lineRange(match.Location.StartLine, match.Location.EndLine)
-		fmt.Fprintf(&b, "  %s %s %s %s %.4g\n",
-			match.QualifiedName, match.Label, match.Location.File, lines, match.Score)
+	Count(&b, len(matches), total)
+	nodes := make([]api.Node, 0, len(matches))
+	for _, m := range matches {
+		nodes = append(nodes, m.Node)
 	}
-	if result.Page.Truncated || result.Budget.Truncated {
-		b.WriteString("truncated: true\n")
-	}
-	if result.Page.NextCursor != "" {
-		fmt.Fprintf(&b, "has_more: true\nnext_cursor: %s\n", result.Page.NextCursor)
-	}
+	Table(&b, "", "results", []string{"qn", "kind", "file", "lines"}, nodeRows(nodes))
 	return b.String()
 }
 
 func TraceCompact(result api.TraceResult) string {
 	if result.Status == "ambiguous" {
-		var b strings.Builder
-		b.WriteString("status: ambiguous\n")
-		if result.Message != "" {
-			fmt.Fprintf(&b, "message: %s\n", result.Message)
-		}
-		fmt.Fprintf(&b, "suggestions: %d  (cols: qn label file lines)\n", len(result.Suggestions))
-		for _, node := range result.Suggestions {
-			fmt.Fprintf(&b, "  %s %s %s %s\n",
-				node.QualifiedName, node.Label, node.Location.File,
-				lineRange(node.Location.StartLine, node.Location.EndLine))
-		}
-		return b.String()
+		return ambiguousCompact(result.Message, result.Suggestions)
 	}
 
-	start := ""
+	start := result.Start
 	direction := normalizeTraceDirection(result.Direction)
 	type hopHit struct {
-		name string
-		qn   string
-		hop  int
-		rel  string
+		qn  string
+		hop int
+		rel string
 	}
 	neighbors := map[string]hopHit{}
 	for _, path := range result.Paths {
@@ -81,7 +166,7 @@ func TraceCompact(result api.TraceResult) string {
 			if step.Via != nil {
 				via = step.Via.Type
 			}
-			if via != "" && via != "CALLS" && via != "USAGE" && via != "CONFIGURES" {
+			if via != "" && via != "CALLS" && via != "USAGE" && via != "CONFIGURES" && via != "HANDLES" && via != "HTTP_CALLS" && via != "REDIRECTS_TO" {
 				continue
 			}
 			if skipCompactVariable(step.Node) {
@@ -94,46 +179,60 @@ func TraceCompact(result api.TraceResult) string {
 				if rel == "" {
 					rel = "CALLS"
 				}
-				neighbors[qn] = hopHit{name: step.Node.Name, qn: qn, hop: step.Hop, rel: rel}
+				neighbors[qn] = hopHit{qn: qn, hop: step.Hop, rel: rel}
 			}
 		}
 	}
-
-	groups := map[string][]hopHit{}
-	var groupOrder []string
+	hits := make([]hopHit, 0, len(neighbors))
 	for _, hit := range neighbors {
-		prefix := PackagePrefix(hit.qn)
-		if _, ok := groups[prefix]; !ok {
-			groupOrder = append(groupOrder, prefix)
+		hits = append(hits, hit)
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].hop != hits[j].hop {
+			return hits[i].hop < hits[j].hop
 		}
-		groups[prefix] = append(groups[prefix], hit)
-	}
-	sort.Strings(groupOrder)
-	for _, prefix := range groupOrder {
-		sort.Slice(groups[prefix], func(i, j int) bool {
-			if groups[prefix][i].hop != groups[prefix][j].hop {
-				return groups[prefix][i].hop < groups[prefix][j].hop
-			}
-			return groups[prefix][i].name < groups[prefix][j].name
-		})
-	}
+		return hits[i].qn < hits[j].qn
+	})
 
-	group, total := traceNeighborLabels(direction)
+	group := traceNeighborLabel(direction)
 	var b strings.Builder
-	fmt.Fprintf(&b, "function: %s\n", start)
-	fmt.Fprintf(&b, "direction: %s\n", direction)
-	fmt.Fprintf(&b, "%s: %d\n", total, len(neighbors))
-	fmt.Fprintf(&b, "unresolved_calls: %d\n", result.UnresolvedCalls)
-	if result.Truncated {
-		b.WriteString("truncated: true\n")
-	}
-	fmt.Fprintf(&b, "%s: %d  (rows: name rel hop; qn = group prefix + \".\" + name)\n", group, len(neighbors))
-	for _, prefix := range groupOrder {
-		fmt.Fprintf(&b, "%s:\n", prefix)
-		for _, hit := range groups[prefix] {
-			fmt.Fprintf(&b, "  %s %s %d\n", hit.name, strings.ToLower(hit.rel), hit.hop)
+	Field(&b, "", "function", start)
+	Field(&b, "", "direction", direction)
+	if len(hits) == 0 {
+		b.WriteString("count: 0\n")
+		fmt.Fprintf(&b, "%s: none in the graph\n", group)
+	} else {
+		Count(&b, len(hits), len(hits))
+		rows := make([][]string, 0, len(hits))
+		for _, hit := range hits {
+			rows = append(rows, []string{hit.qn, strings.ToLower(hit.rel), fmt.Sprint(hit.hop)})
 		}
+		Table(&b, "", group, []string{"qn", "rel", "hop"}, rows)
 	}
+	if len(result.External) > 0 {
+		List(&b, "", "external", result.External)
+	}
+	if result.Tests > 0 {
+		Field(&b, "", "tests", fmt.Sprintf("%d test symbols reached, not listed", result.Tests))
+	}
+	if result.Uncertain > 0 {
+		Field(&b, "", "uncertain", fmt.Sprintf("%d symbols reached only by guessed edges, not walked", result.Uncertain))
+	}
+	if result.UnresolvedCalls > 0 {
+		Field(&b, "", "unresolved_calls", result.UnresolvedCalls)
+	}
+	if result.Truncated {
+		Field(&b, "", "truncated", true)
+	}
+	return b.String()
+}
+
+// ambiguousCompact lists the candidates for a short name. The engine's
+// prose message is dropped: the table and the help line say the same.
+func ambiguousCompact(_ string, suggestions []api.Node) string {
+	var b strings.Builder
+	Field(&b, "", "status", "ambiguous; several symbols share this name")
+	Table(&b, "", "candidates", []string{"qn", "kind", "file", "lines"}, nodeRows(suggestions))
 	return b.String()
 }
 
@@ -148,14 +247,14 @@ func normalizeTraceDirection(direction string) string {
 	}
 }
 
-func traceNeighborLabels(direction string) (group, total string) {
+func traceNeighborLabel(direction string) string {
 	switch direction {
 	case "incoming":
-		return "callers", "callers_total"
+		return "callers"
 	case "both":
-		return "neighbors", "neighbors_total"
+		return "neighbors"
 	default:
-		return "callees", "callees_total"
+		return "callees"
 	}
 }
 
@@ -182,96 +281,89 @@ func filepathExt(path string) string {
 
 func SnippetCompact(result api.SnippetResult) string {
 	if result.Status == "ambiguous" {
-		var b strings.Builder
-		b.WriteString("status: ambiguous\n")
-		if result.Message != "" {
-			fmt.Fprintf(&b, "message: %s\n", result.Message)
-		}
-		fmt.Fprintf(&b, "suggestions: %d  (cols: qn label file lines)\n", len(result.Suggestions))
-		for _, node := range result.Suggestions {
-			fmt.Fprintf(&b, "  %s %s %s %s\n",
-				node.QualifiedName, node.Label, node.Location.File,
-				lineRange(node.Location.StartLine, node.Location.EndLine))
-		}
-		return b.String()
+		return ambiguousCompact(result.Message, result.Suggestions)
 	}
 	var b strings.Builder
+	b.WriteString("symbol:\n")
 	if result.QualifiedName != "" {
-		fmt.Fprintf(&b, "qualified_name: %s\n", result.QualifiedName)
-	}
-	if result.Name != "" {
-		fmt.Fprintf(&b, "name: %s\n", result.Name)
+		Field(&b, "  ", "qn", result.QualifiedName)
 	}
 	if result.Label != "" {
-		fmt.Fprintf(&b, "label: %s\n", result.Label)
+		Field(&b, "  ", "kind", result.Label)
 	}
-	fmt.Fprintf(&b, "file: %s\n", result.Location.File)
-	if src := strings.TrimSpace(result.Location.File); src != "" {
-		fmt.Fprintf(&b, "src=%s\n", src)
-	}
-	fmt.Fprintf(&b, "lines: %s\n", lineRange(result.Location.StartLine, result.Location.EndLine))
-	fmt.Fprintf(&b, "callers: %d\n", result.Callers)
-	fmt.Fprintf(&b, "callees: %d\n", result.Callees)
-	if result.Clipped {
-		b.WriteString("clipped: true\n")
-	}
+	Field(&b, "  ", "file", result.Location.File)
+	Field(&b, "  ", "lines", lineRange(result.Location.StartLine, result.Location.EndLine))
+	Field(&b, "  ", "callers", result.Callers)
+	Field(&b, "  ", "callees", result.Callees)
+	total := 0
 	if result.OmittedStart > 0 && result.OmittedEnd >= result.OmittedStart {
-		fmt.Fprintf(&b, "omitted: L%d-%d\n", result.OmittedStart, result.OmittedEnd)
-		if qn := strings.TrimSpace(result.QualifiedName); qn != "" {
-			fmt.Fprintf(&b, "so graph snippet %s --from %d\n", qn, result.OmittedStart)
-		}
+		total = result.OmittedEnd - result.Location.StartLine + 1
 	}
+	Code(&b, "", result.Location.StartLine, total, result.Code)
 	if result.Clipped && len(result.DirectCallees) > 0 {
-		b.WriteString("callees: (cols: qn file)\n")
+		rows := make([][]string, 0, len(result.DirectCallees))
 		for _, node := range result.DirectCallees {
-			fmt.Fprintf(&b, "  %s %s\n", node.QualifiedName, node.Location.File)
+			rows = append(rows, []string{node.QualifiedName, node.Location.File})
 		}
+		Table(&b, "", "callees", []string{"qn", "file"}, rows)
 	}
-	if len(result.Suggestions) > 0 && result.Status != "ambiguous" {
-		fmt.Fprintf(&b, "also: %d  (cols: qn label file)\n", len(result.Suggestions))
+	if len(result.Suggestions) > 0 {
+		rows := make([][]string, 0, len(result.Suggestions))
 		for _, node := range result.Suggestions {
-			fmt.Fprintf(&b, "  %s %s %s\n", node.QualifiedName, node.Label, node.Location.File)
+			rows = append(rows, []string{node.QualifiedName, node.Label, node.Location.File})
 		}
-	}
-	b.WriteString("source:\n")
-	b.WriteString(result.Code)
-	if !strings.HasSuffix(result.Code, "\n") {
-		b.WriteByte('\n')
+		Table(&b, "", "also", []string{"qn", "kind", "file"}, rows)
 	}
 	return b.String()
 }
 
-func ArchitectureCompact(result api.ArchitectureResult) string {
+func ArchitectureCompact(result api.ArchitectureResult, full ...bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "total_nodes: %d\n", result.TotalNodes)
-	fmt.Fprintf(&b, "total_edges: %d\n", result.TotalEdges)
+	Field(&b, "", "total_nodes", result.TotalNodes)
+	Field(&b, "", "total_edges", result.TotalEdges)
 	if result.Summary != "" {
-		fmt.Fprintf(&b, "summary: %s\n", result.Summary)
+		Field(&b, "", "summary", result.Summary)
 	}
 	if len(result.Languages) > 0 {
-		b.WriteString("languages:\n")
+		rows := make([][]string, 0, len(result.Languages))
 		for _, lang := range result.Languages {
-			fmt.Fprintf(&b, "  %s %d\n", lang.Language, lang.FileCount)
+			rows = append(rows, []string{lang.Language, fmt.Sprint(lang.FileCount)})
 		}
+		Table(&b, "", "languages", []string{"language", "files"}, rows)
 	}
 	if len(result.Packages) > 0 {
-		b.WriteString("packages:\n")
 		limit := len(result.Packages)
-		if limit > 20 {
+		if limit > 20 && (len(full) == 0 || !full[0]) {
 			limit = 20
 		}
+		Count(&b, limit, len(result.Packages))
+		rows := make([][]string, 0, limit)
+		hasFlow := false
 		for _, pkg := range result.Packages[:limit] {
-			fmt.Fprintf(&b, "  %s nodes=%d fan_in=%d fan_out=%d\n", pkg.Name, pkg.NodeCount, pkg.FanIn, pkg.FanOut)
+			if pkg.FanIn != 0 || pkg.FanOut != 0 {
+				hasFlow = true
+				break
+			}
 		}
+		for _, pkg := range result.Packages[:limit] {
+			row := []string{pkg.Name, fmt.Sprint(pkg.NodeCount)}
+			if hasFlow {
+				row = append(row, fmt.Sprint(pkg.FanIn), fmt.Sprint(pkg.FanOut))
+			}
+			rows = append(rows, row)
+		}
+		columns := []string{"name", "nodes"}
+		if hasFlow {
+			columns = append(columns, "fan_in", "fan_out")
+		}
+		Table(&b, "", "packages", columns, rows)
 	}
 	if len(result.Communities) > 0 {
-		b.WriteString("clusters:\n")
-		for _, community := range result.Communities {
-			fmt.Fprintf(&b, "  id=%d label=%s members=%d cohesion=%.3f\n",
-				community.ID, community.Name, community.Members, community.Cohesion)
+		rows := make([][]string, 0, len(result.Communities))
+		for _, c := range result.Communities {
+			rows = append(rows, []string{fmt.Sprint(c.ID), c.Name, fmt.Sprint(c.Members), fmt.Sprintf("%.3f", c.Cohesion)})
 		}
-	} else {
-		b.WriteString("aspects_hint: pass aspects=[\"clusters\"] for Leiden clusters\n")
+		Table(&b, "", "clusters", []string{"id", "label", "members", "cohesion"}, rows)
 	}
 	return b.String()
 }
@@ -279,57 +371,174 @@ func ArchitectureCompact(result api.ArchitectureResult) string {
 func ImpactCompact(result api.ImpactResult) string {
 	var b strings.Builder
 	if result.Base != "" {
-		fmt.Fprintf(&b, "base: %s\n", result.Base)
+		Field(&b, "", "base", result.Base)
 	}
 	if result.MergeBase != "" {
-		fmt.Fprintf(&b, "merge_base: %s\n", result.MergeBase)
+		Field(&b, "", "merge_base", result.MergeBase)
 	}
 	if len(result.ChangedFiles) > 0 {
-		fmt.Fprintf(&b, "changed_files: %d\n", len(result.ChangedFiles))
-		for _, f := range result.ChangedFiles {
-			fmt.Fprintf(&b, "  %s\n", f)
-		}
+		List(&b, "", "changed_files", result.ChangedFiles)
 	}
-	fmt.Fprintf(&b, "impacted_files: %d\n", len(result.ImpactedFiles))
-	for _, f := range result.ImpactedFiles {
-		reason := strings.Join(f.Reasons, ",")
-		if reason == "" {
-			reason = "-"
+	if len(result.ImpactedFiles) == 0 {
+		b.WriteString("impacted_files: none; no indexed code depends on these changes\n")
+	} else {
+		rows := make([][]string, 0, len(result.ImpactedFiles))
+		for _, f := range result.ImpactedFiles {
+			rows = append(rows, []string{f.Path, fmt.Sprint(f.Symbols), strings.Join(f.Reasons, ";")})
 		}
-		fmt.Fprintf(&b, "  %s symbols=%d %s\n", f.Path, f.Symbols, reason)
+		Table(&b, "", "impacted_files", []string{"path", "symbols", "reasons"}, rows)
 	}
-	fmt.Fprintf(&b, "impacted_symbols: %d\n", result.Total)
+	Field(&b, "", "impacted_symbols", result.Total)
 	if result.Truncated {
-		b.WriteString("truncated: true\n")
+		Field(&b, "", "truncated", true)
 	}
 	return b.String()
 }
 
-// QueryAgentJSON is the default --json graph query payload: compact text plus
-// slim seeds. Full Node/Edge structs are omitted (default query output is text-only;
-// use --full for the complete QueryResult).
+// CodeSearchCompact lists matching lines. Text is clipped to one screen line;
+// file:line is the handle for snippet or Read.
+func CodeSearchCompact(result api.CodeSearchResult, pattern, path string, full ...bool) string {
+	showFull := len(full) > 0 && full[0]
+	var b strings.Builder
+	if len(result.Matches) == 0 && len(result.NameMatches) == 0 {
+		b.WriteString("count: 0\n")
+		scope := "indexed files"
+		if path != "" {
+			scope = path
+		}
+		fmt.Fprintf(&b, "matches: no line in %s contains %s\n", scope, Quote(pattern))
+		return b.String()
+	}
+	total := result.TotalGrepMatches
+	Count(&b, len(result.Matches), total)
+	if len(result.Shared) > 0 {
+		shared := make([][]string, 0, len(result.Shared))
+		uses := [][]string{}
+		for _, value := range result.Shared {
+			shared = append(shared, []string{value.Value, strings.Join(value.Consumers, " | ")})
+			for _, use := range value.Uses {
+				uses = append(uses, []string{value.Value, use.Consumer, fmt.Sprintf("%s:%d", use.File, use.Line), use.Expr})
+			}
+		}
+		Table(&b, "", "shared", []string{"value", "consumers"}, shared)
+		if len(uses) > 0 {
+			Table(&b, "", "uses", []string{"value", "consumer", "location", "expr"}, uses)
+		}
+		Field(&b, "", "test_scope", "inject the issue input at the shared producer and check every consumer; mocking one consumer alias hides the others")
+	}
+	rows := make([][]string, 0, len(result.Matches))
+	hasSymbol := false
+	for _, m := range result.Matches {
+		if m.Node != nil && m.Node.QualifiedName != "" {
+			hasSymbol = true
+			break
+		}
+	}
+	for _, m := range result.Matches {
+		text := strings.TrimSpace(m.Source)
+		text = codeSearchLine(text, showFull)
+		row := []string{m.Location.File, fmt.Sprint(m.Location.StartLine)}
+		if hasSymbol {
+			qn := ""
+			if m.Node != nil {
+				qn = m.Node.QualifiedName
+			}
+			row = append(row, qn)
+		}
+		rows = append(rows, append(row, text))
+	}
+	columns := []string{"file", "line", "text"}
+	if hasSymbol {
+		columns = []string{"file", "line", "qn", "text"}
+	}
+	Table(&b, "", "matches", columns, rows)
+	if len(result.NameMatches) > 0 {
+		nameRows := make([][]string, 0, len(result.NameMatches))
+		for _, m := range result.NameMatches {
+			qn := ""
+			if m.Node != nil {
+				qn = m.Node.QualifiedName
+			}
+			line := strings.TrimSpace(m.Source)
+			line = codeSearchLine(line, showFull)
+			nameRows = append(nameRows, []string{m.Location.File, fmt.Sprint(m.Location.StartLine), qn, line})
+		}
+		Table(&b, "", "name_matches", []string{"file", "line", "qn", "text"}, nameRows)
+	}
+	if len(result.Related) > 0 {
+		links := make([][]string, 0, len(result.Related))
+		for _, link := range result.Related {
+			links = append(links, []string{link.From, link.Rel, link.To, link.File + ":" + lineRange(link.Start, link.End)})
+		}
+		Table(&b, "", "related", []string{"from", "rel", "qn", "location"}, links)
+	}
+	if len(result.Tests) > 0 {
+		rows := make([][]string, 0, len(result.Tests))
+		for _, test := range result.Tests {
+			rows = append(rows, []string{test.QualifiedName, test.Target, test.File, fmt.Sprint(test.Line)})
+		}
+		Table(&b, "", "tests", []string{"qn", "target", "file", "line"}, rows)
+	}
+	if len(result.TestRuns) > 0 {
+		runs := make([][]string, 0, len(result.TestRuns))
+		for _, command := range result.TestRuns {
+			runs = append(runs, []string{command})
+		}
+		Table(&b, "", "test_run", []string{"command"}, runs)
+	}
+	if len(result.Bodies) > 0 {
+		fmt.Fprintf(&b, "contexts[%d]:\n", len(result.Bodies))
+		for _, body := range result.Bodies {
+			Field(&b, "  - ", "qn", body.QualifiedName)
+			Field(&b, "    ", "file", body.File)
+			Code(&b, "    ", body.StartLine, body.TotalLines, body.Code)
+		}
+	}
+	return b.String()
+}
+
+func codeSearchLine(line string, full bool) string {
+	runes := []rune(line)
+	if full || len(runes) <= 160 {
+		return line
+	}
+	return fmt.Sprintf("%s… (truncated, %d chars; use --full)", string(runes[:160]), len(runes))
+}
+
+// QueryAgentJSON is the default --json graph query payload: the same page the
+// text view shows. Full Node/Edge structs need --full.
 func QueryAgentJSON(result api.QueryResult) map[string]any {
-	seeds := make([]map[string]any, 0, len(result.Seeds))
-	for _, seed := range result.Seeds {
-		seeds = append(seeds, map[string]any{
-			"qualified_name": seed.QualifiedName,
-			"name":           seed.Name,
-			"file":           seed.Location.File,
-			"lines":          lineRange(seed.Location.StartLine, seed.Location.EndLine),
-			"score":          seed.Score,
+	nodes := make([]map[string]any, 0, len(result.Rows))
+	for _, n := range result.Rows {
+		nodes = append(nodes, map[string]any{
+			"qn":    n.QualifiedName,
+			"kind":  n.Label,
+			"file":  n.Location.File,
+			"lines": lineRange(n.Location.StartLine, n.Location.EndLine),
 		})
 	}
-	return map[string]any{
-		"text":      result.Text,
-		"budget":    result.Budget,
-		"seeds":     seeds,
-		"truncated": result.Budget.Truncated,
+	edges := []map[string]any{}
+	for _, row := range queryEdgeRows(result.Rows, result.Edges) {
+		edges = append(edges, map[string]any{"from": row[0], "rel": row[1], "to": row[2]})
 	}
+	payload := map[string]any{
+		"count":  len(result.Rows),
+		"total":  result.RowsTotal,
+		"offset": result.Offset,
+		"nodes":  nodes,
+		"edges":  edges,
+		"linked": result.Linked,
+		"bodies": result.Bodies,
+	}
+	if len(result.CallersOf) > 0 {
+		payload["callers_of"] = result.CallersOf
+	}
+	return payload
 }
 
 func lineRange(start, end int) string {
 	if start <= 0 {
-		return "-"
+		return ""
 	}
 	if end <= 0 || end == start {
 		return fmt.Sprintf("%d", start)

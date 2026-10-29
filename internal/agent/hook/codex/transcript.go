@@ -28,13 +28,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/agent/pricing"
 	"github.com/ishanjainn/superopen/internal/paths"
+	"github.com/ishanjainn/superopen/internal/session/trace"
 )
 
 // maxTranscriptScan caps how many bytes of one rollout we'll read.
-// Long sessions (hours of dense usage) can exceed our 4 MiB tail-file
-// budget; we accept slight undercount on those rather than blow the
-// 5s hook timeout.
+// Long sessions (hours of dense usage) can exceed this budget; usage scans
+// read the tail so recent turns remain attributable within the hook timeout.
 const maxTranscriptScan = 32 * 1024 * 1024
 
 // maxLineLen is the per-line scanner buffer ceiling. Codex's
@@ -78,6 +79,7 @@ type sessionMeta struct {
 type codexTokenUsage struct {
 	InputTokens           int64 `json:"input_tokens"`
 	CachedInputTokens     int64 `json:"cached_input_tokens"`
+	CacheWriteInputTokens int64 `json:"cache_write_input_tokens"`
 	OutputTokens          int64 `json:"output_tokens"`
 	ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
 	TotalTokens           int64 `json:"total_tokens"`
@@ -109,6 +111,53 @@ type codexTokenSnapshot struct {
 	ReasoningObserved  bool
 }
 
+// BackfillTurnUsage repairs missing usage or pricing on recorded turns.
+// It also recovers turns in rollouts longer than the old head-only scan budget.
+func BackfillTurnUsage(sessionID string, spans []trace.Span) bool {
+	path := ""
+	changed := false
+	for i := range spans {
+		sp := &spans[i]
+		if sp.Name != "coding_agent.llm.turn" {
+			continue
+		}
+		model := sp.Attributes["gen_ai.request.model"]
+		if model == "" {
+			model = sp.Attributes["gen_ai.response.model"]
+		}
+		rate := pricing.Lookup(model)
+		if sp.Attributes["gen_ai.usage.total_tokens"] != "" &&
+			(sp.Attributes["gen_ai.usage.cost"] != "" || (rate.InputPer1M == 0 && rate.OutputPer1M == 0)) {
+			continue
+		}
+		turnID := sp.Attributes["gen_ai.response.id"]
+		if turnID == "" {
+			continue
+		}
+		if path == "" {
+			path = findRolloutForSession(sessionID)
+			if path == "" {
+				return changed
+			}
+		}
+		snap, ok := readTokenUsageForTurn(path, turnID)
+		if !ok {
+			continue
+		}
+		u := snap.TurnUsage
+		sp.Attributes["gen_ai.usage.input_tokens"] = fmt.Sprint(u.InputTokens)
+		sp.Attributes["gen_ai.usage.output_tokens"] = fmt.Sprint(u.OutputTokens)
+		sp.Attributes["gen_ai.usage.total_tokens"] = fmt.Sprint(u.TotalTokens)
+		sp.Attributes["gen_ai.usage.cache.read_input_tokens"] = fmt.Sprint(u.CachedInputTokens)
+		sp.Attributes["gen_ai.usage.cache.creation_input_tokens"] = fmt.Sprint(u.CacheWriteInputTokens)
+		if cost := rate.Cost(u.InputTokens, u.OutputTokens, u.CachedInputTokens, u.CacheWriteInputTokens); cost > 0 {
+			sp.Attributes["gen_ai.usage.cost"] = fmt.Sprint(cost)
+		}
+		changed = true
+	}
+	return changed
+}
+
 // readReasoningSummaryForTurn returns the public reasoning summary Codex
 // persisted for one turn. Codex rollout records may also contain
 // `encrypted_content`; that is private, opaque model state used for
@@ -130,7 +179,7 @@ func readReasoningSummaryForTurn(path, turnID string) (string, bool) {
 		parts        []string
 		seen         = map[string]struct{}{}
 	)
-	err := scanCodexLines(path, func(raw []byte) (bool, error) {
+	err := scanCodexTailLines(path, func(raw []byte) (bool, error) {
 		var l codexLine
 		if err := json.Unmarshal(raw, &l); err != nil {
 			return false, nil
@@ -255,7 +304,7 @@ func readTokenUsageForTurn(path, turnID string) (codexTokenSnapshot, bool) {
 		seenReasoning     = map[string]struct{}{}
 	)
 
-	err := scanCodexLines(path, func(raw []byte) (bool, error) {
+	err := scanCodexTailLines(path, func(raw []byte) (bool, error) {
 		var l codexLine
 		if err := json.Unmarshal(raw, &l); err != nil {
 			return false, nil
@@ -347,6 +396,14 @@ func readTokenUsageForTurn(path, turnID string) (codexTokenSnapshot, bool) {
 // Stops when visit returns done=true or the byte budget is exceeded.
 // Best-effort: a corrupt line is skipped silently, never fatal.
 func scanCodexLines(path string, visit func(raw []byte) (bool, error)) error {
+	return scanCodexLinesFrom(path, false, visit)
+}
+
+func scanCodexTailLines(path string, visit func(raw []byte) (bool, error)) error {
+	return scanCodexLinesFrom(path, true, visit)
+}
+
+func scanCodexLinesFrom(path string, tail bool, visit func(raw []byte) (bool, error)) error {
 	if strings.HasPrefix(path, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
@@ -358,7 +415,24 @@ func scanCodexLines(path string, visit func(raw []byte) (bool, error)) error {
 	}
 	defer func() { _ = f.Close() }()
 
-	scanner := bufio.NewScanner(f)
+	input := bufio.NewReader(f)
+	if tail {
+		info, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		if offset := info.Size() - maxTranscriptScan; offset > 0 {
+			if _, err := f.Seek(offset, 0); err != nil {
+				return err
+			}
+			input.Reset(f)
+			// The seek can land in a JSONL record. Resume at the next one.
+			if _, err := input.ReadBytes('\n'); err != nil {
+				return err
+			}
+		}
+	}
+	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineLen)
 	var read int64
 	for scanner.Scan() {
@@ -477,11 +551,12 @@ func subtractCodexUsage(final, baseline codexTokenUsage) (codexTokenUsage, bool)
 	out := codexTokenUsage{
 		InputTokens:           final.InputTokens - baseline.InputTokens,
 		CachedInputTokens:     final.CachedInputTokens - baseline.CachedInputTokens,
+		CacheWriteInputTokens: final.CacheWriteInputTokens - baseline.CacheWriteInputTokens,
 		OutputTokens:          final.OutputTokens - baseline.OutputTokens,
 		ReasoningOutputTokens: final.ReasoningOutputTokens - baseline.ReasoningOutputTokens,
 		TotalTokens:           final.TotalTokens - baseline.TotalTokens,
 	}
-	if out.InputTokens < 0 || out.CachedInputTokens < 0 ||
+	if out.InputTokens < 0 || out.CachedInputTokens < 0 || out.CacheWriteInputTokens < 0 ||
 		out.OutputTokens < 0 || out.ReasoningOutputTokens < 0 ||
 		out.TotalTokens < 0 {
 		return codexTokenUsage{}, false
@@ -497,14 +572,10 @@ func hasPositiveCodexUsage(u codexTokenUsage) bool {
 		u.TotalTokens > 0
 }
 
-// findRolloutForSession walks today's Codex `sessions/<date>` tree
+// findRolloutForSession walks recent Codex `sessions/<date>` trees
 // looking for a `rollout-*.jsonl` whose first line contains the given
 // `sessionID`. This is the fallback when the hook payload doesn't
-// include `transcript_path`. We only scan today's directory because
-// Stop fires within the same calendar day as the session start
-// (sessions span days only on truly long-running setups - an
-// acceptable corner-case to undercount). Returns "" when no match
-// is found.
+// include `transcript_path`. Returns "" when no match is found.
 func findRolloutForSession(sessionID string) string {
 	if sessionID == "" {
 		return ""

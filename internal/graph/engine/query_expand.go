@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -11,14 +10,10 @@ import (
 	"github.com/ishanjainn/superopen/internal/graph/api"
 )
 
-// Superopen graph query expansion and text rendering.
+// Superopen graph query expansion.
 const (
-	queryDefaultBudget  = 1200
-	queryCharsPerToken  = 3
-	queryBodyReserve    = 1200
 	queryHubDegreeFloor = 50
 	queryMaxNodeRows    = 16
-	queryMaxEdgeRows    = 16
 	// Fetch a window, rank by same-file / same-package / CALLS, keep this many.
 	queryNeighborFetch = 200
 	queryNeighborKeep  = 48
@@ -69,12 +64,9 @@ func (s *Store) queryExpandBFS(
 	depth int,
 	degrees map[int64]int,
 	nodesByID map[int64]queryNodeHit,
-	seenEdges map[int64]bool,
-	edges *[]api.Edge,
 	terms []string,
-) ([]string, error) {
+) error {
 	threshold := hubThreshold(degrees)
-	var edgeLines []string
 	frontier := make([]api.Node, 0, len(expand))
 	for _, seed := range expand {
 		frontier = append(frontier, seed.Node)
@@ -89,28 +81,12 @@ func (s *Store) queryExpandBFS(
 			}
 			neighbors, err := s.neighbors(ctx, node, "both", nil, queryNeighborFetch)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			neighbors = clipQueryNeighbors(node, neighbors, queryNeighborKeep, terms)
 			for _, item := range neighbors {
 				if skipDataLanguageVariable(item.node) && !seedIDs[item.node.ID] {
 					continue
-				}
-				if item.edge.ID != 0 && !seenEdges[item.edge.ID] {
-					seenEdges[item.edge.ID] = true
-					if edges != nil {
-						*edges = append(*edges, item.edge)
-					}
-					from, to := node.Name, item.node.Name
-					if item.edge.SourceID == item.node.ID {
-						from, to = to, from
-					}
-					at := ""
-					if item.edge.Evidence != nil && item.edge.Evidence.Location != nil && item.edge.Evidence.Location.StartLine > 0 {
-						at = fmt.Sprintf(" at=%s:L%d", item.edge.Evidence.Location.File, item.edge.Evidence.Location.StartLine)
-					}
-					line := fmt.Sprintf("EDGE %s --%s --> %s%s", from, item.edge.Type, to, at)
-					edgeLines = append(edgeLines, line)
 				}
 				if _, ok := nodesByID[item.node.ID]; ok {
 					existing := nodesByID[item.node.ID]
@@ -133,7 +109,7 @@ func (s *Store) queryExpandBFS(
 		}
 		frontier = next
 	}
-	return edgeLines, nil
+	return nil
 }
 
 func preferQueryNeighbor(from api.Node, item neighbor, terms []string) int {
@@ -219,6 +195,13 @@ func queryNameOverlap(n api.Node, terms []string) int {
 		}
 		if strings.Contains(name, tl) || strings.Contains(last, tl) {
 			score += 4
+			continue
+		}
+		if strings.HasSuffix(tl, "s") && len(tl) > 5 {
+			stem := strings.TrimSuffix(tl, "s")
+			if strings.Contains(name, stem) || strings.Contains(last, stem) {
+				score += 3
+			}
 		}
 	}
 	return score
@@ -247,96 +230,6 @@ func isSyntheticQueryFile(path string) bool {
 	return strings.Contains(p, "<python-builtins>") || strings.Contains(p, "<builtins>")
 }
 
-func formatQueryNodeLine(hit queryNodeHit) string {
-	return formatQueryNodeLineFact(hit, true)
-}
-
-func formatQueryNodeLineFact(hit queryNodeHit, withFact bool) string {
-	qnField := ""
-	if qn := strings.TrimSpace(hit.node.QualifiedName); qn != "" && hit.node.Label != "File" && hit.node.Label != "Folder" {
-		qnField = "qn=" + qn + " "
-	}
-	if withFact {
-		if fact := queryNodeFact(hit.node); fact != "" {
-			qnField += fact + " "
-		}
-	}
-	return fmt.Sprintf("NODE %s [%ssrc=%s loc=%s]\n",
-		queryNodeDisplayName(hit.node), qnField, hit.node.Location.File, queryNodeLoc(hit.node))
-}
-
-func queryNodeBody(ordered []queryNodeHit, withFact bool) string {
-	var b strings.Builder
-	for _, hit := range ordered {
-		b.WriteString(formatQueryNodeLineFact(hit, withFact))
-	}
-	return b.String()
-}
-
-func queryNodeBodyFit(ordered []queryNodeHit, header, edges string, maxChars int) string {
-	var facts, plain strings.Builder
-	for _, hit := range ordered {
-		facts.WriteString(formatQueryNodeLineFact(hit, true))
-		plain.WriteString(formatQueryNodeLineFact(hit, false))
-	}
-	withFacts := facts.String()
-	if maxChars <= 0 || len(header)+len(withFacts)+len(edges) <= maxChars {
-		return withFacts
-	}
-	return plain.String()
-}
-
-// preferQueryNodeBody keeps ~40-char signature/docstring facts only when they
-// fit the existing token cap. Do not raise queryDefaultBudget to make room.
-func preferQueryNodeBody(header, withFacts, plain, edges string, maxChars int) string {
-	if maxChars <= 0 || len(header)+len(withFacts)+len(edges) <= maxChars {
-		return withFacts
-	}
-	return plain
-}
-
-func queryNodeFact(n api.Node) string {
-	raw := strings.TrimSpace(queryNodePropString(n, "signature"))
-	if raw == "" {
-		raw = firstQueryDocLine(queryNodePropString(n, "docstring"))
-	}
-	raw = strings.Join(strings.Fields(raw), " ")
-	if raw == "" {
-		return ""
-	}
-	const maxFact = 40
-	if len(raw) > maxFact {
-		raw = strings.TrimSpace(raw[:maxFact])
-	}
-	return "sig=" + raw
-}
-
-func queryNodePropString(n api.Node, key string) string {
-	if n.Properties == nil {
-		return ""
-	}
-	v, ok := n.Properties[key]
-	if !ok || v == nil {
-		return ""
-	}
-	s, ok := v.(string)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(s)
-}
-
-func firstQueryDocLine(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return strings.TrimSpace(s[:i])
-	}
-	return s
-}
-
 func queryNodeSpan(n api.Node) int {
 	if n.Location.StartLine <= 0 {
 		return 0
@@ -358,7 +251,7 @@ func queryWideType(n api.Node) bool {
 }
 
 // spliceWideTypeMethods keeps seed Class/Module rows, then adds same-file
-// methods the question actually names so snippet stays within the 80-line cap
+// methods the question actually names so snippet stays within its line cap
 // instead of pointing at a 1700-line class. Methods with no name overlap stay
 // off the first screen. The 16-row cap still applies to result.Nodes.
 func (s *Store) spliceWideTypeMethods(ctx context.Context, ordered []queryNodeHit, terms []string) []queryNodeHit {
@@ -524,133 +417,4 @@ func screenQueryNodes(ordered []queryNodeHit) []queryNodeHit {
 		out = append(out, hit)
 	}
 	return out
-}
-
-// renderSeedQueryText prints seeds before any source bodies. When bodies are
-// attached, the other-nodes line is only a count: the BODIES header already
-// says to stop or snippet one listed qn. When there are no bodies, the line
-// still names snippet and trace so a caller that cuts the tail can recover.
-func renderSeedQueryText(screen []queryNodeHit, other int, withBodies bool) string {
-	var b strings.Builder
-	for _, hit := range screen {
-		b.WriteString(formatQueryNodeLine(hit))
-	}
-	if other > 0 {
-		if withBodies {
-			fmt.Fprintf(&b, "%d other nodes.\n", other)
-		} else {
-			fmt.Fprintf(&b, "%d other nodes. `so graph snippet <qn>` for a NODE already shown. `so graph trace <qn> --direction incoming` for callers. `so graph trace <qn>` for callees.\n", other)
-		}
-	}
-	return b.String()
-}
-
-func queryNodeLoc(node api.Node) string {
-	start := node.Location.StartLine
-	end := node.Location.EndLine
-	if start <= 0 {
-		return "-"
-	}
-	if end > start {
-		return fmt.Sprintf("L%d-%d", start, end)
-	}
-	return fmt.Sprintf("L%d", start)
-}
-
-func applyQueryBudget(header, nodeBody, edgeBody string, seedCount int, ordered []queryNodeHit, budget, maxChars, listed int) (string, bool) {
-	edgeReserve := 0
-	if strings.TrimSpace(edgeBody) != "" {
-		edgeReserve = maxChars / 4
-		if edgeReserve > len(edgeBody)+1 {
-			edgeReserve = len(edgeBody) + 1
-		}
-		if edgeReserve < 96 {
-			edgeReserve = 96
-		}
-		if edgeReserve > maxChars/3 {
-			edgeReserve = maxChars / 3
-		}
-	}
-	nodeCap := maxChars - edgeReserve
-	if nodeCap < len(header)+64 {
-		nodeCap = maxChars * 3 / 4
-	}
-	nodeOutput := header + nodeBody
-	cutAt := len(nodeOutput)
-	nodeTrunc := false
-	if len(nodeOutput) > nodeCap {
-		nodeTrunc = true
-		cutAt = strings.LastIndex(nodeOutput[:nodeCap], "\n")
-		if cutAt < len(header) {
-			cutAt = nodeCap
-			if cutAt > len(nodeOutput) {
-				cutAt = len(nodeOutput)
-			}
-		}
-		seedBlockEnd := len(header)
-		for i := 0; i < seedCount && i < len(ordered); i++ {
-			seedBlockEnd += len(formatQueryNodeLine(ordered[i]))
-		}
-		if cutAt < seedBlockEnd {
-			cutAt = seedBlockEnd
-			if cutAt > len(nodeOutput) {
-				cutAt = len(nodeOutput)
-			}
-		}
-		nodeOutput = nodeOutput[:cutAt]
-	}
-	remain := maxChars - len(nodeOutput)
-	keptEdges := edgeBody
-	if remain < len(edgeBody) {
-		kept := edgeBody
-		if remain > 0 {
-			cut := strings.LastIndex(edgeBody[:min(remain, len(edgeBody))], "\n")
-			if cut > 0 {
-				kept = edgeBody[:cut+1]
-			} else {
-				kept = ""
-			}
-		} else {
-			kept = ""
-		}
-		keptEdges = kept
-	}
-	body := nodeOutput
-	if keptEdges != "" {
-		if !strings.HasSuffix(body, "\n") {
-			body += "\n"
-		}
-		body += keptEdges
-	}
-	shownNodes := strings.Count(body, "NODE ")
-	pageNodes := len(ordered)
-	foundNodes := listed
-	if foundNodes < pageNodes {
-		foundNodes = pageNodes
-	}
-	cutCount := pageNodes - shownNodes
-	if cutCount < 0 {
-		cutCount = 0
-	}
-	shownEdges := strings.Count(body, "EDGE ")
-	if !nodeTrunc && shownNodes >= pageNodes && (edgeBody == "" || shownEdges == strings.Count(edgeBody, "EDGE ") || strings.Count(edgeBody, "EDGE ") == 0) {
-		if len(header+nodeBody+edgeBody) <= maxChars {
-			return header + nodeBody + edgeBody, false
-		}
-	}
-	if cutCount == 0 && shownEdges > 0 {
-		estTokens := len(body) / queryCharsPerToken
-		return fmt.Sprintf(
-			"[i] Complete answer over budget: all %d nodes and %d edges shown (~%d tokens vs the requested ~%d-token budget). Narrow the question if you need a smaller subgraph, or run `so graph snippet <qn>` on a NODE below. Do not pipe through head/tail.\n\n%s",
-			pageNodes, shownEdges, estTokens, budget, body,
-		), false
-	}
-	omitted := foundNodes - shownNodes
-	if omitted < 0 {
-		omitted = 0
-	}
-	return fmt.Sprintf(
-		"[!] TRUNCATED: showing %d of %d listed nodes (~%d-token budget). Narrow the question first. The answer may be among the %d cut nodes — `so graph snippet <qn>` only for a NODE already shown.\n\n%s\n... (%d more nodes omitted.)",
-		shownNodes, foundNodes, budget, omitted, strings.TrimRight(body, "\n"), omitted,
-	), true
 }

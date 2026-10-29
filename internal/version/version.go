@@ -2,10 +2,11 @@
 package version
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/ishanjainn/superopen/internal/cli"
 )
 
 // Version is the CLI's semver string without a leading "v" (e.g. "0.1.0").
@@ -14,7 +15,7 @@ import (
 //	-ldflags "-X github.com/ishanjainn/superopen/internal/version.Version=1.2.3"
 //
 // Keep the default in sync with /VERSION at the repo root.
-var Version = "0.7.0"
+var Version = "0.8.0"
 
 // Commit is the short commit SHA, set at build time via -ldflags.
 var Commit = ""
@@ -36,13 +37,14 @@ func NewCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			out := cmd.OutOrStdout()
+			o := cli.NewFromCmd(cmd)
+			data := map[string]any{"version": Display()}
 			if Commit != "" {
-				_, err := fmt.Fprintf(out, "so %s (%s)\n", Display(), Commit)
-				return err
+				data["commit"] = Commit
 			}
-			_, err := fmt.Fprintf(out, "so %s\n", Display())
-			return err
+			o.Next("so --help")
+			o.Object("version", data)
+			return nil
 		},
 	}
 }

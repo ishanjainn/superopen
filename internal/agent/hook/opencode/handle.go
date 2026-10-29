@@ -90,6 +90,16 @@ func handle(in normalize.Input) error {
 			Outcome: "completed",
 		}
 		applyAccumulated(&s, sid, in.Vendor)
+		if p.Tokens != nil {
+			rollup := normalize.LLMTurn{}
+			stampUsage(&rollup, p, model)
+			s.InputTokens = rollup.InputTokens
+			s.OutputTokens = rollup.OutputTokens
+			s.TotalTokens = rollup.TotalTokens
+			if p.Cost != nil && *p.Cost > 0 {
+				s.CostUSD = *p.Cost
+			}
+		}
 		return in.Emit.EmitSession(s)
 
 	case strings.Contains(event, "tool.execute.before") || event == "pretooluse" || event == "tool_start":

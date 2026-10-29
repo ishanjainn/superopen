@@ -122,6 +122,9 @@ func skillDirsNamed(name string) []string {
 		filepath.Join(codexHome, "skills", name),
 		filepath.Join(home, ".gemini", "skills", name),
 		filepath.Join(home, ".pi", "agent", "skills", name),
+		filepath.Join(home, ".omp", "agent", "skills", name),
+		filepath.Join(home, ".prime", "agent", "skills", name),
+		filepath.Join(home, ".omo", "agent", "skills", name),
 	}
 	if cfg, err := paths.ClaudeConfigDir(); err == nil && cfg != "" {
 		dirs = append(dirs, filepath.Join(cfg, "skills", name))

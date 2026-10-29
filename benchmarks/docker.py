@@ -13,8 +13,6 @@ IMAGE = "so-bench"
 DOCKERFILE = Path(__file__).resolve().parent / "docker" / "Dockerfile"
 CLAUDE_CODE_PIN = "2.1.241"  # published 2026-08-22; >= 72h old
 OPENCODE_PIN = "1.18.21"  # published 2026-08-21; >= 72h old
-CURSOR_CLI_PIN = "2026.10.22-27dcf5f"  # version the official install script fetched on 2026-10-24
-FORWARDED_KEYS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY", "CURSOR_API_KEY")
 
 _containers: dict[str, str] = {}
 
@@ -107,8 +105,6 @@ def build_image() -> None:
         f"CLAUDE_CODE_VERSION={CLAUDE_CODE_PIN}",
         "--build-arg",
         f"OPENCODE_VERSION={OPENCODE_PIN}",
-        "--build-arg",
-        f"CURSOR_CLI_VERSION={CURSOR_CLI_PIN}",
         "-t",
         IMAGE,
         "-f",
@@ -261,7 +257,7 @@ def start_arm_argv(
         "--user",
         _host_user(),
     ]
-    for key in FORWARDED_KEYS:
+    for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY"):
         if os.environ.get(key):
             argv.extend(["-e", key])
     argv.append(IMAGE)
@@ -311,7 +307,7 @@ def exec_cmd(
     inner = rewrite_cmd(cmd, maps, so_host)
     argv = ["docker", "exec", "-w", "/work"]
     if env:
-        for key in (*FORWARDED_KEYS, "SO_EMBED_URL"):
+        for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENCODE_API_KEY", "SO_EMBED_URL"):
             if not env.get(key):
                 continue
             val = env[key]

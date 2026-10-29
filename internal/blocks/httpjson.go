@@ -1,6 +1,8 @@
 package blocks
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,11 +38,17 @@ func HTTPJSON(root, rawURL string) (string, error) {
 	if len(body) > compact.MaxInput {
 		return "", compact.ErrTooLarge
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("http status %d", resp.StatusCode)
+	}
+	if !json.Valid(bytes.TrimSpace(body)) {
+		return "", fmt.Errorf("response is not JSON")
+	}
 	out := compact.CompressAny(root, body, engine.TypeJSON)
 	if out.PassedThrough {
 		return string(body), nil
 	}
-	return "recover so retrieve " + out.Handle + "\n" + string(out.Output), nil
+	return "recover: so retrieve --raw " + out.Handle + "\ncontent:\n" + string(out.Output), nil
 }
 
 // FileContains reports whether path contains pattern. Used by wait-for.

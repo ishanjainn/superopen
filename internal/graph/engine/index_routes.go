@@ -24,6 +24,8 @@ func indexHTTPRoutes(project string, files []ParsedSyntaxFile, graph *goGraph) {
 		sort.Slice(byFileName[key], func(i, j int) bool { return byFileName[key][i].QualifiedName < byFileName[key][j].QualifiedName })
 	}
 	resolvedCalls := map[string]string{}
+	registry := newSymbolRegistry(graph.nodes)
+	importIndex := newImportTargetIndex(graph.nodes)
 	for _, edge := range graph.edges {
 		if edge.kind != "CALLS" {
 			continue
@@ -35,10 +37,19 @@ func indexHTTPRoutes(project string, files []ParsedSyntaxFile, graph *goGraph) {
 	}
 	suppressResolved := map[string]bool{}
 	for _, parsed := range files {
+		imports := map[string]string{}
+		for _, fact := range parsed.Extraction.Imports {
+			if fact.LocalName != "" {
+				if target := localSyntaxImportTargetForLanguage(parsed.File.Language, parsed.File.Path, fact.Name, "", importIndex); target != "" {
+					imports[fact.LocalName] = target
+				}
+			}
+		}
 		for _, call := range parsed.Extraction.Calls {
 			if len(call.Arguments) == 0 {
 				continue
 			}
+			registrationPath := routeRegistrationPath(call, parsed.File.Language)
 			source := enclosingRouteSource(parsed, call, modules, byFileName)
 			resolved := resolvedCalls[source+"\x00"+call.Name]
 			importIdentity := importedCallIdentity(parsed.File.Language, call.Name, parsed.Extraction.Imports)
@@ -55,9 +66,17 @@ func indexHTTPRoutes(project string, files []ParsedSyntaxFile, graph *goGraph) {
 				kind = serviceHTTP
 			}
 			importKind, _ := matchService(importIdentity)
-			if call.FirstStringArg != "" && serviceRouteMethod(call.Name) != "" &&
-				(importKind == serviceRouteRegistration || importKind == serviceHTTP) {
-				addRegisteredRoute(project, graph, source, call, call.FirstStringArg, serviceRouteMethod(call.Name))
+			if registrationPath != "" && serviceRouteMethod(call.Name) != "" &&
+				isJSSupertestRequest(call.Name, parsed.Extraction.Imports) {
+				addHTTPRoute(project, graph, source, call, registrationPath, serviceRouteMethod(call.Name), "service_pattern")
+				continue
+			}
+			if registrationPath != "" && serviceRouteMethod(call.Name) != "" &&
+				(importKind == serviceRouteRegistration || importKind == serviceHTTP ||
+					parsed.File.Language == "go" || isJSLanguage(parsed.File.Language)) {
+				method := serviceRouteMethod(call.Name)
+				addRegisteredRoute(project, graph, source, parsed.File.Path, call, registrationPath, method)
+				addRegisteredRouteHandler(graph, registry, parsed, source, call, registrationPath, method, imports)
 				if resolved != "" {
 					suppressResolved[source+"\x00"+call.Name+"\x00"+resolved] = true
 				}
@@ -67,7 +86,20 @@ func indexHTTPRoutes(project string, files []ParsedSyntaxFile, graph *goGraph) {
 				addHTTPRoute(project, graph, source, call, call.FirstStringArg, serviceHTTPMethod(call.Name), "service_pattern")
 				continue
 			}
+			if method := pythonTestClientMethod(parsed.File.Path, parsed.File.Language, call.Name); method != "" &&
+				strings.HasPrefix(call.FirstStringArg, "/") && !strings.Contains(call.FirstStringArg, "://") {
+				addHTTPRoute(project, graph, source, call, call.FirstStringArg, method, "test_client")
+				continue
+			}
+			if isJSLanguage(parsed.File.Language) && expressRedirectCallee(call.Name) &&
+				routePathShaped(call.FirstStringArg) {
+				addRedirectRoute(project, graph, source, parsed.File.Path, call)
+				continue
+			}
 			if resolved != "" {
+				if isJSLanguage(parsed.File.Language) && isClientNavigationCall(call.Name) {
+					continue
+				}
 				for _, argument := range call.Arguments {
 					// Tree-sitter's JS regex node is not present in Superopen's
 					// call argument argument surface. Our generic argument collector does
@@ -80,7 +112,7 @@ func indexHTTPRoutes(project string, files []ParsedSyntaxFile, graph *goGraph) {
 					if candidate == "" {
 						candidate = argument.Expr
 					}
-					if normalized, ok := normalizeArgumentURL(candidate); ok {
+					if normalized, ok := normalizeArgumentURL(candidate); ok && isHTTPRouteLiteral(normalized, call.Name) {
 						addArgumentURLRoute(project, graph, source, call, normalized)
 						break
 					}
@@ -100,6 +132,127 @@ func indexHTTPRoutes(project string, files []ParsedSyntaxFile, graph *goGraph) {
 		graph.edges = filtered
 	}
 	indexInfraURLRoutes(project, files, graph)
+}
+
+// routeRegistrationPath follows the route-specific argument check: a literal
+// string is preferred, then a slash-shaped first or named path argument. A
+// JavaScript regex is accepted only on an Express-style registration call.
+func routeRegistrationPath(call SyntaxFact, language string) string {
+	if routePathShaped(call.FirstStringArg) {
+		return call.FirstStringArg
+	}
+	for _, argument := range call.Arguments {
+		if argument.Index != 0 && !routePathKeyword(argument.Keyword) {
+			continue
+		}
+		path := argument.Value
+		if path == "" {
+			path = argument.Expr
+		}
+		if !routePathShaped(path) {
+			continue
+		}
+		if !argument.Literal && isJSLanguage(language) && looksLikeJavaScriptRegex(path) && !expressRouteCallee(call.Name) {
+			continue
+		}
+		return path
+	}
+	return ""
+}
+
+func routePathShaped(path string) bool {
+	return strings.HasPrefix(path, "/") && !strings.ContainsAny(path, "\r\n") &&
+		!(strings.HasPrefix(path, "/*") && strings.HasSuffix(path, "*/")) &&
+		!strings.HasPrefix(path, "// ")
+}
+
+func routePathKeyword(keyword string) bool {
+	switch keyword {
+	case "prefix", "path", "route", "pattern", "url", "endpoint", "rule", "mount_path", "route_path", "url_path":
+		return true
+	}
+	return false
+}
+
+func expressRouteCallee(callee string) bool {
+	for _, receiver := range []string{"app.", "router.", "route."} {
+		if strings.HasPrefix(callee, receiver) {
+			return true
+		}
+	}
+	return false
+}
+
+func expressRedirectCallee(callee string) bool {
+	return callee == "res.redirect" || callee == "response.redirect"
+}
+
+func addRedirectRoute(project string, graph *goGraph, source, file string, call SyntaxFact) {
+	path := canonicalRoutePath(call.FirstStringArg)
+	target := "__route__ANY__" + path
+	graph.nodes = append(graph.nodes, api.Node{Project: project, Label: "Route", Name: path,
+		QualifiedName: target, Location: api.Location{File: file, StartLine: call.StartLine, EndLine: call.EndLine},
+		Properties: api.Properties{"source": "redirect"}})
+	graph.edges = append(graph.edges, pendingEdge{source: source, target: target, kind: "REDIRECTS_TO",
+		properties: api.Properties{"callee": call.Name, "url_path": call.FirstStringArg},
+		evidence:   syntaxEvidence(file, call, "redirect", 1)})
+}
+
+func isClientNavigationCall(callee string) bool {
+	method := callee
+	receiver := ""
+	if dot := strings.LastIndexByte(callee, '.'); dot >= 0 {
+		receiver, method = callee[:dot], callee[dot+1:]
+	}
+	switch method {
+	case "navigate", "navigateByUrl", "navigateTo", "navigateForward", "navigateBack", "navigateRoot", "pushState", "replaceState":
+		return true
+	case "goto", "redirect", "permanentRedirect":
+		return receiver == ""
+	case "push", "replace", "prefetch":
+		receiver = strings.ToLower(receiver)
+		return strings.HasSuffix(receiver, "router") || strings.HasSuffix(receiver, "history") ||
+			(method == "replace" && strings.HasSuffix(receiver, "location"))
+	case "go", "assign":
+		return strings.HasSuffix(strings.ToLower(receiver), "location")
+	}
+	return false
+}
+
+func pythonTestClientMethod(file, language, callee string) string {
+	if language != "python" || !(strings.HasPrefix(file, "tests/") || strings.Contains(file, "/tests/") ||
+		strings.HasPrefix(filepath.Base(file), "test_")) {
+		return ""
+	}
+	method := serviceHTTPMethod(callee)
+	if method == "" {
+		return ""
+	}
+	receiver := strings.TrimSuffix(callee, "."+strings.ToLower(method))
+	if receiver == callee {
+		return ""
+	}
+	for _, allowed := range []string{"self.client", "self.rf", "self.request_factory", "self.factory", "cls.request_factory",
+		"client", "rf", "factory", "request_factory", "RequestFactory()"} {
+		if receiver == allowed {
+			return method
+		}
+	}
+	return ""
+}
+
+func isJSSupertestRequest(callee string, imports []SyntaxFact) bool {
+	open := strings.IndexByte(callee, '(')
+	if open <= 0 {
+		return false
+	}
+	root := strings.TrimSpace(callee[:open])
+	for _, imported := range imports {
+		if imported.LocalName == root && (imported.Name == "supertest" || imported.Name == "superagent") {
+			return true
+		}
+	}
+	return false
 }
 
 // indexInfraURLRoutes mirrors try_upsert_infra_route for YAML/config URL values.
@@ -214,13 +367,72 @@ func addHTTPRoute(project string, graph *goGraph, source string, call SyntaxFact
 		evidence:   &api.Evidence{Strategy: strategy, Confidence: .8}})
 }
 
-func addRegisteredRoute(project string, graph *goGraph, source string, call SyntaxFact, routePath, method string) {
+func addRegisteredRoute(project string, graph *goGraph, source, file string, call SyntaxFact, routePath, method string) {
 	target := "__route__" + method + "__" + canonicalRoutePath(routePath)
 	graph.nodes = append(graph.nodes, api.Node{Project: project, Label: "Route", Name: routePath,
-		QualifiedName: target, Properties: api.Properties{"method": method}})
+		QualifiedName: target, Location: api.Location{File: file, StartLine: call.StartLine, EndLine: call.EndLine},
+		Properties: api.Properties{"method": method}})
 	graph.edges = append(graph.edges, pendingEdge{source: source, target: target, kind: "CALLS",
 		properties: api.Properties{"callee": call.Name, "url_path": routePath, "via": "route_registration"},
 		evidence:   &api.Evidence{Strategy: "service_pattern", Confidence: .8}})
+}
+
+// A route's second callable argument is its handler. Resolve the same local,
+// imported, or receiver-owned symbol used by the call graph before linking it.
+func addRegisteredRouteHandler(graph *goGraph, registry symbolRegistry, parsed ParsedSyntaxFile, source string, call SyntaxFact, routePath, method string, imports map[string]string) {
+	ref := ""
+	for _, arg := range call.Arguments {
+		if arg.Index > 0 && arg.Keyword == "" {
+			candidate := strings.TrimSpace(arg.Expr)
+			if routeHandlerName(candidate) {
+				ref = candidate
+			}
+		}
+	}
+	if ref == "" {
+		return
+	}
+	var resolution symbolResolution
+	module := syntaxDefinitionModuleQN(parsed.File.Language, parsed.File.Path)
+	if candidate := joinSyntaxScope(module, ref); candidate != "" {
+		if node, ok := registry.exact[candidate]; ok && (node.Label == "Function" || node.Label == "Method") {
+			resolution = symbolResolution{qn: candidate, strategy: "same_module", confidence: 1}
+		}
+	}
+	if parsed.File.Language == "go" && strings.Contains(ref, ".") && strings.Contains(source, ".") {
+		candidate := packagePrefix(source) + "." + ref[strings.LastIndexByte(ref, '.')+1:]
+		if node, ok := registry.exact[candidate]; ok && (node.Label == "Method" || node.Label == "Function") {
+			resolution = symbolResolution{qn: candidate, strategy: "receiver_method", confidence: 1}
+		}
+	}
+	if resolution.qn == "" {
+		session := newResolveSession(module, imports)
+		resolution = registry.resolveWith(session, ref)
+	}
+	if resolution.qn == "" || guessStrategy(resolution.strategy) {
+		return
+	}
+	target, ok := registry.exact[resolution.qn]
+	if !ok || (target.Label != "Function" && target.Label != "Method") {
+		return
+	}
+	route := "__route__" + method + "__" + canonicalRoutePath(routePath)
+	graph.edges = append(graph.edges, pendingEdge{source: resolution.qn, target: route, kind: "HANDLES",
+		properties: api.Properties{"handler": resolution.qn}, evidence: syntaxEvidence(parsed.File.Path, call, "route_handler", resolution.confidence)})
+}
+
+func routeHandlerName(value string) bool {
+	for _, part := range strings.Split(value, ".") {
+		if part == "" || !isRouteIdentifier(part[0]) || part[0] >= '0' && part[0] <= '9' {
+			return false
+		}
+		for i := 1; i < len(part); i++ {
+			if !isRouteIdentifier(part[i]) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func canonicalRoutePath(input string) string {
@@ -309,17 +521,23 @@ func looksLikeJavaScriptRegex(value string) bool {
 	if len(value) < 3 || value[0] != '/' {
 		return false
 	}
-	last := strings.LastIndexByte(value[1:], '/')
-	if last < 0 {
+	last := strings.LastIndexByte(value, '/')
+	if last <= 0 {
 		return false
 	}
-	last++
+	backslashes := 0
+	for i := last - 1; i > 0 && value[i] == '\\'; i-- {
+		backslashes++
+	}
+	if backslashes%2 != 0 {
+		return false
+	}
 	for _, flag := range value[last+1:] {
 		if !strings.ContainsRune("dgimsuvy", flag) {
 			return false
 		}
 	}
-	return last < len(value)-1 || !strings.Contains(value[1:last], "/")
+	return true
 }
 
 func validGenericArgURL(routePath string) bool {

@@ -90,6 +90,9 @@ func durableTargets(home string) []string {
 		filepath.Join(opencode, "AGENTS.md"),
 		filepath.Join(copilot, "AGENTS.md"),
 		filepath.Join(home, ".pi", "agent", "AGENTS.md"),
+		filepath.Join(home, ".omp", "agent", "AGENTS.md"),
+		filepath.Join(home, ".prime", "agent", "AGENTS.md"),
+		filepath.Join(home, ".omo", "agent", "AGENTS.md"),
 	}
 	if cfg, err := paths.ClaudeConfigDir(); err == nil {
 		extra := filepath.Join(cfg, "CLAUDE.md")
@@ -120,7 +123,7 @@ func uniquePaths(in []string) []string {
 }
 
 func writeCursorRule(path string) error {
-	body := "---\ndescription: Superopen — ignore unless this workspace has a .so directory\nalwaysApply: true\n---\n\n" +
+	body := "---\ndescription: Superopen — use only in a managed repository or linked worktree of one\nalwaysApply: true\n---\n\n" +
 		beginMarker + "\n" + CursorRule() + endMarker + "\n"
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

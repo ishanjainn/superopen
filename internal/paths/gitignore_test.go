@@ -48,6 +48,32 @@ func TestRemoveRepoIgnoreNonGit(t *testing.T) {
 	}
 }
 
+func TestRemoveRepoIgnoreCleansOnlyOwnLocalExclude(t *testing.T) {
+	root := initGit(t, map[string]string{"README": "hi\n"})
+	cmd := exec.Command("git", "-C", root, "rev-parse", "--git-path", "info/exclude")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exclude := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(exclude) {
+		exclude = filepath.Join(root, exclude)
+	}
+	if err := paths.ExcludeGraphFromGit(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := paths.RemoveRepoIgnore(root); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(exclude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), "Superopen machine-local data") || strings.Contains(string(content), "/.so/") {
+		t.Fatalf("own exclude must be removed on purge: %q", content)
+	}
+}
+
 func initGit(t *testing.T, files map[string]string) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

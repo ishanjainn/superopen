@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS file_hashes (
   scope_project_id TEXT NOT NULL,
   project TEXT NOT NULL,
   rel_path TEXT NOT NULL,
-  sha256 TEXT NOT NULL,
+  digest TEXT NOT NULL,
   mtime_ns INTEGER NOT NULL DEFAULT 0,
   size INTEGER NOT NULL DEFAULT 0,
   language TEXT NOT NULL DEFAULT '',
@@ -197,10 +197,14 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
   qualified_name,
   label,
   file_path,
+  body,
   content='',
   tokenize='unicode61 remove_diacritics 2'
 );
 `
+
+// ftsNameColumns limits a MATCH to what a symbol is called and where it lives.
+const ftsNameColumns = "{name qualified_name label file_path}"
 
 const schemaIndexDDL = `
 CREATE INDEX IF NOT EXISTS idx_nodes_label ON nodes(project, label);
@@ -323,7 +327,7 @@ type ProjectRecord struct {
 type FileRecord struct {
 	Project   string
 	Path      string
-	SHA256    string
+	Digest    string
 	MTimeNS   int64
 	Size      int64
 	Language  string
@@ -536,10 +540,10 @@ func (b *Builder) PutProject(p ProjectRecord) error {
 }
 
 func (b *Builder) PutFile(f FileRecord) error {
-	_, err := b.tx.Exec(`INSERT INTO file_hashes(tenant_id,scope_project_id,project,rel_path,sha256,mtime_ns,size,language)
-		VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,scope_project_id,project,rel_path) DO UPDATE SET sha256=excluded.sha256,
+	_, err := b.tx.Exec(`INSERT INTO file_hashes(tenant_id,scope_project_id,project,rel_path,digest,mtime_ns,size,language)
+		VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id,scope_project_id,project,rel_path) DO UPDATE SET digest=excluded.digest,
 		mtime_ns=excluded.mtime_ns,size=excluded.size,language=excluded.language`,
-		b.tenant, b.projectID, f.Project, filepath.ToSlash(f.Path), f.SHA256, f.MTimeNS, f.Size, f.Language)
+		b.tenant, b.projectID, f.Project, filepath.ToSlash(f.Path), f.Digest, f.MTimeNS, f.Size, f.Language)
 	return err
 }
 
@@ -552,14 +556,16 @@ func (b *Builder) PutNode(n api.Node) (int64, error) {
 		return b.putNodeInsert(n, props)
 	}
 	var oldID int64
-	var oldName, oldQN, oldLabel, oldFile string
-	oldErr := b.tx.QueryRow(`SELECT id,name,qualified_name,label,file_path FROM nodes WHERE tenant_id=? AND scope_project_id=? AND project=? AND qualified_name=?`,
-		b.tenant, b.projectID, n.Project, n.QualifiedName).Scan(&oldID, &oldName, &oldQN, &oldLabel, &oldFile)
+	var oldName, oldQN, oldLabel, oldFile, oldProps string
+	oldErr := b.tx.QueryRow(`SELECT id,name,qualified_name,label,file_path,properties FROM nodes WHERE tenant_id=? AND scope_project_id=? AND project=? AND qualified_name=?`,
+		b.tenant, b.projectID, n.Project, n.QualifiedName).Scan(&oldID, &oldName, &oldQN, &oldLabel, &oldFile, &oldProps)
 	if oldErr != nil && !errors.Is(oldErr, sql.ErrNoRows) {
 		return 0, oldErr
 	}
 	if oldErr == nil {
-		if err := b.deleteFTSNode(oldID, oldName, oldQN, oldLabel, oldFile); err != nil {
+		var old api.Properties
+		_ = json.Unmarshal([]byte(oldProps), &old)
+		if err := b.deleteFTSNode(oldID, oldName, oldQN, oldLabel, oldFile, ftsBodyText(old)); err != nil {
 			return 0, err
 		}
 	}
@@ -574,15 +580,31 @@ func (b *Builder) PutNode(n api.Node) (int64, error) {
 	if err := row.Scan(&id); err != nil {
 		return 0, err
 	}
-	_, err = b.tx.Exec(`INSERT INTO nodes_fts(rowid,name,qualified_name,label,file_path) VALUES(?,?,?,?,?)`,
-		id, camelTerms(n.Name), camelTerms(n.QualifiedName), n.Label, filepath.ToSlash(n.Location.File))
+	_, err = b.tx.Exec(`INSERT INTO nodes_fts(rowid,name,qualified_name,label,file_path,body) VALUES(?,?,?,?,?,?)`,
+		id, camelTerms(n.Name), camelTerms(n.QualifiedName), n.Label, filepath.ToSlash(n.Location.File), ftsBodyText(n.Properties))
 	return id, err
 }
 
-func (b *Builder) deleteFTSNode(id int64, name, qualifiedName, label, file string) error {
-	_, err := b.tx.Exec(`INSERT INTO nodes_fts(nodes_fts,rowid,name,qualified_name,label,file_path)
-		VALUES('delete',?,?,?,?,?)`, id, camelTerms(name), camelTerms(qualifiedName), label, filepath.ToSlash(file))
+// deleteFTSNode removes a contentless FTS row, which needs the exact values
+// it was inserted with, body included.
+func (b *Builder) deleteFTSNode(id int64, name, qualifiedName, label, file, body string) error {
+	_, err := b.tx.Exec(`INSERT INTO nodes_fts(nodes_fts,rowid,name,qualified_name,label,file_path,body)
+		VALUES('delete',?,?,?,?,?,?)`, id, camelTerms(name), camelTerms(qualifiedName), label, filepath.ToSlash(file), body)
 	return err
+}
+
+// ftsBodyText is what a symbol says rather than what it is called: its
+// docstring and the identifiers its body uses. A question names behavior
+// ("strip unused annotations"), and the code that does it often has none of
+// those words in its name.
+func ftsBodyText(props api.Properties) string {
+	doc, _ := props["docstring"].(string)
+	bt, _ := props["bt"].(string)
+	text := strings.TrimSpace(doc + " " + bt)
+	if text == "" {
+		return ""
+	}
+	return camelTerms(text)
 }
 
 func (b *Builder) PutEdge(e api.Edge) (int64, error) {
@@ -720,18 +742,18 @@ func (b *Builder) PutCoverage(project string, coverage api.Coverage) error {
 // not extraction failures, and therefore never appear in this graph.
 func (b *Builder) rebuildMissedGraph(project string, coverage api.Coverage) error {
 	shadow := project + "::missed"
-	rows, err := b.tx.Query(`SELECT id,name,qualified_name,label,file_path FROM nodes WHERE project=? ORDER BY id`, shadow)
+	rows, err := b.tx.Query(`SELECT id,name,qualified_name,label,file_path,properties FROM nodes WHERE project=? ORDER BY id`, shadow)
 	if err != nil {
 		return err
 	}
 	type ftsNode struct {
-		id                               int64
-		name, qualifiedName, label, file string
+		id                                      int64
+		name, qualifiedName, label, file, props string
 	}
 	var oldNodes []ftsNode
 	for rows.Next() {
 		var node ftsNode
-		if err := rows.Scan(&node.id, &node.name, &node.qualifiedName, &node.label, &node.file); err != nil {
+		if err := rows.Scan(&node.id, &node.name, &node.qualifiedName, &node.label, &node.file, &node.props); err != nil {
 			rows.Close()
 			return err
 		}
@@ -745,7 +767,9 @@ func (b *Builder) rebuildMissedGraph(project string, coverage api.Coverage) erro
 		return err
 	}
 	for _, node := range oldNodes {
-		if err := b.deleteFTSNode(node.id, node.name, node.qualifiedName, node.label, node.file); err != nil {
+		var props api.Properties
+		_ = json.Unmarshal([]byte(node.props), &props)
+		if err := b.deleteFTSNode(node.id, node.name, node.qualifiedName, node.label, node.file, ftsBodyText(props)); err != nil {
 			return err
 		}
 	}
@@ -853,7 +877,7 @@ func (s *Store) verifySchema(ctx context.Context) error {
 		return fmt.Errorf("graph protocol metadata: %w", err)
 	}
 	if schema != fmt.Sprint(api.SchemaVersion) || protocol != fmt.Sprint(api.ProtocolVersion) {
-		return fmt.Errorf("incompatible graph database: schema=%s protocol=%s", schema, protocol)
+		return fmt.Errorf("graph database was built by another version (schema=%s protocol=%s)", schema, protocol)
 	}
 	return nil
 }
@@ -954,8 +978,11 @@ func hasLexicalSearchFilters(req api.SearchRequest) bool {
 }
 
 func (s *Store) searchFTS(ctx context.Context, req api.SearchRequest, limit int, terms string) (api.SearchResult, error) {
+	// Search finds symbols by name. The body column (docstrings, identifiers
+	// a body uses) serves question ranking only; here it would list every
+	// caller of a name next to the name itself.
 	where := []string{"nodes_fts MATCH ?"}
-	args := []any{terms}
+	args := []any{ftsNameColumns + " : (" + terms + ")"}
 	if req.Project != "" {
 		where = append(where, "n.project=?")
 		args = append(args, req.Project)
@@ -1004,7 +1031,7 @@ func (s *Store) searchFTS(ctx context.Context, req api.SearchRequest, limit int,
 	args = append(args, limit+1, offset)
 	boost := `CASE n.label WHEN 'Function' THEN 10 WHEN 'Method' THEN 10 WHEN 'Route' THEN 8 WHEN 'Class' THEN 5 WHEN 'Interface' THEN 5 ELSE 0 END`
 	query := `SELECT n.id,n.project,n.label,n.name,n.qualified_name,n.file_path,
-		n.start_line,n.start_column,n.end_line,n.end_column,n.properties,-bm25(nodes_fts,8.0,5.0,2.0,1.0)+` + boost + ` score
+		n.start_line,n.start_column,n.end_line,n.end_column,n.properties,-bm25(nodes_fts,8.0,5.0,2.0,1.0,0.0)+` + boost + ` score
 		FROM nodes_fts JOIN nodes n ON n.id=nodes_fts.rowid WHERE ` + strings.Join(where, " AND ") +
 		` ORDER BY score DESC,n.qualified_name LIMIT ? OFFSET ?`
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -1155,17 +1182,90 @@ func camelTerms(input string) string {
 
 var searchToken = regexp.MustCompile(`[\pL\pN_]+`)
 
+// ftsStopwords are grammatical words only. Domain verbs (load, register)
+// stay searchable, unlike queryStopwords.
+var ftsStopwords = map[string]bool{
+	"a": true, "an": true, "and": true, "any": true, "are": true, "as": true, "at": true,
+	"be": true, "but": true, "by": true, "can": true, "could": true, "did": true, "do": true,
+	"does": true, "for": true, "from": true, "has": true, "have": true, "how": true, "if": true,
+	"in": true, "into": true, "is": true, "it": true, "its": true, "of": true, "on": true,
+	"or": true, "should": true, "that": true, "the": true, "their": true, "them": true,
+	"there": true, "these": true, "they": true, "this": true, "those": true, "to": true,
+	"was": true, "were": true, "what": true, "when": true, "where": true, "which": true,
+	"who": true, "why": true, "will": true, "with": true, "would": true,
+}
+
+// ftsStem trims a common English inflection from a plain alphabetic word so a
+// prefix match covers its forms: properties -> property, members -> member,
+// decorating/decorated -> decorat. Identifiers (digits, underscores), short
+// words and double-s words (class, process) are left alone, and the stem
+// never drops below four letters.
+func ftsStem(token string) string {
+	r := []rune(token)
+	for _, c := range r {
+		if !unicode.IsLetter(c) {
+			return token
+		}
+	}
+	trim := func(suffix, add string) (string, bool) {
+		if !strings.HasSuffix(token, suffix) {
+			return "", false
+		}
+		stem := token[:len(token)-len(suffix)] + add
+		if len([]rune(stem)) < 4 {
+			return "", false
+		}
+		return stem, true
+	}
+	if len(r) < 5 {
+		return token
+	}
+	for _, rule := range [][2]string{{"ies", "y"}, {"sses", "ss"}, {"ing", ""}, {"ed", ""}} {
+		if stem, ok := trim(rule[0], rule[1]); ok {
+			return stem
+		}
+	}
+	if strings.HasSuffix(token, "s") && !strings.HasSuffix(token, "ss") && !strings.HasSuffix(token, "us") && !strings.HasSuffix(token, "is") {
+		if stem, ok := trim("s", ""); ok {
+			return stem
+		}
+	}
+	return token
+}
+
+// ftsQuery ORs content tokens. Stopwords and 1-2 char tokens are dropped
+// ("is"* matched thousands of nodes); only 4+ char tokens prefix-match.
+// If nothing survives, every token is kept so a short query still searches.
 func ftsQuery(input string) string {
 	tokens := searchToken.FindAllString(input, -1)
-	seen := map[string]bool{}
-	filtered := tokens[:0]
-	for _, token := range tokens {
-		token = strings.ToLower(token)
-		if token == "" || seen[token] {
-			continue
+	build := func(strict bool) []string {
+		seen := map[string]bool{}
+		var out []string
+		for _, token := range tokens {
+			token = strings.ToLower(token)
+			if token == "" || seen[token] {
+				continue
+			}
+			if strict && (ftsStopwords[token] || len([]rune(token)) <= 2) {
+				continue
+			}
+			seen[token] = true
+			if strict {
+				// Prefix-match the stem so "properties" finds PropertyDocumenter
+				// and "decorated" finds decorator. The index has no stemmer.
+				token = ftsStem(token)
+			}
+			quoted := `"` + strings.ReplaceAll(token, `"`, `""`) + `"`
+			if !strict || len([]rune(token)) >= 4 {
+				quoted += "*"
+			}
+			out = append(out, quoted)
 		}
-		seen[token] = true
-		filtered = append(filtered, `"`+strings.ReplaceAll(token, `"`, `""`)+`"*`)
+		return out
+	}
+	filtered := build(true)
+	if len(filtered) == 0 {
+		filtered = build(false)
 	}
 	sort.Strings(filtered)
 	return strings.Join(filtered, " OR ")

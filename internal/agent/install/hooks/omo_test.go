@@ -92,18 +92,18 @@ func unsetenv(t *testing.T, name string) {
 	})
 }
 
-// SENPI_CODING_AGENT_DIR and PI_CODING_AGENT_DIR are the legacy prefixes Senpi's own brand profile
+// SENPI_CODING_AGENT_DIR and PI_CODING_AGENT_DIR are prefixes Senpi's own brand profile
 // keeps readable when OMO_CODING_AGENT_DIR is unset -- upstream Senpi's own name, then pi-mono's,
 // most specific first. An install that ignored them would land somewhere the runtime does not look
 // for an operator who set one before OMO existed.
-func TestOmoExtensionPathFallsBackToLegacyAgentDirOverrides(t *testing.T) {
+func TestOmoExtensionPathRespectsAgentDirOverrides(t *testing.T) {
 	home := t.TempDir()
 	testenv.SetHome(t, home)
 	unsetenv(t, omoAgentDirEnv)
 
 	t.Run("senpi", func(t *testing.T) {
 		senpiDir := filepath.Join(home, "senpi-profile", "agent")
-		t.Setenv(omoAgentDirLegacyEnv, senpiDir)
+		t.Setenv(omoAgentDirSenpiEnv, senpiDir)
 		unsetenv(t, omoAgentDirPiEnv)
 
 		got, err := OmoExtensionPath(LevelUser)
@@ -117,7 +117,7 @@ func TestOmoExtensionPathFallsBackToLegacyAgentDirOverrides(t *testing.T) {
 	})
 
 	t.Run("pi", func(t *testing.T) {
-		unsetenv(t, omoAgentDirLegacyEnv)
+		unsetenv(t, omoAgentDirSenpiEnv)
 		piDir := filepath.Join(home, "pi-profile", "agent")
 		t.Setenv(omoAgentDirPiEnv, piDir)
 
@@ -131,10 +131,10 @@ func TestOmoExtensionPathFallsBackToLegacyAgentDirOverrides(t *testing.T) {
 		}
 	})
 
-	t.Run("omo wins over both legacy names", func(t *testing.T) {
+	t.Run("omo wins over other names", func(t *testing.T) {
 		omoDir := filepath.Join(home, "omo-profile", "agent")
 		t.Setenv(omoAgentDirEnv, omoDir)
-		t.Setenv(omoAgentDirLegacyEnv, filepath.Join(home, "senpi-profile", "agent"))
+		t.Setenv(omoAgentDirSenpiEnv, filepath.Join(home, "senpi-profile", "agent"))
 		t.Setenv(omoAgentDirPiEnv, filepath.Join(home, "pi-profile", "agent"))
 
 		got, err := OmoExtensionPath(LevelUser)
@@ -144,7 +144,7 @@ func TestOmoExtensionPathFallsBackToLegacyAgentDirOverrides(t *testing.T) {
 		want := filepath.Join(omoDir, "extensions", "superopen.ts")
 		if got != want {
 			t.Fatalf("OmoExtensionPath = %q, want %q -- the OMO-prefixed variable must win over "+
-				"either legacy spelling", got, want)
+				"either other spelling", got, want)
 		}
 	})
 }

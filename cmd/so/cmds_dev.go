@@ -123,8 +123,7 @@ func maybeOpenUI(url string, noOpen bool) {
 func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen, hot bool) error {
 	url := fmt.Sprintf("http://127.0.0.1:%d", uiPort)
 	if st, err := readDevStatus(layout, uiPort); err == nil && st.alive {
-		fmt.Printf("Already running (pid %d) at %s\n", st.pid, st.url)
-		fmt.Printf("Stop with: so dev stop\n")
+		writeDevState("already_running", st.pid, st.url, "", "so dev stop")
 		maybeOpenUI(url+"/graph", noOpen)
 		return nil
 	}
@@ -181,7 +180,22 @@ func startDevDetached(root string, layout paths.Paths, uiPort int, noOpen, hot b
 }
 
 func printDevURL(url string) {
-	fmt.Printf("Running on: %s\n", url)
+	writeDevState("running", 0, url, "", "so dev stop")
+}
+
+func writeDevState(state string, pid int, url, note string, next ...string) {
+	data := map[string]any{"dev": state}
+	if pid > 0 {
+		data["pid"] = pid
+	}
+	if url != "" {
+		data["url"] = url
+	}
+	if note != "" {
+		data["note"] = note
+	}
+	out().Next(next...)
+	out().Object("dev", data)
 }
 
 func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot bool) error {
@@ -225,7 +239,7 @@ func runDevForeground(root string, layout paths.Paths, uiPort int, noOpen, hot b
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
-	fmt.Println("\nShutting down…")
+	writeDevState("stopped", 0, "", "", "so dev -d")
 	return nil
 }
 
@@ -236,7 +250,7 @@ func stopDev() error {
 	raw, err := os.ReadFile(pf)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Println("No Superopen UI pid file - nothing to stop.")
+			writeDevState("stopped", 0, "", "nothing to stop", "so dev -d")
 			return nil
 		}
 		return err
@@ -248,14 +262,14 @@ func stopDev() error {
 	}
 	if !processAlive(pid) {
 		_ = os.Remove(pf)
-		fmt.Println("UI was not running (stale pid file removed).")
+		writeDevState("stopped", 0, "", "stale pid file removed", "so dev -d")
 		return nil
 	}
 	if err := killProcessTree(pid); err != nil {
 		return fmt.Errorf("stop pid %d: %w", pid, err)
 	}
 	_ = os.Remove(pf)
-	fmt.Printf("Stopped Superopen UI (pid %d)\n", pid)
+	writeDevState("stopped", pid, "", "", "so dev -d")
 	return nil
 }
 
@@ -298,13 +312,13 @@ func statusDev(uiPort int) error {
 
 	switch {
 	case err == nil && st.alive && reachable:
-		fmt.Printf("running  pid=%d  %s\n", st.pid, url)
+		writeDevState("running", st.pid, url, "", "so dev stop")
 	case reachable:
-		fmt.Printf("reachable  %s  (no tracked pid)\n", url)
+		writeDevState("running", 0, url, "no tracked pid", "so dev stop")
 	case err == nil && st.alive:
-		fmt.Printf("pid %d alive but UI not reachable yet (%s)\n", st.pid, url)
+		writeDevState("starting", st.pid, url, "not reachable yet", "so dev status")
 	default:
-		fmt.Println("stopped")
+		writeDevState("stopped", 0, "", "", "so dev -d")
 	}
 	return nil
 }

@@ -20,7 +20,6 @@ fi
 docker build \
   --build-arg "CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION:-2.1.241}" \
   --build-arg "OPENCODE_VERSION=${OPENCODE_VERSION:-1.18.21}" \
-  --build-arg "CURSOR_CLI_VERSION=${CURSOR_CLI_VERSION:-2026.10.22-27dcf5f}" \
   -t "$IMAGE" \
   -f "$DOCKERFILE" \
   "$ROOT/benchmarks/docker"
@@ -86,7 +85,6 @@ run=(
   -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}"
   -e "OPENAI_API_KEY=${OPENAI_API_KEY:-}"
   -e "OPENCODE_API_KEY=${OPENCODE_API_KEY:-}"
-  -e "CURSOR_API_KEY=${CURSOR_API_KEY:-}"
   -e "SUPEROPEN_LOCOMO_URL=${SUPEROPEN_LOCOMO_URL:-}"
   -e "SUPEROPEN_LME_URL=${SUPEROPEN_LME_URL:-}"
   -v "$ROOT:/src"

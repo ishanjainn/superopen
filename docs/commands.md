@@ -15,7 +15,7 @@ Global flags, the config file, and environment variables are listed in
 | `--root` | Repository root override (env: `SUPEROPEN_ROOT`; otherwise walk up to git top-level or nearest `.so/`) |
 
 Exit codes are stable: `0` ok, `1` error, `2` usage, `3` not found,
-`4` continuation. Errors print `error:` / `hint:` on stdout.
+`4` continuation. Errors print `error:` and a `help[1]:` fix on stdout; an unknown flag exits `2` and lists the valid flags.
 
 ## Top-level commands
 
@@ -30,7 +30,7 @@ Exit codes are stable: `0` ok, `1` error, `2` usage, `3` not found,
 | `so gc` | Apply retention (`--show`, `--sessions-hours`, `--memory-hours`) |
 | `so scan` | Run detection rules over recorded tool calls. See [scan.md](scan.md). |
 | `so shrink` | Shrink stdin or one command's stdout. Original bytes stay in `.so/db/ccr.db`. |
-| `so retrieve` | Print the exact original bytes for a recovery handle. |
+| `so retrieve` | Inspect the original for a recovery handle (`--raw` prints exact bytes). |
 | `so blocks` | Stage reusable scripts and run the built-ins. Apply is the only write to `AGENTS.md`. |
 | `so version` | Print CLI version |
 
@@ -44,8 +44,9 @@ architecture           coverage   diagnostics
 artifact   layout      projects
 ```
 
-Defaults: compact `NODE`/`EDGE` text under a token budget. `TRUNCATED`
-means run `snippet` or ask a narrower question. `so graph impact` prints
+Defaults: AXI TOON (`count: N of M`, `name[N]{cols}:` rows, `help[]`). A
+query prints 15 ranked rows; the `help[]` line gives the `--offset` command for
+more. `so graph impact` prints
 compact file rollups (`--files`, `--base main`). `--json` / `--full` are
 escape hatches. Cypher support is a read-only subset (`so graph cypher --help`).
 
@@ -93,6 +94,7 @@ session and the agent is not asked to propose.
 ```bash
 so scan
 so scan --session <id> --min-severity high --fail-on high
+so scan rules                 # list, then: show | set <file|-> | enable | disable | remove
 so scan --json
 so scan --rules <dir>
 ```
@@ -108,19 +110,26 @@ so shrink < noise.json
 so shrink -- pnpm test
 so shrink --type json < rows.json
 so retrieve ccr_…
+so retrieve --raw ccr_… > original.json
+so shrink --raw < rows.json > compact.txt
 ```
 
 `so shrink` reads stdin, or the stdout of the command after `--`. Above 64 MiB
 it fails with `cave_input_too_large` and does not truncate. If the transform
-is not smaller, or the original cannot be stored, the original bytes are what
-print. `so graph`, `so memory`, and `so sessions` output is unchanged.
+is not smaller, or the original cannot be stored, the content passes through.
+Default output is structured text with byte counts and the complete transformed
+content. Compressed results include a recovery command; pass-through results
+remain complete even when no recovery handle exists. `--json` is available and
+`--raw` prints bytes for pipelines. `so graph`, `so memory`, and `so sessions`
+output is unchanged. Hosts with a tool-result replacement hook automatically
+shrink supported noisy shell test and log output; the installed skill gives
+every host `so shrink -- <command>` as an explicit path. Source reads, search
+results, diffs and stderr stay complete. OpenClaw needs conversation access
+enabled for its result-persistence hook.
 
 The recovery file is `.so/db/ccr.db` (gitignored with `db/`). The default cap
 is 512 MiB (`SUPEROPEN_CCR_MAX_BYTES`). At the cap, new transforms pass the
 original through. Existing handles are not evicted. A bad handle fails.
-
-Token lines on stderr are `inferred` local estimates. They are not a provider
-bill.
 
 `so install --voice` adds an opt-in short-reply skill. A normal install does
 not. It stays off until you ask for it.
@@ -132,13 +141,23 @@ so blocks scan
 so blocks init
 so blocks apply
 so blocks decline
-so blocks run test-summary
+so blocks run test-summary results.xml
+so blocks run first-error test.log
 so blocks run json-peek <file> [path]
 so blocks run grep-defs <file>
+so blocks run --raw test-summary < results.xml
 ```
 
-`scan` ranks shell commands retyped in local session history. Script text stays
-on the machine. `init` stages an index and does not edit `AGENTS.md`. `apply`
-writes that index. A hook may add one line telling the agent to use a block.
-It does not deny or rewrite the command. `grep-defs` can be larger than a
-plain grep. That note stays in the index.
+`scan` ranks commands seen in multiple local sessions and shows which built-in
+block matches each. Script text stays on the machine. `init` stages only blocks
+matched by repeated commands; when there are no matches, it reports `none`.
+It does not edit `AGENTS.md`. `apply` writes the staged index. A hook may add
+one line about a block after graph guidance has had priority. It does not deny
+or rewrite the command. Block results show complete content; `--json` and
+`--raw` expose machine-readable or pipe-ready output. `test-summary` summarizes
+JUnit, pytest JSON, and Jest JSON reports. Other formats pass through unchanged;
+`first-error` works on plain test output. `grep-defs` can be
+larger than a plain grep and is never staged without a matching repeat.
+`replace-in-file` requires one unambiguous match and reports an already
+applied replacement on a repeat. `http-json` fails on non-2xx or non-JSON
+responses.

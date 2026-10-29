@@ -30,70 +30,117 @@ const (
 // emitSteerContext writes vendor-specific additionalContext when the event
 // supports it. Unknown protocols get no stdout (fail-open).
 func emitSteerContext(vendor, event, kind string, payload []byte) {
+	if event == "" {
+		event = payloadEvent(payload)
+	}
 	decision, ok := steerDecisionFor(vendor, event, kind, payload)
 	if !ok {
 		return
 	}
 	var body any
-	switch hookProtocol(vendor) {
-	case "claude-code":
-		hso := map[string]any{
-			"hookEventName": decision.hookEvent,
-		}
-		if decision.deny {
-			hso["permissionDecision"] = "deny"
-			hso["permissionDecisionReason"] = decision.text
-		} else if decision.replace != nil {
-			hso["updatedToolOutput"] = decision.replace
-		} else if decision.text != "" {
-			hso["additionalContext"] = decision.text
-		} else {
+	if (vendor == "copilot-cli" || vendor == "vscode") && event == "userPromptTransformed" {
+		prompt := peekContext(payload).TransformedPrompt
+		if prompt == "" || decision.text == "" {
 			return
 		}
-		body = map[string]any{"hookSpecificOutput": hso}
-	case "cursor":
-		if decision.deny && event == "beforeShellExecution" {
-			body = map[string]any{
-				"permission":    "deny",
-				"user_message":  decision.text,
-				"agent_message": decision.text,
+		body = map[string]any{"modifiedTransformedPrompt": prompt + "\n\n" + decision.text}
+	} else if vendor == "copilot-cli" && event == "postToolUse" && decision.replace != nil {
+		body = map[string]any{"modifiedResult": map[string]any{
+			"resultType": "success", "textResultForLlm": decision.replace,
+		}}
+	} else if (vendor == "cline" || vendor == "hermes") && event == "transformToolResult" && decision.replace != nil {
+		body = map[string]any{"output_replacement": decision.replace}
+	} else {
+		switch hookProtocol(vendor) {
+		case "claude-code":
+			if vendor == "factory" && event == "UserPromptSubmit" {
+				if decision.text == "" {
+					return
+				}
+				body = map[string]any{"additionalContext": decision.text}
+				break
 			}
-			break
-		}
-		if decision.deny || decision.text == "" {
-			// Cursor has no PreToolUse deny contract matching Claude.
+			hso := map[string]any{
+				"hookEventName": decision.hookEvent,
+			}
+			if decision.deny {
+				hso["permissionDecision"] = "deny"
+				hso["permissionDecisionReason"] = decision.text
+			} else if decision.replace != nil {
+				hso["updatedToolOutput"] = decision.replace
+			} else if decision.text != "" {
+				hso["additionalContext"] = decision.text
+			} else {
+				return
+			}
+			body = map[string]any{"hookSpecificOutput": hso}
+		case "cursor":
+			if decision.deny && event == "beforeShellExecution" {
+				body = map[string]any{
+					"permission":    "deny",
+					"user_message":  decision.text,
+					"agent_message": decision.text,
+				}
+				break
+			}
+			if decision.deny || decision.text == "" {
+				// Cursor has no PreToolUse deny contract matching Claude.
+				if decision.text == "" {
+					return
+				}
+			}
+			body = map[string]any{"additional_context": decision.text}
+		case "codex":
+			// Codex Desktop rejects additionalContext on PreToolUse.
+			if event == "PreToolUse" {
+				return
+			}
 			if decision.text == "" {
 				return
 			}
-		}
-		body = map[string]any{"additional_context": decision.text}
-	case "codex":
-		// Codex Desktop rejects additionalContext on PreToolUse.
-		if event == "PreToolUse" {
+			body = map[string]any{
+				"hookSpecificOutput": map[string]any{
+					"hookEventName":     decision.hookEvent,
+					"additionalContext": decision.text,
+				},
+			}
+		case "context", "pi":
+			if decision.replace != nil && (vendor == "opencode" || vendor == "openclaw" || hookProtocol(vendor) == "pi") {
+				body = map[string]any{"output_replacement": decision.replace}
+				break
+			}
+			if decision.text == "" {
+				return
+			}
+			body = map[string]any{"additionalContext": decision.text}
+		case "hermes":
+			if event != "UserPromptSubmit" || decision.text == "" {
+				return
+			}
+			body = map[string]any{"context": decision.text}
+		default:
 			return
 		}
-		if decision.text == "" {
-			return
-		}
-		body = map[string]any{
-			"hookSpecificOutput": map[string]any{
-				"hookEventName":     decision.hookEvent,
-				"additionalContext": decision.text,
-			},
-		}
-	case "context", "pi":
-		if decision.text == "" {
-			return
-		}
-		body = map[string]any{"additionalContext": decision.text}
-	default:
-		return
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(body); err != nil {
 		fmt.Fprintf(os.Stderr, "so hook: steer stdout: %v\n", err)
 	}
+}
+
+func payloadEvent(payload []byte) string {
+	var probe struct {
+		Type  string `json:"type"`
+		Event string `json:"event"`
+	}
+	if json.Unmarshal(payload, &probe) != nil {
+		return ""
+	}
+	if event := strings.TrimSpace(probe.Type); event != "" {
+		return event
+	}
+	return strings.TrimSpace(probe.Event)
 }
 
 type steerDecision struct {
@@ -117,6 +164,17 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 	}
 	ev := strings.TrimSpace(event)
 	vendor = steerVendor(vendor)
+	if vendor == "vscode" && ev == "UserPromptSubmit" {
+		return steerDecision{}, false
+	}
+	if vendor == "openclaw" && ev == "before_prompt_build" {
+		start := sessionStartText(payload, vendor)
+		prompt := promptSubmitText(payload, vendor)
+		if text := strings.TrimSpace(strings.Join([]string{start, prompt}, "\n")); text != "" {
+			return steerDecision{text: text, hookEvent: ev}, true
+		}
+		return steerDecision{}, false
+	}
 	var sessionEvent, toolEvent bool
 	var compactEvent bool
 	switch vendor {
@@ -132,13 +190,13 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		sessionEvent = lower == "sessionstart" || lower == "beforeagent"
 		toolEvent = lower == "beforetool"
 	case "copilot-cli":
-		sessionEvent = ev == "sessionStart" || ev == "userPromptSubmitted"
+		sessionEvent = ev == "sessionStart" || ev == "userPromptTransformed"
 		toolEvent = ev == "preToolUse"
 	case "opencode":
 		lower := strings.ToLower(ev)
 		sessionEvent = strings.Contains(lower, "session.created") || strings.Contains(lower, "session.end") ||
 			strings.Contains(lower, "session.deleted") || strings.Contains(lower, "session.idle") ||
-			lower == "sessionstart" || lower == "session_start"
+			lower == "sessionstart" || lower == "session_start" || lower == "chat.message"
 		toolEvent = strings.Contains(lower, "tool.execute.before") || lower == "pretooluse"
 	case "pi":
 		lower := strings.ToLower(ev)
@@ -178,6 +236,16 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 			return steerDecision{hookEvent: ev, replace: replaced}, true
 		}
 		return steerDecision{}, false
+	case (vendor == "opencode" && ev == "tool.execute.after") ||
+		(vendor == "cline" && ev == "transformToolResult") ||
+		(vendor == "hermes" && ev == "transformToolResult") ||
+		(vendor == "copilot-cli" && ev == "postToolUse") ||
+		(vendor == "openclaw" && ev == "tool_result_persist") ||
+		(vendor == "pi" && ev == "tool_result"):
+		if replaced, ok := replaceTextToolOutput(payload); ok {
+			return steerDecision{hookEvent: ev, replace: replaced}, true
+		}
+		return steerDecision{}, false
 	case toolEvent:
 		if reason, denied := guardDeny(payload, vendor); denied {
 			if vendor == "codex" {
@@ -193,12 +261,15 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		if vendor == "codex" {
 			return steerDecision{}, false
 		}
+		if decision, ok := graphGate(payload, vendor, kind, ev); ok {
+			return decision, true
+		}
 		if cmd := bashCommandFromPayload(payload); cmd != "" && !compact.ProtectCommand(cmd) {
 			if hint := blocks.Hint(cmd); hint != "" {
 				return steerDecision{text: hint, hookEvent: ev}, true
 			}
 		}
-		return graphGate(payload, vendor, kind, ev)
+		return steerDecision{}, false
 	}
 	return steerDecision{}, false
 }
@@ -211,12 +282,15 @@ func graphGate(payload []byte, vendor, kind, hookEvent string) (steerDecision, b
 	cmd := bashCommandFromPayload(payload)
 	if commandLooksLikeSo(cmd) {
 		if bashLooksLikeGraphQuery(cmd) {
-			if engine.QueryStampFreshFor(stampRoot(payload), steerSessionID(payload)) {
+			if engine.QueryStampFreshFor(stampRoot(payload), steerSessionID(payload)) && graphQuerySeen(payload, vendor) {
 				if !claimQueryRepeat(payload, vendor) {
 					return steerDecision{}, false
 				}
 				return steerDecision{text: steer.QueryRepeatNudge(), hookEvent: hookEvent}, true
 			}
+			markGraphQuerySeen(payload, vendor)
+			engine.RecordQueryStampFor(stampRoot(payload), steerSessionID(payload))
+		} else if bashLooksLikeGraphCodeSearch(cmd) {
 			engine.RecordQueryStampFor(stampRoot(payload), steerSessionID(payload))
 		}
 		return steerDecision{}, false
@@ -389,14 +463,16 @@ func isPromptSubmitEvent(vendor, ev string) bool {
 	case "cursor":
 		return ev == "beforeSubmitPrompt"
 	case "copilot-cli":
-		return ev == "userPromptSubmitted"
+		return ev == "userPromptTransformed"
 	case "gemini":
 		return lower == "beforeagent"
 	case "pi":
 		return lower == "before_agent_start"
+	case "opencode":
+		return lower == "chat.message"
 	default:
 		return strings.EqualFold(ev, "UserPromptSubmit") || strings.EqualFold(ev, "beforeSubmitPrompt") ||
-			lower == "beforeagent" || lower == "before_agent_start"
+			lower == "beforeagent" || lower == "before_agent_start" || lower == "userprompttransformed"
 	}
 }
 
@@ -419,6 +495,9 @@ func sessionStartText(payload []byte, vendor string) string {
 	switch route {
 	case routeCode:
 		core = steer.GraphStartLine()
+		if _, extraVendor := vendors.ByID(vendor); extraVendor {
+			core += "\nNoisy test/log: so shrink -- <command>. Repeated shell work: so blocks scan, then so blocks run <name>."
+		}
 	case routeMemory:
 		if text := memory.SessionStartIndex(root); text != "" {
 			core = text
@@ -466,6 +545,13 @@ func promptSubmitText(payload []byte, vendor string) string {
 		return harvest.JoinStart(steer.CaptureNudge(), live)
 	}
 	if kind != routeMemory {
+		if kind == routeCode && (vendor == "opencode" || vendor == "hermes") {
+			guidance := steer.GraphStartLine()
+			if vendor == "hermes" {
+				guidance += "\nNoisy test/log: so shrink -- <command>. Repeated shell work: so blocks scan, then so blocks run <name>."
+			}
+			return harvest.JoinStart(guidance, live)
+		}
 		return live
 	}
 	if root == "" {
@@ -604,15 +690,67 @@ func claudeBashStdout(payload []byte) string {
 	return ""
 }
 
+var queryTableHeader = regexp.MustCompile(`^(nodes|callers)\[\d+\]\{qn,kind,file,lines\}:$`)
+
+// queryTableFiles reads the file column of TOON nodes/callers rows.
+func queryTableFiles(stdout string) []string {
+	var files []string
+	inTable := false
+	for _, line := range strings.Split(stdout, "\n") {
+		if queryTableHeader.MatchString(strings.TrimSpace(line)) && !strings.HasPrefix(line, " ") {
+			inTable = true
+			continue
+		}
+		if !inTable {
+			continue
+		}
+		if !strings.HasPrefix(line, "  ") {
+			inTable = false
+			continue
+		}
+		if cells := splitTOONRow(strings.TrimSpace(line)); len(cells) >= 3 {
+			files = append(files, cells[2])
+		}
+	}
+	return files
+}
+
+// splitTOONRow splits one comma-delimited TOON row, honoring "quoted" cells.
+func splitTOONRow(row string) []string {
+	var cells []string
+	var cur strings.Builder
+	quoted := false
+	for i := 0; i < len(row); i++ {
+		c := row[i]
+		switch {
+		case quoted && c == '\\' && i+1 < len(row):
+			i++
+			cur.WriteByte(row[i])
+		case c == '"':
+			quoted = !quoted
+		case c == ',' && !quoted:
+			cells = append(cells, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	return append(cells, cur.String())
+}
+
 func srcPathsFromQuery(stdout string) []string {
-	matches := querySrcPattern.FindAllStringSubmatch(stdout, -1)
-	if len(matches) == 0 {
+	var paths []string
+	for _, m := range querySrcPattern.FindAllStringSubmatch(stdout, -1) {
+		paths = append(paths, m[1])
+	}
+	paths = append(paths, queryTableFiles(stdout)...)
+	if len(paths) == 0 {
 		return nil
 	}
 	seen := map[string]bool{}
 	out := make([]string, 0, queryListedFileCap)
-	for _, m := range matches {
-		p := filepath.ToSlash(strings.TrimSpace(m[1]))
+	for _, raw := range paths {
+		p := filepath.ToSlash(strings.TrimSpace(raw))
 		if p == "" || p == "-" || seen[p] {
 			continue
 		}
@@ -703,6 +841,29 @@ func claimQueryRepeat(payload []byte, vendor string) bool {
 	return claimSessionFlag(payload, vendor, func(s *sessionstate.State) *bool {
 		return &s.QueryRepeatReminded
 	}, "last_query_repeat")
+}
+
+func graphQuerySeen(payload []byte, vendor string) bool {
+	sessionID := steerSessionID(payload)
+	if sessionID != "" {
+		state := sessionstate.Load(sessionID, vendor)
+		return state != nil && state.GraphQuerySeen
+	}
+	return engine.QueryStampFreshAt(filepath.Join(paths.Resolve(stampRoot(payload)).DBDir, "last_graph_query_seen"))
+}
+
+func markGraphQuerySeen(payload []byte, vendor string) {
+	sessionID := steerSessionID(payload)
+	if sessionID != "" {
+		state := sessionstate.Load(sessionID, vendor)
+		if state == nil {
+			state = &sessionstate.State{}
+		}
+		state.GraphQuerySeen = true
+		sessionstate.Save(sessionID, vendor, state)
+		return
+	}
+	claimRootStamp(payload, "last_graph_query_seen")
 }
 
 // claimSessionFlag is once-per-session when the host sent an id. Missing ids
@@ -820,6 +981,8 @@ func hookProtocol(vendor string) string {
 		return "pi"
 	case "gemini", "copilot-cli", "opencode":
 		return "context"
+	case "hermes":
+		return "hermes"
 	default:
 		if spec, ok := vendors.ByID(vendor); ok {
 			if spec.Protocol == vendors.ProtocolPi {
@@ -845,7 +1008,7 @@ func steerVendor(vendor string) string {
 func classifyExtraEvent(ev string) (session, tool, compact bool) {
 	switch strings.ToLower(strings.TrimSpace(ev)) {
 	case "sessionstart", "session_start", "on_session_start", "beforerun", "preinvocation", "session.created",
-		"userpromptsubmit", "beforesubmitprompt", "beforeagent", "userpromptsubmitted", "pre_llm_call", "before_agent_start",
+		"userpromptsubmit", "beforesubmitprompt", "beforeagent", "userpromptsubmitted", "userprompttransformed", "pre_llm_call", "before_agent_start",
 		"subagentstart", "subagent_spawned":
 		return true, false, false
 	case "pretooluse", "beforetool", "pre_tool_use", "pre_tool_call", "before_tool_call", "beforeshellexecution", "beforereadfile",
@@ -1020,6 +1183,10 @@ func bashLooksLikeListing(cmd string) bool {
 
 func bashLooksLikeGraphQuery(cmd string) bool {
 	return strings.Contains(strings.ToLower(cmd), "graph query")
+}
+
+func bashLooksLikeGraphCodeSearch(cmd string) bool {
+	return strings.Contains(strings.ToLower(cmd), "graph code-search")
 }
 
 // longestTerm picks the most selective identifier in a raw pattern.

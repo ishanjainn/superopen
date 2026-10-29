@@ -22,6 +22,7 @@ function fire(event: string, payload: Record<string, unknown>, sync = false): st
       return typeof r.stdout === "string" ? r.stdout : "";
     }
     const child = spawn(bin, args, { stdio: ["pipe", "ignore", "ignore"] });
+    child.on("error", () => {});
     child.stdin?.end(input);
   } catch {
     /* never block OpenCode */
@@ -46,6 +47,15 @@ function additionalContext(stdout: string): string {
     if (!line) return "";
     const parsed = JSON.parse(line) as { additionalContext?: string };
     return typeof parsed.additionalContext === "string" ? parsed.additionalContext : "";
+  } catch {
+    return "";
+  }
+}
+
+function outputReplacement(stdout: string): string {
+  try {
+    const response = JSON.parse(stdout.trim()) as { output_replacement?: unknown };
+    return typeof response.output_replacement === "string" ? response.output_replacement : "";
   } catch {
     return "";
   }
@@ -121,6 +131,7 @@ function toolsFromParts(parts: unknown): Array<Record<string, unknown>> {
 export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
   let lastSid: string | null = null;
   let reminded = false;
+  const promptContext = new Map<string, string>();
 
   function rememberSid(...vals: unknown[]): string | null {
     for (const v of vals) {
@@ -171,7 +182,7 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
             true
           );
           try {
-            spawn(soBin(), ["graph", "refresh", "--detach"], { stdio: "ignore" });
+            spawn(soBin(), ["graph", "refresh", "--detach"], { stdio: "ignore" }).on("error", () => {});
           } catch {
             /* ignore */
           }
@@ -266,14 +277,26 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
       const parts = (output as { parts?: unknown[] })?.parts;
       const text = textFromParts(parts);
       if (!text || !sid) return;
-      fire("message.updated", {
-        type: "message.updated",
+      const stdout = fire("chat.message", {
+        type: "chat.message",
         cwd: directory,
         session_id: sid,
         sessionID: sid,
         role: "user",
         text,
       }, true);
+      const context = additionalContext(stdout);
+      if (context) promptContext.set(sid, context);
+      else promptContext.delete(sid);
+    },
+
+    "experimental.chat.system.transform": async (input, output) => {
+      const sid = input.sessionID;
+      if (!sid) return;
+      const context = promptContext.get(sid);
+      if (!context) return;
+      promptContext.delete(sid);
+      output.system.push(context);
     },
 
     "tool.execute.before": async (input, output) => {
@@ -343,6 +366,11 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
         true
       );
       const nudge = additionalContext(stdout);
+      const replacement = outputReplacement(stdout);
+      if (replacement && output && typeof output === "object") {
+        const out = output as { output?: unknown };
+        if (typeof out.output === "string") out.output = replacement;
+      }
       if (nudge && isEditTool(tool) && output && typeof output === "object") {
         const out = output as { output?: unknown };
         if (typeof out.output === "string") {
@@ -352,6 +380,7 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
     },
 
     dispose: async () => {
+      promptContext.clear();
       fire(
         "session.end",
         { cwd: directory, type: "session.end", session_id: lastSid, sessionID: lastSid },

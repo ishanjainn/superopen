@@ -167,8 +167,20 @@ function paintEdge(color: THREE.Color, intensity: number, dark: boolean) {
     color.multiplyScalar(intensity);
     return;
   }
-  // Floor so sparse edges stay cyan/green/purple pastels, not hairline black.
-  color.lerp(PAPER, 1 - Math.min(1, Math.max(intensity, 0.32) * 1.6));
+  // Light stage: full hue, a touch deeper so it reads on white. Strength is
+  // carried by alpha (lightEdgeAlpha), so overlaps build saturation instead
+  // of washing every edge to the same pastel.
+  color.multiplyScalar(0.88);
+}
+
+/**
+ * Alpha for a light-stage edge. Dense graphs scale intensity down by edge
+ * count; the square root keeps hierarchy (same-cluster over cross-cluster)
+ * visible without letting 50k edges either vanish or smear into grey.
+ */
+function lightEdgeAlpha(intensity: number, emphasized: boolean): number {
+  if (emphasized) return 0.85;
+  return Math.min(0.6, Math.max(0.05, 0.5 * Math.sqrt(intensity)));
 }
 
 let pointTexture: THREE.CanvasTexture | null = null;
@@ -537,7 +549,9 @@ export function StellarGraphScene({
 
     const byID = new Map(nodes.map((node) => [node.id, node]));
     const edgePositions = new Float32Array(data.edges.length * 6);
-    const edgeColors = new Float32Array(data.edges.length * 6);
+    // Light stage edges carry per-vertex alpha (RGBA); dark stage glows (RGB).
+    const colorSize = dark ? 3 : 4;
+    const edgeColors = new Float32Array(data.edges.length * 2 * colorSize);
     const density = edgeIntensityScale(data.edges.length) * display.edgeBrightness;
     let edgeCount = 0;
     for (const edge of data.edges) {
@@ -561,10 +575,22 @@ export function StellarGraphScene({
       );
       tempColor.set(EDGE_COLORS[edge.type] ?? DEFAULT_EDGE_COLOR);
       paintEdge(tempColor, intensity, dark);
-      edgeColors.set(
-        [tempColor.r, tempColor.g, tempColor.b, tempColor.r, tempColor.g, tempColor.b],
-        offset,
-      );
+      const colorOffset = edgeCount * 2 * colorSize;
+      if (dark) {
+        edgeColors.set(
+          [tempColor.r, tempColor.g, tempColor.b, tempColor.r, tempColor.g, tempColor.b],
+          colorOffset,
+        );
+      } else {
+        const alpha = lightEdgeAlpha(intensity, hasHighlight && Boolean(sourceLit && targetLit));
+        edgeColors.set(
+          [
+            tempColor.r, tempColor.g, tempColor.b, alpha,
+            tempColor.r, tempColor.g, tempColor.b, alpha,
+          ],
+          colorOffset,
+        );
+      }
       edgeCount++;
     }
     const edgeGeometry = new THREE.BufferGeometry();
@@ -574,7 +600,7 @@ export function StellarGraphScene({
     );
     edgeGeometry.setAttribute(
       "color",
-      new THREE.BufferAttribute(edgeColors.slice(0, edgeCount * 6), 3),
+      new THREE.BufferAttribute(edgeColors.slice(0, edgeCount * 2 * colorSize), colorSize),
     );
     graph.add(
       new THREE.LineSegments(

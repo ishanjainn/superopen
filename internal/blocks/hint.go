@@ -4,10 +4,10 @@ import (
 	"strings"
 )
 
-// Hint is one line when a shell command is starting to retype a built-in.
-// It is empty for graph, memory, and session commands, and for plain greps.
-// The caller must not deny or rewrite the command.
-func Hint(cmd string) string {
+// BlockFor identifies a built-in that can replace a repeated shell pattern.
+// Plain test output is routed to first-error because test-summary accepts
+// structured reports only.
+func BlockFor(cmd string) string {
 	fields := strings.Fields(cmd)
 	low := strings.ToLower(strings.Join(fields, " "))
 	if low == "" || mentionsSO(low) {
@@ -15,19 +15,39 @@ func Hint(cmd string) string {
 	}
 	switch {
 	case testTail(low):
-		return "use so blocks run test-summary"
+		return "first-error"
 	case jsonPeek(low):
-		return "use so blocks run json-peek"
+		return "json-peek"
 	case jsonlStats(low):
-		return "use so blocks run jsonl-stats"
+		return "jsonl-stats"
 	case firstErr(low):
-		return "use so blocks run first-error"
+		return "first-error"
 	case httpJSON(low):
-		return "use so blocks run http-json"
+		return "http-json"
 	case replaceFile(low):
-		return "use so blocks run replace-in-file"
+		return "replace-in-file"
 	case waitFor(low):
-		return "use so blocks run wait-for"
+		return "wait-for"
+	default:
+		return ""
+	}
+}
+
+// Hint is a one-line, actionable suggestion. It never denies or rewrites a command.
+func Hint(cmd string) string {
+	switch BlockFor(cmd) {
+	case "first-error":
+		return "save full command output, then run so blocks run first-error <file>"
+	case "json-peek":
+		return "use so blocks run json-peek <file> [path]"
+	case "jsonl-stats":
+		return "use so blocks run jsonl-stats <file>"
+	case "http-json":
+		return "use so blocks run http-json <url>"
+	case "replace-in-file":
+		return "use so blocks run replace-in-file <file> <old> <new>"
+	case "wait-for":
+		return "use so blocks run wait-for --file <file> --pattern <text>"
 	default:
 		return ""
 	}

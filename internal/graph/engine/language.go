@@ -112,10 +112,7 @@ func DetectLanguage(name string, content []byte, overrides map[string]string) (D
 	}
 	if !ok {
 		lastDot := strings.LastIndexByte(base, '.')
-		if lastDot < 0 {
-			return DetectedLanguage{}, false
-		}
-		for dot := strings.IndexByte(base, '.'); dot >= 0 && dot < lastDot; {
+		for dot := strings.IndexByte(base, '.'); lastDot >= 0 && dot >= 0 && dot < lastDot; {
 			compound := base[dot:]
 			if compound == ".blade.php" {
 				language, ok = "blade", true
@@ -131,7 +128,7 @@ func DetectLanguage(name string, content []byte, overrides map[string]string) (D
 			}
 			dot += next + 1
 		}
-		if !ok {
+		if !ok && lastDot >= 0 {
 			ext := base[lastDot:]
 			if override, exists := overrides[ext]; exists && configuredLanguageValid(override) {
 				language, ok = override, true
@@ -139,6 +136,10 @@ func DetectLanguage(name string, content []byte, overrides map[string]string) (D
 				language, ok = extensionLanguages[ext]
 			}
 		}
+	}
+	if !ok && len(content) > 0 {
+		language = languageFromShebang(content)
+		ok = language != ""
 	}
 	if !ok || language == "" {
 		return DetectedLanguage{}, false

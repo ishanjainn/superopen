@@ -51,6 +51,15 @@ function additionalContext(stdout: string): string {
   }
 }
 
+function outputReplacement(stdout: string): string {
+  try {
+    const response = JSON.parse(stdout.trim()) as { output_replacement?: unknown };
+    return typeof response.output_replacement === "string" ? response.output_replacement : "";
+  } catch {
+    return "";
+  }
+}
+
 function shellSafeNudge(text: string): string {
   return text.replace(/`/g, "").replace(/\$\(/g, "(").replace(/"/g, "'");
 }
@@ -348,6 +357,24 @@ export default function (pi: ExtensionAPI) {
       if (typeof ev.result === "string") {
         ev.result = ev.result + "\n" + nudge;
       }
+    }
+  });
+
+  pi.on("tool_result", async (event, ctx) => {
+    const blocks = event.content;
+    if (event.isError || !Array.isArray(blocks)) return;
+    const original = blocks.filter((block) => block.type === "text").map((block) => block.text).join("");
+    if (!original) return;
+    const response = fire("tool_result", {
+      cwd: ctx.cwd,
+      session_id: sid(ctx),
+      tool_name: event.toolName,
+      tool_input: event.input,
+      tool_response: original,
+    }, true);
+    const replacement = outputReplacement(response);
+    if (replacement) {
+      return { content: [{ type: "text" as const, text: replacement }, ...blocks.filter((block) => block.type !== "text")] };
     }
   });
 

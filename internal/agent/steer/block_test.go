@@ -18,6 +18,9 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if !paths.MentionsCommand(first, "graph query") {
 		t.Fatalf("missing graph query invocation: %s", first)
 	}
+	if !paths.MentionsCommand(first, "graph code-search") || !contains(first, "exact flag") {
+		t.Fatalf("durable block must route exact literals to code-search: %s", first)
+	}
 	if contains(first, "so-verify") || contains(first, "so-scout") || contains(first, "so-auditor") {
 		t.Fatalf("always-on block must not name subagents: %s", first)
 	}
@@ -27,11 +30,8 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if contains(first, "run `so init` once") {
 		t.Fatalf("block must not auto-init unmanaged repos: %s", first)
 	}
-	if contains(first, "ignore Superopen entirely") {
-		t.Fatalf("block must still try one graph query when .so/ is missing: %s", first)
-	}
-	if !contains(first, "still run one graph query") {
-		t.Fatalf("block must try one graph query when .so/ is missing: %s", first)
+	if contains(first, "still run one graph query") || !containsAll(first, "linked Git worktree", "do not invoke or mention Superopen", "first graph query seeds") {
+		t.Fatalf("block must skip unmanaged repositories and retain managed worktree seeding: %s", first)
 	}
 	if !contains(first, "Do not spawn Explore") {
 		t.Fatalf("block must close the Explore hole: %s", first)
@@ -42,8 +42,8 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if !contains(first, "list the tree") {
 		t.Fatalf("block must say not to list the tree to confirm Superopen: %s", first)
 	}
-	if !contains(first, "TRUNCATED") {
-		t.Fatalf("block must allow a follow-up query only after TRUNCATED: %s", first)
+	if !contains(first, "--offset") {
+		t.Fatalf("block must send more rows to the --offset help line: %s", first)
 	}
 	if paths.MentionsCommand(first, "graph trace") || paths.MentionsCommand(first, "graph search") {
 		t.Fatalf("always-on block must not list trace/search as the default: %s", first)
@@ -51,8 +51,8 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if !paths.MentionsCommand(first, "graph snippet") {
 		t.Fatalf("block must name snippet as overflow for a listed NODE: %s", first)
 	}
-	if !contains(first, "BODIES") {
-		t.Fatalf("block must tell agents to stop on query BODIES: %s", first)
+	if !contains(first, "bodies[]") {
+		t.Fatalf("block must tell agents to stop on query bodies[]: %s", first)
 	}
 	if !paths.MentionsCommand(first, "graph impact") {
 		t.Fatalf("block must name graph impact for multi-file work: %s", first)
@@ -137,6 +137,11 @@ func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 	if !contains(SearchNudge(), ".so/") || !contains(HookReminder(), ".so/") {
 		t.Fatal("search/reminder should tell agents not to Grep .so/")
 	}
+	for _, line := range []string{GraphStartLine(), HookReminder(), SearchNudge(), ReadDenyReason()} {
+		if !paths.MentionsCommand(line, "graph code-search") || !paths.MentionsCommand(line, "graph query") {
+			t.Fatalf("graph guidance must distinguish literals and relationships: %q", line)
+		}
+	}
 	if paths.MentionsCommand(ReadNudge(), "graph snippet") || paths.MentionsCommand(ReadNudge(), "graph trace") {
 		t.Fatal("read nudge must not list snippet/trace (spray menu)")
 	}
@@ -154,8 +159,8 @@ func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 		t.Fatalf("overflow must be one line without quotes: %q", overflow)
 	}
 	repeat := QueryRepeatNudge()
-	if !paths.MentionsCommand(repeat, "graph snippet") || !contains(repeat, "TRUNCATED") {
-		t.Fatalf("repeat-query overflow must name snippet and TRUNCATED: %q", repeat)
+	if !paths.MentionsCommand(repeat, "graph snippet") || !contains(repeat, "--offset") {
+		t.Fatalf("repeat-query overflow must name snippet and --offset: %q", repeat)
 	}
 	if contains(SearchNudge(), "Do not ls") == false {
 		t.Fatal("search nudge must discourage listing to confirm Superopen")
@@ -164,14 +169,17 @@ func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 
 func TestCursorRuleIsShortGate(t *testing.T) {
 	rule := CursorRule()
-	if contains(rule, "ignore Superopen entirely") {
-		t.Fatalf("rule must still try one graph query when .so/ is missing: %s", rule)
-	}
-	if !contains(rule, "still run one graph query") {
-		t.Fatalf("rule must try one graph query when .so/ is missing: %s", rule)
+	if contains(rule, "still run one graph query") || !containsAll(rule, "linked Git worktree", "do not invoke or mention Superopen", "first graph query seeds") {
+		t.Fatalf("rule must skip unmanaged repositories and retain managed worktree seeding: %s", rule)
 	}
 	if !contains(rule, "graph impact") {
 		t.Fatalf("rule must name graph impact for multi-file work: %s", rule)
+	}
+	if !containsAll(rule, "so shrink -- <command>", "so blocks scan", "so blocks run <name>") {
+		t.Fatalf("rule must expose noisy-output and repeated-work commands: %s", rule)
+	}
+	if !paths.MentionsCommand(rule, "graph code-search") {
+		t.Fatalf("cursor rule must route exact literals to code-search: %s", rule)
 	}
 	if !contains(rule, "head or tail") {
 		t.Fatalf("rule must forbid piping so through head/tail: %s", rule)

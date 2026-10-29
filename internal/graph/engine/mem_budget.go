@@ -92,6 +92,7 @@ func dropExtractedOccurrences(files []ParsedSyntaxFile) {
 		files[i].Extraction.Usages = nil
 		files[i].Extraction.Writes = nil
 		files[i].Extraction.Bindings = nil
+		files[i].Extraction.TypeAssignments = nil
 		files[i].Extraction.Calls = nil
 		files[i].Extraction.Throws = nil
 		files[i].Body = nil

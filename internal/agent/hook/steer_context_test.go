@@ -2,16 +2,36 @@ package hook
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/ishanjainn/superopen/internal/agent/vendors"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 )
+
+func TestExtraHarnessSessionGuidanceIncludesShrinkAndBlocks(t *testing.T) {
+	root := t.TempDir()
+	writeHookSession(t, root, "harness-guidance")
+	writeHookSourceFile(t, root)
+	for _, spec := range vendors.Extra() {
+		t.Run(spec.ID, func(t *testing.T) {
+			payload, err := json.Marshal(map[string]any{"cwd": root, "session_id": "guidance-" + spec.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := sessionStartText(payload, spec.ID)
+			if !strings.Contains(got, "so shrink -- <command>") || !strings.Contains(got, "so blocks scan") {
+				t.Fatalf("missing new-feature guidance: %q", got)
+			}
+		})
+	}
+}
 
 func TestIsExploreToolExcludesShellAndListing(t *testing.T) {
 	for _, name := range []string{"Grep", "glob", "Read", "codebase_search", "Bash"} {
@@ -45,6 +65,12 @@ func TestBashLooksLikeReadAndListing(t *testing.T) {
 	if bashLooksLikeGraphQuery("/usr/local/bin/so graph snippet pkg.Foo.bar") {
 		t.Fatal("snippet must not look like graph query")
 	}
+	if !bashLooksLikeGraphCodeSearch("/usr/local/bin/so graph code-search '--verbose' pylint") {
+		t.Fatal("literal graph search should match")
+	}
+	if bashLooksLikeGraphCodeSearch("/usr/local/bin/so graph query 'verbose option'") {
+		t.Fatal("query must not look like literal graph search")
+	}
 }
 
 func TestBashCatPreToolUseEmitsGraphNudge(t *testing.T) {
@@ -64,6 +90,21 @@ func TestBashCatPreToolUseEmitsGraphNudge(t *testing.T) {
 	d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", payload)
 	if !ok || !strings.Contains(d.text, "graph query") {
 		t.Fatalf("bash sed -n should get a graph nudge, ok=%v text=%q", ok, d.text)
+	}
+}
+
+func TestOpenClawPromptBuildDeliversGraphContext(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "openclaw-prompt")
+	writeHookSourceFile(t, root)
+	payload, err := json.Marshal(map[string]any{"sessionKey": "openclaw-prompt", "cwd": root, "prompt": "fix auth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, ok := steerDecisionFor("openclaw", "before_prompt_build", "", payload)
+	if !ok || !strings.Contains(decision.text, "graph query") {
+		t.Fatalf("prompt context ok=%v text=%q", ok, decision.text)
 	}
 }
 
@@ -136,8 +177,20 @@ func TestSessionReminderSilentWhenUnmanaged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text, _, ok := steerTextFor("claude-code", "SessionStart", payload); ok {
-		t.Fatalf("unmanaged session must not inject Superopen context, got %q", text)
+	for _, host := range []struct{ vendor, event string }{
+		{"claude-code", "SessionStart"},
+		{"cursor", "sessionStart"},
+		{"codex", "SessionStart"},
+		{"gemini", "SessionStart"},
+		{"opencode", "session.created"},
+		{"copilot-cli", "sessionStart"},
+		{"pi", "before_agent_start"},
+		{"openclaw", "before_prompt_build"},
+		{"cline", "beforeRun"},
+	} {
+		if text, _, ok := steerTextFor(host.vendor, host.event, payload); ok {
+			t.Fatalf("%s unmanaged session must not inject Superopen context, got %q", host.vendor, text)
+		}
 	}
 }
 
@@ -756,7 +809,7 @@ func TestQueryRepeatOverflowOnceAfterStamp(t *testing.T) {
 		t.Fatalf("first graph query must run without overflow, got %q", d.text)
 	}
 	d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", queryPayload)
-	if !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") || !strings.Contains(d.text, "TRUNCATED") {
+	if !ok || d.deny || !paths.MentionsCommand(d.text, "graph snippet") || !strings.Contains(d.text, "--offset") {
 		t.Fatalf("second graph query must overflow to snippet (no deny), got ok=%v deny=%v text=%q", ok, d.deny, d.text)
 	}
 	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "search", queryPayload); ok {
@@ -773,6 +826,47 @@ func TestQueryRepeatOverflowOnceAfterStamp(t *testing.T) {
 	}
 	if _, ok := steerDecisionFor("claude-code", "PreToolUse", "search", snippetPayload); ok {
 		t.Fatal("graph snippet after a query must stay silent")
+	}
+}
+
+func TestCodeSearchSatisfiesGraphGateWithoutBlockingFirstQuery(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".so", "db"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".so", "db", "so.db"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const session = "literal-first-session"
+	writeHookSession(t, root, session)
+	writeHookSourceFile(t, root)
+	payload := func(command string) []byte {
+		t.Helper()
+		data, err := json.Marshal(map[string]any{
+			"tool_name": "Bash", "tool_input": map[string]any{"command": command},
+			"cwd": root, "session_id": session,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	if d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", payload("/usr/local/bin/so graph code-search '--verbose' pylint")); ok {
+		t.Fatalf("code-search must run without nudge, got %q", d.text)
+	}
+	if !engine.QueryStampFreshFor(root, session) {
+		t.Fatal("code-search should satisfy the graph-first gate")
+	}
+	if d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", payload("rg verbose pylint")); ok {
+		t.Fatalf("code-search should silence the initial grep nudge, got %q", d.text)
+	}
+	query := payload("/usr/local/bin/so graph query 'verbose option construction'")
+	if d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", query); ok {
+		t.Fatalf("first relationship query after code-search must run, got %q", d.text)
+	}
+	if d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", query); !ok || !paths.MentionsCommand(d.text, "graph snippet") {
+		t.Fatalf("second relationship query should get overflow, got ok=%v text=%q", ok, d.text)
 	}
 }
 
@@ -909,9 +1003,16 @@ func TestPriorWorkCueInjectsIndex(t *testing.T) {
 	if !cursorOK || !strings.Contains(cursorText, "UNIQUE_CUE_BODY") {
 		t.Fatalf("cursor beforeSubmitPrompt cue failed: ok=%v text=%q", cursorOK, cursorText)
 	}
-	copilotText, _, copilotOK := steerTextFor("copilot-cli", "userPromptSubmitted", payload)
+	copilotText, _, copilotOK := steerTextFor("copilot-cli", "userPromptTransformed", payload)
 	if !copilotOK || !strings.Contains(copilotText, "UNIQUE_CUE_BODY") {
-		t.Fatalf("copilot-cli userPromptSubmitted cue failed: ok=%v text=%q", copilotOK, copilotText)
+		t.Fatalf("copilot-cli userPromptTransformed cue failed: ok=%v text=%q", copilotOK, copilotText)
+	}
+	if text, _, ok := steerTextFor("copilot-cli", "userPromptSubmitted", payload); ok {
+		t.Fatalf("copilot-cli submitted hook must stay silent, got %q", text)
+	}
+	vsCodeText, _, vsCodeOK := steerTextFor("vscode", "userPromptTransformed", payload)
+	if !vsCodeOK || !strings.Contains(vsCodeText, "UNIQUE_CUE_BODY") {
+		t.Fatalf("vscode userPromptTransformed cue failed: ok=%v text=%q", vsCodeOK, vsCodeText)
 	}
 	codexText, _, codexOK := steerTextFor("codex", "UserPromptSubmit", payload)
 	if !codexOK || !strings.Contains(codexText, "UNIQUE_CUE_BODY") {
@@ -925,8 +1026,86 @@ func TestPriorWorkCueInjectsIndex(t *testing.T) {
 	if !piOK || !strings.Contains(piText, "UNIQUE_CUE_BODY") {
 		t.Fatalf("pi before_agent_start cue failed: ok=%v text=%q", piOK, piText)
 	}
+	openCodeText, _, openCodeOK := steerTextFor("opencode", "chat.message", payload)
+	if !openCodeOK || !strings.Contains(openCodeText, "UNIQUE_CUE_BODY") {
+		t.Fatalf("opencode chat.message cue failed: ok=%v text=%q", openCodeOK, openCodeText)
+	}
+	hermesPayload, err := json.Marshal(map[string]any{
+		"session_id": id,
+		"cwd":        root,
+		"extra":      map[string]any{"user_message": "what did we decide last time about JWT?"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hermesText, _, hermesOK := steerTextFor("hermes", "UserPromptSubmit", hermesPayload)
+	if !hermesOK || !strings.Contains(hermesText, "UNIQUE_CUE_BODY") || hookProtocol("hermes") != "hermes" {
+		t.Fatalf("hermes prompt recall failed: ok=%v text=%q", hermesOK, hermesText)
+	}
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = writer
+	emitSteerContext("hermes", "UserPromptSubmit", "", hermesPayload)
+	_ = writer.Close()
+	os.Stdout = oldStdout
+	output, err := io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]string
+	if err := json.Unmarshal(output, &wire); err != nil || !strings.Contains(wire["context"], "UNIQUE_CUE_BODY") {
+		t.Fatalf("hermes wire context: %s, err=%v", output, err)
+	}
+	reader, writer, err = os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = writer
+	emitSteerContext("factory", "UserPromptSubmit", "", payload)
+	_ = writer.Close()
+	os.Stdout = oldStdout
+	output, err = io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(output, &wire); err != nil || !strings.Contains(wire["additionalContext"], "UNIQUE_CUE_BODY") {
+		t.Fatalf("factory prompt wire context: %s, err=%v", output, err)
+	}
+	transformedPayload, err := json.Marshal(map[string]any{
+		"session_id":        id,
+		"cwd":               root,
+		"prompt":            "what did we decide last time about JWT?",
+		"transformedPrompt": "original model prompt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, vendor := range []string{"copilot-cli", "vscode"} {
+		reader, writer, err = os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Stdout = writer
+		emitSteerContext(vendor, "userPromptTransformed", "", transformedPayload)
+		_ = writer.Close()
+		os.Stdout = oldStdout
+		output, err = io.ReadAll(reader)
+		_ = reader.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		wire = nil
+		if err := json.Unmarshal(output, &wire); err != nil || !strings.HasPrefix(wire["modifiedTransformedPrompt"], "original model prompt\n\n") || !strings.Contains(wire["modifiedTransformedPrompt"], "UNIQUE_CUE_BODY") {
+			t.Fatalf("%s transformed prompt: %s, err=%v", vendor, output, err)
+		}
+	}
 	if text, _, ok := steerTextFor("opencode", "session.created", payload); ok && strings.Contains(text, "UNIQUE_CUE_BODY") {
-		t.Fatalf("opencode has no prompt-submit event; must not inject bodies on session.created, got %q", text)
+		t.Fatalf("opencode session.created must not inject bodies, got %q", text)
 	}
 }
 
@@ -955,6 +1134,12 @@ func TestCodePromptDoesNotInjectMemoryPack(t *testing.T) {
 	}
 	if text, _, ok := steerTextFor("claude-code", "UserPromptSubmit", payload); ok {
 		t.Fatalf("code prompt must not inject memory bodies, got %q", text)
+	}
+	for _, c := range []struct{ vendor, event string }{{"opencode", "chat.message"}, {"hermes", "UserPromptSubmit"}} {
+		text, _, ok := steerTextFor(c.vendor, c.event, payload)
+		if !ok || !strings.Contains(text, "graph query") || strings.Contains(text, "UNIQUE_CODE_PROMPT_BODY") {
+			t.Fatalf("%s code prompt graph route failed: ok=%v text=%q", c.vendor, ok, text)
+		}
 	}
 }
 
@@ -1236,4 +1421,15 @@ func TestCapturePromptNudgesCaptureNotRecall(t *testing.T) {
 func writeHookSession(t *testing.T, root, id string) {
 	t.Helper()
 	_ = os.MkdirAll(filepath.Join(root, ".so", "sessions", id), 0o755)
+}
+
+func TestSrcPathsFromQueryReadsTOONRows(t *testing.T) {
+	stdout := "count: 2 of 9\nnodes[2]{qn,kind,file,lines}:\n" +
+		"  django.core.mail.utils.DNS_NAME,Variable,django/core/mail/utils.py,20\n" +
+		"  pkg.weird,Function,\"dir,with/comma.py\",3-4\n" +
+		"edges[0]{from,rel,to}:\nbodies[1]:\n  - qn: x\n    file: other.py\n"
+	got := srcPathsFromQuery(stdout)
+	if len(got) != 2 || got[0] != "django/core/mail/utils.py" || got[1] != "dir,with/comma.py" {
+		t.Fatalf("got %v", got)
+	}
 }

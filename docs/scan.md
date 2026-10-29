@@ -15,7 +15,7 @@ so scan --rules <dir>           # use this directory instead of stored rules
 ```
 
 Text output is one tab-separated line per finding: severity, rule id, session id, reason.
-No matches prints `no findings`.
+No matches prints `count: 0` and `findings: none`.
 
 Ranks, low to high: `info`, `low`, `medium`, `high`, `critical`.
 
@@ -35,11 +35,9 @@ Other tools are skipped. Prompt text is already redacted in the session log, so 
 
 ## Rules
 
-If you pass `--rules`, that directory is the whole set.
+The rules a scan runs are the built-in set plus your own. Custom rules are `*.rule.yaml` files in `.so/guards` (not listed in `.so/.gitignore`, so they can be committed). A custom rule with a built-in's `id` replaces that built-in; remove it to get the built-in back. A rule with `disabled: true` stays on file but is skipped. If you pass `--rules <dir>`, only the rules in that directory run.
 
-Otherwise scan looks in `.so/guards` for `*.rule.yaml`. If that directory has any rule files, those files replace the built-in set. They are not merged with it. `.so/guards` is not listed in `.so/.gitignore`, so those files can be committed.
-
-If `.so/guards` is missing or empty, scan uses a small baseline compiled into `so`:
+The built-in rules:
 
 - curl or wget piped into a shell
 - recursive delete from `/`
@@ -49,6 +47,21 @@ If `.so/guards` is missing or empty, scan uses a small baseline compiled into `s
 - a secret-file read followed by a network command in the same session, within 120 seconds
 
 This phase reports findings only. `posture: enforce-capable` is allowed in the file, but nothing is blocked.
+
+### Manage rules
+
+```bash
+so scan rules                    # list every rule: id, severity, source, enabled
+so scan rules show <id>          # the rule's YAML
+so scan rules set rule.yaml      # create, or replace the rule with the same id (use - for stdin)
+so scan rules disable <id>       # skip it in scans; works on built-ins
+so scan rules enable <id>
+so scan rules remove <id>        # delete a custom rule; removing an edited built-in restores it
+```
+
+`set` checks the rule before writing anything: the fields, the expression, and that every test fixture gives its stated verdict. An invalid rule is rejected and no file changes. A built-in cannot be deleted, only disabled.
+
+The Scan page has a Rules tab that does the same: list, edit the YAML, save, disable, delete or revert, and add a new rule. It reads and writes the same files, so a change in either place applies to both and to the next scan.
 
 ## Writing a rule
 

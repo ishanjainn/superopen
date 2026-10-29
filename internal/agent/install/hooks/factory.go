@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,20 +14,19 @@ type FactoryOptions struct {
 }
 
 type FactoryStatus struct {
-	Installed    bool   `json:"installed"`
-	BinaryPath   string `json:"binary_path,omitempty"`
-	SettingsPath string `json:"settings_path,omitempty"`
-	Message      string `json:"message,omitempty"`
+	Installed  bool   `json:"installed"`
+	BinaryPath string `json:"binary_path,omitempty"`
+	HooksPath  string `json:"hooks_path,omitempty"`
+	Message    string `json:"message,omitempty"`
 }
 
 type factoryHookGroup = settingsHookGroup
 type factoryHookRef = settingsHookRef
-type factorySettings = settingsHooksFile
 
 var factoryRuntime = hookRuntime{
 	displayName: "Factory",
-	configPath:  factorySettingsPath,
-	install:     installFactorySettings,
+	configPath:  factoryHooksPath,
+	install:     installFactoryHooks,
 	uninstall:   removeFactoryEndpointHooks,
 	isInstalled: isFactoryInstalledAt,
 }
@@ -57,51 +57,141 @@ func IsFactoryInstalled(opts FactoryOptions) bool {
 
 func factoryStatusFromRuntime(status runtimeStatus) FactoryStatus {
 	return FactoryStatus{
-		Installed:    status.Installed,
-		BinaryPath:   status.BinaryPath,
-		SettingsPath: status.ConfigPath,
-		Message:      status.Message,
+		Installed:  status.Installed,
+		BinaryPath: status.BinaryPath,
+		HooksPath:  status.ConfigPath,
+		Message:    status.Message,
 	}
 }
 
-func installFactorySettings(path, binaryPath, logPath, configPath string) error {
+func installFactoryHooks(path, binaryPath, logPath, configPath string) error {
 	prefix := endpointCommandPrefix("factory", binaryPath, logPath, configPath)
 	endpointHooks := map[string]factoryHookGroup{
 		"SessionStart":     {Hooks: []factoryHookRef{{Type: "command", Command: hookLine(prefix, "session-start")}}},
 		"UserPromptSubmit": {Hooks: []factoryHookRef{{Type: "command", Command: hookLine(prefix, "prompt-submit"), Timeout: 30}}},
-		"PostToolUse":      {Matcher: "Write|Edit|MultiEdit|Create", Hooks: []factoryHookRef{{Type: "command", Command: hookLine(prefix, "post-tool")}}},
+		"PreToolUse":       {Hooks: []factoryHookRef{{Type: "command", Command: hookLine(prefix, "pre-tool")}}},
+		"PostToolUse":      {Hooks: []factoryHookRef{{Type: "command", Command: hookLine(prefix, "post-tool")}}},
 		"Stop":             {Hooks: []factoryHookRef{{Type: "command", Command: hookLine(prefix, "stop"), Timeout: 45}}},
 		"SessionEnd":       {Hooks: []factoryHookRef{{Type: "command", Command: hookLine(prefix, "session-end")}}},
 	}
-	return installSettingsEndpointHooks(path, "factory", endpointHooks)
+	doc, err := readFactoryHooks(path)
+	if err != nil {
+		return err
+	}
+	for event, group := range endpointHooks {
+		var existing []settingsHookGroup
+		if raw, ok := doc[event]; ok {
+			if err := json.Unmarshal(raw, &existing); err != nil {
+				return fmt.Errorf("factory %s hooks: %w", event, err)
+			}
+		}
+		merged, err := json.Marshal(mergeSettingsEndpointHook(existing, group, "factory"))
+		if err != nil {
+			return err
+		}
+		doc[event] = merged
+	}
+	return writeFactoryHooks(path, doc)
 }
 
-func readFactorySettings(path string) (factorySettings, error) {
-	return readSettingsHooks(path)
+func readFactoryHooks(path string) (map[string]json.RawMessage, error) {
+	doc := map[string]json.RawMessage{}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return doc, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	if doc == nil {
+		return nil, fmt.Errorf("factory hooks must be a JSON object")
+	}
+	return doc, nil
+}
+
+func writeFactoryHooks(path string, doc map[string]json.RawMessage) error {
+	data, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0600)
 }
 
 func removeFactoryEndpointHooks(path string) (bool, error) {
-	return removeSettingsEndpointHooks(path, "factory")
+	doc, err := readFactoryHooks(path)
+	if err != nil {
+		return false, err
+	}
+	changed := false
+	for event, raw := range doc {
+		var groups []settingsHookGroup
+		if json.Unmarshal(raw, &groups) != nil {
+			continue
+		}
+		kept := make([]settingsHookGroup, 0, len(groups))
+		eventChanged := false
+		for _, group := range groups {
+			filtered, removed := filterSettingsEndpointHooks(group, "factory")
+			eventChanged = eventChanged || removed
+			if !removed || len(filtered.Hooks) > 0 {
+				kept = append(kept, filtered)
+			}
+		}
+		if !eventChanged {
+			continue
+		}
+		changed = true
+		if len(kept) == 0 {
+			delete(doc, event)
+			continue
+		}
+		encoded, err := json.Marshal(kept)
+		if err != nil {
+			return false, err
+		}
+		doc[event] = encoded
+	}
+	if !changed {
+		return false, nil
+	}
+	return true, writeFactoryHooks(path, doc)
 }
 
 func isFactoryInstalledAt(path string) bool {
-	return isSettingsEndpointInstalledAt(path, "factory")
+	doc, err := readFactoryHooks(path)
+	if err != nil {
+		return false
+	}
+	for _, raw := range doc {
+		var groups []settingsHookGroup
+		if json.Unmarshal(raw, &groups) == nil {
+			for _, group := range groups {
+				if isSettingsEndpointHookGroup(group, "factory") {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
-func factorySettingsPath(level Level) (string, error) {
+func factoryHooksPath(level Level) (string, error) {
 	switch level {
 	case "", LevelUser:
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(home, ".factory", "settings.json"), nil
+		return filepath.Join(home, ".factory", "hooks.json"), nil
 	case LevelProject:
 		cwd, err := os.Getwd()
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(cwd, ".factory", "settings.json"), nil
+		return filepath.Join(cwd, ".factory", "hooks.json"), nil
 	default:
 		return "", fmt.Errorf("unknown hook level %q", level)
 	}

@@ -123,7 +123,7 @@ func devinStatusFromRuntime(status runtimeStatus) DevinStatus {
 }
 
 func installDevinCLIHooks(path, binaryPath, logPath, configPath string) error {
-	return installDevinHooksForPlatform(path, binaryPath, logPath, configPath, "devin-cli", []string{"devin", "devin-cli"})
+	return installDevinHooksForPlatform(path, binaryPath, logPath, configPath, "devin-cli", []string{"devin-cli"})
 }
 
 func installDevinDesktopHooks(path, binaryPath, logPath, configPath string) error {
@@ -148,10 +148,6 @@ func installDevinDesktopHooks(path, binaryPath, logPath, configPath string) erro
 		return err
 	}
 	return os.WriteFile(path, data, 0600)
-}
-
-func installDevinHooks(path, binaryPath, logPath, configPath string) error {
-	return installDevinHooksForPlatform(path, binaryPath, logPath, configPath, "devin", []string{"devin"})
 }
 
 func installDevinHooksForPlatform(path, binaryPath, logPath, configPath, platform string, replacePlatforms []string) error {
@@ -299,12 +295,8 @@ func mergeWindsurfEndpointHook(existing []windsurfHookRef, hook windsurfHookRef,
 	return append(out, hook)
 }
 
-func removeDevinEndpointHooks(path string) (bool, error) {
-	return removeDevinEndpointHooksForPlatforms(path, "devin")
-}
-
 func removeDevinCLIEndpointHooks(path string) (bool, error) {
-	return removeDevinEndpointHooksForPlatforms(path, "devin", "devin-cli")
+	return removeDevinEndpointHooksForPlatforms(path, "devin-cli")
 }
 
 func removeDevinDesktopEndpointHooks(path string) (bool, error) {
@@ -404,12 +396,8 @@ func filterDevinEndpointHooks(group devinHookGroup, platforms ...string) (devinH
 	return filtered, changed
 }
 
-func isDevinInstalledAt(path string) bool {
-	return isDevinInstalledAtPlatforms(path, "devin")
-}
-
 func isDevinCLIInstalledAt(path string) bool {
-	return isDevinInstalledAtPlatforms(path, "devin", "devin-cli")
+	return isDevinInstalledAtPlatforms(path, "devin-cli")
 }
 
 func isDevinDesktopInstalledAt(path string) bool {

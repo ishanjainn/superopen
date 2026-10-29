@@ -8,6 +8,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -18,6 +19,7 @@ import {
   Settings2,
   Sparkles,
 } from "lucide-react";
+import Onboarding from "@/components/ui/onboarding";
 import FeaturePageHeader from "@/components/shell/feature-page-header";
 import { useProject } from "@/components/shell/project-context";
 import {
@@ -39,6 +41,7 @@ import "./graph.css";
 
 const NODE_BUDGET_STEP = 5000;
 const DEFAULT_NODE_BUDGET = 5000;
+const graphCache = new Map<string, { data: GraphData; revision: string }>();
 const COMMUNITY_COLORS = [
   "#4e79a7",
   "#f28e2b",
@@ -165,52 +168,35 @@ function GraphNotIndexed({
   repoRoot?: string;
   onRetry: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
   const command = repoRoot
     ? `cd ${quoteForShell(repoRoot)} && so graph build`
     : "so graph build";
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard access is optional; the command stays selectable.
-    }
-  };
-
   return (
-    <div className="graph-empty">
-      <h2 className="graph-empty-title">No graph for {repo} yet</h2>
-      <p className="graph-empty-body">
-        Superopen has this repository registered but has not indexed its code.
-        Build the graph once — it runs locally and refreshes on its own from
-        then on.
-      </p>
-      <div className="graph-empty-command">
-        <code>{command}</code>
+    <Onboarding
+      title={`No graph for ${repo} yet`}
+      description="Superopen has this repository registered but has not indexed its code. Build the graph once. It runs locally and refreshes on its own from then on."
+      steps={[{ label: "Index the repository.", command }]}
+      note={
+        <>
+          In a coding agent, <code>/so init</code> does the same and also creates <code>.so/</code>{" "}
+          if the repository has never been set up.
+        </>
+      }
+      actions={
         <button
           type="button"
-          className="graph-empty-copy"
-          onClick={() => void copy()}
+          onClick={onRetry}
+          className="rounded border border-neutral-300 px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
         >
-          {copied ? "Copied" : "Copy"}
+          Check again
         </button>
-      </div>
-      <p className="graph-empty-note">
-        In a coding agent, <code>/so init</code> does the same and also creates{" "}
-        <code>.so/</code> if the repository has never been set up.
-      </p>
-      <button type="button" className="graph-retry" onClick={onRetry}>
-        Retry
-      </button>
-    </div>
+      }
+    />
   );
 }
 
 export default function GraphPage() {
-  const { projectId, projects, currentSlug } = useProject();
+  const { projectId, projects, currentSlug, ready } = useProject();
   const [data, setData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState<{ received: number; total: number | null }>({
@@ -220,6 +206,8 @@ export default function GraphPage() {
   const [error, setError] = useState("");
   const [errorCode, setErrorCode] = useState("");
   const [budget, setBudget] = useState(DEFAULT_NODE_BUDGET);
+  const [budgetProject, setBudgetProject] = useState<string | null>(null);
+  const requestId = useRef(0);
   const [budgetDraft, setBudgetDraft] = useState(String(DEFAULT_NODE_BUDGET));
   const [showLabels, setShowLabels] = useState(true);
   const [display, setDisplay] =
@@ -245,12 +233,31 @@ export default function GraphPage() {
       const next = loadBudget(projectId);
       setBudget(next);
       setBudgetDraft(String(next));
+      setBudgetProject(projectId);
     }, 0);
     return () => window.clearTimeout(timer);
   }, [projectId]);
 
-  const loadGraph = useCallback(async () => {
-    setLoading(true);
+  const loadGraph = useCallback(async (force = false, signal?: AbortSignal) => {
+    const id = ++requestId.current;
+    const current = () => id === requestId.current && !signal?.aborted;
+    const key = `${projectId}\0${budget}`;
+    const cached = !force ? graphCache.get(key) : undefined;
+    const showData = (body: GraphData) => {
+      setData(body);
+      setEnabledLabels(new Set(body.nodes.map((node) => node.label)));
+      setEnabledEdges(new Set(body.edges.map((edge) => edge.type)));
+      setEnabledCommunities(
+        new Set(body.nodes.map((node) => node.community || "Unclustered")),
+      );
+      setSelected(null);
+    };
+    if (cached) {
+      showData(cached.data);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     setError("");
     setErrorCode("");
     setProgress({ received: 0, total: null });
@@ -258,11 +265,28 @@ export default function GraphPage() {
       const url = new URL("/api/graph/layout", window.location.origin);
       url.searchParams.set("max_nodes", String(budget));
       if (projectId) url.searchParams.set("project", projectId);
-      const response = await fetch(url.toString());
+      if (cached?.revision) {
+        try {
+          const check = await fetch(url.toString(), {
+            method: "HEAD", signal, cache: "no-store",
+          });
+          if (!current()) return;
+          if (
+            check.ok &&
+            check.headers.get("x-so-graph-revision") === cached.revision
+          ) return;
+        } catch {
+          if (!current()) return;
+        }
+      }
+      setLoading(true);
+      const response = await fetch(url.toString(), { signal, cache: "no-store" });
+      if (!current()) return;
       if (!response.ok) {
         const failure = (await response.json().catch(() => null)) as
           | { error?: string; code?: string }
           | null;
+        if (!current()) return;
         setErrorCode(failure?.code || "");
         throw new Error(failure?.error || "Graph layout failed");
       }
@@ -277,7 +301,7 @@ export default function GraphPage() {
           if (done) break;
           chunks.push(value);
           received += value.length;
-          setProgress({ received, total });
+          if (current()) setProgress({ received, total });
         }
         const bytes = new Uint8Array(received);
         let offset = 0;
@@ -291,24 +315,32 @@ export default function GraphPage() {
       }
       body.nodes ??= [];
       body.edges ??= [];
-      setData(body);
-      setEnabledLabels(new Set(body.nodes.map((node) => node.label)));
-      setEnabledEdges(new Set(body.edges.map((edge) => edge.type)));
-      setEnabledCommunities(
-        new Set(body.nodes.map((node) => node.community || "Unclustered")),
-      );
-      setSelected(null);
+      if (!current()) return;
+      graphCache.delete(key);
+      graphCache.set(key, {
+        data: body,
+        revision: response.headers.get("x-so-graph-revision") || "",
+      });
+      if (graphCache.size > 4) graphCache.delete(graphCache.keys().next().value!);
+      showData(body);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Graph layout failed");
+      if (current()) {
+        setError(cause instanceof Error ? cause.message : "Graph layout failed");
+      }
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   }, [budget, projectId]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void loadGraph(), 0);
-    return () => window.clearTimeout(timer);
-  }, [loadGraph]);
+    if (!ready || budgetProject !== projectId) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void loadGraph(false, controller.signal), 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [loadGraph, ready, budgetProject, projectId]);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === projectId),
@@ -865,7 +897,7 @@ export default function GraphPage() {
         actions={
           <button
             type="button"
-            onClick={() => void loadGraph()}
+            onClick={() => void loadGraph(true)}
             className="rounded border border-neutral-200 p-1.5 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-900"
             title="Rebuild the layout"
           >
@@ -984,7 +1016,7 @@ export default function GraphPage() {
                     <GraphNotIndexed
                       repo={repoLabel}
                       repoRoot={activeProject?.repo_root}
-                      onRetry={() => void loadGraph()}
+                      onRetry={() => void loadGraph(true)}
                     />
                   ) : (
                     <div>
@@ -993,7 +1025,7 @@ export default function GraphPage() {
                         <button
                           type="button"
                           className="graph-retry"
-                          onClick={() => void loadGraph()}
+                          onClick={() => void loadGraph(true)}
                         >
                           Retry
                         </button>

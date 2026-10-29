@@ -47,7 +47,7 @@ func CountTurnsFromSpans(spans []trace.Span) int {
 }
 
 // TurnsFor returns persisted turns, or scans this session's events.jsonl when
-// the document still has 0 (legacy files, nested ids never listed).
+// the document still has 0 while its event stream is being recorded.
 func (s *Store) TurnsFor(id string, persisted int) int {
 	if persisted > 0 {
 		return persisted

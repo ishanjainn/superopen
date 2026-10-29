@@ -25,7 +25,7 @@ import (
 // hung clone or a flaky filesystem can swallow the entire budget and
 // starve the actual span emission. 500ms is more than enough for a
 // healthy local repo and short enough that a hung call fails fast.
-const perSubcommandBudget = 500 * time.Millisecond
+var perSubcommandBudget = 500 * time.Millisecond
 
 // Context is the VCS snapshot captured at hook time. All fields are
 // best-effort - empty values mean "not in a repo" or "git not on PATH".

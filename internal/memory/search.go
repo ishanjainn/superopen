@@ -392,7 +392,6 @@ func (s *Store) denseRanked(qvec Vector, limit int, whereSQL string, args []any)
 	if limit <= 0 {
 		limit = denseCandidateLimit
 	}
-	s.backfillPassages(whereSQL, args)
 	best := map[int64]float64{}
 	q := `SELECT v.episode_id, v.vector FROM memory_vectors v
 WHERE v.embedder_id=? AND v.episode_id IN (SELECT id FROM memory_episodes WHERE ` + whereSQL + `)`

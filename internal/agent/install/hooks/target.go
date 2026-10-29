@@ -59,8 +59,6 @@ func runtimeFor(id string) (hookRuntime, error) {
 		return qwenRuntime, nil
 	case "senpi":
 		return omoRuntime, nil
-	case "vscode":
-		return vscodeRuntime, nil
 	default:
 		return hookRuntime{}, fmt.Errorf("unsupported catalog vendor %q", id)
 	}

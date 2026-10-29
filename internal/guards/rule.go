@@ -44,12 +44,14 @@ const ScopeSession Scope = "session"
 
 // Rule is a single threat-detection rule. Exactly one of Match or Correlation is set.
 type Rule struct {
-	ID          string            `yaml:"id"`
-	Version     int               `yaml:"version"`
-	Title       string            `yaml:"title"`
-	Description string            `yaml:"description,omitempty"`
-	Severity    Severity          `yaml:"severity"`
-	Status      Status            `yaml:"status"`
+	ID          string   `yaml:"id"`
+	Version     int      `yaml:"version"`
+	Title       string   `yaml:"title"`
+	Description string   `yaml:"description,omitempty"`
+	Severity    Severity `yaml:"severity"`
+	Status      Status   `yaml:"status"`
+	// Disabled keeps the rule on file but out of every scan.
+	Disabled    bool              `yaml:"disabled,omitempty"`
 	Posture     Posture           `yaml:"posture"`
 	Taxonomy    map[string]string `yaml:"taxonomy,omitempty"`
 	Match       string            `yaml:"match,omitempty"`

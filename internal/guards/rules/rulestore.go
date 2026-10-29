@@ -1,5 +1,7 @@
-// Package rules loads the detection corpus. A small baseline is embedded in the
-// binary. Additional rules live in a directory the caller passes in.
+// Package rules loads the detection corpus. A baseline of built-in rules is
+// embedded in the binary. Custom rules live in a store directory and are merged
+// with the built-ins: a custom rule with a built-in's id overrides it, and a
+// rule can be disabled without being deleted.
 package rules
 
 import (
@@ -25,8 +27,12 @@ const RuleFileSuffix = ".rule.yaml"
 type Source string
 
 const (
+	// SourceBaseline is a built-in rule, unchanged.
 	SourceBaseline Source = "baseline"
-	SourceStore    Source = "store"
+	// SourceStore is a custom rule with its own id.
+	SourceStore Source = "store"
+	// SourceOverride is a custom rule that replaces a built-in of the same id.
+	SourceOverride Source = "override"
 )
 
 // LoadedRule is a validated rule paired with its origin.
@@ -90,35 +96,40 @@ func baselineRulePath(name string) string {
 	return path.Join("baseline", name)
 }
 
-// LoadActive resolves the active rule set:
+// LoadActive resolves the rules a scan runs:
 //
-// - if rulesDir is non-empty, load only from that directory (explicit override);
-// - else load from storeDir; if the store is empty (or absent), fall back to the
-// embedded baseline.
+// - if rulesDir is non-empty, only the rules in that directory (explicit override);
+// - else the built-in rules merged with storeDir, a store rule replacing the
+// built-in of the same id.
 //
-// Every returned rule has passed validation (via guards.LoadDir / Baseline).
+// Disabled rules are left out. Every returned rule has passed validation.
 func LoadActive(storeDir, rulesDir string) ([]LoadedRule, error) {
 	if rulesDir != "" {
 		rules, err := guards.LoadDir(rulesDir)
 		if err != nil {
 			return nil, err
 		}
-		return tag(rules, SourceStore), nil
+		return enabledOnly(tag(rules, SourceStore)), nil
 	}
-
-	if HasRuleFiles(storeDir) {
-		rules, err := guards.LoadDir(storeDir)
-		if err != nil {
-			return nil, err
-		}
-		return tag(rules, SourceStore), nil
-	}
-
-	base, err := Baseline()
+	entries, err := List(storeDir)
 	if err != nil {
 		return nil, err
 	}
-	return tag(base, SourceBaseline), nil
+	loaded := make([]LoadedRule, 0, len(entries))
+	for _, e := range entries {
+		loaded = append(loaded, LoadedRule{Rule: e.Rule, Source: e.Source})
+	}
+	return enabledOnly(loaded), nil
+}
+
+func enabledOnly(rules []LoadedRule) []LoadedRule {
+	out := rules[:0:0]
+	for _, r := range rules {
+		if !r.Rule.Disabled {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func tag(rules []*guards.Rule, src Source) []LoadedRule {
@@ -265,7 +276,8 @@ func rollbackInstall(installed []Installed, tmpDir string) {
 	}
 }
 
-// Remove deletes a rule by id from storeDir. Returns the removed path. The id is
+// Remove deletes a custom rule by id from storeDir. Removing an override
+// brings the built-in rule of that id back. Returns the removed path. The id is
 // validated against the rule-id grammar before use so it can never contain path
 // separators or ".." segments that would resolve outside the store.
 func Remove(storeDir, id string) (string, error) {
@@ -275,7 +287,12 @@ func Remove(storeDir, id string) (string, error) {
 	target := filepath.Join(storeDir, id+RuleFileSuffix)
 	if err := os.Remove(target); err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("rule %q is not installed in the store", id)
+			if base, berr := baselineRules(); berr == nil {
+				if _, builtin := base[id]; builtin {
+					return "", fmt.Errorf("rule %q is built in and has no custom copy to remove; disable it instead", id)
+				}
+			}
+			return "", fmt.Errorf("no rule %q", id)
 		}
 		return "", err
 	}

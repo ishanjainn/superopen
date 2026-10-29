@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -116,6 +117,9 @@ func localSyntaxImportTargetForLanguage(language, sourceFile, imported, goModule
 	if isJSLanguage(language) {
 		return jsSyntaxImportTarget(sourceFile, imported, index)
 	}
+	if language == "python" {
+		return pythonSyntaxImportTarget(sourceFile, imported, index)
+	}
 	clean := filepath.ToSlash(imported)
 	if language == "go" && goModule != "" {
 		if clean == goModule {
@@ -177,6 +181,9 @@ func jsSyntaxImportTarget(sourceFile, imported string, index *importTargetIndex)
 	clean := filepath.ToSlash(imported)
 	if strings.HasPrefix(clean, ".") {
 		clean = filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(sourceFile), clean)))
+		if clean == "." {
+			return index.projectQN
+		}
 	} else {
 		clean = strings.TrimPrefix(clean, "@/")
 	}
@@ -238,10 +245,11 @@ func jsImportTypeSymbolTarget(sourceFile, clean string, index *importTargetIndex
 		return ""
 	}
 	own := fileQualifiedName(sourceFile)
+	family := pathLanguageFamily(sourceFile)
 	var candidates []string
 	for _, id := range index.byName[base] {
 		node := index.nodes[id]
-		if node.QualifiedName == own {
+		if node.QualifiedName == own || !sameLanguageFamily(family, node.Location.File) {
 			continue
 		}
 		if syntaxImportTargetable(node.Label) && node.Label != "Module" && node.Label != "File" {
@@ -261,11 +269,12 @@ func syntaxImportSymbolFallback(sourceFile, imported string, index *importTarget
 		return value == '.' || value == '/' || value == '\\' || value == ':'
 	})
 	own := fileQualifiedName(sourceFile)
+	family := pathLanguageFamily(sourceFile)
 	for i := len(segments) - 1; i >= 0; i-- {
 		var candidates []string
 		for _, id := range index.byName[segments[i]] {
 			node := index.nodes[id]
-			if node.QualifiedName == own || !syntaxImportTargetable(node.Label) {
+			if node.QualifiedName == own || !syntaxImportTargetable(node.Label) || !sameLanguageFamily(family, node.Location.File) {
 				continue
 			}
 			candidates = append(candidates, node.QualifiedName)
@@ -276,4 +285,111 @@ func syntaxImportSymbolFallback(sourceFile, imported string, index *importTarget
 		}
 	}
 	return ""
+}
+
+// pythonSyntaxImportTarget resolves a dotted Python import (pkg.mod.Name,
+// .sibling.Name) to the qualified name it binds. Qualified names follow file
+// paths, with a package's own symbols under pkg.__init__, so the path is
+// tried as written, with __init__ inserted, and then one segment shorter
+// until a module or package matches. A path that matches nothing in the
+// project is a standard-library or third-party import and stays unresolved:
+// guessing by the last segment bound "from django.db import connections" to
+// a method named db and "from collections import Counter" to an unrelated
+// module called collections.
+func pythonSyntaxImportTarget(sourceFile, imported string, index *importTargetIndex) string {
+	dotted := pythonAbsoluteImportName(sourceFile, imported)
+	if dotted == "" {
+		return ""
+	}
+	own := fileQualifiedName(sourceFile)
+	lookup := func(qn string) string {
+		candidates := []string{qn, qn + ".__init__"}
+		if dot := strings.LastIndexByte(qn, '.'); dot > 0 {
+			candidates = append(candidates, qn[:dot]+".__init__"+qn[dot:])
+		}
+		for _, candidate := range candidates {
+			for _, id := range index.byQN[candidate] {
+				node := index.nodes[id]
+				if node.QualifiedName != own && pythonImportTargetable(node.Label) {
+					return node.QualifiedName
+				}
+			}
+		}
+		return ""
+	}
+	for work := dotted; work != ""; {
+		if target := lookup(work); target != "" {
+			return target
+		}
+		// A src/ or lib/ layout puts the package under a directory that is
+		// not itself a package; its qualified names carry that prefix.
+		if module := index.pythonRootedModule(work); module != "" {
+			if rest := strings.TrimPrefix(dotted, work); rest != "" {
+				if target := lookup(module + rest); target != "" {
+					return target
+				}
+			}
+			return module
+		}
+		dot := strings.LastIndexByte(work, '.')
+		if dot < 0 {
+			break
+		}
+		work = work[:dot]
+	}
+	return ""
+}
+
+func pythonAbsoluteImportName(sourceFile, imported string) string {
+	dotted := imported
+	if strings.HasPrefix(dotted, ".") {
+		rest := strings.TrimLeft(dotted, ".")
+		pkg := path.Dir(filepath.ToSlash(sourceFile))
+		for up := len(dotted) - len(rest); up > 1; up-- {
+			pkg = path.Dir(pkg)
+		}
+		dotted = rest
+		if pkg != "." && pkg != "/" {
+			base := strings.ReplaceAll(pkg, "/", ".")
+			if dotted == "" {
+				dotted = base
+			} else {
+				dotted = base + "." + dotted
+			}
+		}
+	}
+	return dotted
+}
+
+// pythonRootedModule finds the one module whose qualified name is work
+// under a directory prefix that is not a Python package (no __init__ module).
+func (index *importTargetIndex) pythonRootedModule(work string) string {
+	match := ""
+	for _, key := range []string{work, work + ".__init__"} {
+		for _, qn := range index.moduleSuffixes[key] {
+			if qn == key || !strings.HasSuffix(qn, "."+key) {
+				continue
+			}
+			prefix := strings.TrimSuffix(qn, "."+key)
+			if len(index.byQN[prefix+".__init__"]) > 0 {
+				continue
+			}
+			if match != "" && match != qn {
+				return ""
+			}
+			match = qn
+		}
+	}
+	return match
+}
+
+func pythonImportTargetable(label string) bool {
+	return syntaxImportTargetable(label) || label == "Variable" || label == "Folder"
+}
+
+// sameLanguageFamily is true when a candidate file could define what a file
+// of the given family imports by name. Unknown families match anything.
+func sameLanguageFamily(family, candidateFile string) bool {
+	other := pathLanguageFamily(candidateFile)
+	return family == "" || other == "" || other == family
 }

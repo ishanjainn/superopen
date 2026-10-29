@@ -72,6 +72,8 @@ func TestLookupOpenAI(t *testing.T) {
 		{"gpt-5.6-terra", Rate{InputPer1M: 2.50, OutputPer1M: 15.00, CachedReadPer1M: 0.25, CacheCreationPer1M: 3.125}},
 		{"gpt-5.6-luna", Rate{InputPer1M: 1.00, OutputPer1M: 6.00, CachedReadPer1M: 0.10, CacheCreationPer1M: 1.25}},
 		{"gpt-5.6-sol-medium", Rate{InputPer1M: 5.00, OutputPer1M: 30.00, CachedReadPer1M: 0.50, CacheCreationPer1M: 6.25}},
+		{"gpt-6-sol", Rate{InputPer1M: 2.00, OutputPer1M: 10.00, CachedReadPer1M: 0.20, CacheCreationPer1M: 2.50}},
+		{"gpt-6.1-sol", Rate{InputPer1M: 2.00, OutputPer1M: 10.00, CachedReadPer1M: 0.10, CacheCreationPer1M: 2.50}},
 		// o-series - confirm o3 isn't being eaten by the gpt-5 family.
 		{"o3", Rate{InputPer1M: 2.00, OutputPer1M: 8.00}},
 		{"o4-mini", Rate{InputPer1M: 1.10, OutputPer1M: 4.40}},
