@@ -41,3 +41,14 @@ func TestEventsFromSpansProjectsBashAndRead(t *testing.T) {
 		t.Fatalf("read: %+v", events[1])
 	}
 }
+
+func TestActionForToolAcrossHostNames(t *testing.T) {
+	for _, name := range []string{"Bash", "bash", "Shell", "shell", "exec_command"} {
+		if action, ok := actionForTool(name); !ok || action != "command.executed" {
+			t.Fatalf("%q mapped to %q, %v", name, action, ok)
+		}
+	}
+	if action, ok := actionForTool("read"); !ok || action != "file.read" {
+		t.Fatalf("read mapped to %q, %v", action, ok)
+	}
+}

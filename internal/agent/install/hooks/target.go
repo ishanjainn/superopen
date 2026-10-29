@@ -16,8 +16,6 @@ func TargetPaths(id string, level Level) ([]string, error) {
 		return nil, err
 	}
 	switch id {
-	case "factory":
-		return []string{path, factoryLegacySettingsPath(path)}, nil
 	case "dsh":
 		return []string{path, dshPatchPathFor(path)}, nil
 	case "muse":

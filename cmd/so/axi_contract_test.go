@@ -134,6 +134,20 @@ func TestEveryCommandGroupHasABareBehavior(t *testing.T) {
 	})
 }
 
+func TestBlocksHomeSuggestsCommandsUsableWithoutStagedScripts(t *testing.T) {
+	root := newRootCommand()
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"blocks"})
+	got := captureStdout(t, func() {
+		if err := root.Execute(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(got, "  so blocks scan\n") || !strings.Contains(got, "  so blocks run\n") || strings.Contains(got, "  so blocks apply\n") {
+		t.Fatalf("blocks home suggested a staged-only action: %s", got)
+	}
+}
+
 // An unknown subcommand names the valid ones (AXI §6).
 func TestUnknownSubcommandListsTheValidOnes(t *testing.T) {
 	root := newRootCommand()

@@ -18,7 +18,31 @@ func groupHome(cmd *cobra.Command, _ []string) error {
 			continue
 		}
 		rows = append(rows, map[string]any{"command": c.Name(), "description": c.Short})
-		if len(next) < 2 {
+	}
+	// Point agents at inspection commands before actions that need staged state.
+	for _, name := range []string{"list", "scan", "search", "query", "show", "status", "run"} {
+		if len(next) == 2 {
+			break
+		}
+		if c, _, err := cmd.Find([]string{name}); err == nil && c != nil && c.Parent() == cmd && !c.Hidden {
+			next = append(next, c.UseLine())
+		}
+	}
+	for _, c := range cmd.Commands() {
+		if len(next) == 2 {
+			break
+		}
+		if c.Hidden || c.Name() == "help" || c.Name() == "completion" {
+			continue
+		}
+		found := false
+		for _, hint := range next {
+			if hint == c.UseLine() {
+				found = true
+				break
+			}
+		}
+		if !found {
 			next = append(next, c.UseLine())
 		}
 	}

@@ -90,6 +90,9 @@ func durableTargets(home string) []string {
 		filepath.Join(opencode, "AGENTS.md"),
 		filepath.Join(copilot, "AGENTS.md"),
 		filepath.Join(home, ".pi", "agent", "AGENTS.md"),
+		filepath.Join(home, ".omp", "agent", "AGENTS.md"),
+		filepath.Join(home, ".prime", "agent", "AGENTS.md"),
+		filepath.Join(home, ".omo", "agent", "AGENTS.md"),
 	}
 	if cfg, err := paths.ClaudeConfigDir(); err == nil {
 		extra := filepath.Join(cfg, "CLAUDE.md")

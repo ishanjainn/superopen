@@ -13,6 +13,8 @@ import (
 	"github.com/ishanjainn/superopen/internal/agent/sessionstate"
 	"github.com/ishanjainn/superopen/internal/agent/steer"
 	"github.com/ishanjainn/superopen/internal/agent/vendors"
+	"github.com/ishanjainn/superopen/internal/blocks"
+	"github.com/ishanjainn/superopen/internal/compact"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/guards"
 	"github.com/ishanjainn/superopen/internal/harvest"
@@ -28,6 +30,9 @@ const (
 // emitSteerContext writes vendor-specific additionalContext when the event
 // supports it. Unknown protocols get no stdout (fail-open).
 func emitSteerContext(vendor, event, kind string, payload []byte) {
+	if event == "" {
+		event = payloadEvent(payload)
+	}
 	decision, ok := steerDecisionFor(vendor, event, kind, payload)
 	if !ok {
 		return
@@ -39,6 +44,12 @@ func emitSteerContext(vendor, event, kind string, payload []byte) {
 			return
 		}
 		body = map[string]any{"modifiedTransformedPrompt": prompt + "\n\n" + decision.text}
+	} else if vendor == "copilot-cli" && event == "postToolUse" && decision.replace != nil {
+		body = map[string]any{"modifiedResult": map[string]any{
+			"resultType": "success", "textResultForLlm": decision.replace,
+		}}
+	} else if (vendor == "cline" || vendor == "hermes") && event == "transformToolResult" && decision.replace != nil {
+		body = map[string]any{"output_replacement": decision.replace}
 	} else {
 		switch hookProtocol(vendor) {
 		case "claude-code":
@@ -55,6 +66,8 @@ func emitSteerContext(vendor, event, kind string, payload []byte) {
 			if decision.deny {
 				hso["permissionDecision"] = "deny"
 				hso["permissionDecisionReason"] = decision.text
+			} else if decision.replace != nil {
+				hso["updatedToolOutput"] = decision.replace
 			} else if decision.text != "" {
 				hso["additionalContext"] = decision.text
 			} else {
@@ -92,6 +105,10 @@ func emitSteerContext(vendor, event, kind string, payload []byte) {
 				},
 			}
 		case "context", "pi":
+			if decision.replace != nil && (vendor == "opencode" || vendor == "openclaw" || hookProtocol(vendor) == "pi") {
+				body = map[string]any{"output_replacement": decision.replace}
+				break
+			}
 			if decision.text == "" {
 				return
 			}
@@ -112,10 +129,25 @@ func emitSteerContext(vendor, event, kind string, payload []byte) {
 	}
 }
 
+func payloadEvent(payload []byte) string {
+	var probe struct {
+		Type  string `json:"type"`
+		Event string `json:"event"`
+	}
+	if json.Unmarshal(payload, &probe) != nil {
+		return ""
+	}
+	if event := strings.TrimSpace(probe.Type); event != "" {
+		return event
+	}
+	return strings.TrimSpace(probe.Event)
+}
+
 type steerDecision struct {
 	text      string
 	hookEvent string
 	deny      bool
+	replace   any
 }
 
 func steerTextFor(vendor, event string, payload []byte) (text, hookEvent string, ok bool) {
@@ -200,6 +232,19 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		return steerDecision{}, false
 	case vendor == "claude-code" && ev == "PostToolUse":
 		recordClaudeQueryFiles(payload)
+		if replaced, ok := replaceToolOutput(payload); ok {
+			return steerDecision{hookEvent: ev, replace: replaced}, true
+		}
+		return steerDecision{}, false
+	case (vendor == "opencode" && ev == "tool.execute.after") ||
+		(vendor == "cline" && ev == "transformToolResult") ||
+		(vendor == "hermes" && ev == "transformToolResult") ||
+		(vendor == "copilot-cli" && ev == "postToolUse") ||
+		(vendor == "openclaw" && ev == "tool_result_persist") ||
+		(vendor == "pi" && ev == "tool_result"):
+		if replaced, ok := replaceTextToolOutput(payload); ok {
+			return steerDecision{hookEvent: ev, replace: replaced}, true
+		}
 		return steerDecision{}, false
 	case toolEvent:
 		if reason, denied := guardDeny(payload, vendor); denied {
@@ -216,7 +261,15 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 		if vendor == "codex" {
 			return steerDecision{}, false
 		}
-		return graphGate(payload, vendor, kind, ev)
+		if decision, ok := graphGate(payload, vendor, kind, ev); ok {
+			return decision, true
+		}
+		if cmd := bashCommandFromPayload(payload); cmd != "" && !compact.ProtectCommand(cmd) {
+			if hint := blocks.Hint(cmd); hint != "" {
+				return steerDecision{text: hint, hookEvent: ev}, true
+			}
+		}
+		return steerDecision{}, false
 	}
 	return steerDecision{}, false
 }
@@ -442,6 +495,9 @@ func sessionStartText(payload []byte, vendor string) string {
 	switch route {
 	case routeCode:
 		core = steer.GraphStartLine()
+		if _, extraVendor := vendors.ByID(vendor); extraVendor {
+			core += "\nNoisy test/log: so shrink -- <command>. Repeated shell work: so blocks scan, then so blocks run <name>."
+		}
 	case routeMemory:
 		if text := memory.SessionStartIndex(root); text != "" {
 			core = text
@@ -490,7 +546,11 @@ func promptSubmitText(payload []byte, vendor string) string {
 	}
 	if kind != routeMemory {
 		if kind == routeCode && (vendor == "opencode" || vendor == "hermes") {
-			return harvest.JoinStart(steer.GraphStartLine(), live)
+			guidance := steer.GraphStartLine()
+			if vendor == "hermes" {
+				guidance += "\nNoisy test/log: so shrink -- <command>. Repeated shell work: so blocks scan, then so blocks run <name>."
+			}
+			return harvest.JoinStart(guidance, live)
 		}
 		return live
 	}

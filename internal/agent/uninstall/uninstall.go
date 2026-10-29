@@ -55,6 +55,9 @@ func RemoveAll(purge, keepData, dryRun bool, stdout, stderr io.Writer) (removed 
 			for _, path := range skills.RemoveAll() {
 				removed = append(removed, path)
 			}
+			for _, path := range skills.RemoveVoice() {
+				removed = append(removed, path)
+			}
 			for _, path := range steer.RemoveAll() {
 				removed = append(removed, path)
 			}

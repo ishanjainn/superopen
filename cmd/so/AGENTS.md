@@ -13,6 +13,8 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). Graph output: [../graph/AGENTS
 | `so graph *` success | **axi.md** TOON: `count: N of M`, `nodes[N]{qn,kind,file,lines}:`, numbered `code[]`, `shared[]`/`uses[]` for values with multiple consumers, `tests[]`/`test_run[]` for related checks, `help[]` (`internal/graph/format`) |
 | `so memory`, `so sessions` (user) | **axi.md**: TOON lists, content-first dashboards, `help[]`, structured errors on stdout |
 | `so sessions hook` | **host JSON** (`additionalContext` / permission). Not AXI. Always exit 0 on telemetry failure. Hidden from `so sessions --help`; invoked by vendor plugin manifests |
+| `so shrink`, `so blocks run *` | TOON records show the complete result content so a formatter cannot hide failures after a safe transform passes through. `--json` is machine-readable; `--raw` prints bytes for a pipe. Compressed originals have `so retrieve --raw` recovery. |
+| `so retrieve` | Bounded TOON by default, with `--full` or `--raw` for complete content. |
 
 | AXI | Where |
 |-----|--------|
@@ -49,12 +51,18 @@ so graph build | refresh | query | search | snippet | trace | …
 so memory | search | get | capture | forget | …
 so harvest inventory | propose | scan | list | show | apply | decline | review | jev | jev-settings
 so scan
+so shrink | retrieve
+so blocks scan | init | apply | decline | run
 so sessions | show | finalize | …
 
 Hidden (host argv, not user-facing): so sessions hook
 ```
 
 Wiring: `graph_cmd.go`, `graph_native_cli.go` → `internal/graph/client`.
+
+`so blocks run` is a content-first group of named scripts. `blocks scan` counts
+distinct sessions, and `blocks init` stages only scripts matched by repeated
+commands. A staged index is never deleted by an empty rescan.
 
 ## Contributor workflow
 

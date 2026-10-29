@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -21,6 +22,16 @@ const generateTimeout = 45 * time.Second
 // MaybeGenerate is called from session finalize. Cursor/Copilot/Gemini mark
 // pending for the next live SessionStart. One-shot vendors spawn their own CLI.
 func MaybeGenerate(root, sessionID string) GenerateResult {
+	return maybeGenerate(root, sessionID, false)
+}
+
+// MaybeGenerateResumed evaluates new work added after a completed session was
+// reopened. Earlier runs and proposals remain available for review.
+func MaybeGenerateResumed(root, sessionID string) GenerateResult {
+	return maybeGenerate(root, sessionID, true)
+}
+
+func maybeGenerate(root, sessionID string, resumed bool) GenerateResult {
 	sessionID = strings.TrimSpace(sessionID)
 	res := GenerateResult{SessionID: sessionID}
 	if sessionID == "" {
@@ -29,7 +40,7 @@ func MaybeGenerate(root, sessionID string) GenerateResult {
 	}
 	skipped, pending, spawn := headless.SessionEndPolicy(root, sessionID)
 	store, storeErr := OpenRoot(root)
-	if storeErr == nil && store.HasAttempt(sessionID) {
+	if storeErr == nil && !resumed && store.HasAttempt(sessionID) {
 		_ = store.Close()
 		res.Skipped = "already-queued"
 		res.Pending = pending
@@ -53,8 +64,8 @@ func MaybeGenerate(root, sessionID string) GenerateResult {
 		res.Skipped = "test"
 		return res
 	}
-	if os.Getenv("SUPEROPEN_HARVEST_SYNC") == "1" {
-		return generate(root, sessionID)
+	if resumed || os.Getenv("SUPEROPEN_HARVEST_SYNC") == "1" {
+		return generate(root, sessionID, resumed)
 	}
 	if store, err := OpenRoot(root); err == nil {
 		_, _ = store.InsertRun(sessionID, StatusPending, "", "detached")
@@ -71,10 +82,10 @@ func MaybeGenerate(root, sessionID string) GenerateResult {
 
 // Generate runs skip gates then at most one bounded call on the session's own CLI.
 func Generate(root, sessionID string) GenerateResult {
-	return generate(root, sessionID)
+	return generate(root, sessionID, false)
 }
 
-func generate(root, sessionID string) GenerateResult {
+func generate(root, sessionID string, resumed bool) GenerateResult {
 	res := GenerateResult{SessionID: strings.TrimSpace(sessionID)}
 	if res.SessionID == "" {
 		res.Skipped = "no-session"
@@ -90,7 +101,7 @@ func generate(root, sessionID string) GenerateResult {
 		return res
 	}
 	defer store.Close()
-	if store.SuccessfulRun(res.SessionID) || store.HasOpenForSession(res.SessionID) {
+	if !resumed && (store.SuccessfulRun(res.SessionID) || store.HasOpenForSession(res.SessionID)) {
 		res.Skipped = "already-harvested"
 		_ = store.ResolvePending(res.SessionID, StatusSkipped, res.Skipped)
 		return res
@@ -126,7 +137,7 @@ func generate(root, sessionID string) GenerateResult {
 		_, _ = store.InsertRun(res.SessionID, StatusPending, provider.Name, res.Skipped)
 		return res
 	}
-	prompt, err := buildPrompt(root, res.SessionID, store)
+	prompt, err := buildPrompt(root, res.SessionID, store, false)
 	if err != nil {
 		res.Skipped = err.Error()
 		res.Pending = true
@@ -136,6 +147,11 @@ func generate(root, sessionID string) GenerateResult {
 	ctx, cancel := context.WithTimeout(context.Background(), generateTimeout)
 	defer cancel()
 	out, err := headless.Run(ctx, provider, prompt)
+	if !resumed && store.HasOpenForSession(res.SessionID) {
+		_ = store.ResolvePending(res.SessionID, StatusProposed, "")
+		res.Provider = provider.Name
+		return res
+	}
 	if err != nil {
 		res.Skipped = err.Error()
 		res.Pending = true
@@ -143,17 +159,31 @@ func generate(root, sessionID string) GenerateResult {
 		return res
 	}
 	inputs := pickProposals(parseProposals(out))
+	if len(inputs) == 0 && !emptyProposalOutput(out) {
+		res.Skipped = "invalid-proposals"
+		res.Pending = true
+		_, _ = store.InsertRun(res.SessionID, StatusPending, provider.Name, res.Skipped)
+		return res
+	}
 	inserted := 0
+	var proposeErr error
 	for _, in := range inputs {
 		in.SessionID = res.SessionID
 		in.Provider = provider.Name
 		if _, err := Propose(root, in); err != nil {
+			proposeErr = err
 			continue
 		}
 		inserted++
 	}
 	status := StatusProposed
 	if inserted == 0 {
+		if proposeErr != nil {
+			res.Skipped = "invalid-proposal: " + proposeErr.Error()
+			res.Pending = true
+			_, _ = store.InsertRun(res.SessionID, StatusPending, provider.Name, res.Skipped)
+			return res
+		}
 		status = StatusSkipped
 		res.Skipped = "no-proposals"
 	}
@@ -163,7 +193,7 @@ func generate(root, sessionID string) GenerateResult {
 	return res
 }
 
-// Brief is the same prompt the one-shot CLI would see, for the live agent.
+// Brief gives a live agent the session evidence and proposal instructions.
 func Brief(root, sessionID string) (string, error) {
 	store, err := OpenRoot(root)
 	if err != nil {
@@ -177,7 +207,7 @@ func Brief(root, sessionID string) (string, error) {
 	if sessionID == "" {
 		return "", fmt.Errorf("no pending harvest session")
 	}
-	return buildPrompt(root, sessionID, store)
+	return buildPrompt(root, sessionID, store, true)
 }
 
 // Skip closes a pending harvest with nothing to propose.
@@ -225,7 +255,7 @@ func sessionActive(root, id string) bool {
 	return session.HasActivity(root, id)
 }
 
-func buildPrompt(root, sessionID string, store *Store) (string, error) {
+func buildPrompt(root, sessionID string, store *Store, liveAgent bool) (string, error) {
 	files, _ := Inventory(root)
 	var inv []string
 	open, _ := store.List(StatusOpen)
@@ -249,9 +279,17 @@ func buildPrompt(root, sessionID string, store *Store) (string, error) {
 	digest := session.Digest(root, sessionID)
 	var b strings.Builder
 	b.WriteString("You propose playbook patches for Superopen harvest. Output JSON only: an array of objects with keys kind,target,title,reason,issue,suggestion,diff,evidence,memory_title,memory_text.\n")
-	b.WriteString("The current user message is a note for this turn (memory capture). It is not evidence for a playbook diff on this session. If this session has nothing to change, the caller runs harvest skip. Pipe the JSON array to so harvest propose on stdin. Do not write a file. Do not shell-redirect into a path.\n")
+	b.WriteString("kind,target,title,reason,issue,suggestion,diff,memory_title,memory_text must be JSON strings; evidence must be an array of objects.\n")
+	if liveAgent {
+		b.WriteString("The current user message is a note for this turn (memory capture). It is not evidence for a playbook diff on this session. If this session has nothing to change, run harvest skip. Pipe the JSON array to so harvest propose on stdin. Do not write a file. Do not shell-redirect into a path.\n")
+	} else {
+		b.WriteString("Return the JSON array as your final answer. Do not call so harvest propose or skip, and do not write harvest or memory state. Before writing a diff, read the named playbook file in the repository root below and match its current lines exactly. Never use a similarly named file from another repository. Return [] if there is nothing to propose.\n")
+	}
+	b.WriteString("Repository root: ")
+	b.WriteString(root)
+	b.WriteString("\n")
 	b.WriteString("kind is improve|create|simplify|principle|memory. Prefer simplify/delete of unused or duplicate rules. Max 3 proposals.\n")
-	b.WriteString("Each proposal needs a concrete reason and evidence (session/memory/graph ids that exist). Do not restate graph-first, Superopen sentinel, or memory contracts.\n")
+	b.WriteString("Each proposal needs a concrete reason and evidence as JSON objects, for example: \"evidence\":[{\"kind\":\"session\",\"id\":\"SESSION_ID\"}]. Use session, memory, or graph ids that exist; never use evidence strings. Do not restate graph-first, Superopen sentinel, or memory contracts.\n")
 	b.WriteString("diff must be a unified diff against the named target. Do not edit files. Do not dump full playbook bodies.\n")
 	b.WriteString("If this session contains a correction or debugging pattern future agents should reuse, put it in memory_title and memory_text on one proposal. That text is stored only when the proposal is applied. Use kind memory and omit target when there is no playbook patch.\n")
 	b.WriteString("Session: ")
@@ -274,22 +312,9 @@ func buildPrompt(root, sessionID string, store *Store) (string, error) {
 }
 
 func parseProposals(raw string) []ProposeInput {
-	raw = strings.TrimSpace(raw)
+	raw = proposalPayload(raw)
 	if raw == "" {
 		return nil
-	}
-	if i := strings.Index(raw, "```"); i >= 0 {
-		rest := raw[i+3:]
-		rest = strings.TrimPrefix(rest, "json")
-		rest = strings.TrimPrefix(rest, "JSON")
-		if j := strings.Index(rest, "```"); j >= 0 {
-			raw = rest[:j]
-		}
-	}
-	if i := strings.Index(raw, "["); i >= 0 {
-		if j := strings.LastIndex(raw, "]"); j > i {
-			raw = raw[i : j+1]
-		}
 	}
 	var many []ProposeInput
 	if err := json.Unmarshal([]byte(raw), &many); err == nil {
@@ -299,7 +324,97 @@ func parseProposals(raw string) []ProposeInput {
 	if json.Unmarshal([]byte(raw), &one) == nil && one.Title != "" {
 		return []ProposeInput{one}
 	}
-	return nil
+	// One-shot agents sometimes render evidence ids as strings despite the
+	// requested object shape. Preserve recognizable ids instead of dropping
+	// an otherwise usable proposal.
+	var records []map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &records) != nil {
+		var record map[string]json.RawMessage
+		if json.Unmarshal([]byte(raw), &record) != nil {
+			return nil
+		}
+		records = []map[string]json.RawMessage{record}
+	}
+	var proposals []ProposeInput
+	for _, record := range records {
+		var reason string
+		if json.Unmarshal(record["reason"], &reason) != nil {
+			var fields map[string]string
+			if json.Unmarshal(record["reason"], &fields) == nil {
+				keys := make([]string, 0, len(fields))
+				for key := range fields {
+					keys = append(keys, key)
+				}
+				sort.Strings(keys)
+				var parts []string
+				for _, key := range keys {
+					if value := strings.TrimSpace(fields[key]); value != "" {
+						parts = append(parts, value)
+					}
+				}
+				record["reason"], _ = json.Marshal(strings.Join(parts, " "))
+			}
+		}
+		var items []json.RawMessage
+		if json.Unmarshal(record["evidence"], &items) != nil {
+			continue
+		}
+		var evidence []Evidence
+		for _, item := range items {
+			var e Evidence
+			if json.Unmarshal(item, &e) == nil && e.Kind != "" {
+				evidence = append(evidence, e)
+				continue
+			}
+			var label string
+			if json.Unmarshal(item, &label) != nil {
+				continue
+			}
+			kind, id, ok := strings.Cut(label, ":")
+			if ok && id != "" && (kind == "session" || kind == "memory" || kind == "graph") {
+				evidence = append(evidence, Evidence{Kind: kind, ID: id})
+			}
+		}
+		if len(evidence) == 0 {
+			continue
+		}
+		record["evidence"], _ = json.Marshal(evidence)
+		encoded, _ := json.Marshal(record)
+		var in ProposeInput
+		if json.Unmarshal(encoded, &in) == nil && in.Title != "" {
+			proposals = append(proposals, in)
+		}
+	}
+	return proposals
+}
+
+func emptyProposalOutput(raw string) bool {
+	return proposalPayload(raw) == "[]"
+}
+
+var terminalControl = regexp.MustCompile("\x1b\\[[0-?]*[ -/]*[@-~]")
+
+func proposalPayload(raw string) string {
+	raw = strings.TrimSpace(terminalControl.ReplaceAllString(raw, ""))
+	if i := strings.Index(raw, "```"); i >= 0 {
+		rest := raw[i+3:]
+		rest = strings.TrimPrefix(strings.TrimPrefix(rest, "json"), "JSON")
+		if j := strings.Index(rest, "```"); j >= 0 {
+			raw = rest[:j]
+		}
+	}
+	arrayStart := strings.Index(raw, "[")
+	objectStart := strings.Index(raw, "{")
+	if objectStart >= 0 && (arrayStart < 0 || objectStart < arrayStart) {
+		if end := strings.LastIndex(raw, "}"); end > objectStart {
+			raw = raw[objectStart : end+1]
+		}
+	} else if arrayStart >= 0 {
+		if end := strings.LastIndex(raw, "]"); end > arrayStart {
+			raw = raw[arrayStart : end+1]
+		}
+	}
+	return strings.TrimSpace(raw)
 }
 
 func truncate(s string, n int) string {

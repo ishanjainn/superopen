@@ -15,6 +15,8 @@ The examples below use `so`; substitute the absolute path above if `so` is unava
 
 Never Grep `.so/` or installed skill/rule directories. Never pipe `so` through `head`/`tail`. If you spawn a Task/subagent, its prompt must say to run the same command line first (Explore children never see SessionStart).
 
+For noisy test or log commands, use `so shrink -- <command> [args...]` in any shell harness. A smaller result includes a recovery command for the exact original; otherwise the complete output passes through. Never shrink source reads, diffs, search results, or graph output.
+
 Apply this skill only when `.so/` exists at the repository root, or the repository is a linked Git worktree whose main worktree has `.so/`. Check `.so/` at the root first. If absent and `.git` is a file, compare `git rev-parse --git-dir` and `git rev-parse --git-common-dir`; only if they differ, check `.so/` beside the main worktree's `.git` directory. Otherwise use normal tools without invoking or mentioning Superopen. Do not `so init` unless the user explicitly asked. In a managed linked worktree, the first graph query seeds `.so/` from the main worktree.
 
 ## Scenario table
@@ -27,6 +29,7 @@ Apply this skill only when `.so/` exists at the repository root, or the reposito
 | Rename / signature / multi-file edit | `so graph impact --files <path>` or `--base main` | Check siblings before you finish; do not skip dependents |
 | Cold repo / architecture | `so graph architecture` | Stop; do not dump every hub |
 | Prior work / diary | `so memory recall "<question>"` | Quote `#id`; not graph query |
+| Repeated shell work across sessions | `so blocks scan` | Run a matching built-in with its required file or stream, such as `so blocks run first-error test.log`; `so blocks init` stages suggestions and `so blocks apply` writes the reviewed set |
 | Persist a fact for later | `so memory capture --kind knowledge --horizon medium --title "…" --text "…"` | Intent, not a phrase; then stop |
 | Literal flag, option, key, error or value | `so graph code-search -- "<literal>" [path...]` | Use the most distinctive exact string. The result ranks definitions, shows bare-name registrations for flags and namespaced directives, names enclosing `qn`s and related graph users, and attaches bounded source bodies. Follow a related `qn` with `graph snippet` if needed. Grep only if the file is unindexed |
 | Several literal variants or a regex | `so graph code-search --regex -- "<pattern>" [path...]` | Use a bounded path such as `tests` when looking for test coverage; hits retain qualified names and source contexts |

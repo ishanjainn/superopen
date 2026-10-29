@@ -45,62 +45,45 @@ func geminiTranscriptUsage(path, sessionID, fallbackModel string) (normalize.LLM
 	}
 	messages := make(map[string]geminiRecordedMessage)
 	var recordedID string
-	if strings.EqualFold(filepath.Ext(path), ".jsonl") {
-		scanner := bufio.NewScanner(io.LimitReader(file, maxGeminiTranscriptBytes+1))
-		scanner.Buffer(make([]byte, 64*1024), maxGeminiTranscriptBytes)
-		for scanner.Scan() {
-			var record struct {
-				SessionID string `json:"sessionId"`
-				Set       struct {
-					SessionID string                  `json:"sessionId"`
-					Messages  []geminiRecordedMessage `json:"messages"`
-				} `json:"$set"`
-				Messages []geminiRecordedMessage `json:"messages"`
-				ID       string                  `json:"id"`
-				Type     string                  `json:"type"`
-			}
-			if json.Unmarshal(scanner.Bytes(), &record) != nil {
-				continue // An interrupted append can leave a partial last line.
-			}
-			if record.SessionID != "" {
-				recordedID = record.SessionID
-			}
-			if record.Set.SessionID != "" {
-				recordedID = record.Set.SessionID
-			}
-			for _, message := range record.Messages {
-				storeGeminiMessage(messages, message)
-			}
-			for _, message := range record.Set.Messages {
-				storeGeminiMessage(messages, message)
-			}
-			if record.ID != "" && record.Type == "gemini" {
-				var message geminiRecordedMessage
-				if json.Unmarshal(scanner.Bytes(), &message) == nil {
-					storeGeminiMessage(messages, message)
-				}
-			}
-		}
-		if scanner.Err() != nil {
-			return normalize.LLMTurn{}, false
-		}
-	} else if strings.EqualFold(filepath.Ext(path), ".json") {
-		body, err := io.ReadAll(io.LimitReader(file, maxGeminiTranscriptBytes+1))
-		if err != nil || len(body) > maxGeminiTranscriptBytes {
-			return normalize.LLMTurn{}, false
-		}
+	if !strings.EqualFold(filepath.Ext(path), ".jsonl") {
+		return normalize.LLMTurn{}, false
+	}
+	scanner := bufio.NewScanner(io.LimitReader(file, maxGeminiTranscriptBytes+1))
+	scanner.Buffer(make([]byte, 64*1024), maxGeminiTranscriptBytes)
+	for scanner.Scan() {
 		var record struct {
-			SessionID string                  `json:"sessionId"`
-			Messages  []geminiRecordedMessage `json:"messages"`
+			SessionID string `json:"sessionId"`
+			Set       struct {
+				SessionID string                  `json:"sessionId"`
+				Messages  []geminiRecordedMessage `json:"messages"`
+			} `json:"$set"`
+			Messages []geminiRecordedMessage `json:"messages"`
+			ID       string                  `json:"id"`
+			Type     string                  `json:"type"`
 		}
-		if json.Unmarshal(body, &record) != nil {
-			return normalize.LLMTurn{}, false
+		if json.Unmarshal(scanner.Bytes(), &record) != nil {
+			continue // An interrupted append can leave a partial last line.
 		}
-		recordedID = record.SessionID
+		if record.SessionID != "" {
+			recordedID = record.SessionID
+		}
+		if record.Set.SessionID != "" {
+			recordedID = record.Set.SessionID
+		}
 		for _, message := range record.Messages {
 			storeGeminiMessage(messages, message)
 		}
-	} else {
+		for _, message := range record.Set.Messages {
+			storeGeminiMessage(messages, message)
+		}
+		if record.ID != "" && record.Type == "gemini" {
+			var message geminiRecordedMessage
+			if json.Unmarshal(scanner.Bytes(), &message) == nil {
+				storeGeminiMessage(messages, message)
+			}
+		}
+	}
+	if scanner.Err() != nil {
 		return normalize.LLMTurn{}, false
 	}
 	if recordedID != sessionID {

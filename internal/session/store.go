@@ -125,7 +125,7 @@ func (s *Store) Ensure() error {
 		id := entry.Name()
 		if _, err := os.Stat(filepath.Join(s.Paths.SessionDir(id), "session.json")); err == nil {
 			// session.json is authoritative and index.json is rebuildable. Repair
-			// an interrupted/migrated catalog instead of leaving the session hidden
+			// an interrupted catalog instead of leaving the session hidden
 			// from CLI consumers.
 			if meta, getErr := s.Get(id); getErr == nil {
 				if err := s.upsertIndex(meta); err != nil {

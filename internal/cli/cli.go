@@ -249,6 +249,9 @@ func (o *Out) flushHints() {
 func (o *Out) takeHints() []string {
 	hints := o.hints
 	o.hints = nil
+	if hints == nil {
+		return []string{}
+	}
 	return hints
 }
 

@@ -47,9 +47,9 @@ func TestGeminiSessionEndReadsJSONLUsage(t *testing.T) {
 	}
 }
 
-func TestGeminiSessionEndReadsLegacyJSONAndRejectsWrongSession(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.json")
-	body := `{"sessionId":"s1","messages":[{"id":"x","type":"gemini","model":"gemini-2.5-flash","tokens":{"input":5,"output":2,"thoughts":1,"total":8}}]}`
+func TestGeminiSessionEndRejectsWrongSession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	body := "{\"sessionId\":\"s1\"}\n{\"id\":\"x\",\"type\":\"gemini\",\"model\":\"gemini-2.5-flash\",\"tokens\":{\"input\":5,\"output\":2,\"thoughts\":1,\"total\":8}}\n"
 	if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -63,8 +63,8 @@ func TestGeminiSessionEndReadsLegacyJSONAndRejectsWrongSession(t *testing.T) {
 }
 
 func TestGeminiSessionEndPrefersHostUsage(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.json")
-	if err := os.WriteFile(path, []byte(`{"sessionId":"s1","messages":[{"id":"x","type":"gemini","tokens":{"input":5,"output":2,"total":7}}]}`), 0600); err != nil {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := os.WriteFile(path, []byte("{\"sessionId\":\"s1\"}\n{\"id\":\"x\",\"type\":\"gemini\",\"tokens\":{\"input\":5,\"output\":2,\"total\":7}}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	emit := &recorder{}

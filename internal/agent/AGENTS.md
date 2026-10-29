@@ -27,7 +27,17 @@ When `.so/` exists in a **customer repo**, every supported coding vendor gets th
 | **Observability** | `so sessions hook` records session start/end, user prompts, tool calls, assistant turns into `.so/sessions` |
 | **Silent lifecycle** | SessionEnd / sessionEnd detach `so sessions finalize` (no extra model text). Finalize is single-flight per session: duplicate sessionEnd or both `sessions hook` + `sessions finalize --detach` must not spawn a second harvest/distill worker. Prompt-submit is silent unless the prompt is prior-work/personal (or the workspace is a memory store with little source), **or** harvest/distill is pending. Then inject the live `brief`/`propose`/`skip` (or distill `--brief`/`--apply`) line once. Stop stays silent. PostToolUse / postToolUse may inject a blast-radius line after an edit when unedited dependents exist (fail-open, at most 3 per session). SessionStart is one route only: graph one-liner when the repo has source, or N-memories + recall command when live diary rows exist and there is little/no source. Harvest OPEN review stays on-demand (`references/harvest.md`). A pending harvest/distill one-liner may append after the graph or memory line. SessionEnd uses the session vendor's own one-shot CLI when authenticated; otherwise work stays pending for the next live agent. There is no cross-vendor fallback. Headless distill/harvest workers set `SUPEROPEN_HEADLESS=1` and must not be recorded as sessions. Only explore-tool nudges (and SubagentStart where the host has subagents). Skill / `AGENTS.md` / `SKILL.md` Reads are not “skipped graph”. |
 
+Codex fires `SessionEnd` when a CLI process closes, including `codex exec` threads that may later resume under the same ID. `Stop` remains turn-only. A resumed thread with new activity is rematerialized on its next `SessionEnd`, then distill and harvest may run again. Empty resumes do not repeat those workers.
+
 `so sessions hook` is a **host-protocol exception**: stdout is vendor control JSON (`additionalContext` / `permissionDecision`), never AXI TOON/`help[]`/dashboards. Telemetry logs go to stderr. Always exit 0 on telemetry-path failure. The command is Hidden under `so sessions` so the user AXI catalog stays list/show/finalize. Users install with `so install`.
+
+Claude PostToolUse, OpenCode execute.after, Copilot CLI postToolUse, Cline afterTool,
+Hermes transform_tool_result, Pi and its installed forks' tool_result, and OpenClaw tool_result_persist may replace only an allowlisted
+shell test or log result when a log or test-report transform is smaller and the
+original is recoverable. They preserve stderr, source reads, diffs and graph
+output. Every host can run `so shrink -- <command>` explicitly. OpenClaw
+requires conversation access enabled for its persistence hook.
+PreToolUse graph guidance has priority over optional block hints.
 
 | Vendor | Graph-first channel | Notes |
 |--------|---------------------|-------|

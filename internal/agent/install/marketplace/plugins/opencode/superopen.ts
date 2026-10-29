@@ -52,6 +52,15 @@ function additionalContext(stdout: string): string {
   }
 }
 
+function outputReplacement(stdout: string): string {
+  try {
+    const response = JSON.parse(stdout.trim()) as { output_replacement?: unknown };
+    return typeof response.output_replacement === "string" ? response.output_replacement : "";
+  } catch {
+    return "";
+  }
+}
+
 // Shell-safe echo: no backticks / $(...) in echo (bash command substitution).
 function shellSafeNudge(text: string): string {
   return text.replace(/`/g, "").replace(/\$\(/g, "(").replace(/"/g, "'");
@@ -357,6 +366,11 @@ export const SuperopenPlugin: Plugin = async ({ client, directory }) => {
         true
       );
       const nudge = additionalContext(stdout);
+      const replacement = outputReplacement(stdout);
+      if (replacement && output && typeof output === "object") {
+        const out = output as { output?: unknown };
+        if (typeof out.output === "string") out.output = replacement;
+      }
       if (nudge && isEditTool(tool) && output && typeof output === "object") {
         const out = output as { output?: unknown };
         if (typeof out.output === "string") {

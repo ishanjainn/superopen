@@ -130,6 +130,18 @@ func (s *Store) MarkDistilled(sessionID string) error {
 	return s.setMeta(metaDistilled, joinCSV(setKeys(set)))
 }
 
+// UnmarkDistilled permits a resumed session with new activity to distill
+// again. The prior memory episodes remain and duplicate writes are merged.
+func (s *Store) UnmarkDistilled(sessionID string) error {
+	set := map[string]struct{}{}
+	for _, id := range s.DistilledSessions() {
+		if id != sessionID {
+			set[id] = struct{}{}
+		}
+	}
+	return s.setMeta(metaDistilled, joinCSV(setKeys(set)))
+}
+
 func (s *Store) ExpireHorizons() (int, error) {
 	seq := s.SessionSeq()
 	now := nowRFC()

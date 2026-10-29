@@ -30,9 +30,7 @@ function loadPinned(): boolean {
 	const pinned = getUIPref("sidebar_pinned");
 	if (pinned === "1" || pinned === "true") return true;
 	if (pinned === "0" || pinned === "false") return false;
-	// Older builds stored an explicit expand toggle. Honor that once.
-	const legacy = getUIPref("sidebar_expanded");
-	return legacy === "1" || legacy === "true";
+	return false;
 }
 
 function savePinned(pinned: boolean) {

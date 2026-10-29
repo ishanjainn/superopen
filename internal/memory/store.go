@@ -48,7 +48,7 @@ const (
 	metaPending         = "pending_distill"
 	metaDistillPaused   = "distill_paused"
 	quantizationInt8    = "int8-unit"
-	memorySchemaVersion = "3"
+	memorySchemaVersion = "1"
 )
 
 const memoryDDL = `
@@ -138,10 +138,6 @@ CREATE INDEX IF NOT EXISTS memory_episodes_kind ON memory_episodes(kind, created
 CREATE INDEX IF NOT EXISTS memory_episodes_topic ON memory_episodes(topic, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS memory_episodes_content_hash ON memory_episodes(tenant_id, principal_id, content_hash) WHERE content_hash != '';
 CREATE INDEX IF NOT EXISTS memory_episodes_scope ON memory_episodes(tenant_id, principal_id, created_at);
-CREATE TABLE IF NOT EXISTS memory_shapes (
-  episode_id INTEGER PRIMARY KEY REFERENCES memory_episodes(id) ON DELETE CASCADE,
-  blob BLOB NOT NULL
-);
 CREATE TABLE IF NOT EXISTS memory_passages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   episode_id INTEGER NOT NULL REFERENCES memory_episodes(id) ON DELETE CASCADE,
@@ -387,10 +383,6 @@ func open(path string, busyMs int) (*Store, error) {
 		return nil, err
 	}
 	if _, err := db.Exec(`INSERT OR IGNORE INTO memory_economy(id, packs_served, tokens_injected, fallback_searches, tokens_saved, updated_at) VALUES(1,0,0,0,0,?)`, nowRFC()); err != nil {
-		s.Close()
-		return nil, err
-	}
-	if err := s.ensurePassagesSchema(); err != nil {
 		s.Close()
 		return nil, err
 	}
@@ -920,40 +912,6 @@ func setKeys(set map[string]struct{}) []string {
 		out = append(out, k)
 	}
 	return out
-}
-
-func (s *Store) backfillTags() error {
-	rows, err := s.db.Query(`SELECT id, uid, text, tags FROM memory_episodes WHERE tags='' LIMIT 400`)
-	if err != nil {
-		return err
-	}
-	type row struct {
-		id   int64
-		uid  string
-		text string
-		tags string
-	}
-	var all []row
-	for rows.Next() {
-		var r row
-		if rows.Scan(&r.id, &r.uid, &r.text, &r.tags) == nil {
-			all = append(all, r)
-		}
-	}
-	_ = rows.Close()
-	for _, r := range all {
-		plain := s.openText(r.uid, r.text)
-		tags := entityTags(plain)
-		if tags == "" {
-			continue
-		}
-		_, _ = s.db.Exec(`UPDATE memory_episodes SET tags=? WHERE id=?`, tags, r.id)
-	}
-	return nil
-}
-
-func (s *Store) tableColumns(table string) (map[string]bool, error) {
-	return pragmaColumns(s.db.DB, table)
 }
 
 func marshalStringList(in []string) string {

@@ -42,6 +42,22 @@ func TestClaudeRequiresAuthFile(t *testing.T) {
 	}
 }
 
+func TestCodexAcceptsAPIKeyAuthFile(t *testing.T) {
+	home := t.TempDir()
+	binDir := t.TempDir()
+	writeFakeBin(t, binDir, "codex")
+	t.Setenv("PATH", binDir)
+	isolateHome(t, home)
+	t.Setenv("CODEX_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "auth.json"), []byte(`{"auth_mode":"apikey","OPENAI_API_KEY":"test-key"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, ok := codex()
+	if !ok || p.Name != "codex" {
+		t.Fatalf("Codex API key auth not detected: %+v ok=%v", p, ok)
+	}
+}
+
 func TestHasOneShot(t *testing.T) {
 	if !HasOneShot("claude-code") || !HasOneShot("cc") || !HasOneShot("opencode") || !HasOneShot("codex") || !HasOneShot("pi") {
 		t.Fatal("one-shot vendors")

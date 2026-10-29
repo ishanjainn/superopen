@@ -56,10 +56,58 @@ hooks:
 		"subagent_stop:",
 		"on_session_end:",
 		"on_session_finalize:",
+		"enabled:",
+		"superopen",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Hermes config missing %q:\n%s", want, text)
 		}
+	}
+	module, err := os.ReadFile(filepath.Join(filepath.Dir(path), "plugins", "superopen", "__init__.py"))
+	if err != nil || !strings.Contains(string(module), `register_hook("transform_tool_result", _transform)`) || !strings.Contains(string(module), `/tmp/superopen hooks`) {
+		t.Fatalf("Hermes transform plugin missing: %v", err)
+	}
+}
+
+func TestHermesPluginInstallAndRemovePreservesOtherPlugins(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("plugins:\n  enabled:\n    - user-plugin\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := installHermesConfig(path, "/tmp/so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := installHermesConfig(path, "/tmp/so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatal(err)
+	}
+	config, err := readHermesConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled := config.values["plugins"].(map[string]interface{})["enabled"].([]interface{})
+	if len(enabled) != 2 {
+		t.Fatalf("reinstall duplicated plugin: %v", enabled)
+	}
+	otherFile := filepath.Join(filepath.Dir(path), "plugins", "superopen", "notes.txt")
+	if err := os.WriteFile(otherFile, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := removeHermesEndpointHooks(path); err != nil || !changed {
+		t.Fatalf("remove: changed=%v err=%v", changed, err)
+	}
+	config, err = readHermesConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled = config.values["plugins"].(map[string]interface{})["enabled"].([]interface{})
+	if len(enabled) != 1 || enabled[0] != "user-plugin" {
+		t.Fatalf("other plugin changed: %v", enabled)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "plugins", "superopen", "__init__.py")); !os.IsNotExist(err) {
+		t.Fatalf("managed plugin remains: %v", err)
+	}
+	if _, err := os.Stat(otherFile); err != nil {
+		t.Fatalf("user file was removed: %v", err)
 	}
 }
 

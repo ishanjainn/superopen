@@ -60,9 +60,8 @@ func TestPatchManifestProducesValidJSONForWindowsPaths(t *testing.T) {
 }
 
 func TestCodexStopHookUsesSessionsRefresh(t *testing.T) {
-	// Codex has no SessionEnd; Stop is turn-end and must refresh (keep active)
-	// rather than finalizing the session. Both the repo plugins/ tree and the
-	// embedded install marketplace must agree.
+	// Stop is turn-end and must refresh (keep active). SessionEnd is the
+	// closing event. Both plugin trees must agree.
 	raw, err := marketplaceFS.ReadFile("marketplace/plugins/codex/plugins/superopen/hooks/hooks.json")
 	if err != nil {
 		t.Fatalf("read embedded codex hooks: %v", err)
@@ -73,6 +72,9 @@ func TestCodexStopHookUsesSessionsRefresh(t *testing.T) {
 	}
 	if strings.Contains(body, `"so sessions finalize"`) {
 		t.Fatalf("Codex hooks must not finalize on Stop (that closes every turn); hooks.json:\n%s", body)
+	}
+	if !strings.Contains(body, `"SessionEnd"`) || !strings.Contains(body, `so sessions hook --vendor=codex --event=SessionEnd`) {
+		t.Fatalf("Codex SessionEnd must invoke the lifecycle hook; hooks.json:\n%s", body)
 	}
 }
 

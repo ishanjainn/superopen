@@ -21,7 +21,7 @@ const (
 )
 
 // Generic personal/prior-work cues. No dataset name lists.
-var memoryCue = regexp.MustCompile(`(?i)(?:last time|we decided|remember|what did we|who(?:'s|\s+is|\s+was|\s+were)\b|what\s+did\s+i\b|when\s+did\s+i\b|where\s+did\s+i\b|where\s+do\s+i\b|what\s+(?:is|was)\s+my\b|what\s+degree|i\s+graduate|graduated|\bmy\s+(?:degree|school|birthday|family|parents|job|hometown|commute|playlist|occupation)\b|how\s+long\b.{0,48}(?:commute|drive|trip|travel)|how\s+many\b.{0,40}(?:\bdo\s+i\b|\bdid\s+i\b|\bi\s+have\b|\bi've\b)|where\s+(?:did|do)\s+i\s+(?:buy|bought|get|got|shop)|what\s+did\s+i\s+(?:name|buy|get))`)
+var memoryCue = regexp.MustCompile(`(?i)(?:last time|we decided|did\s+we\s+decide|remember|what did we|who(?:'s|\s+is|\s+was|\s+were)\b|what\s+did\s+i\b|when\s+did\s+i\b|where\s+did\s+i\b|where\s+do\s+i\b|what\s+(?:is|was)\s+my\b|what\s+degree|i\s+graduate|graduated|\bmy\s+(?:degree|school|birthday|family|parents|job|hometown|commute|playlist|occupation)\b|how\s+long\b.{0,48}(?:commute|drive|trip|travel)|how\s+many\b.{0,40}(?:\bdo\s+i\b|\bdid\s+i\b|\bi\s+have\b|\bi've\b)|where\s+(?:did|do)\s+i\s+(?:buy|bought|get|got|shop)|what\s+did\s+i\s+(?:name|buy|get))`)
 
 // Store-phrase nudge only. Questions like "do you remember" stay recall.
 var captureCue = regexp.MustCompile(`(?i)(?:remember\s+this|remember\s+for\s+later|don'?t\s+forget|save\s+this|jot\s+this|keep\s+this|contributor\s+notes|belongs\s+in\s+the\s+notes)`)
@@ -53,11 +53,11 @@ func classifyPrompt(prompt string) string {
 	if isCapturePrompt(p) {
 		return routeCapture
 	}
-	if codeCue.MatchString(p) {
-		return routeCode
-	}
 	if memoryCue.MatchString(p) {
 		return routeMemory
+	}
+	if codeCue.MatchString(p) {
+		return routeCode
 	}
 	return ""
 }
@@ -190,6 +190,9 @@ func bashCommandFromPayload(payload []byte) string {
 	}
 	if input == nil {
 		input, _ = probe["args"].(map[string]any)
+	}
+	if input == nil {
+		input, _ = probe["toolArgs"].(map[string]any)
 	}
 	if input == nil {
 		input = probe

@@ -8,7 +8,7 @@ Parent index: [../../AGENTS.md](../../AGENTS.md). UI: [../../web/AGENTS.md](../.
 
 | Path | Role |
 |------|------|
-| `store.go` | SQLite persistence (schema_version=3, no ALTER migrate) |
+| `store.go` | SQLite persistence (schema_version=1, fresh schema only) |
 | `search.go`, `recall.go`, `rank.go` | Retrieval and ranking |
 | `capture.go`, `distill.go`, `horizon.go`, `teach.go`, `observer.go` | Agent JSON writes, post-session distill, mechanical expiry |
 | `pack.go`, `ingest.go`, `format.go` | SessionStart index, ingest, AXI TOON index rows (`IndexRow`) |

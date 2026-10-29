@@ -246,9 +246,8 @@ type State struct {
 	SessionStartedAt time.Time `json:"session_started_at,omitempty"`
 
 	// LastSessionRootEmitAt is the wall-clock of the most recent
-	// `coding_agent.session` span emission. Used by Codex (which has
-	// no SessionEnd hook and would otherwise re-emit the session-
-	// root span on EVERY Stop event) to throttle re-emits to once
+	// `coding_agent.session` span emission. Used by Codex to throttle
+	// active session-root re-emits on Stop to once
 	// every ~60s. Deterministic SpanIDs ensure all re-emits collapse
 	// onto a single `otel_traces` row in ClickHouse, but throttling
 	// still saves the OTLP serialise + send cost on long sessions

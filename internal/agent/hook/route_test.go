@@ -70,6 +70,9 @@ func TestClassifyPromptCaptureVsRecall(t *testing.T) {
 	if got := classifyPrompt("do you remember this timeout"); got != routeMemory {
 		t.Errorf("do you remember this must stay recall, got %q", got)
 	}
+	if got := classifyPrompt("What exact value did we decide the health endpoint should return?"); got != routeMemory {
+		t.Errorf("prior decision about code must use memory, got %q", got)
+	}
 }
 
 func TestClassifyPromptContributorNotesAreCapture(t *testing.T) {

@@ -8,11 +8,30 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ishanjainn/superopen/internal/agent/vendors"
 	"github.com/ishanjainn/superopen/internal/graph/engine"
 	"github.com/ishanjainn/superopen/internal/harvest"
 	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 )
+
+func TestExtraHarnessSessionGuidanceIncludesShrinkAndBlocks(t *testing.T) {
+	root := t.TempDir()
+	writeHookSession(t, root, "harness-guidance")
+	writeHookSourceFile(t, root)
+	for _, spec := range vendors.Extra() {
+		t.Run(spec.ID, func(t *testing.T) {
+			payload, err := json.Marshal(map[string]any{"cwd": root, "session_id": "guidance-" + spec.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := sessionStartText(payload, spec.ID)
+			if !strings.Contains(got, "so shrink -- <command>") || !strings.Contains(got, "so blocks scan") {
+				t.Fatalf("missing new-feature guidance: %q", got)
+			}
+		})
+	}
+}
 
 func TestIsExploreToolExcludesShellAndListing(t *testing.T) {
 	for _, name := range []string{"Grep", "glob", "Read", "codebase_search", "Bash"} {

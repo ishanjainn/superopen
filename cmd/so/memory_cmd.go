@@ -154,24 +154,7 @@ func memoryRecallCmd() *cobra.Command {
 			}
 			defer store.Close()
 			budget, _ := cmd.Flags().GetInt("budget")
-			structural, _ := cmd.Flags().GetBool("structural")
 			query := strings.Join(args, " ")
-			if structural {
-				hits, err := store.RecallShape(query, 12)
-				if err != nil {
-					return err
-				}
-				for _, h := range hits {
-					_ = store.Reinforce(h.ID)
-				}
-				out := out()
-				out.Next(memory.HelpForSearch(hits)...)
-				if out.Flags.JSON {
-					return out.HumanOrJSON("memory_recall", nil, hits)
-				}
-				out.Rows("memories", []string{"id", "kind", "title", "tokens"}, memory.IndexRowsFromHits(hits))
-				return nil
-			}
 			res, err := store.Recall(query, budget)
 			if err != nil {
 				return err
@@ -204,8 +187,6 @@ func memoryRecallCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Int("budget", 1500, "Token budget")
-	cmd.Flags().Bool("structural", false, "")
-	_ = cmd.Flags().MarkHidden("structural")
 	return cmd
 }
 

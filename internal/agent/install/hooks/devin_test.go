@@ -16,8 +16,8 @@ func TestInstallDevinProjectHooksPreservesNonSuperopenHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installDevinHooks(path, "/tmp/superopen hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installDevinHooks returned error: %v", err)
+	if err := installDevinCLIHooks(path, "/tmp/superopen hooks", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installDevinCLIHooks returned error: %v", err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -26,7 +26,7 @@ func TestInstallDevinProjectHooksPreservesNonSuperopenHooks(t *testing.T) {
 	text := string(data)
 	for _, want := range []string{
 		"echo keep",
-		"'/tmp/superopen hooks' sessions hook --vendor=devin",
+		"'/tmp/superopen hooks' sessions hook --vendor=devin-cli",
 		"PermissionRequest",
 		"PreToolUse",
 		"PostToolUse",
@@ -46,15 +46,15 @@ func TestInstallDevinUserConfigPreservesUnrelatedKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installDevinHooks(path, "/tmp/so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installDevinHooks returned error: %v", err)
+	if err := installDevinCLIHooks(path, "/tmp/so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
+		t.Fatalf("installDevinCLIHooks returned error: %v", err)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
 	text := string(data)
-	if !strings.Contains(text, `"theme"`) || !strings.Contains(text, "echo keep") || !strings.Contains(text, "--vendor=devin") {
+	if !strings.Contains(text, `"theme"`) || !strings.Contains(text, "echo keep") || !strings.Contains(text, "--vendor=devin-cli") {
 		t.Fatalf("user config was not preserved and updated:\n%s", text)
 	}
 }
@@ -111,52 +111,6 @@ func TestInstallDevinDesktopHooksUsesCascadeEvents(t *testing.T) {
 	}
 }
 
-func TestInstallDevinHooksReplacesOldSuperopenHooks(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hooks.v1.json")
-	existing := `{"PostToolUse":[{"hooks":[{"type":"command","command":"sessions hook old-so sessions hook --vendor=devin post-tool"}]},{"hooks":[{"type":"command","command":"echo keep"}]}]}`
-	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := installDevinHooks(path, "/tmp/new-so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installDevinHooks returned error: %v", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read hooks: %v", err)
-	}
-	text := string(data)
-	if strings.Contains(text, "old-so") {
-		t.Fatalf("old endpoint hook was not replaced:\n%s", text)
-	}
-	if !strings.Contains(text, "echo keep") || !strings.Contains(text, "/tmp/new-so") {
-		t.Fatalf("expected preserved hook and new hook:\n%s", text)
-	}
-}
-
-func TestInstallDevinCLIHooksReplacesLegacyHooksWithExplicitPlatform(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hooks.v1.json")
-	existing := `{"PostToolUse":[{"hooks":[{"type":"command","command":"sessions hook old-so sessions hook --vendor=devin post-tool"}]},{"hooks":[{"type":"command","command":"echo keep"}]}]}`
-	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := installDevinCLIHooks(path, "/tmp/new-so", "/tmp/runtime.jsonl", "/tmp/config.json"); err != nil {
-		t.Fatalf("installDevinCLIHooks returned error: %v", err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read hooks: %v", err)
-	}
-	text := string(data)
-	if strings.Contains(text, "--vendor=devin post-tool") || strings.Contains(text, "old-so") {
-		t.Fatalf("legacy devin hook was not replaced:\n%s", text)
-	}
-	if !strings.Contains(text, "echo keep") || !strings.Contains(text, "--vendor=devin-cli") {
-		t.Fatalf("expected preserved hook and explicit devin-cli hook:\n%s", text)
-	}
-}
-
 func TestInstallDevinDesktopHooksDoesNotRemoveCLIHooks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.json")
 	existing := `{"hooks":{"post_write_code":[{"command":"sessions hook so sessions hook --vendor=devin-cli post-tool"}]}}`
@@ -179,14 +133,14 @@ func TestInstallDevinDesktopHooksDoesNotRemoveCLIHooks(t *testing.T) {
 
 func TestRemoveDevinEndpointHooksPreservesOtherHooks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hooks.v1.json")
-	existing := `{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]},{"hooks":[{"type":"command","command":"sessions hook so sessions hook --vendor=devin session-start"}]}]}`
+	existing := `{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]},{"hooks":[{"type":"command","command":"sessions hook so sessions hook --vendor=devin-cli session-start"}]}]}`
 	if err := os.WriteFile(path, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	changed, err := removeDevinEndpointHooks(path)
+	changed, err := removeDevinCLIEndpointHooks(path)
 	if err != nil {
-		t.Fatalf("removeDevinEndpointHooks returned error: %v", err)
+		t.Fatalf("removeDevinCLIEndpointHooks returned error: %v", err)
 	}
 	if !changed {
 		t.Fatal("expected endpoint hook removal")
@@ -262,7 +216,7 @@ func TestDevinHookStatusDetectsInstalled(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"sessions hook so sessions hook --vendor=devin stop"}]}]}}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"sessions hook so sessions hook --vendor=devin-cli stop"}]}]}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1,6 +1,7 @@
 // __SO_MANAGED_MARKER__
 // Superopen endpoint telemetry plugin for OpenClaw Gateway.
 // Managed by superopen endpoint hooks install --harness openclaw.
+import { spawnSync } from "node:child_process"
 
 // The argv Superopen's installer writes, as an array rather than a command line.
 //
@@ -372,6 +373,40 @@ export function createSuperopenPlugin() {
   // Per plugin instance rather than per module. OpenClaw loads the plugin once, so this is the
   // same lifetime in production, and it keeps one instance's in-flight calls out of another's.
   const pendingDerivedPaths = new Map()
+  const pendingShrinkInputs = new Map()
+
+  const persistShrunkResult = (event, ctx) => {
+    try {
+      const message = event?.message
+      const id = event?.toolCallId || message?.toolCallId || message?.tool_call_id
+      const input = typeof id === "string" ? pendingShrinkInputs.get(id) : undefined
+      if (typeof id === "string") pendingShrinkInputs.delete(id)
+      if (!input || !message || event?.isError || message?.isError) return
+      const blocks = Array.isArray(message.content) ? message.content : null
+      const text = typeof message.content === "string" ? message.content :
+        blocks ? blocks.filter((block) => block?.type === "text" && typeof block.text === "string")
+          .map((block) => block.text).join("") : ""
+      if (text.length < 2048 || Buffer.byteLength(text, "utf8") > 2 * 1024 * 1024) return
+      const cwd = input.params.workdir || input.params.cwd || ctx?.cwd || process.cwd()
+      const payload = JSON.stringify({
+        type: "tool_result_persist", cwd, tool_name: input.toolName,
+        tool_input: input.params, tool_response: text,
+      })
+      const result = spawnSync(superopenArgv[0], ["sessions", "hook", "--vendor=openclaw", "--event=tool_result_persist"], {
+        input: payload, encoding: "utf8", timeout: 12000, maxBuffer: 2 * 1024 * 1024,
+        stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
+      })
+      if (result.status !== 0) return
+      const replacement = JSON.parse(result.stdout)?.output_replacement
+      if (typeof replacement !== "string" || !replacement) return
+      return { message: {
+        ...message,
+        content: blocks ? [{ type: "text", text: replacement }, ...blocks.filter((block) => block?.type !== "text")] : replacement,
+      } }
+    } catch {
+      return
+    }
+  }
 
   const handlerFor = (hook) => (event, ctx) => {
     let envelope
@@ -384,6 +419,11 @@ export function createSuperopenPlugin() {
 
       if (hook === "before_tool_call") {
         rememberDerivedPaths(pendingDerivedPaths, event)
+        if (typeof event.toolCallId === "string" && ["exec", "bash", "shell"].includes(event.toolName)) {
+          pendingShrinkInputs.delete(event.toolCallId)
+          pendingShrinkInputs.set(event.toolCallId, { toolName: event.toolName, params: event.params || {} })
+          while (pendingShrinkInputs.size > 256) pendingShrinkInputs.delete(pendingShrinkInputs.keys().next().value)
+        }
       } else if (hook === "after_tool_call") {
         // OpenClaw does not repeat `derivedPaths` on the completion, so the value remembered from
         // the proposal is attached here under the same key the mapper already reads.
@@ -422,6 +462,7 @@ export function createSuperopenPlugin() {
       for (const hook of subscribedHooks) {
         api.on(hook, handlerFor(hook))
       }
+      api.on("tool_result_persist", persistShrunkResult)
     },
     // Exposed so a test can assert the subscription list without a live gateway.
     subscribedHooks: [...subscribedHooks],

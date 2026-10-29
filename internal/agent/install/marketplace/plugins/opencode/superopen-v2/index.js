@@ -31,6 +31,15 @@ function contextFrom(stdout) {
   }
 }
 
+function replacementFrom(stdout) {
+  try {
+    const result = JSON.parse(stdout.trim());
+    return typeof result.output_replacement === "string" ? result.output_replacement : "";
+  } catch {
+    return "";
+  }
+}
+
 export default {
   id: "superopen",
   async setup(ctx) {
@@ -60,12 +69,29 @@ export default {
       });
     });
     await ctx.tool.hook("execute.after", (event) => {
-      fire("tool.execute.after", {
+      const content = event.result?.content;
+      const result = typeof event.result === "string" ? event.result :
+        typeof content === "string" ? content :
+          Array.isArray(content) ? content.filter((part) => part?.type === "text" && typeof part.text === "string")
+            .map((part) => part.text).join("") : undefined;
+      const response = fire("tool.execute.after", {
         sessionID: event.sessionID, cwd: directory, tool_name: event.tool,
         tool_use_id: event.callID, tool_input: event.input,
-        tool_result: event.status === "error" ? event.error?.message : event.result,
+        tool_result: event.status === "error" ? event.error?.message : result,
         errored: event.status === "error",
-      });
+      }, true);
+      if (event.status !== "completed") return;
+      const replacement = replacementFrom(response);
+      if (!replacement) return;
+      if (typeof event.result === "string") event.result = replacement;
+      else if (event.result && typeof event.result.content === "string") {
+        event.result = { ...event.result, content: replacement };
+      } else if (event.result && Array.isArray(event.result.content)) {
+        event.result = { ...event.result, content: [
+          { type: "text", text: replacement },
+          ...event.result.content.filter((part) => part?.type !== "text"),
+        ] };
+      }
     });
 
     void (async () => {

@@ -46,10 +46,8 @@ const (
 
 	// OpenClawManagedPluginMarker identifies a plugin entry as one Superopen wrote.
 	//
-	// The version suffix is part of the contract with the plugin source. Bump it when the plugin's
-	// behavior changes in a way that makes an older installed copy wrong, which is what lets a
-	// repair recognize a stale file rather than leave it in place. Exported for the same reason
-	// the Pi-family markers are: the harness probe and the inventory scanner both read it.
+	// Keep this ownership marker stable across behavior upgrades so uninstall still recognizes
+	// earlier installed copies. The harness probe and inventory scanner also read it.
 	OpenClawManagedPluginMarker = "superopen-managed-openclaw-plugin:v1"
 
 	// openClawStateDirName is OpenClaw's state directory under the home directory.
@@ -411,7 +409,7 @@ func OpenClawConfigAdvice() []string {
 	entry, hasEntry := config.Plugins.Entries[openClawPluginID]
 	if !hasEntry || entry.Hooks.AllowConversationAccess == nil || !*entry.Hooks.AllowConversationAccess {
 		advice = append(advice, fmt.Sprintf(
-			"Add plugins.entries.%s.hooks.allowConversationAccess = true to %s to collect token usage and agent messages; everything else is collected without it.",
+			"Add plugins.entries.%s.hooks.allowConversationAccess = true to %s for token usage, agent messages, and automatic shrinking of tool results.",
 			openClawPluginID, openClawConfigPath()))
 	}
 	if entry.Hooks.AllowPromptInjection != nil && !*entry.Hooks.AllowPromptInjection {

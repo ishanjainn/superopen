@@ -32,18 +32,16 @@ func (s *Store) ensureKey() error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	for _, path := range []string{s.keyPath(), filepath.Join(dir, "memory.key")} {
-		raw, err := os.ReadFile(path)
-		if err == nil && len(raw) >= 32 {
-			s.key = append([]byte(nil), raw[:32]...)
-			return nil
-		}
-		if err == nil && len(raw) > 0 && len(raw) < 32 {
+	raw, err := os.ReadFile(s.keyPath())
+	if err == nil {
+		if len(raw) < 32 {
 			return fmt.Errorf("memory key is truncated")
 		}
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
+		s.key = append([]byte(nil), raw[:32]...)
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
 	}
 	buf := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, buf); err != nil {
@@ -57,12 +55,6 @@ func (s *Store) ensureKey() error {
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		raw, rerr := os.ReadFile(path)
-		if rerr == nil && len(raw) >= 32 {
-			s.key = append([]byte(nil), raw[:32]...)
-			return nil
-		}
-		legacy := filepath.Join(dir, "memory.key")
-		raw, rerr = os.ReadFile(legacy)
 		if rerr == nil && len(raw) >= 32 {
 			s.key = append([]byte(nil), raw[:32]...)
 			return nil

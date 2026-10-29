@@ -1,5 +1,5 @@
 // __SO_MANAGED_MARKER__
-// Superopen endpoint telemetry plugin for Cline.
+// Superopen endpoint plugin for Cline.
 // Managed by superopen endpoint hooks install --harness cline.
 
 import { execFileSync } from "node:child_process"
@@ -74,7 +74,7 @@ function safeClone(value: unknown, depth = 0, seen = new WeakSet<object>()): unk
   }
 }
 
-async function sendToSuperopen(payload: Record<string, unknown>, captureContext = false): Promise<string | undefined> {
+async function sendToSuperopen(payload: Record<string, unknown>, capture: "context" | "replacement" | false = false): Promise<string | undefined> {
   // Flattened before anything else sees it, so every consumer of this function is handed plain
   // data. Doing it further down, on the way into the child process, would leave a live SDK object
   // -- cycles, functions and all -- reaching whatever else is wired up here.
@@ -83,7 +83,7 @@ async function sendToSuperopen(payload: Record<string, unknown>, captureContext 
   const testSender = (globalThis as Record<symbol, unknown>)[Symbol.for("superopen.cline.testSender")]
   if (typeof testSender === "function") {
     const result = await (testSender as (value: unknown) => unknown)(safe)
-    return captureContext && typeof result === "string" ? result : undefined
+    return capture && typeof result === "string" ? result : undefined
   }
 
   let body: string
@@ -111,7 +111,7 @@ async function sendToSuperopen(payload: Record<string, unknown>, captureContext 
       try {
         const eventName = typeof payload?.type === "string" && payload.type ? payload.type : "tool"
         child = spawn(superopenArgv[0], superopenArgv.slice(1).concat(["--event=" + eventName]), {
-          stdio: ["pipe", captureContext ? "pipe" : "ignore", "ignore"],
+          stdio: ["pipe", capture ? "pipe" : "ignore", "ignore"],
           windowsHide: true,
         })
       } catch (err) {
@@ -127,15 +127,16 @@ async function sendToSuperopen(payload: Record<string, unknown>, captureContext 
         }
         debugLog("hook binary timed out", { type: payload?.type })
         finish()
-      }, captureContext ? promptTimeoutMs : sendTimeoutMs)
+      }, capture ? promptTimeoutMs : sendTimeoutMs)
       // An unreferenced timer cannot keep a CLI host alive waiting on Superopen telemetry.
       if (typeof timer.unref === "function") timer.unref()
       const done = () => {
         clearTimeout(timer)
-        if (captureContext) {
+        if (capture) {
           try {
-            const context = JSON.parse(output)?.additionalContext
-            finish(typeof context === "string" ? context : undefined)
+            const parsed = JSON.parse(output)
+            const value = capture === "context" ? parsed?.additionalContext : parsed?.output_replacement
+            finish(typeof value === "string" ? value : undefined)
           } catch { finish() }
         } else finish()
       }
@@ -283,7 +284,7 @@ export function createSuperopenPlugin() {
     if (!managed && !managedWorkspace(context)) return undefined
     try {
       const extra = type === "afterRun" ? runUsage(context) : {}
-      return await sendToSuperopen({ ...base, ...identity(context), ...(context ?? {}), ...extra, type }, captureContext)
+      return await sendToSuperopen({ ...base, ...identity(context), ...(context ?? {}), ...extra, type }, captureContext ? "context" : false)
     } catch (err) {
       // Unreachable in practice: sendToSuperopen swallows its own failures. Kept because a hook that
       // rejects is a hook that can break the run it was observing.
@@ -306,7 +307,7 @@ export function createSuperopenPlugin() {
       if (managed) api.registerRule?.({
         id: "superopen-graph",
         source: "superopen",
-        content: `For codebase questions in this Superopen workspace, start with ${superopenArgv[0]} graph code-search -- '<literal>' for exact flags, keys and errors; use ${superopenArgv[0]} graph query '<question>' for behavior and relationships. Read the listed graph source bodies and use graph snippet for a listed symbol before Grep or full-file Read. For prior-work facts use ${superopenArgv[0]} memory recall '<question>'.`,
+        content: `For codebase questions in this Superopen workspace, start with ${superopenArgv[0]} graph code-search -- '<literal>' for exact flags, keys and errors; use ${superopenArgv[0]} graph query '<question>' for behavior and relationships. Read the listed graph source bodies and use graph snippet for a listed symbol before Grep or full-file Read. For prior-work facts use ${superopenArgv[0]} memory recall '<question>'. For noisy tests or logs use ${superopenArgv[0]} shrink -- <command>; for repeated shell work use ${superopenArgv[0]} blocks scan and blocks run <name>.`,
       })
     },
 
@@ -319,7 +320,25 @@ export function createSuperopenPlugin() {
         return text ? { appendContext: text } : undefined
       },
       beforeTool: (context: HookContext) => forward("beforeTool", context),
-      afterTool: (context: HookContext) => forward("afterTool", context),
+      afterTool: async (context: HookContext) => {
+        await forward("afterTool", context)
+        if (!managed || !context || asRecord(context.toolCall).toolName !== "run_commands") return undefined
+        const result = asRecord(context.result)
+        if (result.isError || !Array.isArray(result.output)) return undefined
+        let changed = false
+        const next = await Promise.all(result.output.map(async (part: unknown) => {
+          const row = asRecord(part)
+          if (row.success !== true || typeof row.query !== "string" || typeof row.result !== "string" || row.result.length < 2048) return part
+          const replacement = await sendToSuperopen({
+            ...base, ...identity(context), type: "transformToolResult", tool_name: "bash",
+            tool_input: { command: row.query }, tool_response: row.result,
+          }, "replacement")
+          if (replacement === undefined) return part
+          changed = true
+          return { ...row, result: replacement }
+        }))
+        return changed ? { result: { ...result, output: next } } : undefined
+      },
       afterRun: (context: HookContext) => forward("afterRun", context),
     },
   }

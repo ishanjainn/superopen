@@ -36,20 +36,10 @@ func InstallFactory(opts FactoryOptions) (FactoryStatus, error) {
 	if err != nil {
 		return FactoryStatus{}, err
 	}
-	if _, err := removeSettingsEndpointHooks(factoryLegacySettingsPath(status.ConfigPath), "factory"); err != nil {
-		return FactoryStatus{}, err
-	}
 	return factoryStatusFromRuntime(status), nil
 }
 
 func UninstallFactory(opts FactoryOptions) (FactoryStatus, error) {
-	path, err := factoryHooksPath(opts.Level)
-	if err != nil {
-		return FactoryStatus{}, err
-	}
-	if _, err := removeSettingsEndpointHooks(factoryLegacySettingsPath(path), "factory"); err != nil {
-		return FactoryStatus{}, err
-	}
 	status, err := uninstallRuntimeHooks(factoryRuntime, RuntimeOptions(opts))
 	if err != nil {
 		return FactoryStatus{}, err
@@ -205,8 +195,4 @@ func factoryHooksPath(level Level) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown hook level %q", level)
 	}
-}
-
-func factoryLegacySettingsPath(hooksPath string) string {
-	return filepath.Join(filepath.Dir(hooksPath), "settings.json")
 }

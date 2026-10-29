@@ -175,6 +175,9 @@ func TestCursorRuleIsShortGate(t *testing.T) {
 	if !contains(rule, "graph impact") {
 		t.Fatalf("rule must name graph impact for multi-file work: %s", rule)
 	}
+	if !containsAll(rule, "so shrink -- <command>", "so blocks scan", "so blocks run <name>") {
+		t.Fatalf("rule must expose noisy-output and repeated-work commands: %s", rule)
+	}
 	if !paths.MentionsCommand(rule, "graph code-search") {
 		t.Fatalf("cursor rule must route exact literals to code-search: %s", rule)
 	}

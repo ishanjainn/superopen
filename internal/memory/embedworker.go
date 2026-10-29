@@ -398,7 +398,7 @@ func ServeEmbedWorker(addr string) error {
 		addr = DefaultEmbedListen
 	}
 	_ = FetchModels()
-	if dir := bgeModelDir(); dir != "" && bgeReadyDir(dir) {
+	if dir := ModelDir(); dir != "" && bgeReadyDir(dir) {
 		if startBGEChild(addr, dir) {
 			return nil
 		}
@@ -445,24 +445,6 @@ func EnsureModelDir() error {
 		return nil
 	}
 	return os.MkdirAll(dir, 0o755)
-}
-
-func legacyBGEDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".superopen", "models", "bge-small-en-v1.5")
-}
-
-func bgeModelDir() string {
-	if dir := ModelDir(); bgeReadyDir(dir) {
-		return dir
-	}
-	if dir := legacyBGEDir(); bgeReadyDir(dir) {
-		return dir
-	}
-	return ModelDir()
 }
 
 func bgeReadyDir(dir string) bool {

@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/cli"
+	"github.com/ishanjainn/superopen/internal/memory"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/session"
+	"github.com/ishanjainn/superopen/internal/session/trace"
 )
 
 func TestSessionsListTOON(t *testing.T) {
@@ -291,4 +293,74 @@ func TestClaimSessionFinalizeSingleFlight(t *testing.T) {
 		t.Fatal("a different session must not block")
 	}
 	unlock2()
+}
+
+func TestCodexFinalizeAfterResumeReprocessesNewActivity(t *testing.T) {
+	root := t.TempDir()
+	layout := paths.Resolve(root)
+	if err := layout.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	id := "codex-resume-finalize"
+	spans := trace.NewLocalJSONL(layout.TracesDir)
+	start := time.Now().Add(-time.Minute).UTC()
+	if err := spans.Write([]trace.Span{
+		{TraceID: "trace", SpanID: "root", Name: "coding_agent.session", SessionID: id,
+			StartTimeUnixN: start.UnixNano(), Attributes: map[string]string{"coding_agent.client": "codex"}},
+		{TraceID: "trace", SpanID: "turn-1", Name: "coding_agent.llm.turn", SessionID: id,
+			StartTimeUnixN: start.Add(time.Second).UnixNano(), EndTimeUnixN: start.Add(2 * time.Second).UnixNano(),
+			Attributes: map[string]string{"coding_agent.client": "codex", "gen_ai.prompt": "first task", "gen_ai.usage.total_tokens": "10"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := finalizeSession(root, id, nil); err != nil {
+		t.Fatal(err)
+	}
+	first, err := session.NewStore(layout).Get(id)
+	if err != nil || first.Status != session.StatusEnded {
+		t.Fatalf("first finalize: meta=%+v err=%v", first, err)
+	}
+	mem, err := memory.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mem.MarkDistilled(id); err != nil {
+		t.Fatal(err)
+	}
+	_ = mem.Close()
+	resumedTurnAt := time.Now().UTC()
+	if err := spans.Write([]trace.Span{{TraceID: "trace", SpanID: "turn-2", Name: "coding_agent.llm.turn", SessionID: id,
+		StartTimeUnixN: resumedTurnAt.UnixNano(), EndTimeUnixN: resumedTurnAt.UnixNano(),
+		Attributes: map[string]string{"coding_agent.client": "codex", "gen_ai.prompt": "follow-up task", "gen_ai.usage.total_tokens": "20"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := finalizeSession(root, id, nil); err != nil {
+		t.Fatal(err)
+	}
+	second, err := session.NewStore(layout).Get(id)
+	if err != nil || second.Tokens <= first.Tokens {
+		t.Fatalf("resume finalize: first=%+v second=%+v err=%v", first, second, err)
+	}
+	mem, err = memory.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mem.Close()
+	if mem.HasDistilled(id) {
+		t.Fatal("resumed Codex session must permit another distill")
+	}
+	if err := mem.MarkDistilled(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := spans.Write([]trace.Span{{TraceID: "trace", SpanID: "end-only", Name: "coding_agent.session", SessionID: id,
+		StartTimeUnixN: start.UnixNano(), EndTimeUnixN: time.Now().UTC().UnixNano(),
+		Attributes: map[string]string{"coding_agent.client": "codex"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := finalizeSession(root, id, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !mem.HasDistilled(id) {
+		t.Fatal("closing a resumed thread without new activity must not re-distill")
+	}
 }
