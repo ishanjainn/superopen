@@ -2,6 +2,7 @@ package generic
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,7 +12,10 @@ import (
 )
 
 func TestGeminiSessionEndReadsJSONLUsage(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.jsonl")
+	path := filepath.Join(t.TempDir(), "session\\transcript.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
 	body := `{"sessionId":"s1","projectHash":"repo"}
 {"id":"a","type":"gemini","model":"gemini-2.5-flash","tokens":{"input":100,"output":20,"cached":30,"thoughts":5,"total":125}}
 {"id":"a","type":"gemini","model":"gemini-2.5-flash","tokens":{"input":100,"output":20,"cached":30,"thoughts":5,"total":125}}
@@ -22,7 +26,10 @@ func TestGeminiSessionEndReadsJSONLUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	emit := &recorder{}
-	payload := []byte(`{"session_id":"s1","transcript_path":"` + path + `"}`)
+	payload, err := json.Marshal(map[string]any{"session_id": "s1", "transcript_path": path})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := New("gemini").Handle(context.Background(), normalize.Input{Event: "SessionEnd", Payload: payload, Emit: emit}); err != nil {
 		t.Fatal(err)
 	}
@@ -61,9 +68,18 @@ func TestGeminiSessionEndPrefersHostUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	emit := &recorder{}
-	payload := []byte(`{"session_id":"s1","model":"gemini-2.5-flash","transcript_path":"` + path + `","usage":{"input_tokens":10,"output_tokens":20}}`)
+	payload, err := json.Marshal(map[string]any{
+		"session_id": "s1", "model": "gemini-2.5-flash", "transcript_path": path,
+		"usage": map[string]int{"input_tokens": 10, "output_tokens": 20},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := New("gemini").Handle(context.Background(), normalize.Input{Event: "SessionEnd", Payload: payload, Emit: emit}); err != nil {
 		t.Fatal(err)
+	}
+	if len(emit.sessions) != 1 {
+		t.Fatalf("sessions=%d", len(emit.sessions))
 	}
 	if got := emit.sessions[0].TotalTokens; got != 30 {
 		t.Fatalf("host usage total=%d", got)

@@ -238,7 +238,7 @@ func removeSettingsEndpointHooksFromLoaded(settings *settingsHooksFile, platform
 }
 
 func mergeSettingsEndpointHook(existing []settingsHookGroup, group settingsHookGroup, platform string) []settingsHookGroup {
-	out := make([]settingsHookGroup, 0, len(existing)+1)
+	out := make([]settingsHookGroup, 0, len(existing))
 	for _, item := range existing {
 		filtered, changed := filterSettingsEndpointHooks(item, platform)
 		if !changed || len(filtered.Hooks) > 0 {
