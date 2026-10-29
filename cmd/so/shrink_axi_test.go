@@ -66,7 +66,7 @@ func TestShrinkAndRetrieveAXI(t *testing.T) {
 	if _, ok := encoded["next"].([]any); !ok {
 		t.Fatalf("next must be a list: %+v", encoded)
 	}
-	rows := make([]string, 400)
+	rows := make([]string, 4000)
 	for i := range rows {
 		rows[i] = "repeated long value"
 	}

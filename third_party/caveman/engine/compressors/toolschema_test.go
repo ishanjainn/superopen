@@ -580,7 +580,7 @@ func TestToolSchemaPreservesArgumentConstraints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(pretty.Bytes(), golden) {
+	if !bytes.Equal(pretty.Bytes(), bytes.ReplaceAll(golden, []byte("\r\n"), []byte("\n"))) {
 		t.Fatalf("output drifted from golden.\n--- got ---\n%s\n--- want ---\n%s", pretty.String(), golden)
 	}
 

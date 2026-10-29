@@ -272,7 +272,7 @@ func TestMemoryCaptureRequiresFields(t *testing.T) {
 	}
 }
 
-func captureStdout(t *testing.T, fn func()) string {
+func captureStdout(t *testing.T, fn func()) (output string) {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -280,12 +280,23 @@ func captureStdout(t *testing.T, fn func()) string {
 	}
 	old := os.Stdout
 	os.Stdout = w
+	var buf bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(&buf, r)
+		done <- copyErr
+	}()
+	defer func() {
+		os.Stdout = old
+		_ = w.Close()
+		if copyErr := <-done; copyErr != nil {
+			t.Errorf("read captured stdout: %v", copyErr)
+		}
+		_ = r.Close()
+		output = buf.String()
+	}()
 	fn()
-	_ = w.Close()
-	os.Stdout = old
-	raw, _ := io.ReadAll(r)
-	_ = r.Close()
-	return string(raw)
+	return output
 }
 
 func TestMemoryForgetHidesAXI(t *testing.T) {
