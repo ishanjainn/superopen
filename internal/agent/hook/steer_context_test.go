@@ -158,8 +158,20 @@ func TestSessionReminderSilentWhenUnmanaged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text, _, ok := steerTextFor("claude-code", "SessionStart", payload); ok {
-		t.Fatalf("unmanaged session must not inject Superopen context, got %q", text)
+	for _, host := range []struct{ vendor, event string }{
+		{"claude-code", "SessionStart"},
+		{"cursor", "sessionStart"},
+		{"codex", "SessionStart"},
+		{"gemini", "SessionStart"},
+		{"opencode", "session.created"},
+		{"copilot-cli", "sessionStart"},
+		{"pi", "before_agent_start"},
+		{"openclaw", "before_prompt_build"},
+		{"cline", "beforeRun"},
+	} {
+		if text, _, ok := steerTextFor(host.vendor, host.event, payload); ok {
+			t.Fatalf("%s unmanaged session must not inject Superopen context, got %q", host.vendor, text)
+		}
 	}
 }
 

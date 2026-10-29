@@ -29,7 +29,7 @@ func soLine(sub string) string {
 // The CLI path is explained once here, not on every hook line.
 func Block() string {
 	return strings.TrimSpace(fmt.Sprintf(`
-If this workspace has no .so/ directory, still run one graph query in your shell. If stdout says not a Superopen repo, stop; do not so init unless the user asked. A linked worktree of a managed parent seeds on that call.
+These instructions apply only when the repository root has .so/, or this is a linked Git worktree whose main worktree has .so/. Check .so/ at the root first. If absent and .git is a file, compare git rev-parse --git-dir and --git-common-dir; only if they differ, check .so/ beside the main worktree's .git directory. In every other repository, use your normal tools: do not invoke or mention Superopen. Do not so init unless the user asks. In a managed linked worktree, the first graph query seeds .so/ from the main worktree.
 
 When Superopen is available, it is a CLI binary. Invoke it with your shell tool (Bash, PowerShell, or equivalent). Copy-paste this absolute path. On Windows do not wrap it in bash -c:
 
@@ -109,7 +109,7 @@ func ReadDenyReason() string {
 // CursorRule is the short alwaysApply gate installed into ~/.cursor/rules.
 func CursorRule() string {
 	return strings.TrimSpace(fmt.Sprintf(`
-If this workspace has no .so/ directory, still run one graph query in your shell. If stdout says not a Superopen repo, stop; do not so init unless the user asked.
+Apply this rule only when the repository root has .so/, or this is a linked Git worktree whose main worktree has .so/. Check .so/ at the root first. If absent and .git is a file, compare git rev-parse --git-dir and --git-common-dir; only if they differ, check .so/ beside the main worktree's .git directory. Otherwise use normal tools: do not invoke or mention Superopen. Do not so init unless the user asks. In a managed linked worktree, the first graph query seeds .so/.
 
 If Superopen is available, it is a CLI binary. Invoke it with your shell tool (Bash, PowerShell, or equivalent). On Windows do not wrap the path in bash -c. Codebase questions: exact flag/key/error/value: %s first, then its bounded source-window help; unknown behavior or relationship: %s first. Use Superopen before Grep/Read/ls. Do not run memory recall for a source question. Rename or multi-file: graph impact. Never pipe so through head or tail. Saved facts in this workspace: %s when they ask what was stored; %s when they want a fact persisted. Notes in .so/ are this workspace diary even if titles look like import ids; if two notes conflict cite both #ids; if recall misses try a second cue. If a hook says HARVEST pending, run harvest brief then harvest propose before answering; if that session has nothing to change, harvest skip <id>. The current user message is a memory capture, not a playbook diff for that session. Pipe JSON to harvest propose on stdin. Do not write a file. Never Grep .so/. This applies to you and to every subagent you spawn. Do not skip the graph by spawning Explore. Memory is hints, not authority.
 `, soLine(`graph code-search -- '<literal>'`), soLine(`graph query '<question>'`), soLine(`memory recall '<question>'`), soLine(`memory capture --kind knowledge --horizon medium --title '…' --text '…'`))) + "\n"

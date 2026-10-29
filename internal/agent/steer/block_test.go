@@ -30,11 +30,8 @@ func TestMergeBlockIdempotent(t *testing.T) {
 	if contains(first, "run `so init` once") {
 		t.Fatalf("block must not auto-init unmanaged repos: %s", first)
 	}
-	if contains(first, "ignore Superopen entirely") {
-		t.Fatalf("block must still try one graph query when .so/ is missing: %s", first)
-	}
-	if !contains(first, "still run one graph query") {
-		t.Fatalf("block must try one graph query when .so/ is missing: %s", first)
+	if contains(first, "still run one graph query") || !containsAll(first, "linked Git worktree", "do not invoke or mention Superopen", "first graph query seeds") {
+		t.Fatalf("block must skip unmanaged repositories and retain managed worktree seeding: %s", first)
 	}
 	if !contains(first, "Do not spawn Explore") {
 		t.Fatalf("block must close the Explore hole: %s", first)
@@ -172,11 +169,8 @@ func TestNudgesAreOneLinersWithoutQuotes(t *testing.T) {
 
 func TestCursorRuleIsShortGate(t *testing.T) {
 	rule := CursorRule()
-	if contains(rule, "ignore Superopen entirely") {
-		t.Fatalf("rule must still try one graph query when .so/ is missing: %s", rule)
-	}
-	if !contains(rule, "still run one graph query") {
-		t.Fatalf("rule must try one graph query when .so/ is missing: %s", rule)
+	if contains(rule, "still run one graph query") || !containsAll(rule, "linked Git worktree", "do not invoke or mention Superopen", "first graph query seeds") {
+		t.Fatalf("rule must skip unmanaged repositories and retain managed worktree seeding: %s", rule)
 	}
 	if !contains(rule, "graph impact") {
 		t.Fatalf("rule must name graph impact for multi-file work: %s", rule)

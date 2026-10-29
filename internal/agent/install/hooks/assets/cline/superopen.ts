@@ -2,6 +2,10 @@
 // Superopen endpoint telemetry plugin for Cline.
 // Managed by superopen endpoint hooks install --harness cline.
 
+import { execFileSync } from "node:child_process"
+import { statSync } from "node:fs"
+import { basename, dirname, isAbsolute, join, resolve } from "node:path"
+
 // The argv Superopen's installer writes, as an array rather than a command line.
 //
 // Cline plugins run inside whichever host loaded them -- the VS Code extension host, a JetBrains
@@ -205,6 +209,35 @@ function identity(context: Record<string, unknown> | undefined): Record<string, 
   return fields
 }
 
+function directoryExists(path: string): boolean {
+  try { return statSync(path).isDirectory() } catch { return false }
+}
+
+function fileExists(path: string): boolean {
+  try { return statSync(path).isFile() } catch { return false }
+}
+
+function gitPath(root: string, flag: string): string {
+  try {
+    const path = execFileSync("git", ["-C", root, "rev-parse", flag], { encoding: "utf8", timeout: 1000, stdio: ["ignore", "pipe", "ignore"] }).trim()
+    return path ? (isAbsolute(path) ? path : resolve(root, path)) : ""
+  } catch { return "" }
+}
+
+function managedWorkspace(context: HookContext): boolean {
+  const fields = identity(context)
+  const start = typeof fields.cwd === "string" ? fields.cwd : ""
+  if (!start) return false
+  const root = gitPath(start, "--show-toplevel") || start
+  if (directoryExists(join(root, ".so"))) return true
+  if (!fileExists(join(root, ".git"))) return false
+  const gitDir = gitPath(root, "--git-dir")
+  const commonDir = gitPath(root, "--git-common-dir")
+  if (!gitDir || !commonDir || gitDir === commonDir) return false
+  const parent = basename(commonDir) === ".git" ? dirname(commonDir) : commonDir
+  return directoryExists(join(parent, ".so"))
+}
+
 type HookContext = Record<string, unknown> | undefined
 
 function currentPrompt(context: HookContext): string {
@@ -244,8 +277,10 @@ function runUsage(context: HookContext): Record<string, unknown> {
 
 export function createSuperopenPlugin() {
   let base: Record<string, unknown> = {}
+  let managed = false
 
   const forward = async (type: string, context: HookContext, captureContext = false) => {
+    if (!managed && !managedWorkspace(context)) return undefined
     try {
       const extra = type === "afterRun" ? runUsage(context) : {}
       return await sendToSuperopen({ ...base, ...identity(context), ...(context ?? {}), ...extra, type }, captureContext)
@@ -265,12 +300,13 @@ export function createSuperopenPlugin() {
     // once rather than re-derived per event.
     setup(api: { registerRule?: (rule: { id: string; content: string; source: string }) => void }, context: HookContext) {
       base = identity(context)
+      managed = managedWorkspace(context)
       // Cline's runtime does not consume hook stdout as prompt context. Its rule registry is
       // model-facing and survives compaction, so the graph route belongs here.
-      api.registerRule?.({
+      if (managed) api.registerRule?.({
         id: "superopen-graph",
         source: "superopen",
-        content: `For codebase questions in a Superopen workspace, start with ${superopenArgv[0]} graph code-search -- '<literal>' for exact flags, keys and errors; use ${superopenArgv[0]} graph query '<question>' for behavior and relationships. Read the listed graph source bodies and use graph snippet for a listed symbol before Grep or full-file Read. If .so/ is absent, try one graph query; stop if it says this is not a Superopen repo. For prior-work facts use ${superopenArgv[0]} memory recall '<question>'.`,
+        content: `For codebase questions in this Superopen workspace, start with ${superopenArgv[0]} graph code-search -- '<literal>' for exact flags, keys and errors; use ${superopenArgv[0]} graph query '<question>' for behavior and relationships. Read the listed graph source bodies and use graph snippet for a listed symbol before Grep or full-file Read. For prior-work facts use ${superopenArgv[0]} memory recall '<question>'.`,
       })
     },
 
