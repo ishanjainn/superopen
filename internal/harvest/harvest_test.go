@@ -188,6 +188,84 @@ func TestParseProposalsCapsAndPrefersSimplify(t *testing.T) {
 	}
 }
 
+func TestParseProposalsStringEvidenceFromHeadlessAgent(t *testing.T) {
+	root := testRepo(t)
+	raw := "```json\n" + `[{"kind":"improve","target":"AGENTS.md","title":"Run tests","reason":"A skipped test missed a regression","diff":"--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ -1,3 +1,4 @@\n # Agents\n \n Follow graph-first search.\n+Run tests.\n","evidence":["session:harvest-e2e-1","AGENTS.md abc123"]}]` + "\n```"
+	got := parseProposals(raw)
+	if len(got) != 1 || len(got[0].Evidence) != 1 || got[0].Evidence[0].Kind != "session" || got[0].Evidence[0].ID != "harvest-e2e-1" {
+		t.Fatalf("lost valid proposal evidence: %+v", got)
+	}
+	got[0].SessionID = "harvest-e2e-1"
+	proposal, err := Propose(root, got[0])
+	if err != nil || proposal.Status != StatusOpen {
+		t.Fatalf("headless proposal was not stored for review: %+v, %v", proposal, err)
+	}
+}
+
+func TestEmptyProposalOutput(t *testing.T) {
+	if !emptyProposalOutput("[]") || !emptyProposalOutput("```json\n[]\n```") || !emptyProposalOutput("\x1b[0m\n> build · model\n\x1b[0m\n[]\n") || emptyProposalOutput("invalid") {
+		t.Fatal("empty harvest output was misclassified")
+	}
+}
+
+func TestParseProposalsOpenCodeTerminalHeader(t *testing.T) {
+	raw := "\x1b[0m\n> build · model\n\x1b[0m\n" + `[{"kind":"memory","title":"Use tests","reason":"Regression","memory_text":"Run tests","evidence":[{"kind":"session","id":"s1"}]}]`
+	got := parseProposals(raw)
+	if len(got) != 1 || got[0].Title != "Use tests" {
+		t.Fatalf("OpenCode output lost proposal: %+v", got)
+	}
+}
+
+func TestParseSingleProposalWithEvidenceArray(t *testing.T) {
+	raw := "\x1b[0m\n> build · model\n" + `{"kind":"memory","title":"Use tests","reason":"Regression","memory_text":"Run tests","evidence":[{"kind":"session","id":"s1"}]}`
+	got := parseProposals(raw)
+	if len(got) != 1 || got[0].Title != "Use tests" || len(got[0].Evidence) != 1 {
+		t.Fatalf("single proposal lost: %+v", got)
+	}
+}
+
+func TestParseProposalWithStructuredReason(t *testing.T) {
+	raw := `[{"kind":"improve","target":"AGENTS.md","title":"Run tests","reason":{"cause":"A regression was missed.","intent":"Add a lasting rule."},"evidence":[{"kind":"session","id":"s1"}]}]`
+	got := parseProposals(raw)
+	if len(got) != 1 || !strings.Contains(got[0].Reason, "A regression was missed.") || !strings.Contains(got[0].Reason, "Add a lasting rule.") {
+		t.Fatalf("structured reason was lost: %+v", got)
+	}
+}
+
+func TestProposeRejectsDiffFromAnotherRepository(t *testing.T) {
+	root := testRepo(t)
+	_, err := Propose(root, ProposeInput{
+		Kind: KindImprove, Target: "AGENTS.md", Title: "Run tests", Reason: "Missed regression",
+		Diff: "--- a/AGENTS.md\n+++ b/AGENTS.md\n@@ -1 +1,2 @@\n Other repository instructions\n+Run tests.\n",
+	})
+	if err == nil || !strings.Contains(err.Error(), "diff does not apply") {
+		t.Fatalf("wrong-repo patch was accepted: %v", err)
+	}
+}
+
+func TestHarvestBriefSpecifiesEvidenceObjects(t *testing.T) {
+	root := testRepo(t)
+	store, err := OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	prompt, err := buildPrompt(root, "sess-1", store, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt, `"evidence":[{"kind":"session","id":"SESSION_ID"}]`) {
+		t.Fatal("harvest brief must show the evidence schema")
+	}
+	headlessPrompt, err := buildPrompt(root, "sess-1", store, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(headlessPrompt, "Do not call so harvest propose") || strings.Contains(headlessPrompt, "Pipe the JSON array") {
+		t.Fatal("headless worker was told to submit its own proposal")
+	}
+}
+
 func TestSessionStartLinePendingNotOpenReview(t *testing.T) {
 	root := testRepo(t)
 	if line := PendingSessionStartLine(root); line != "" {
@@ -207,6 +285,9 @@ func TestSessionStartLinePendingNotOpenReview(t *testing.T) {
 	}
 	if !paths.MentionsCommand(line, "harvest brief") || !paths.MentionsCommand(line, "harvest skip") {
 		t.Fatalf("live line must name brief then skip: %q", line)
+	}
+	if !strings.Contains(line, "harvest brief sess-pending --full") {
+		t.Fatalf("live agent needs the complete brief: %q", line)
 	}
 	if !strings.Contains(line, "sess-pending") || !strings.Contains(line, "memory capture") || !strings.Contains(line, "not a playbook diff") {
 		t.Fatalf("pending line must keep the session and treat the current message as a note: %q", line)

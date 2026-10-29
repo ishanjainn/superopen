@@ -1465,6 +1465,9 @@ func TestSessionStartIndexPendingWithKnowledge(t *testing.T) {
 	if !strings.Contains(text, "sess-later") || !strings.Contains(text, "DISTILL pending") {
 		t.Fatalf("pending distill must survive live memories, got %q", text)
 	}
+	if !strings.Contains(text, "memory distill --brief sess-later --full") {
+		t.Fatalf("live agent needs the complete distill brief: %q", text)
+	}
 }
 
 func TestSchemaVersionIsOne(t *testing.T) {

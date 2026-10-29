@@ -90,12 +90,12 @@ func eventFromSpan(sp trace.Span) (Event, bool) {
 }
 
 func actionForTool(name string) (string, bool) {
-	switch name {
-	case "Bash", "Shell":
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "bash", "shell", "exec_command":
 		return "command.executed", true
-	case "Read":
+	case "read":
 		return "file.read", true
-	case "Edit", "Write", "MultiEdit":
+	case "edit", "write", "multiedit":
 		return "file.edited", true
 	default:
 		return "", false

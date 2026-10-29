@@ -105,6 +105,11 @@ func Propose(root string, in ProposeInput) (Proposal, error) {
 		}
 		return out, nil
 	}
+	if strings.TrimSpace(in.Diff) != "" {
+		if _, err := ApplyUnified(liveStr, in.Diff); err != nil {
+			return Proposal{}, fmt.Errorf("diff does not apply to %s: %w", in.Target, err)
+		}
+	}
 	plus, minus := DiffStats(in.Diff)
 	p := Proposal{
 		SessionID:   in.SessionID,

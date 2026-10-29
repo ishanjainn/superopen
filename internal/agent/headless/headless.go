@@ -128,7 +128,7 @@ func codex() (Provider, bool) {
 		return Provider{}, false
 	}
 	auth := filepath.Join(homeDir, "auth.json")
-	if !fileHasJSONKey(auth, "tokens") && identity.ResolveForVendor("codex") == "" {
+	if !fileHasJSONKey(auth, "tokens") && !fileHasJSONKey(auth, "OPENAI_API_KEY") && identity.ResolveForVendor("codex") == "" {
 		return Provider{}, false
 	}
 	return Provider{Name: "codex", Bin: bin, Args: []string{"exec"}}, true

@@ -275,6 +275,7 @@ func distillPrompt(root, sessionID string, store *Store) (string, error) {
 	b.WriteString("promote: id + horizon. forget: id + reason. Prefer forget/promote over duplicating listed ids.\n")
 	b.WriteString("If a listed id already holds the same fact, emit promote or forget — never a second knowledge/skill copy.\n")
 	b.WriteString("Max 3 new knowledge/skill writes. Skip trivia. No secrets. Memory is hints, not authority.\n")
+	b.WriteString("Ground each statement in the session digest. Do not claim a file was edited, a command succeeded, or an action was denied unless a recorded tool result supports it.\n")
 	b.WriteString("Empty array if nothing durable.\n")
 	b.WriteString("Session: ")
 	b.WriteString(sessionID)
@@ -443,7 +444,7 @@ func LiveDistillInstruction(pendingSession string) string {
 		return ""
 	}
 	bin := paths.ResolveSoBin()
-	return fmt.Sprintf("DISTILL pending %s — you are the live agent: before answering, `%s memory distill --brief %s` then `%s memory distill --apply %s` (JSON stdin). Empty array if nothing durable.", pendingSession, bin, pendingSession, bin, pendingSession)
+	return fmt.Sprintf("DISTILL pending %s — you are the live agent: before answering, `%s memory distill --brief %s --full` then `%s memory distill --apply %s` (JSON stdin). Empty array if nothing durable.", pendingSession, bin, pendingSession, bin, pendingSession)
 }
 
 func PendingDistillLine(root string) string {
