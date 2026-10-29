@@ -89,6 +89,50 @@ func TestInstallOpenCodeAndPiUseHostDiscoveryPaths(t *testing.T) {
 	}
 }
 
+func TestInstallOpenCodeV2UsesServerPlugin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	binDir := filepath.Join(home, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"so":       "#!/bin/sh\n",
+		"opencode": "#!/bin/sh\necho 2.2.0\n",
+	} {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(body), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	base := filepath.Join(home, ".config", "opencode", "plugins")
+	if err := os.MkdirAll(base, 0755); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(base, "superopen.ts")
+	if err := os.WriteFile(old, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := installGenericVendor("opencode", false); err != nil {
+		t.Fatal(err)
+	}
+	newPath := filepath.Join(base, "superopen", "index.js")
+	data, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `id: "superopen"`) || !strings.Contains(string(data), `session.hook("context"`) {
+		t.Fatalf("V2 plugin lacks setup/context hook: %s", data)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatal("V1 plugin still installed alongside V2")
+	}
+}
+
 func TestInstallGeminiMergesSettingsAndUsesCurrentEvents(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

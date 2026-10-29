@@ -16,6 +16,8 @@ func TargetPaths(id string, level Level) ([]string, error) {
 		return nil, err
 	}
 	switch id {
+	case "factory":
+		return []string{path, factoryLegacySettingsPath(path)}, nil
 	case "dsh":
 		return []string{path, dshPatchPathFor(path)}, nil
 	case "muse":
@@ -59,8 +61,6 @@ func runtimeFor(id string) (hookRuntime, error) {
 		return qwenRuntime, nil
 	case "senpi":
 		return omoRuntime, nil
-	case "vscode":
-		return vscodeRuntime, nil
 	default:
 		return hookRuntime{}, fmt.Errorf("unsupported catalog vendor %q", id)
 	}

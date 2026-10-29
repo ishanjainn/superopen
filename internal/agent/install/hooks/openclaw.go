@@ -381,6 +381,7 @@ func OpenClawStateDir(home string) (string, error) {
 //     mentions it when the key is already present: an allowlist introduced where none existed
 //     would deny every other plugin the operator runs, which is a far worse outcome than the one
 //     it would fix.
+//   - `allowPromptInjection` must not be false for model-facing graph and memory context.
 //
 // A config that cannot be read or parsed produces no advice rather than a guess. JSON5 is the
 // common case there, and telling an operator their config is missing a key that is in it -- three
@@ -397,6 +398,7 @@ func OpenClawConfigAdvice() []string {
 				Enabled *bool `json:"enabled"`
 				Hooks   struct {
 					AllowConversationAccess *bool `json:"allowConversationAccess"`
+					AllowPromptInjection    *bool `json:"allowPromptInjection"`
 				} `json:"hooks"`
 			} `json:"entries"`
 		} `json:"plugins"`
@@ -410,6 +412,11 @@ func OpenClawConfigAdvice() []string {
 	if !hasEntry || entry.Hooks.AllowConversationAccess == nil || !*entry.Hooks.AllowConversationAccess {
 		advice = append(advice, fmt.Sprintf(
 			"Add plugins.entries.%s.hooks.allowConversationAccess = true to %s to collect token usage and agent messages; everything else is collected without it.",
+			openClawPluginID, openClawConfigPath()))
+	}
+	if entry.Hooks.AllowPromptInjection != nil && !*entry.Hooks.AllowPromptInjection {
+		advice = append(advice, fmt.Sprintf(
+			"Set plugins.entries.%s.hooks.allowPromptInjection = true in %s for model-facing graph and memory context.",
 			openClawPluginID, openClawConfigPath()))
 	}
 	if len(config.Plugins.Allow) > 0 {

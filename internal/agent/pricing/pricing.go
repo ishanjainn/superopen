@@ -2,7 +2,7 @@
 // small static table of public list prices.
 //
 // The CLI is short-lived and offline-safe; we do not fetch live pricing.
-// Rates here are last-known public list prices (2026-07, sourced from
+// Rates here are last-known public list prices (2026-10, sourced from
 // https://cursor.com/docs/models-and-pricing plus provider list prices)
 // and are kept deliberately conservative - we'd rather under-bill than
 // over-bill the dashboard. The server can replace these with
@@ -255,6 +255,15 @@ var table = []entry{
 		rate:  Rate{InputPer1M: 15.00, OutputPer1M: 75.00, CachedReadPer1M: 1.50, CacheCreationPer1M: 18.75},
 	},
 	// --- OpenAI ----------------------------------------------------
+	// GPT-6 Sol rates from the public API price list.
+	{
+		match: []string{"gpt-6.1-sol", "gpt-6-1-sol"},
+		rate:  Rate{InputPer1M: 2.00, OutputPer1M: 10.00, CachedReadPer1M: 0.10, CacheCreationPer1M: 2.50},
+	},
+	{
+		match: []string{"gpt-6-sol"},
+		rate:  Rate{InputPer1M: 2.00, OutputPer1M: 10.00, CachedReadPer1M: 0.20, CacheCreationPer1M: 2.50},
+	},
 	// GPT-5.x ladder. GPT-5.6 Sol/Terra/Luna MUST come before the bare
 	// `gpt-5` catch-all - `strings.Contains("gpt-5.6-sol", "gpt-5")`
 	// is true and previously under-billed Sol ~4x.

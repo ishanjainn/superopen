@@ -16,7 +16,6 @@ var settingsHooksRuntimes = []struct {
 	install   func(path, binaryPath, logPath, configPath string) error
 	uninstall func(path string) (bool, error)
 }{
-	{"factory", installFactorySettings, removeFactoryEndpointHooks},
 	{"qwen", installQwenSettings, removeQwenEndpointHooks},
 }
 

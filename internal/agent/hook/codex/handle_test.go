@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,7 +11,9 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/agent/normalize"
+	"github.com/ishanjainn/superopen/internal/agent/pricing"
 	"github.com/ishanjainn/superopen/internal/agent/sessionstate"
+	"github.com/ishanjainn/superopen/internal/session/trace"
 )
 
 // recordingEmitter is a normalize.Emitter implementation that captures
@@ -287,7 +290,7 @@ func TestCodexTokenSnapshotFromRollout(t *testing.T) {
 		{"type": "event_msg", "payload": map[string]any{
 			"type": "token_count",
 			"info": map[string]any{
-				"total_token_usage": map[string]any{"input_tokens": 1500, "output_tokens": 400, "cached_input_tokens": 800, "reasoning_output_tokens": 150, "total_tokens": 1900},
+				"total_token_usage": map[string]any{"input_tokens": 1500, "output_tokens": 400, "cached_input_tokens": 800, "cache_write_input_tokens": 200, "reasoning_output_tokens": 150, "total_tokens": 1900},
 			},
 		}},
 	}
@@ -322,6 +325,9 @@ func TestCodexTokenSnapshotFromRollout(t *testing.T) {
 	if snap.TurnUsage.CachedInputTokens != 800 {
 		t.Errorf("cached_input_tokens: got %d want 800", snap.TurnUsage.CachedInputTokens)
 	}
+	if snap.TurnUsage.CacheWriteInputTokens != 200 {
+		t.Errorf("cache_write_input_tokens: got %d want 200", snap.TurnUsage.CacheWriteInputTokens)
+	}
 	if snap.TurnUsage.ReasoningOutputTokens != 150 {
 		t.Errorf("reasoning_output_tokens: got %d want 150", snap.TurnUsage.ReasoningOutputTokens)
 	}
@@ -330,6 +336,64 @@ func TestCodexTokenSnapshotFromRollout(t *testing.T) {
 	}
 	if !snap.ReasoningObserved || snap.ReasoningSummary != "Attribute the turn usage." {
 		t.Errorf("reasoning summary: got %q observed=%v", snap.ReasoningSummary, snap.ReasoningObserved)
+	}
+}
+
+func TestCodexTokenSnapshotFromLongRollout(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	dir := filepath.Join(home, "sessions", time.Now().UTC().Format("2006/01/02"))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "rollout-test.jsonl")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("{\"type\":\"session_meta\",\"payload\":{\"id\":\"long\"}}\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Seek(maxTranscriptScan+1024, 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{
+		"\n",
+		"{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"late\"}}\n",
+		"{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\"}}\n",
+		"{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":100,\"output_tokens\":10,\"total_tokens\":110}}}}\n",
+	} {
+		if _, err := f.WriteString(line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	snap, ok := readTokenUsageForTurn(path, "late")
+	if !ok || snap.TurnUsage.TotalTokens != 110 {
+		t.Fatalf("late turn usage = %+v, ok=%v", snap.TurnUsage, ok)
+	}
+	meta, ok := readSessionMeta(path)
+	if !ok || meta.SessionID != "long" {
+		t.Fatalf("session meta = %+v, ok=%v", meta, ok)
+	}
+	spans := []trace.Span{{Name: "coding_agent.llm.turn", Attributes: map[string]string{
+		"gen_ai.response.id": "late", "gen_ai.request.model": "gpt-6-sol",
+	}}}
+	BackfillTurnUsage("long", spans)
+	attrs := spans[0].Attributes
+	if attrs["gen_ai.usage.total_tokens"] != "110" {
+		t.Fatalf("backfilled tokens = %q", attrs["gen_ai.usage.total_tokens"])
+	}
+	wantCost := pricing.Lookup("gpt-6-sol").Cost(100, 10, 0, 0)
+	if attrs["gen_ai.usage.cost"] != fmt.Sprint(wantCost) {
+		t.Fatalf("backfilled cost = %q, want %v", attrs["gen_ai.usage.cost"], wantCost)
+	}
+	delete(attrs, "gen_ai.usage.cost")
+	BackfillTurnUsage("long", spans)
+	if attrs["gen_ai.usage.cost"] != fmt.Sprint(wantCost) {
+		t.Fatalf("recovered cost = %q, want %v", attrs["gen_ai.usage.cost"], wantCost)
 	}
 }
 

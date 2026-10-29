@@ -1,6 +1,6 @@
 ---
 name: so
-description: "Use for any question about a codebase, its architecture, file relationships, or project content. Start with graph code-search for an exact flag, key, error or value; graph query for unknown behavior and relationships. Also use for prior-work facts (so memory recall) and when the user wants a fact stored (so memory capture). Superopen is a CLI binary invoked with your shell tool (Bash, PowerShell, or equivalent), not an MCP tool. If .so/ is missing, run one graph query anyway (a linked worktree may seed from the parent). If that prints the unmanaged message, stop and do not so init unless the user explicitly asked."
+description: "Use for codebase questions, prior-work facts, and captured facts only in a Superopen-managed repository (.so/ at its root) or a linked Git worktree whose main worktree is managed. Start with graph code-search for an exact flag, key, error or value; graph query for unknown behavior and relationships. Use memory recall for stored facts and memory capture when asked to save a fact. Superopen is a CLI binary invoked with your shell tool, not an MCP tool. In an unmanaged repository, do not invoke or mention Superopen."
 ---
 
 # Superopen (`/so`)
@@ -15,7 +15,7 @@ The examples below use `so`; substitute the absolute path above if `so` is unava
 
 Never Grep `.so/` or installed skill/rule directories. Never pipe `so` through `head`/`tail`. If you spawn a Task/subagent, its prompt must say to run the same command line first (Explore children never see SessionStart).
 
-If `.so/` is missing, still run **one** `graph query`. If stdout says `not a Superopen repo`, stop. Do not `so init` unless the user explicitly asked. A linked git worktree of a managed parent seeds on that call.
+Apply this skill only when `.so/` exists at the repository root, or the repository is a linked Git worktree whose main worktree has `.so/`. Check `.so/` at the root first. If absent and `.git` is a file, compare `git rev-parse --git-dir` and `git rev-parse --git-common-dir`; only if they differ, check `.so/` beside the main worktree's `.git` directory. Otherwise use normal tools without invoking or mentioning Superopen. Do not `so init` unless the user explicitly asked. In a managed linked worktree, the first graph query seeds `.so/` from the main worktree.
 
 ## Scenario table
 

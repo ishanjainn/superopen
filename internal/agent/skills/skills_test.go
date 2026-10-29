@@ -37,8 +37,8 @@ func TestInstallAllWritesSkill(t *testing.T) {
 			t.Fatalf("%s still has placeholder", path)
 		}
 		if filepath.Base(path) == "SKILL.md" {
-			if !bytes.Contains(body, []byte("any question about a codebase")) {
-				t.Fatalf("%s description must trip on any codebase question: %s", path, body[:300])
+			if !bytes.Contains(body, []byte("only in a Superopen-managed repository")) || !bytes.Contains(body, []byte("do not invoke or mention Superopen")) {
+				t.Fatalf("%s description must gate unmanaged repositories: %s", path, body[:300])
 			}
 			if !bytes.Contains(body, []byte("graph code-search for an exact")) || !bytes.Contains(body, []byte("graph query for unknown behavior")) {
 				t.Fatalf("%s description must route exact literals and unknown behavior separately", path)

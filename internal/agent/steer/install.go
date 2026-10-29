@@ -120,7 +120,7 @@ func uniquePaths(in []string) []string {
 }
 
 func writeCursorRule(path string) error {
-	body := "---\ndescription: Superopen — ignore unless this workspace has a .so directory\nalwaysApply: true\n---\n\n" +
+	body := "---\ndescription: Superopen — use only in a managed repository or linked worktree of one\nalwaysApply: true\n---\n\n" +
 		beginMarker + "\n" + CursorRule() + endMarker + "\n"
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

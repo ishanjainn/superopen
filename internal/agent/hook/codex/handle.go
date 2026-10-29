@@ -495,12 +495,9 @@ func emitTurnOnStop(in normalize.Input, p codexPayload, cwd, permissionMode stri
 			turn.TotalTokens = turn.InputTokens + turn.OutputTokens
 		}
 		turn.CacheReadTokens = snap.TurnUsage.CachedInputTokens
+		turn.CacheCreationTokens = snap.TurnUsage.CacheWriteInputTokens
 		if rate := pricing.Lookup(turn.Model); turn.Model != "" {
-			// OpenAI's prompt caching is implicit - the rollout
-			// only surfaces `cached_input_tokens` (reads). There
-			// is no separate cache-write counter, so we pass 0
-			// for cacheCreation.
-			turn.CostUSD = rate.Cost(turn.InputTokens, turn.OutputTokens, turn.CacheReadTokens, 0)
+			turn.CostUSD = rate.Cost(turn.InputTokens, turn.OutputTokens, turn.CacheReadTokens, turn.CacheCreationTokens)
 		}
 		if snap.TurnUsage.ReasoningOutputTokens > 0 {
 			if turn.Extras == nil {

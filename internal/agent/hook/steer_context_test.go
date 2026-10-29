@@ -2,6 +2,7 @@ package hook
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,6 +71,21 @@ func TestBashCatPreToolUseEmitsGraphNudge(t *testing.T) {
 	d, ok := steerDecisionFor("claude-code", "PreToolUse", "search", payload)
 	if !ok || !strings.Contains(d.text, "graph query") {
 		t.Fatalf("bash sed -n should get a graph nudge, ok=%v text=%q", ok, d.text)
+	}
+}
+
+func TestOpenClawPromptBuildDeliversGraphContext(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	writeHookSession(t, root, "openclaw-prompt")
+	writeHookSourceFile(t, root)
+	payload, err := json.Marshal(map[string]any{"sessionKey": "openclaw-prompt", "cwd": root, "prompt": "fix auth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, ok := steerDecisionFor("openclaw", "before_prompt_build", "", payload)
+	if !ok || !strings.Contains(decision.text, "graph query") {
+		t.Fatalf("prompt context ok=%v text=%q", ok, decision.text)
 	}
 }
 
@@ -142,8 +158,20 @@ func TestSessionReminderSilentWhenUnmanaged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text, _, ok := steerTextFor("claude-code", "SessionStart", payload); ok {
-		t.Fatalf("unmanaged session must not inject Superopen context, got %q", text)
+	for _, host := range []struct{ vendor, event string }{
+		{"claude-code", "SessionStart"},
+		{"cursor", "sessionStart"},
+		{"codex", "SessionStart"},
+		{"gemini", "SessionStart"},
+		{"opencode", "session.created"},
+		{"copilot-cli", "sessionStart"},
+		{"pi", "before_agent_start"},
+		{"openclaw", "before_prompt_build"},
+		{"cline", "beforeRun"},
+	} {
+		if text, _, ok := steerTextFor(host.vendor, host.event, payload); ok {
+			t.Fatalf("%s unmanaged session must not inject Superopen context, got %q", host.vendor, text)
+		}
 	}
 }
 
@@ -956,9 +984,16 @@ func TestPriorWorkCueInjectsIndex(t *testing.T) {
 	if !cursorOK || !strings.Contains(cursorText, "UNIQUE_CUE_BODY") {
 		t.Fatalf("cursor beforeSubmitPrompt cue failed: ok=%v text=%q", cursorOK, cursorText)
 	}
-	copilotText, _, copilotOK := steerTextFor("copilot-cli", "userPromptSubmitted", payload)
+	copilotText, _, copilotOK := steerTextFor("copilot-cli", "userPromptTransformed", payload)
 	if !copilotOK || !strings.Contains(copilotText, "UNIQUE_CUE_BODY") {
-		t.Fatalf("copilot-cli userPromptSubmitted cue failed: ok=%v text=%q", copilotOK, copilotText)
+		t.Fatalf("copilot-cli userPromptTransformed cue failed: ok=%v text=%q", copilotOK, copilotText)
+	}
+	if text, _, ok := steerTextFor("copilot-cli", "userPromptSubmitted", payload); ok {
+		t.Fatalf("copilot-cli submitted hook must stay silent, got %q", text)
+	}
+	vsCodeText, _, vsCodeOK := steerTextFor("vscode", "userPromptTransformed", payload)
+	if !vsCodeOK || !strings.Contains(vsCodeText, "UNIQUE_CUE_BODY") {
+		t.Fatalf("vscode userPromptTransformed cue failed: ok=%v text=%q", vsCodeOK, vsCodeText)
 	}
 	codexText, _, codexOK := steerTextFor("codex", "UserPromptSubmit", payload)
 	if !codexOK || !strings.Contains(codexText, "UNIQUE_CUE_BODY") {
@@ -972,8 +1007,86 @@ func TestPriorWorkCueInjectsIndex(t *testing.T) {
 	if !piOK || !strings.Contains(piText, "UNIQUE_CUE_BODY") {
 		t.Fatalf("pi before_agent_start cue failed: ok=%v text=%q", piOK, piText)
 	}
+	openCodeText, _, openCodeOK := steerTextFor("opencode", "chat.message", payload)
+	if !openCodeOK || !strings.Contains(openCodeText, "UNIQUE_CUE_BODY") {
+		t.Fatalf("opencode chat.message cue failed: ok=%v text=%q", openCodeOK, openCodeText)
+	}
+	hermesPayload, err := json.Marshal(map[string]any{
+		"session_id": id,
+		"cwd":        root,
+		"extra":      map[string]any{"user_message": "what did we decide last time about JWT?"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hermesText, _, hermesOK := steerTextFor("hermes", "UserPromptSubmit", hermesPayload)
+	if !hermesOK || !strings.Contains(hermesText, "UNIQUE_CUE_BODY") || hookProtocol("hermes") != "hermes" {
+		t.Fatalf("hermes prompt recall failed: ok=%v text=%q", hermesOK, hermesText)
+	}
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = writer
+	emitSteerContext("hermes", "UserPromptSubmit", "", hermesPayload)
+	_ = writer.Close()
+	os.Stdout = oldStdout
+	output, err := io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]string
+	if err := json.Unmarshal(output, &wire); err != nil || !strings.Contains(wire["context"], "UNIQUE_CUE_BODY") {
+		t.Fatalf("hermes wire context: %s, err=%v", output, err)
+	}
+	reader, writer, err = os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = writer
+	emitSteerContext("factory", "UserPromptSubmit", "", payload)
+	_ = writer.Close()
+	os.Stdout = oldStdout
+	output, err = io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(output, &wire); err != nil || !strings.Contains(wire["additionalContext"], "UNIQUE_CUE_BODY") {
+		t.Fatalf("factory prompt wire context: %s, err=%v", output, err)
+	}
+	transformedPayload, err := json.Marshal(map[string]any{
+		"session_id":        id,
+		"cwd":               root,
+		"prompt":            "what did we decide last time about JWT?",
+		"transformedPrompt": "original model prompt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, vendor := range []string{"copilot-cli", "vscode"} {
+		reader, writer, err = os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Stdout = writer
+		emitSteerContext(vendor, "userPromptTransformed", "", transformedPayload)
+		_ = writer.Close()
+		os.Stdout = oldStdout
+		output, err = io.ReadAll(reader)
+		_ = reader.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		wire = nil
+		if err := json.Unmarshal(output, &wire); err != nil || !strings.HasPrefix(wire["modifiedTransformedPrompt"], "original model prompt\n\n") || !strings.Contains(wire["modifiedTransformedPrompt"], "UNIQUE_CUE_BODY") {
+			t.Fatalf("%s transformed prompt: %s, err=%v", vendor, output, err)
+		}
+	}
 	if text, _, ok := steerTextFor("opencode", "session.created", payload); ok && strings.Contains(text, "UNIQUE_CUE_BODY") {
-		t.Fatalf("opencode has no prompt-submit event; must not inject bodies on session.created, got %q", text)
+		t.Fatalf("opencode session.created must not inject bodies, got %q", text)
 	}
 }
 
@@ -1002,6 +1115,12 @@ func TestCodePromptDoesNotInjectMemoryPack(t *testing.T) {
 	}
 	if text, _, ok := steerTextFor("claude-code", "UserPromptSubmit", payload); ok {
 		t.Fatalf("code prompt must not inject memory bodies, got %q", text)
+	}
+	for _, c := range []struct{ vendor, event string }{{"opencode", "chat.message"}, {"hermes", "UserPromptSubmit"}} {
+		text, _, ok := steerTextFor(c.vendor, c.event, payload)
+		if !ok || !strings.Contains(text, "graph query") || strings.Contains(text, "UNIQUE_CODE_PROMPT_BODY") {
+			t.Fatalf("%s code prompt graph route failed: ok=%v text=%q", c.vendor, ok, text)
+		}
 	}
 }
 

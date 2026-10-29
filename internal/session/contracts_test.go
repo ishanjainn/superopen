@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ishanjainn/superopen/internal/agent/pricing"
 	"github.com/ishanjainn/superopen/internal/artifact"
 	"github.com/ishanjainn/superopen/internal/paths"
 	"github.com/ishanjainn/superopen/internal/session/trace"
@@ -38,8 +39,8 @@ func TestMaterializeFootprintFromToolCallArguments(t *testing.T) {
 		Name: "coding_agent.tool.call", SpanID: "t1", SessionID: id,
 		StartTimeUnixN: time.Now().UnixNano(),
 		Attributes: map[string]string{
-			"gen_ai.tool.name":            "Read",
-			"gen_ai.tool.call.arguments":  `{"file_path":"src/app.ts"}`,
+			"gen_ai.tool.name":           "Read",
+			"gen_ai.tool.call.arguments": `{"file_path":"src/app.ts"}`,
 		},
 	}}
 	meta, err := store.MaterializeFromSpans(id, spans, 0, 0)
@@ -120,6 +121,8 @@ func TestSessionCostCountsUsageOnce(t *testing.T) {
 			Attributes: map[string]string{"gen_ai.usage.total_tokens": "1000"}},
 		{Name: "coding_agent.session.loop.stop", SpanID: "stop", SessionID: id, StartTimeUnixN: now + 1,
 			Attributes: map[string]string{"gen_ai.usage.total_tokens": "1000"}},
+		{Name: "coding_agent.llm.turn", SpanID: "turn", SessionID: id, StartTimeUnixN: now + 2,
+			Attributes: map[string]string{"gen_ai.usage.total_tokens": "1000"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -129,6 +132,34 @@ func TestSessionCostCountsUsageOnce(t *testing.T) {
 	}
 	if tokens != 1000 {
 		t.Fatalf("tokens=%d want 1000 (counted once)", tokens)
+	}
+}
+
+func TestSessionCostFromTurnsWithoutSessionRollup(t *testing.T) {
+	s := trace.NewLocalJSONL(t.TempDir())
+	id := "active-codex"
+	attrs := map[string]string{
+		"gen_ai.request.model":                     "gpt-6-sol",
+		"gen_ai.usage.input_tokens":                "1000",
+		"gen_ai.usage.output_tokens":               "100",
+		"gen_ai.usage.total_tokens":                "1100",
+		"gen_ai.usage.cache.read_input_tokens":     "400",
+		"gen_ai.usage.cache.creation_input_tokens": "200",
+	}
+	if err := s.Write([]trace.Span{
+		{Name: "coding_agent.session", SpanID: "root", SessionID: id},
+		{Name: "coding_agent.llm.turn", SpanID: "turn-1", SessionID: id, Attributes: attrs},
+		{Name: "coding_agent.llm.turn", SpanID: "turn-2", SessionID: id, Attributes: attrs},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tokens, cost, err := s.SessionCost(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCost := 2 * pricing.Lookup("gpt-6-sol").Cost(1000, 100, 400, 200)
+	if tokens != 2200 || cost != wantCost {
+		t.Fatalf("tokens=%d cost=%v, want 2200 and %v", tokens, cost, wantCost)
 	}
 }
 

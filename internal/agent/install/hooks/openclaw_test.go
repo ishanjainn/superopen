@@ -357,6 +357,20 @@ func TestOpenClawConfigAdviceIsSilentWhenAccessIsGranted(t *testing.T) {
 	}
 }
 
+func TestOpenClawConfigAdviceReportsDisabledPromptContext(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv(openClawStateDirEnv, "")
+	t.Setenv(openClawConfigPathEnv, "")
+	writeOpenClawConfig(t, home,
+		`{"plugins":{"entries":{"superopen-endpoint":{"hooks":{"allowConversationAccess":true,"allowPromptInjection":false}}}}}`)
+	advice := OpenClawConfigAdvice()
+	if len(advice) != 1 || !strings.Contains(advice[0], "allowPromptInjection") {
+		t.Fatalf("advice = %v, want prompt injection setting", advice)
+	}
+}
+
 // An allowlist that does not name the plugin stops it loading entirely, which is worth saying.
 func TestOpenClawConfigAdviceNamesAnExcludingAllowlist(t *testing.T) {
 	home := t.TempDir()

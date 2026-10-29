@@ -224,7 +224,7 @@ func vendorMarkerPaths(vendor string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		return []string{filepath.Join(base, "plugins", "superopen.ts")}, nil
+		return []string{filepath.Join(base, "plugins", "superopen.ts"), filepath.Join(base, "plugins", "superopen", "index.js")}, nil
 	case "pi":
 		return []string{filepath.Join(home, ".pi", "agent", "extensions", "superopen", "index.ts")}, nil
 	case "copilot-cli":
