@@ -293,11 +293,27 @@ func finalizeSession(root, requestedID string, out *cli.Out) error {
 		return nil
 	}
 	unlock, ok := claimSessionFinalize(root, id)
+	if !ok && session.VendorFromSpans(spans) == "codex" {
+		// A resumed Codex exec can end while the previous end is still
+		// distilling. Wait for that worker, then inspect the new spans.
+		deadline := time.Now().Add(2 * time.Minute)
+		for !ok && time.Now().Before(deadline) {
+			time.Sleep(100 * time.Millisecond)
+			unlock, ok = claimSessionFinalize(root, id)
+		}
+	}
 	if !ok {
 		return nil
 	}
 	if unlock != nil {
 		defer unlock()
+	}
+	if session.VendorFromSpans(spans) == "codex" {
+		// Another end may have written more turns while we waited.
+		_, spans, err = loadSessionSpans(trace.NewLocalJSONL(paths.TracesDir), id)
+		if err != nil {
+			return err
+		}
 	}
 	copilotBackfilled := false
 	if session.VendorFromSpans(spans) == "copilot-cli" {
@@ -321,8 +337,10 @@ func finalizeSession(root, requestedID string, out *cli.Out) error {
 		}
 	}
 	store := session.NewStore(paths)
+	resumedCodex := false
 	if existing, existingErr := store.Get(id); existingErr == nil && existing.Status == session.StatusEnded && existing.EndedAt != nil {
 		latest := time.Time{}
+		var newSpans []trace.Span
 		for _, span := range spans {
 			at := time.Unix(0, span.EndTimeUnixN).UTC()
 			if span.EndTimeUnixN == 0 {
@@ -331,14 +349,19 @@ func finalizeSession(root, requestedID string, out *cli.Out) error {
 			if at.After(latest) {
 				latest = at
 			}
+			if at.After(*existing.EndedAt) {
+				newSpans = append(newSpans, span)
+			}
 		}
-		if !copilotBackfilled && !latest.After(*existing.EndedAt) {
+		if !copilotBackfilled && (!latest.After(*existing.EndedAt) ||
+			(session.VendorFromSpans(spans) == "codex" && !session.SpansHaveActivity(newSpans))) {
 			if out != nil {
 				out.Next("so sessions show <id>", "so memory distill <id>")
 				out.OK("session", map[string]any{"id": id, "status": existing.Status})
 			}
 			return nil
 		}
+		resumedCodex = session.VendorFromSpans(spans) == "codex"
 	}
 	_ = store.Start(session.Meta{ID: id, Vendor: session.VendorFromSpans(spans), StartedAt: session.StartTimeFromSpans(spans)})
 	if session.VendorFromSpans(spans) == "codex" && codex.BackfillTurnUsage(id, spans) {
@@ -365,13 +388,44 @@ func finalizeSession(root, requestedID string, out *cli.Out) error {
 		// Footprint may be empty for prompt-only sessions.
 		_ = err
 	}
+	if session.VendorFromSpans(spans) == "codex" {
+		// Keep the finalize lock through both workers. A later resume then
+		// gets a fresh pass over its new turns, including memory and harvest.
+		oldMemory, hadMemory := os.LookupEnv("SUPEROPEN_MEMORY_SYNC")
+		oldHarvest, hadHarvest := os.LookupEnv("SUPEROPEN_HARVEST_SYNC")
+		_ = os.Setenv("SUPEROPEN_MEMORY_SYNC", "1")
+		_ = os.Setenv("SUPEROPEN_HARVEST_SYNC", "1")
+		defer func() {
+			if hadMemory {
+				_ = os.Setenv("SUPEROPEN_MEMORY_SYNC", oldMemory)
+			} else {
+				_ = os.Unsetenv("SUPEROPEN_MEMORY_SYNC")
+			}
+			if hadHarvest {
+				_ = os.Setenv("SUPEROPEN_HARVEST_SYNC", oldHarvest)
+			} else {
+				_ = os.Unsetenv("SUPEROPEN_HARVEST_SYNC")
+			}
+		}()
+		if resumedCodex {
+			if memoryStore, err := memory.OpenRoot(root); err == nil {
+				_ = memoryStore.UnmarkDistilled(id)
+				_ = memoryStore.ClearPending(id)
+				_ = memoryStore.Close()
+			}
+		}
+	}
 	if ing, err := memory.IngestSession(root, id); err != nil {
 		fmt.Fprintf(os.Stderr, "so memory ingest: %v\n", err)
 	} else {
 		_ = ing
 		_ = memory.MaybeDistill(root, id, true)
 	}
-	_ = harvest.MaybeGenerate(root, id)
+	if resumedCodex {
+		_ = harvest.MaybeGenerateResumed(root, id)
+	} else {
+		_ = harvest.MaybeGenerate(root, id)
+	}
 	_ = runRetentionSweep(root)
 	if out != nil {
 		out.Next("so sessions show <id>", "so memory distill <id>")

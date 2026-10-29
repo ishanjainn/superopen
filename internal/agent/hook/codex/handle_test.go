@@ -141,8 +141,8 @@ func TestCodexEndToEndOneTurn(t *testing.T) {
 		t.Fatalf("Stop: %v", err)
 	}
 
-	// Sessions: SessionStart → 1, Stop → 1 (Codex has no SessionEnd
-	// event, so Stop re-emits an active session-root snapshot). The deterministic span IDs in the otlp
+	// Sessions: SessionStart → 1, Stop → 1 (Stop re-emits an active
+	// session-root snapshot). The deterministic span IDs in the otlp
 	// emitter dedupe these into a single `otel_traces` row.
 	if len(em.sessions) != 2 {
 		t.Fatalf("expected 2 sessions (start + stop), got %d", len(em.sessions))
@@ -192,6 +192,49 @@ func TestCodexEndToEndOneTurn(t *testing.T) {
 	// span (asserted above via em.toolCalls). Re-encoding them in
 	// the turn's messages JSON used to balloon `gen_ai.input.messages`
 	// past the 16 KB cap, which broke the chat view's JSON parser.
+}
+
+func TestCodexSessionEndAndResume(t *testing.T) {
+	withIsolatedCache(t)
+	em := &recordingEmitter{}
+	sid := "codex-resumed-session"
+	cwd := t.TempDir()
+	start := time.Now().Add(-time.Minute).UTC().Truncate(time.Second)
+	for _, step := range []struct {
+		event, source string
+		at            time.Time
+	}{
+		{"SessionStart", "startup", start},
+		{"SessionEnd", "", start.Add(20 * time.Second)},
+		{"SessionStart", "resume", start.Add(30 * time.Second)},
+		{"SessionEnd", "", start.Add(time.Minute)},
+	} {
+		body, err := json.Marshal(map[string]any{
+			"hook_event_name": step.event,
+			"session_id":      sid,
+			"cwd":             cwd,
+			"source":          step.source,
+			"timestamp":       step.at.Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := handle(context.Background(), normalize.Input{Vendor: "codex", Event: step.event, Payload: body, Emit: em}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(em.sessions) != 4 {
+		t.Fatalf("session emissions = %d, want 4", len(em.sessions))
+	}
+	for i, want := range []time.Time{time.Time{}, start.Add(20 * time.Second), time.Time{}, start.Add(time.Minute)} {
+		got := em.sessions[i]
+		if !got.StartedAt.Equal(start) || !got.EndedAt.Equal(want) {
+			t.Errorf("session %d times = %v..%v, want %v..%v", i, got.StartedAt, got.EndedAt, start, want)
+		}
+		if i%2 == 1 && got.Outcome != "completed" {
+			t.Errorf("session %d outcome = %q, want completed", i, got.Outcome)
+		}
+	}
 }
 
 func TestEffectiveToolNameUnwrapsCodeMode(t *testing.T) {

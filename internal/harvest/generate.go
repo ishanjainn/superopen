@@ -22,6 +22,16 @@ const generateTimeout = 45 * time.Second
 // MaybeGenerate is called from session finalize. Cursor/Copilot/Gemini mark
 // pending for the next live SessionStart. One-shot vendors spawn their own CLI.
 func MaybeGenerate(root, sessionID string) GenerateResult {
+	return maybeGenerate(root, sessionID, false)
+}
+
+// MaybeGenerateResumed evaluates new work added after a completed session was
+// reopened. Earlier runs and proposals remain available for review.
+func MaybeGenerateResumed(root, sessionID string) GenerateResult {
+	return maybeGenerate(root, sessionID, true)
+}
+
+func maybeGenerate(root, sessionID string, resumed bool) GenerateResult {
 	sessionID = strings.TrimSpace(sessionID)
 	res := GenerateResult{SessionID: sessionID}
 	if sessionID == "" {
@@ -30,7 +40,7 @@ func MaybeGenerate(root, sessionID string) GenerateResult {
 	}
 	skipped, pending, spawn := headless.SessionEndPolicy(root, sessionID)
 	store, storeErr := OpenRoot(root)
-	if storeErr == nil && store.HasAttempt(sessionID) {
+	if storeErr == nil && !resumed && store.HasAttempt(sessionID) {
 		_ = store.Close()
 		res.Skipped = "already-queued"
 		res.Pending = pending
@@ -54,8 +64,8 @@ func MaybeGenerate(root, sessionID string) GenerateResult {
 		res.Skipped = "test"
 		return res
 	}
-	if os.Getenv("SUPEROPEN_HARVEST_SYNC") == "1" {
-		return generate(root, sessionID)
+	if resumed || os.Getenv("SUPEROPEN_HARVEST_SYNC") == "1" {
+		return generate(root, sessionID, resumed)
 	}
 	if store, err := OpenRoot(root); err == nil {
 		_, _ = store.InsertRun(sessionID, StatusPending, "", "detached")
@@ -72,10 +82,10 @@ func MaybeGenerate(root, sessionID string) GenerateResult {
 
 // Generate runs skip gates then at most one bounded call on the session's own CLI.
 func Generate(root, sessionID string) GenerateResult {
-	return generate(root, sessionID)
+	return generate(root, sessionID, false)
 }
 
-func generate(root, sessionID string) GenerateResult {
+func generate(root, sessionID string, resumed bool) GenerateResult {
 	res := GenerateResult{SessionID: strings.TrimSpace(sessionID)}
 	if res.SessionID == "" {
 		res.Skipped = "no-session"
@@ -91,7 +101,7 @@ func generate(root, sessionID string) GenerateResult {
 		return res
 	}
 	defer store.Close()
-	if store.SuccessfulRun(res.SessionID) || store.HasOpenForSession(res.SessionID) {
+	if !resumed && (store.SuccessfulRun(res.SessionID) || store.HasOpenForSession(res.SessionID)) {
 		res.Skipped = "already-harvested"
 		_ = store.ResolvePending(res.SessionID, StatusSkipped, res.Skipped)
 		return res
@@ -137,7 +147,7 @@ func generate(root, sessionID string) GenerateResult {
 	ctx, cancel := context.WithTimeout(context.Background(), generateTimeout)
 	defer cancel()
 	out, err := headless.Run(ctx, provider, prompt)
-	if store.HasOpenForSession(res.SessionID) {
+	if !resumed && store.HasOpenForSession(res.SessionID) {
 		_ = store.ResolvePending(res.SessionID, StatusProposed, "")
 		res.Provider = provider.Name
 		return res

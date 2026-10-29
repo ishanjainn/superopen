@@ -62,6 +62,17 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "so sessions hook --vendor=codex --event=SessionEnd",
+            "timeout": 3
+          }
+        ]
+      }
     ]
   }
 }

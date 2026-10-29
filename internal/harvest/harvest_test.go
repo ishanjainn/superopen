@@ -170,6 +170,14 @@ func TestGenerateSkipGates(t *testing.T) {
 	if res.Skipped != "already-harvested" {
 		t.Fatalf("already harvested: %+v", res)
 	}
+	res = generate(root, "sess-done", true)
+	if res.Skipped != "empty" {
+		t.Fatalf("resumed session must pass the old-run gate: %+v", res)
+	}
+	res = MaybeGenerateResumed(root, "sess-done")
+	if res.Skipped == "already-queued" {
+		t.Fatalf("resumed session must pass the old-attempt gate: %+v", res)
+	}
 }
 
 func TestParseProposalsCapsAndPrefersSimplify(t *testing.T) {

@@ -90,7 +90,31 @@ func handle(ctx context.Context, in normalize.Input) error {
 
 	switch event {
 	case "SessionStart":
-		return in.Emit.EmitSession(buildSession(in, p, vcs, cls, permissionMode, cwd, "started", time.Time{}))
+		started := parseEventTime(p.Timestamp)
+		if p.SessionID != "" {
+			st := sessionstate.Load(p.SessionID, "codex")
+			if st == nil {
+				st = &sessionstate.State{}
+			}
+			if st.SessionStartedAt.IsZero() {
+				st.SessionStartedAt = started
+				sessionstate.Save(p.SessionID, "codex", st)
+			} else {
+				started = st.SessionStartedAt
+			}
+		}
+		s := buildSession(in, p, vcs, cls, permissionMode, cwd, "started", time.Time{})
+		s.StartedAt = started
+		return in.Emit.EmitSession(s)
+
+	case "SessionEnd":
+		ended := parseEventTime(p.Timestamp)
+		s := buildSession(in, p, vcs, cls, permissionMode, cwd, "ended", ended)
+		s.Outcome = semconv.CodingAgentSessionOutcomeCompleted
+		if st := sessionstate.Load(p.SessionID, "codex"); st != nil && !st.SessionStartedAt.IsZero() {
+			s.StartedAt = st.SessionStartedAt
+		}
+		return in.Emit.EmitSession(s)
 
 	case "UserPromptSubmit":
 		stampTurnFragment(p, in.ContentCapture, func(f *sessionstate.CodexTurnFragment) {
@@ -195,11 +219,9 @@ func handle(ctx context.Context, in normalize.Input) error {
 		// `coding_agent.llm.turn` span - the canonical
 		// "generation" record per OTel GenAI.
 		emitTurnOnStop(in, p, cwd, permissionMode)
-		// Codex Stop closes one assistant turn, not the chat. Codex has
-		// no SessionEnd hook, so keep the session root active here. The
-		// companion `so sessions refresh` hook materializes the latest
-		// transcript without closing the overall coding session. Explicit
-		// `so sessions finalize` closes the chat when needed.
+		// Codex Stop closes one assistant turn, not the chat. Keep the
+		// session root active here; SessionEnd closes it. The companion
+		// `so sessions refresh` hook materializes the latest transcript.
 		// Deterministic SpanIDs
 		// collapse all re-emits onto the same `otel_traces` row,
 		// so this is purely a wire / CPU optimisation; throttle to
@@ -280,10 +302,8 @@ func markCodexSessionRootEmitted(sessionID string) {
 	sessionstate.Save(sessionID, "codex", st)
 }
 
-// buildSession produces the canonical `coding_agent.session` span. We
-// emit it on SessionStart. Codex doesn't have a `SessionEnd` event;
-// the per-turn `coding_agent.llm.turn` spans accumulate naturally
-// and the session row in the UI rolls them up.
+// buildSession produces the canonical `coding_agent.session` span.
+// SessionStart, periodic Stop snapshots, and SessionEnd share its identity.
 func buildSession(
 	in normalize.Input,
 	p codexPayload,
