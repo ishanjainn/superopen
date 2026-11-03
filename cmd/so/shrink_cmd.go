@@ -7,12 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ishanjainn/superopen/internal/cli"
 	"github.com/ishanjainn/superopen/internal/compact"
-	"github.com/ishanjainn/superopen/third_party/caveman/engine/ccr"
+	"github.com/ishanjainn/superopen/internal/compact/engine/ccr"
 )
 
 func cmdShrink() *cobra.Command {
@@ -102,7 +103,9 @@ func cmdRetrieve() *cobra.Command {
 			}
 			result := map[string]any{"handle": args[0], "bytes": len(body), "content": string(body)}
 			o := out()
-			o.Next("so retrieve --raw " + args[0])
+			if !o.Flags.Full && !o.Flags.JSON && utf8.RuneCount(body) > cli.ToonMaxChars {
+				o.Next("so retrieve --full "+args[0], "so retrieve --raw "+args[0])
+			}
 			return o.HumanOrJSON("retrieved", func() { fmt.Fprint(o.W, cli.Toon(result, o.Flags.Full)) }, result)
 		},
 	}

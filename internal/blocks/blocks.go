@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/ishanjainn/superopen/internal/compact"
-	"github.com/ishanjainn/superopen/third_party/caveman/engine"
+	"github.com/ishanjainn/superopen/internal/compact/engine"
 )
 
 // Names are the built-in scripts, in catalog order.

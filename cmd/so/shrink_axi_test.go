@@ -75,8 +75,11 @@ func TestShrinkAndRetrieveAXI(t *testing.T) {
 	if result.Handle == "" {
 		t.Fatal("fixture did not compress")
 	}
-	if got := run("retrieve", result.Handle); !strings.Contains(got, "content:") || !strings.Contains(got, "use --full") {
+	if got := run("retrieve", result.Handle); !strings.Contains(got, "content:") || !strings.Contains(got, "use --full") || !strings.Contains(got, "so retrieve --full "+result.Handle) {
 		t.Fatalf("bounded retrieve: %q", got)
+	}
+	if got := run("retrieve", "--full", result.Handle); strings.Contains(got, "help[") || strings.Contains(got, "truncated") {
+		t.Fatalf("complete retrieval should be self-contained: %q", got)
 	}
 	if got := run("retrieve", "--raw", result.Handle); got != string(input) {
 		t.Fatal("raw retrieve changed original bytes")

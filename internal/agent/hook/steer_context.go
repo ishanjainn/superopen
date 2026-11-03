@@ -164,6 +164,12 @@ func steerDecisionFor(vendor, event, kind string, payload []byte) (steerDecision
 	}
 	ev := strings.TrimSpace(event)
 	vendor = steerVendor(vendor)
+	if vendor != "claude-code" && vendor != "codex" && vendor != "cursor" && vendor != "gemini" &&
+		vendor != "copilot-cli" && vendor != "opencode" && vendor != "pi" && vendor != "vscode" {
+		if _, known := vendors.ByID(vendor); !known {
+			return steerDecision{}, false
+		}
+	}
 	if vendor == "vscode" && ev == "UserPromptSubmit" {
 		return steerDecision{}, false
 	}
