@@ -190,7 +190,7 @@ func TestStripClaudeMarketplaceJSONRemovesOwned(t *testing.T) {
 			"installLocation": "/Users/me/.claude/plugins/marketplaces/claude-plugins-official",
 			"lastUpdated":     "2026-05-29T06:53:57.733Z",
 		},
-		"so": map[string]any{
+		"superopen": map[string]any{
 			"source": map[string]any{
 				"source": "directory",
 				"path":   "/Users/me/.local/share/superopen/claude-marketplace",
@@ -210,7 +210,7 @@ func TestStripClaudeMarketplaceJSONRemovesOwned(t *testing.T) {
 	}
 
 	got := mustJSONRead(t, path)
-	if _, ok := got["so"]; ok {
+	if _, ok := got["superopen"]; ok {
 		t.Errorf("superopen entry should have been removed; got %#v", got)
 	}
 	if _, ok := got["claude-plugins-official"]; !ok {
@@ -270,7 +270,7 @@ func TestStripClaudeMarketplaceJSONDryRun(t *testing.T) {
 	}
 	path := filepath.Join(pluginDir, "known_marketplaces.json")
 	mustJSONWrite(t, path, map[string]any{
-		"so": map[string]any{"installLocation": "/x"},
+		"superopen": map[string]any{"installLocation": "/x"},
 	})
 	before, _ := os.ReadFile(path)
 
@@ -284,6 +284,49 @@ func TestStripClaudeMarketplaceJSONDryRun(t *testing.T) {
 	after, _ := os.ReadFile(path)
 	if string(before) != string(after) {
 		t.Errorf("dry-run must NOT modify the file")
+	}
+}
+
+func TestStripClaudeSettingsJSON(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	settingsDir := filepath.Join(dir, ".claude")
+	if err := os.MkdirAll(settingsDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(settingsDir, "settings.json")
+	mustJSONWrite(t, path, map[string]any{
+		"model": "sonnet",
+		"extraKnownMarketplaces": map[string]any{
+			"superopen": map[string]any{"source": "directory"},
+			"other":     map[string]any{"source": "github"},
+		},
+	})
+	before, _ := os.ReadFile(path)
+	if touched, err := stripClaudeSettingsJSON(true); err != nil || touched != path {
+		t.Fatalf("dry run touched=%q err=%v", touched, err)
+	}
+	afterDryRun, _ := os.ReadFile(path)
+	if string(before) != string(afterDryRun) {
+		t.Fatal("dry run modified settings")
+	}
+	if touched, err := stripClaudeSettingsJSON(false); err != nil || touched != path {
+		t.Fatalf("strip touched=%q err=%v", touched, err)
+	}
+	got := mustJSONRead(t, path)
+	if got["model"] != "sonnet" {
+		t.Fatal("unrelated setting was lost")
+	}
+	marketplaces := got["extraKnownMarketplaces"].(map[string]any)
+	if _, ok := marketplaces["superopen"]; ok {
+		t.Fatal("superopen marketplace survived")
+	}
+	if _, ok := marketplaces["other"]; !ok {
+		t.Fatal("unrelated marketplace was lost")
+	}
+	if touched, err := stripClaudeSettingsJSON(false); err != nil || touched != "" {
+		t.Fatalf("second pass touched=%q err=%v", touched, err)
 	}
 }
 

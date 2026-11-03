@@ -105,10 +105,11 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 		//      the user already removed it from inside the Claude
 		//      TUI we'll get an "already uninstalled" style error
 		//      and continue.
-		//   4. JSON-level fallback: strip the "so" entry
-		//      from ~/.claude/plugins/known_marketplaces.json.
+		//   4. JSON-level fallback: strip the "superopen" entry
+		//      from ~/.claude/plugins/known_marketplaces.json and
+		//      ~/.claude/settings.json.
 		//      `claude plugin marketplace remove` does not always
-		//      clear this file in practice (observed across
+		//      clear these files in practice (observed across
 		//      multiple Claude Code builds), and leaving it
 		//      behind causes a re-install to silently use the
 		//      stale `installLocation` field.
@@ -136,11 +137,19 @@ func uninstallVendor(vendor string, dryRun bool) (removed []string, errs []strin
 				errs = append(errs, e.Error())
 			}
 		}
-		if touched, e := stripClaudeMarketplaceJSON(dryRun); touched != "" {
+		touched, e := stripClaudeMarketplaceJSON(dryRun)
+		if touched != "" {
 			removed = append(removed, touched+" (residual entry)")
-			if e != nil {
-				errs = append(errs, e.Error())
-			}
+		}
+		if e != nil {
+			errs = append(errs, e.Error())
+		}
+		touched, e = stripClaudeSettingsJSON(dryRun)
+		if touched != "" {
+			removed = append(removed, touched+" (residual entry)")
+		}
+		if e != nil {
+			errs = append(errs, e.Error())
 		}
 		if allowPaths, e := install.StripClaudeAllowlist(dryRun); e != nil {
 			errs = append(errs, e.Error())
@@ -468,9 +477,9 @@ func disableClaudeCodePlugin() error {
 	}
 	// 2) Marketplace remove. The install side ran `claude plugin
 	//    marketplace add <path>` to register the marketplace; this is its
-	//    inverse. The bare "so" key matches the marketplace
+	//    inverse. The "superopen" key matches the marketplace
 	//    `name` field in our claude-marketplace.json.
-	mp := exec.Command(claudeBin, "plugin", "marketplace", "remove", "so") //nolint:gosec
+	mp := exec.Command(claudeBin, "plugin", "marketplace", "remove", "superopen") //nolint:gosec
 	if out, err := mp.CombinedOutput(); err != nil {
 		msg := strings.TrimSpace(string(out))
 		lower := strings.ToLower(msg)

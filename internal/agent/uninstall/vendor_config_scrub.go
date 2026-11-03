@@ -16,7 +16,7 @@ import (
 
 // stripClaudeMarketplaceJSON removes the Superopen marketplace entry from
 // `~/.claude/plugins/known_marketplaces.json` when present. The marketplace
-// key matches the current install registration name ("so").
+// key matches the marketplace manifest name ("superopen").
 func stripClaudeMarketplaceJSON(dryRun bool) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -34,13 +34,54 @@ func stripClaudeMarketplaceJSON(dryRun bool) (string, error) {
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return "", fmt.Errorf("parse %s: %w", path, err)
 	}
-	if _, ok := data["so"]; !ok {
+	if _, ok := data["superopen"]; !ok {
 		return "", nil
 	}
 	if dryRun {
 		return path, nil
 	}
-	delete(data, "so")
+	delete(data, "superopen")
+	out, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return path, err
+	}
+	out = append(out, '\n')
+	if err := writeFileAtomic(path, out, 0o600); err != nil {
+		return path, err
+	}
+	return path, nil
+}
+
+// stripClaudeSettingsJSON removes the marketplace registration that Claude
+// also stores in its user settings. Other settings and marketplaces survive.
+func stripClaudeSettingsJSON(dryRun bool) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(home, ".claude", "settings.json")
+	raw, err := os.ReadFile(path) //nolint:gosec // path is derived from $HOME
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return "", fmt.Errorf("parse %s: %w", path, err)
+	}
+	marketplaces, ok := data["extraKnownMarketplaces"].(map[string]any)
+	if !ok {
+		return "", nil
+	}
+	if _, ok := marketplaces["superopen"]; !ok {
+		return "", nil
+	}
+	if dryRun {
+		return path, nil
+	}
+	delete(marketplaces, "superopen")
 	out, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return path, err
