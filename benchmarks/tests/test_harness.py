@@ -271,7 +271,8 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(files["total"], 3)
 
     def test_parse_modes_all_includes_swe(self) -> None:
-        from run import parse_modes
+        from argparse import Namespace
+        from run import apply_all_defaults, parse_modes
 
         self.assertEqual(
             parse_modes("all"),
@@ -280,6 +281,9 @@ class HarnessTests(unittest.TestCase):
         self.assertNotIn("index", parse_modes("all"))
         self.assertEqual(parse_modes("index,graph"), ["index", "graph"])
         self.assertEqual(parse_modes("all,index")[-1], "index")
+        args = Namespace(phase=2, swe_grade=False)
+        apply_all_defaults(args, ["all"])
+        self.assertEqual((args.phase, args.swe_grade), (3, True))
 
     def test_resume_arms_and_merge(self) -> None:
         from resume import merge_arm_rows, selected_arms
@@ -394,7 +398,7 @@ class HarnessTests(unittest.TestCase):
             self.assertFalse((store / ".so" / "extra").exists())
 
     def test_recall_any_at_k_matches_published_definition(self) -> None:
-        from grade import recall_any_at_k, recall_payload
+        from grade import recall_any_at_k
 
         ranked = ["a", "b", "gold", "d"]
         gold = ["gold"]
@@ -402,9 +406,6 @@ class HarnessTests(unittest.TestCase):
         self.assertTrue(recall_any_at_k(ranked, gold, 5))
         self.assertTrue(recall_any_at_k(ranked, gold, 10))
         self.assertFalse(recall_any_at_k(ranked, [], 10))
-        hits = recall_payload(ranked, gold)
-        self.assertTrue(hits["hit_at_5"])
-        self.assertTrue(hits["hit_at_10"])
 
     def test_run_help_omits_debug(self) -> None:
         import subprocess

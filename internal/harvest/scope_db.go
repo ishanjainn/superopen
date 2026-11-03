@@ -1,7 +1,6 @@
 package harvest
 
 import (
-	"context"
 	"database/sql"
 	"strings"
 
@@ -13,30 +12,6 @@ type harvestDB struct {
 	tenant    string
 	principal string
 	project   string
-}
-
-func (d *harvestDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	q, err := harvestSQL(query, d.tenant, d.principal, d.project)
-	if err != nil {
-		return nil, err
-	}
-	return d.DB.QueryContext(ctx, q, args...)
-}
-
-func (d *harvestDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	q, err := harvestSQL(query, d.tenant, d.principal, d.project)
-	if err != nil {
-		return d.DB.QueryRowContext(ctx, `SELECT 1 WHERE 0`)
-	}
-	return d.DB.QueryRowContext(ctx, q, args...)
-}
-
-func (d *harvestDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	q, err := harvestSQL(query, d.tenant, d.principal, d.project)
-	if err != nil {
-		return nil, err
-	}
-	return d.DB.ExecContext(ctx, q, args...)
 }
 
 func (d *harvestDB) Query(query string, args ...any) (*sql.Rows, error) {

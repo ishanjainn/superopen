@@ -7,7 +7,6 @@ import (
 	"io"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -23,12 +22,11 @@ const (
 )
 
 type toonValue struct {
-	kind   toonKind
-	b      bool
-	s      string
-	obj    []toonField
-	arr    []toonValue
-	parsed bool
+	kind toonKind
+	b    bool
+	s    string
+	obj  []toonField
+	arr  []toonValue
 }
 
 type toonField struct {
@@ -414,26 +412,5 @@ func safeTOONKey(k string) bool {
 func writeIndent(b *strings.Builder, indent int) {
 	for i := 0; i < indent; i++ {
 		b.WriteString("  ")
-	}
-}
-
-func normalizeDecodedJSON(v any) any {
-	switch t := v.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(t))
-		for k, val := range t {
-			out[k] = normalizeDecodedJSON(val)
-		}
-		return out
-	case []any:
-		out := make([]any, len(t))
-		for i, val := range t {
-			out[i] = normalizeDecodedJSON(val)
-		}
-		return out
-	case float64:
-		return json.Number(strconv.FormatFloat(t, 'g', -1, 64))
-	default:
-		return t
 	}
 }

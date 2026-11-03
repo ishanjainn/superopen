@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -22,13 +21,6 @@ def docker_available() -> bool:
         return False
     proc = subprocess.run(["docker", "info"], capture_output=True, text=True, timeout=20)
     return proc.returncode == 0
-
-
-def docker_arch() -> str:
-    machine = platform.machine().lower()
-    if machine in {"arm64", "aarch64"}:
-        return "arm64"
-    return "amd64"
 
 
 def linux_so_path(repo: Path) -> Path:

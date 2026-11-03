@@ -1,7 +1,6 @@
 package memory
 
 import (
-	"encoding/json"
 	"strings"
 )
 
@@ -81,73 +80,6 @@ func (s *Store) Reinforce(id int64) error {
 	return err
 }
 
-func (s *Store) Curiosity(limit int) ([]Hit, error) {
-	if limit <= 0 {
-		limit = 8
-	}
-	rows, err := s.db.Query(`SELECT `+episodeCols+` FROM memory_episodes WHERE faded=0 AND kind NOT IN ('tool','working')
-ORDER BY centrality ASC, created_at DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	eps, err := s.scanEpisodes(rows)
-	if err != nil {
-		return nil, err
-	}
-	hits := make([]Hit, 0, len(eps))
-	for _, ep := range eps {
-		hits = append(hits, Hit{Episode: ep, Snippet: firstLine(ep.Text, 140)})
-	}
-	return hits, nil
-}
-
-func (s *Store) Patterns(limit int) ([]string, error) {
-	if limit <= 0 {
-		limit = 8
-	}
-	rows, err := s.db.Query(`SELECT t.label, COUNT(*) FROM memory_topics t
-JOIN memory_episodes e ON e.community_id=CAST(t.community AS TEXT)
-WHERE e.faded=0 GROUP BY t.id ORDER BY COUNT(*) DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var title string
-		var n int
-		if rows.Scan(&title, &n) == nil && title != "" {
-			out = append(out, title)
-		}
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) When(query string, limit int) ([]Hit, error) {
-	res, err := s.TemporalRecall(query, "", "", 0)
-	if err != nil {
-		return nil, err
-	}
-	if limit <= 0 {
-		limit = 12
-	}
-	hits := res.Hits
-	filtered := hits[:0]
-	for _, h := range hits {
-		if h.Kind == KindTool {
-			continue
-		}
-		if strings.TrimSpace(h.CreatedAt) == "" {
-			continue
-		}
-		filtered = append(filtered, h)
-	}
-	if len(filtered) > limit {
-		filtered = filtered[:limit]
-	}
-	return filtered, nil
-}
-
 func (s *Store) Recent(limit int) ([]Episode, error) {
 	if limit <= 0 {
 		limit = 20
@@ -157,24 +89,4 @@ func (s *Store) Recent(limit int) ([]Episode, error) {
 		return nil, err
 	}
 	return s.scanEpisodes(rows)
-}
-
-func (s *Store) Events(limit int) ([]TimelineBucket, error) {
-	return s.Timeline(limit)
-}
-
-func (s *Store) Consolidate() error {
-	return s.Sleep()
-}
-
-func (s *Store) MapJSON() (string, error) {
-	layout, err := s.Layout(400)
-	if err != nil {
-		return "", err
-	}
-	raw, err := json.Marshal(layout)
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
 }

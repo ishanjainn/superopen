@@ -315,14 +315,6 @@ func addArgumentURLRoute(project string, graph *goGraph, source string, call Syn
 		evidence:   &api.Evidence{Strategy: "arg_url", Confidence: .8}})
 }
 
-func serviceResolutionMatches(resolved, identity string) bool {
-	if resolved == "" {
-		return false
-	}
-	resolved = strings.TrimPrefix(resolved, "external:")
-	return resolved == identity || strings.ReplaceAll(resolved, ".", "/") == strings.ReplaceAll(identity, ".", "/")
-}
-
 func enclosingRouteSource(parsed ParsedSyntaxFile, call SyntaxFact, modules map[string]string, byFileName map[string][]api.Node) string {
 	source := modules[parsed.File.Path]
 	if source == "" {

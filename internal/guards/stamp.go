@@ -1,7 +1,6 @@
 package guards
 
 import (
-	"sync/atomic"
 	"time"
 )
 
@@ -28,19 +27,4 @@ func FormatTimestamp(t time.Time) string {
 // so a log spanning an agent upgrade still reads back end to end.
 func ParseTimestamp(value string) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, value)
-}
-
-// Sequencer hands out the monotonic emission counter carried in Event.Sequence. It is
-// safe for concurrent use, which the hook adapter needs (a single hook invocation can
-// emit several events) and the collector exporter needs (the pipeline may call the
-// consume functions for logs, traces and metrics at the same time).
-type Sequencer struct {
-	n atomic.Uint64
-}
-
-// Next returns the next sequence number for this writer, starting at 1. Zero is reserved
-// to mean "unsequenced" so an absent counter is distinguishable from the first event, and
-// is never handed out.
-func (s *Sequencer) Next() uint64 {
-	return s.n.Add(1)
 }

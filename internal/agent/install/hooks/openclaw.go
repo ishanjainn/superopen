@@ -116,10 +116,6 @@ func OpenClawHookStatus(opts OpenClawOptions) OpenClawStatus {
 	return openClawStatusFromRuntime(runtimeHookStatus(openClawRuntime, RuntimeOptions(opts)))
 }
 
-func IsOpenClawInstalled(opts OpenClawOptions) bool {
-	return isRuntimeInstalled(openClawRuntime, RuntimeOptions(opts))
-}
-
 // openClawStatusFromRuntime reports installed only when the plugin can actually reach the hook
 // binary, and attaches whatever the operator still owes OpenClaw's config.
 func openClawStatusFromRuntime(status runtimeStatus) OpenClawStatus {

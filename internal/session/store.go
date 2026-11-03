@@ -334,12 +334,6 @@ func (s *Store) Children(parentID string) ([]ListItem, error) {
 	return out, nil
 }
 
-func isNestedSession(m Meta) bool {
-	// Require a real parent. Lone is_subagent flags poison parent chats
-	// that emit coding_agent.agent.type=subagent spans on their own id.
-	return m.ParentID != ""
-}
-
 // Search filters sessions by title, changed files, or chat transcript text.
 func (s *Store) Search(q string) ([]ListItem, error) {
 	q = strings.TrimSpace(q)

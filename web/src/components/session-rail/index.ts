@@ -1,1 +1,1 @@
-export { SessionRail, SessionRailDrawer, type SessionRailTool, type SessionRailProps } from "./SessionRail";
+export { SessionRail, SessionRailDrawer, type SessionRailTool } from "./SessionRail";

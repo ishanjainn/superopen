@@ -3,10 +3,8 @@
 // token reduction, and records the original for recovery — keeping what answers
 // depend on and dropping the noise, before the bytes ever reach a model.
 //
-// The four-call surface (Compress, Retrieve, Detect, Stats) is the stable
-// contract the proxy, SDKs, CLI, MCP server, and browser build all share.
-// Simulate is an additional network-free dry run that reports what compression
-// would do without changing stored state.
+// Compress, Retrieve, Detect, and Stats are the core operations. Simulate
+// reports what compression would do without changing stored state.
 package engine
 
 import (
@@ -27,10 +25,6 @@ type Engine struct {
 	counter  tokens.Counter
 	store    *ccr.Store
 }
-
-// Capabilities exposes the active registry, including any explicitly configured
-// strategy. Middleware uses this authority rather than maintaining a second list.
-func (e *Engine) Capabilities() []compressors.Capability { return e.registry.Capabilities() }
 
 // New builds an engine with the default compressor registry. store backs CCR
 // recovery and stats and may be nil — without it the engine still detects and

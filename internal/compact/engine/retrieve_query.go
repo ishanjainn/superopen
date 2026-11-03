@@ -48,9 +48,6 @@ func (e *Engine) RetrieveQuery(handle, query string) ([]byte, error) {
 	return original, nil
 }
 
-// NarrowToQuery is narrowToQuery for content held outside CCR (middleware originals).
-func NarrowToQuery(content []byte, query string) ([]byte, bool) { return narrowToQuery(content, query) }
-
 // narrowToQuery splits stored content into whole units, BM25-ranks them against
 // the query, and returns the relevant ones in their original order, marking every
 // gap. ok is false when the content cannot be decomposed into units or nothing

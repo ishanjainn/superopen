@@ -168,12 +168,6 @@ func (s *Store) HasOpenForSession(sessionID string) bool {
 	return n > 0
 }
 
-func (s *Store) OpenCount() int {
-	var n int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM harvest_proposals WHERE status=?`, StatusOpen).Scan(&n)
-	return n
-}
-
 func (s *Store) PendingSession() string {
 	var id string
 	err := s.db.QueryRow(`SELECT session_id FROM harvest_runs WHERE status=? ORDER BY id DESC LIMIT 1`, StatusPending).Scan(&id)

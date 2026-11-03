@@ -140,8 +140,8 @@ func executeParsedCypher(ctx context.Context, graph cypherGraph, query *cy.Query
 			}
 		}
 	}
-	columns := bindingColumns(bindings)
-	total := len(bindings)
+	var columns []string
+	var total int
 	if query.Return != nil {
 		if query.Return.Star {
 			bindings, columns, total = projectCypherStar(bindings, query, *query.Return, maxRows)

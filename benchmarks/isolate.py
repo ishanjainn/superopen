@@ -270,13 +270,6 @@ def copy_so_store(src_worktree: Path, dest_worktree: Path) -> None:
     shutil.copytree(src, dest, symlinks=True)
 
 
-def parse_graph_status(stdout: str) -> dict[str, Any]:
-    try:
-        return json.loads(stdout)
-    except json.JSONDecodeError:
-        return {}
-
-
 def _cleanup_docker() -> None:
     if _mode != ISOLATE_DOCKER:
         return

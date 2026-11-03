@@ -64,15 +64,15 @@ CREATE TABLE IF NOT EXISTS typed_objects (
   dependencies_json TEXT NOT NULL,
   original_byte_length INTEGER NOT NULL,
   stored_byte_length INTEGER NOT NULL,
-  data BLOB NOT NULL
+  data BLOB NOT NULL,
+  data_ref TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS typed_objects_session_created
   ON typed_objects(session_id, created_at DESC);`
 
 // SQLiteDSN builds the driver DSN for path. The two pragmas are load-bearing,
-// not tuning: this recovery store is opened once per CLI process (superopen-mcp,
-// cavemem, superopen-engine, superopen-browse) yet several such processes share one
-// ~/.superopen/*.db file. Without journal_mode(WAL) a reader is locked out while a
+// not tuning: several CLI processes can share one ~/.superopen/*.db file.
+// Without journal_mode(WAL) a reader is locked out while a
 // write is in flight, and without busy_timeout a contender returns SQLITE_BUSY
 // instead of waiting — a lost Put means an elided payload with no recoverable
 // original, and a lost Get reads as an unknown handle. This mirrors the exact
@@ -92,7 +92,7 @@ const busyRetryBudget = 30 * time.Second
 
 // RetryOnBusy runs fn, retrying while SQLite reports the database is locked
 // (SQLITE_BUSY). Short-lived local processes can initialize the same database
-// concurrently, and a multi-statement migration can hold the write lock longer
+// concurrently, and schema initialization can hold the write lock longer
 // than a single connection's busy_timeout. Retries have a thirty-second wall-clock
 // budget; one already-running SQLite call may finish after that deadline, but no
 // new attempt starts after it.
@@ -139,8 +139,8 @@ func isBusy(err error) bool {
 	return strings.Contains(s, "database is locked") || strings.Contains(s, "SQLITE_BUSY")
 }
 
-// Open opens (creating if needed) the SQLite database at path and migrates the
-// schema. Use ":memory:" for an ephemeral store (tests, the eval harness).
+// Open opens (creating if needed) the SQLite database at path and initializes
+// the schema. Use ":memory:" for an ephemeral store (tests, the eval harness).
 func Open(path string) (*Store, error) {
 	maxBytes := DefaultMaxStorageBytes
 	if raw := strings.TrimSpace(os.Getenv("SUPEROPEN_CCR_MAX_BYTES")); raw != "" {
@@ -225,15 +225,7 @@ func openWithBudgetHooks(path string, maxBytes int64, afterPrepare, afterOpen fu
 	}
 	if err := RetryOnBusy(func() error { _, e := db.Exec(schema); return e }); err != nil {
 		closeSQLiteAfterOpenFailure(db, canonicalPath)
-		return nil, fmt.Errorf("migrate sqlite %q: %w", canonicalPath, err)
-	}
-	if err := RetryOnBusy(func() error { return ensureMetadataColumn(db) }); err != nil {
-		closeSQLiteAfterOpenFailure(db, canonicalPath)
-		return nil, fmt.Errorf("migrate sqlite metadata %q: %w", canonicalPath, err)
-	}
-	if err := RetryOnBusy(func() error { return ensureDataRefColumn(db) }); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate sqlite data_ref %q: %w", canonicalPath, err)
+		return nil, fmt.Errorf("initialize sqlite schema %q: %w", canonicalPath, err)
 	}
 	if err := configureStorageBudget(db, maxBytes); err != nil {
 		closeSQLiteAfterOpenFailure(db, canonicalPath)
@@ -412,64 +404,6 @@ func configureStorageBudget(db *sql.DB, maxBytes int64) error {
 	}
 	_, err := db.Exec(fmt.Sprintf(`PRAGMA journal_size_limit=%d`, maxBytes/8))
 	return err
-}
-
-func ensureMetadataColumn(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(recoveries)`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
-			return err
-		}
-		if name == "metadata" {
-			return rows.Err()
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	_, err = db.Exec(`ALTER TABLE recoveries ADD COLUMN metadata BLOB`)
-	return err
-}
-
-func ensureDataRefColumn(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(typed_objects)`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull, pk int
-		var dflt sql.NullString
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
-			return err
-		}
-		if name == "data_ref" {
-			return rows.Err()
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	_, err = db.Exec(`ALTER TABLE typed_objects ADD COLUMN data_ref TEXT NOT NULL DEFAULT ''`)
-	if err != nil && isDuplicateColumn(err) {
-		// A concurrent process's Open() already added it.
-		return nil
-	}
-	return err
-}
-
-func isDuplicateColumn(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "duplicate column name")
 }
 
 // OpenMemory opens an ephemeral in-memory store.

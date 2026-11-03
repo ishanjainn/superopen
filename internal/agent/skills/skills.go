@@ -156,6 +156,3 @@ func uniqueExistingParents(dirs []string) []string {
 	}
 	return out
 }
-
-// SkillFS exposes embedded skill files for tests.
-func SkillFS() fs.FS { return skillFS }

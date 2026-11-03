@@ -93,11 +93,6 @@ func New(f Flags) *Out {
 	return &Out{Flags: f, W: os.Stdout, ErrW: os.Stderr}
 }
 
-// FromCmd reads persistent flags from the command tree.
-func FromCmd(cmd *cobra.Command, f *Flags) *Out {
-	return New(*f)
-}
-
 // FlagsFromCmd reads persistent --json / --full / --root from a cobra command.
 func FlagsFromCmd(cmd *cobra.Command) Flags {
 	return Flags{
@@ -588,10 +583,6 @@ func Usage(msg, hint string) error { return Fail(ExitUsage, msg, hint) }
 
 // NotFound returns an ExitNotFound error.
 func NotFound(msg, hint string) error { return Fail(ExitNotFound, msg, hint) }
-
-// Continuation tells a coding-agent caller that the command made durable
-// progress and must be resumed through the machine-readable protocol.
-func Continuation(msg, hint string) error { return Fail(ExitContinuationRequired, msg, hint) }
 
 // HumanOrJSONRows prints rows as a TOON table, or the JSON envelope with data.
 func (o *Out) HumanOrJSONRows(kind string, cols []string, rows []map[string]any, data any) error {

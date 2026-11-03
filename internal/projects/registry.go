@@ -265,12 +265,6 @@ func Register(repoRoot, soRoot, remoteURL string) (Project, error) {
 	return p, nil
 }
 
-// Unregister removes a project by id or repo root.
-func Unregister(idOrRoot string) error {
-	_, err := Remove(idOrRoot, RemoveOptions{})
-	return err
-}
-
 // RemoveOptions controls destructive cleanup when removing a project.
 type RemoveOptions struct {
 	// PurgeSO deletes the project's .so directory after unregistering.

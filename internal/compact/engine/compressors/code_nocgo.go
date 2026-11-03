@@ -18,14 +18,9 @@ import (
 // while keeping every import, signature, and type declaration. GDScript is
 // handled by the line-based elider in code_gdscript.go; other languages pass
 // through unchanged. It is S4 (lossy); the original is recoverable via CCR.
-type codeCompressor struct{ opts CodeOptions }
+type codeCompressor struct{}
 
 func newCode() Compressor { return &codeCompressor{} }
-
-// newCodeWith accepts options for build-tag symmetry with the cgo compressor.
-// The pure-Go fallback only elides Go function bodies; comment/docstring modes
-// are a no-op here (they require the tree-sitter build).
-func newCodeWith(opts CodeOptions) Compressor { return &codeCompressor{opts: opts} }
 
 func (c *codeCompressor) ContentType() string       { return "code" }
 func (c *codeCompressor) SafetyClass() safety.Class { return safety.S4 }

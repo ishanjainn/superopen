@@ -24,12 +24,6 @@ func DecodeTOON(in []byte) (any, bool) {
 	return decodeTOON(in)
 }
 
-// DecodeJSONForTOONGrader parses JSON with the same json.Number-preserving
-// path used by the TOON compressor, then converts it to comparable JSON values.
-func DecodeJSONForTOONGrader(in []byte) (any, bool) {
-	return canonicalJSONValue(in)
-}
-
 func decodeTOON(in []byte) (any, bool) {
 	lines, ok := scanTOONLines(string(in))
 	if !ok || len(lines) == 0 {

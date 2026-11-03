@@ -241,14 +241,6 @@ func ApplyJSON(root, sessionID string, raw []byte) DistillResult {
 	return res
 }
 
-func DistillSession(root, sessionID string) (DistillResult, error) {
-	res := Distill(root, sessionID)
-	if res.Pending && res.Skipped != "" && res.Skipped != "paused" && res.Skipped != "no-auth" && res.Skipped != "await-live" {
-		return res, fmt.Errorf("%s", res.Skipped)
-	}
-	return res, nil
-}
-
 // DistillBrief is the same prompt the one-shot CLI would see, for the live agent.
 func DistillBrief(root, sessionID string) (string, error) {
 	sessionID = strings.TrimSpace(sessionID)

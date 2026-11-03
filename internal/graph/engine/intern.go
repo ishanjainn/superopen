@@ -11,30 +11,6 @@ type internShard struct {
 
 var internShards [internShardCount]internShard
 
-type internBuf struct {
-	m map[string]string
-}
-
-var internBufPool = sync.Pool{New: func() any {
-	return &internBuf{m: make(map[string]string, 1024)}
-}}
-
-func bindWorkerIntern() *internBuf {
-	buf := internBufPool.Get().(*internBuf)
-	if buf.m == nil {
-		buf.m = make(map[string]string, 1024)
-	}
-	return buf
-}
-
-func releaseWorkerIntern(buf *internBuf) {
-	if buf == nil {
-		return
-	}
-	clear(buf.m)
-	internBufPool.Put(buf)
-}
-
 func internString(value string) string {
 	if value == "" {
 		return ""
@@ -51,22 +27,6 @@ func internString(value string) string {
 	shard.m[value] = value
 	shard.mu.Unlock()
 	return value
-}
-
-func internLocal(buf *internBuf, value string) string {
-	if value == "" {
-		return ""
-	}
-	if buf != nil {
-		if existing, ok := buf.m[value]; ok {
-			return existing
-		}
-	}
-	interned := internString(value)
-	if buf != nil {
-		buf.m[value] = interned
-	}
-	return interned
 }
 
 func internShardIndex(value string) int {

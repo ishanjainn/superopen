@@ -62,10 +62,6 @@ func HermesHookStatus(opts HermesOptions) HermesStatus {
 	return hermesStatusFromRuntime(runtimeHookStatus(hermesRuntime, RuntimeOptions(opts)))
 }
 
-func IsHermesInstalled(opts HermesOptions) bool {
-	return isRuntimeInstalled(hermesRuntime, RuntimeOptions(opts))
-}
-
 func hermesStatusFromRuntime(status runtimeStatus) HermesStatus {
 	return HermesStatus{
 		Installed:  status.Installed,

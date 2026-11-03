@@ -43,11 +43,6 @@ class BM25Index:
         return [doc_id for _, doc_id in scores[:k]]
 
 
-def dense_search(docs: list[dict[str, Any]], query: str, k: int = 10) -> list[str]:
-    """Deprecated alias for bow_search."""
-    return bow_search(docs, query, k=k)
-
-
 def bow_search(docs: list[dict[str, Any]], query: str, k: int = 10) -> list[str]:
     q = Counter(_tokenize(query))
     scores: list[tuple[float, str]] = []

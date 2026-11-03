@@ -71,15 +71,6 @@ func TestInstallClinePluginWritesManagedPlugin(t *testing.T) {
 	}
 }
 
-func clineArgvHasFlag(argv []string, flag, value string) bool {
-	for i, arg := range argv {
-		if arg == flag {
-			return i+1 < len(argv) && argv[i+1] == value
-		}
-	}
-	return false
-}
-
 // Every path reaches the plugin through JSON encoding, which is why a Windows path needs no
 // per-shell quoting: the backslashes and spaces that break a POSIX-quoted command line survive a
 // round trip unchanged.

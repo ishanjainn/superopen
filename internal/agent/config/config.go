@@ -42,8 +42,7 @@ type Resolved struct {
 	// Teachings, pins, and never_decay rows are never deleted by age.
 	MemoryRetentionHours int
 
-	// Source records where each value came from for `so configure
-	// --show` and debugging.
+	// Source records where each value came from for diagnostics.
 	Source map[string]string
 }
 
@@ -200,8 +199,7 @@ func HoursDuration(hours int) time.Duration {
 }
 
 // Path returns the absolute path to the config file, even if it doesn't
-// yet exist. Used by `so configure` for write-side and by Load for
-// read-side.
+// yet exist. Save writes there and Load reads from it.
 func Path() (string, error) {
 	dir, err := configDir()
 	if err != nil {
@@ -320,7 +318,7 @@ func Save(updates map[string]string) (string, error) {
 	// Stable ordering: sort keys alphabetically so diffs are clean.
 	var lines []string
 	lines = append(lines,
-		"# so CLI config - written by `so configure`.",
+		"# Superopen CLI configuration.",
 		"# Allow-listed keys only; anything else is ignored at read time.",
 		"",
 	)

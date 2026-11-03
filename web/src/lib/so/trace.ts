@@ -11,16 +11,16 @@ import {
   type SessionMeta,
 } from "./sessions";
 
-export type Touch = "hit" | "read" | "edit";
-export type Action = "search" | "read" | "edit" | "exec" | "verify" | "other";
+type Touch = "hit" | "read" | "edit";
+type Action = "search" | "read" | "edit" | "exec" | "verify" | "other";
 
-export type TraceTarget = {
+type TraceTarget = {
   path: string;
   fileId?: number;
   touch: Touch;
 };
 
-export type TraceEvent = {
+type TraceEvent = {
   seq: number;
   ts?: string;
   tool: string;
@@ -31,7 +31,7 @@ export type TraceEvent = {
   summary: string;
 };
 
-export type TraceMark = {
+type TraceMark = {
   seq: number;
   type: "compaction" | "user-message" | "subagent";
   note?: string;
@@ -177,7 +177,7 @@ function districtNameFor(owner: string, districts: Districts): string {
  * directories are tool arguments, not files anyone can land on. Letting them
  * through fills the map with junk tiles and buries the real landings.
  */
-export function isMappablePath(path: string): boolean {
+function isMappablePath(path: string): boolean {
   if (!path) return false;
   if (path.endsWith("/")) return false;
   if (path.includes("[REDACTED]")) return false;

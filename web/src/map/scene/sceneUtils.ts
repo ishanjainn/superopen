@@ -51,11 +51,11 @@ export function preparePaperRenderer(renderer: THREE.WebGLRenderer) {
 
 /** Jump arcs + walker glow - warm orange (middle of yellow→pink ramp). */
 export const EMBER = new THREE.Color("#f97316");
-export const TRAIL_YELLOW = new THREE.Color("#eab308");
-export const TRAIL_ORANGE = new THREE.Color("#f97316");
-export const TRAIL_PINK = new THREE.Color("#ec4899");
+const TRAIL_YELLOW = new THREE.Color("#eab308");
+const TRAIL_ORANGE = new THREE.Color("#f97316");
+const TRAIL_PINK = new THREE.Color("#ec4899");
 
-export const touchColors: Record<Touch | "selected", THREE.Color> = {
+const touchColors: Record<Touch | "selected", THREE.Color> = {
   hit: new THREE.Color("#eab308"), // yellow - seen/search
   read: new THREE.Color("#f97316"), // orange - read
   edit: new THREE.Color("#ec4899"), // pink - edit

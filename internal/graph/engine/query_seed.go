@@ -57,7 +57,6 @@ var queryOverlapSkip = map[string]struct{}{
 
 type seedCandidate struct {
 	node   api.Node
-	score  float64
 	degree int
 }
 

@@ -3,7 +3,6 @@ package memory
 import (
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -74,11 +73,6 @@ func blendLexicalSemantic(hits []Hit, ftsRank, cosRank map[int64]int, lexKeep, s
 	out = append(out, sem[semKeep:]...)
 	out = append(out, rest...)
 	return out
-}
-
-type scoredHit struct {
-	Hit
-	stale bool
 }
 
 func applyStaleDownweight(hits []Hit, stale map[int64]bool, historical bool, weight float64) []Hit {
@@ -177,30 +171,6 @@ func historicalCue(query string) bool {
 		}
 	}
 	return false
-}
-
-func antiHits(hits []Hit, neighbors map[int64][]int64, byID map[int64]Hit, limit int) []Hit {
-	seen := map[int64]struct{}{}
-	for _, h := range hits {
-		seen[h.ID] = struct{}{}
-	}
-	var out []Hit
-	for _, h := range hits {
-		for _, dst := range neighbors[h.ID] {
-			if _, ok := seen[dst]; ok {
-				continue
-			}
-			if ep, ok := byID[dst]; ok {
-				out = append(out, ep)
-				seen[dst] = struct{}{}
-				if len(out) >= limit {
-					return out
-				}
-			}
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
-	return out
 }
 
 func trimToBudget(hits []Hit, budget int, query string) []Hit {
@@ -456,9 +426,4 @@ func queryAnchors(s, query string) []queryAnchor {
 		return out[i].bytePos > out[j].bytePos
 	})
 	return out
-}
-
-func parseID(s string) int64 {
-	n, _ := strconv.ParseInt(s, 10, 64)
-	return n
 }

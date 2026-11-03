@@ -2,9 +2,6 @@ package guards
 
 import (
 	"errors"
-	"os"
-	"runtime"
-	"time"
 )
 
 const (
@@ -505,44 +502,6 @@ type NewEventOptions struct {
 	// knows how it derived Action says so; one that has not been taught to think about it stays
 	// silent instead of claiming the stronger of the two values by accident.
 	Fidelity string
-}
-
-func NewEvent(opts NewEventOptions) Event {
-	hostname, _ := os.Hostname()
-	userName := os.Getenv("USER")
-	if userName == "" {
-		userName = os.Getenv("USERNAME")
-	}
-	severity := opts.Severity
-	if severity == "" {
-		severity = SeverityInfo
-	}
-	return Event{
-		Timestamp:     FormatTimestamp(time.Now()),
-		Vendor:        Vendor,
-		Product:       Product,
-		SchemaVersion: SchemaVersion,
-		Event: EventInfo{
-			Kind:     "agent_runtime",
-			Action:   opts.Action,
-			Category: opts.Category,
-			Fidelity: opts.Fidelity,
-		},
-		Severity: severity,
-		Endpoint: EndpointInfo{
-			Hostname:     hostname,
-			OS:           runtime.GOOS,
-			AgentVersion: opts.AgentVersion,
-		},
-		User: UserInfo{
-			Name: userName,
-			UID:  os.Getenv("UID"),
-		},
-		Harness: opts.Harness,
-		Origin:  opts.Origin,
-		Run:     opts.Run,
-		Message: opts.Message,
-	}
 }
 
 func (e Event) Validate() error {

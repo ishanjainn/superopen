@@ -15,7 +15,7 @@ export interface GraphNode {
   community?: string;
 }
 
-export interface GraphEdge {
+interface GraphEdge {
   source: number;
   target: number;
   type: string;

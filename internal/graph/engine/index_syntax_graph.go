@@ -1,8 +1,6 @@
 package engine
 
 import (
-	"context"
-	"fmt"
 	"math"
 	"path/filepath"
 	"sort"
@@ -16,123 +14,6 @@ import (
 
 type syntaxDefinitionRef struct {
 	file, scope, name, qn, label string
-}
-
-// IndexSyntaxDevelopment runs the complete generic discovery/parse/assemble/
-// atomic-publication spine. It is intentionally not selected by Server until
-// embedded assets and every family resolver pass their readiness gates.
-func IndexSyntaxDevelopment(ctx context.Context, request api.BuildRequest, engineVersion string, parser SyntaxParser, workers int) (api.BuildResult, error) {
-	started := time.Now()
-	root, err := CanonicalRoot(request.RepoRoot)
-	if err != nil {
-		return api.BuildResult{}, err
-	}
-	project := request.Project
-	if project == "" {
-		project, err = ProjectName(root)
-		if err != nil {
-			return api.BuildResult{}, err
-		}
-	}
-	var changes *api.ChangeSet
-	if request.Incremental {
-		planned, err := PlanIncremental(ctx, root, project, request.Exclude)
-		if err != nil {
-			return api.BuildResult{}, err
-		}
-		changes = &planned
-	}
-	files, err := discoverTrackedFiles(ctx, root, request.Exclude)
-	if err != nil {
-		return api.BuildResult{}, err
-	}
-	applyMemoryBudget()
-	repository, err := ParseSyntaxRepository(ctx, parser, root, project, files, nil, workers)
-	if err != nil {
-		return api.BuildResult{}, err
-	}
-	graph, coverage := AssembleSyntaxGraph(repository, project)
-	dropExtractedOccurrences(repository.Files)
-	indexRepositoryBranch(ctx, root, project, &graph)
-	indexPythonBuiltins(project, repository.Files, &graph)
-	indexEnvironmentAccesses(project, root, repository.Files, &graph)
-	indexHTTPRoutes(project, repository.Files, &graph)
-	repository.Files = nil
-	separateUnresolvedRelationships(&graph)
-	revision := gitRevision(ctx, root)
-	if request.ExpectedSource != "" && request.ExpectedSource != revision {
-		return api.BuildResult{}, fmt.Errorf("source revision changed: expected %s, found %s", request.ExpectedSource, revision)
-	}
-	database, err := Publish(ctx, root, func(ctx context.Context, path string) error {
-		store, err := OpenWritableFresh(path)
-		if err != nil {
-			return err
-		}
-		buildErr := store.BuildFresh(ctx, func(builder *Builder) error {
-			if err := builder.PutProject(ProjectRecord{Name: project, RootPath: root, Generation: repository.Generation,
-				SourceRevision: revision, EngineVersion: engineVersion, IndexedAt: time.Now().UTC()}); err != nil {
-				return err
-			}
-			for _, file := range graph.files {
-				if err := builder.PutFile(file); err != nil {
-					return err
-				}
-			}
-			ids := make(map[string]int64, len(graph.nodes))
-			for i := range graph.nodes {
-				node := &graph.nodes[i]
-				id, err := builder.PutNode(*node)
-				if err != nil {
-					return err
-				}
-				ids[node.QualifiedName] = id
-			}
-			if err := builder.flushNodeBatch(); err != nil {
-				return err
-			}
-			if err := putGraphSemantics(builder, graph, ids, project, nil); err != nil {
-				return err
-			}
-			for i := range graph.nodes {
-				graph.nodes[i].Properties = nil
-			}
-			for _, edge := range graph.edges {
-				source, sourceOK := ids[edge.source]
-				target, targetOK := ids[edge.target]
-				if !sourceOK || !targetOK {
-					return fmt.Errorf("syntax edge endpoint missing: %s -[%s]-> %s", edge.source, edge.kind, edge.target)
-				}
-				if _, err := builder.PutEdge(api.Edge{Project: project, SourceID: source, TargetID: target,
-					Type: edge.kind, Properties: edge.dumpProperties(), Evidence: edge.evidence}); err != nil {
-					return err
-				}
-			}
-			for _, edge := range graph.unresolved {
-				if err := builder.PutUnresolved(api.UnresolvedRelationship{Project: project, Source: edge.source,
-					TargetText: edge.target, Type: edge.kind, Properties: edge.dumpProperties(), Evidence: edge.evidence}); err != nil {
-					return err
-				}
-			}
-			return builder.PutCoverage(project, coverage)
-		})
-		if buildErr == nil {
-			buildErr = store.Seal(ctx)
-		}
-		if closeErr := store.Close(); buildErr == nil {
-			buildErr = closeErr
-		}
-		return buildErr
-	})
-	if err != nil {
-		return api.BuildResult{}, err
-	}
-	nodeCount, edgeCount, err := publishedCounts(ctx, database, project)
-	if err != nil {
-		return api.BuildResult{}, err
-	}
-	return api.BuildResult{Status: "ok", Project: project, Database: database,
-		SourceRevision: revision, Generation: repository.Generation, NodeCount: nodeCount, EdgeCount: edgeCount,
-		FileCount: len(graph.files), Duration: time.Since(started), Coverage: summarizedCoverage(coverage, 100), Changes: changes}, nil
 }
 
 // AssembleSyntaxGraph turns language-neutral Tree-sitter facts into the common
@@ -950,23 +831,6 @@ func jsxCallableLabel(label string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func syntaxFactLocallyBound(file string, fact SyntaxFact, bindings map[string]map[string]bool) bool {
-	if fact.Scope == "" || strings.ContainsAny(fact.Name, ".:") {
-		return false
-	}
-	scope := fact.Scope
-	for {
-		if bindings[file+"\x00"+scope][fact.Name] {
-			return true
-		}
-		index := strings.LastIndexByte(scope, '.')
-		if index < 0 {
-			return false
-		}
-		scope = scope[:index]
 	}
 }
 

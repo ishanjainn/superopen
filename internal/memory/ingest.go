@@ -650,24 +650,6 @@ func firstLine(s string, limit int) string {
 	return s
 }
 
-func clip(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
-		return s
-	}
-	return string(runes[:n])
-}
-
-func nonempty(vals ...string) []string {
-	var out []string
-	for _, v := range vals {
-		if strings.TrimSpace(v) != "" {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
 const nearDupCosine = 0.95
 
 func (s *Store) nearDuplicate(vec Vector, kind string) int64 {

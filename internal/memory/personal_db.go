@@ -15,28 +15,12 @@ type personalDB struct {
 	project   string
 }
 
-func (d *personalDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	q, err := personalSQL(query, d.tenant, d.principal, d.project)
-	if err != nil {
-		return nil, err
-	}
-	return d.DB.QueryContext(ctx, q, args...)
-}
-
 func (d *personalDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	q, err := personalSQL(query, d.tenant, d.principal, d.project)
 	if err != nil {
 		return d.DB.QueryRowContext(ctx, `SELECT 1 WHERE 0`)
 	}
 	return d.DB.QueryRowContext(ctx, q, args...)
-}
-
-func (d *personalDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	q, err := personalSQL(query, d.tenant, d.principal, d.project)
-	if err != nil {
-		return nil, err
-	}
-	return d.DB.ExecContext(ctx, q, args...)
 }
 
 func (d *personalDB) Query(query string, args ...any) (*sql.Rows, error) {

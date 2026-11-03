@@ -49,22 +49,6 @@ func (s *Store) knobInt(key string, def int) int {
 	return n
 }
 
-func (s *Store) Profile() map[string]string {
-	out := map[string]string{}
-	rows, err := s.db.Query(`SELECT key, value FROM memory_meta WHERE key NOT LIKE 'schema%' AND key NOT LIKE 'embedder%'`)
-	if err != nil {
-		return out
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var k, v string
-		if rows.Scan(&k, &v) == nil {
-			out[k] = v
-		}
-	}
-	return out
-}
-
 func (s *Store) SetProfile(key, value string) error {
 	_, err := s.db.Exec(`INSERT INTO memory_meta(key, value) VALUES(?,?)
 ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)

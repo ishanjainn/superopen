@@ -1354,22 +1354,6 @@ func pinnedIsExported(name, language string) bool {
 	}
 }
 
-func collectParameterNames(node syntaxView, source []byte, result *[]string) {
-	if isIdentifierNode(node.Kind()) {
-		if value := trimSyntaxLiteral(nodeText(node, source)); value != "" {
-			*result = append(*result, value)
-		}
-		return
-	}
-	for i := 0; i < node.ChildCount(); i++ {
-		child := node.ChildAt(i)
-		if child.FieldName() == "type" || strings.Contains(child.Kind(), "type") {
-			continue
-		}
-		collectParameterNames(child, source, result)
-	}
-}
-
 func syntaxParameterNames(parameters syntaxView, source []byte) []string {
 	result := make([]string, 0, 8)
 	for i := 0; i < parameters.ChildCount(); i++ {
@@ -1755,11 +1739,6 @@ func fillFunctionBodyFacts(fact *SyntaxFact, body syntaxView, source []byte, par
 	}
 }
 
-func syntaxBodyTokens(root syntaxView, source []byte) string {
-	tokens, _, _, _, _ := syntaxFusedBodyWalk(root, source, nil)
-	return tokens
-}
-
 func syntaxFusedBodyWalk(root syntaxView, source []byte, parameterNames []string) (string, ASTProfile, minHashFingerprint, bool, bool) {
 	var profile ASTProfile
 	profile[profileParameters] = uint16(len(parameterNames))
@@ -2098,12 +2077,10 @@ func syntaxForwardSiblingCallee(language string, node, parent syntaxView) bool {
 	if language != "vhdl" {
 		return false
 	}
-	owner := node
-	for depth := 0; depth < 4 && syntaxVHDLCalleeWrapper(owner.Kind()); depth++ {
-		if syntaxNextNamedSiblingType(parent, owner) == "parenthesis_group" {
+	if syntaxVHDLCalleeWrapper(node.Kind()) {
+		if syntaxNextNamedSiblingType(parent, node) == "parenthesis_group" {
 			return true
 		}
-		break
 	}
 	return false
 }

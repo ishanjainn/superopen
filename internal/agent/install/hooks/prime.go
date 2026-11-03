@@ -96,14 +96,6 @@ func UninstallPrime(opts PrimeOptions) (PrimeStatus, error) {
 	return primeStatusFromRuntime(status), nil
 }
 
-func PrimeHookStatus(opts PrimeOptions) PrimeStatus {
-	return primeStatusFromRuntime(runtimeHookStatus(primeRuntime, RuntimeOptions(opts)))
-}
-
-func IsPrimeInstalled(opts PrimeOptions) bool {
-	return isRuntimeInstalled(primeRuntime, RuntimeOptions(opts))
-}
-
 // primeStatusFromRuntime reports installed only when the extension can actually reach the binary.
 func primeStatusFromRuntime(status runtimeStatus) PrimeStatus {
 	status = primeExtension.reachableStatus(status)

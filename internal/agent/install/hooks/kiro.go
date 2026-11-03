@@ -186,14 +186,6 @@ func UninstallKiro(opts KiroOptions) (KiroStatus, error) {
 	return kiroStatusFromRuntime(status), nil
 }
 
-func KiroHookStatus(opts KiroOptions) KiroStatus {
-	return kiroStatusFromRuntime(runtimeHookStatus(kiroRuntime, RuntimeOptions(opts)))
-}
-
-func IsKiroInstalled(opts KiroOptions) bool {
-	return isRuntimeInstalled(kiroRuntime, RuntimeOptions(opts))
-}
-
 func kiroStatusFromRuntime(status runtimeStatus) KiroStatus {
 	return KiroStatus{
 		Installed:  status.Installed,

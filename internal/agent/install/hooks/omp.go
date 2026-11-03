@@ -85,14 +85,6 @@ func UninstallOmp(opts OmpOptions) (OmpStatus, error) {
 	return ompStatusFromRuntime(status), nil
 }
 
-func OmpHookStatus(opts OmpOptions) OmpStatus {
-	return ompStatusFromRuntime(runtimeHookStatus(ompRuntime, RuntimeOptions(opts)))
-}
-
-func IsOmpInstalled(opts OmpOptions) bool {
-	return isRuntimeInstalled(ompRuntime, RuntimeOptions(opts))
-}
-
 // ompStatusFromRuntime reports installed only when the extension can actually reach the hook binary.
 func ompStatusFromRuntime(status runtimeStatus) OmpStatus {
 	status = ompExtension.reachableStatus(status)

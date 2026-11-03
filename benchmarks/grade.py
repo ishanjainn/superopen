@@ -131,7 +131,3 @@ def recall_any_at_k(ranked: Iterable[Any], gold: Iterable[Any], k: int) -> bool:
         return False
     top = [str(x) for x in list(ranked)[:k] if x is not None and str(x)]
     return any(item in gold_set for item in top)
-
-
-def recall_payload(ranked: list[Any], gold: list[Any], ks: tuple[int, ...] = (5, 10)) -> dict[str, bool]:
-    return {f"hit_at_{k}": recall_any_at_k(ranked, gold, k) for k in ks}

@@ -1,5 +1,5 @@
-export const EDGE_REFERENCE_COUNT = 2500;
-export const NODE_REFERENCE_COUNT = 25_000;
+const EDGE_REFERENCE_COUNT = 2500;
+const NODE_REFERENCE_COUNT = 25_000;
 
 export function edgeIntensityScale(edgeCount: number): number {
   if (edgeCount <= EDGE_REFERENCE_COUNT) return 1;

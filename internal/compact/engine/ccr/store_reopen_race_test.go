@@ -143,8 +143,8 @@ func TestOpenRejectsImpossibleBudgetBeforePreparingFiles(t *testing.T) {
 	}
 }
 
-// A fan-out of fresh processes (cavemem remember, superopen-mcp) opens one new
-// ccr.db at once. Switching it to WAL can return SQLITE_BUSY without waiting on
+// A fan-out of fresh processes opens one new ccr.db at once. Switching it to WAL
+// can return SQLITE_BUSY without waiting on
 // busy_timeout; before Open retried that, most runs of this lost an open.
 func TestConcurrentFreshOpensAllSucceed(t *testing.T) {
 	for round := 0; round < 40; round++ {

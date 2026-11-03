@@ -123,14 +123,6 @@ func UninstallMuse(opts MuseOptions) (MuseStatus, error) {
 	return museStatusFromRuntime(status), nil
 }
 
-func MuseHookStatus(opts MuseOptions) MuseStatus {
-	return museStatusFromRuntime(runtimeHookStatus(museRuntime, RuntimeOptions(opts)))
-}
-
-func IsMuseInstalled(opts MuseOptions) bool {
-	return isRuntimeInstalled(museRuntime, RuntimeOptions(opts))
-}
-
 func museStatusFromRuntime(status runtimeStatus) MuseStatus {
 	out := MuseStatus{
 		Installed:  status.Installed,

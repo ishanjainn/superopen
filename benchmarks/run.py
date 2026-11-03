@@ -164,8 +164,7 @@ def apply_all_defaults(args: Any, requested: list[str]) -> None:
     if "all" not in requested:
         return
     args.phase = 3
-    if not getattr(args, "no_swe_grade", False):
-        args.swe_grade = True
+    args.swe_grade = True
 
 
 def main() -> int:
@@ -223,6 +222,8 @@ def main() -> int:
         help="After locomo memory, also run LongMemEval-S when the dataset file exists",
     )
     args = parser.parse_args()
+    requested = [m.strip() for m in args.mode.split(",") if m.strip()]
+    apply_all_defaults(args, requested)
     args.host = require_coding_host(args.host)
     args.model = default_model(args.host, args.model or "")
     apply_scale(args)
@@ -231,7 +232,6 @@ def main() -> int:
     keep = bool(args.debug)
     out = work_dir(keep=keep, out=args.out)
     host_so = resolve_so_bin(args.so_bin)
-    requested = [m.strip() for m in args.mode.split(",") if m.strip()]
     modes = parse_modes(args.mode)
     require_agent_credentials(modes=modes, phase=args.phase, max_spend=args.max_spend)
     if any(m == "memory" or m == "all" for m in requested):
