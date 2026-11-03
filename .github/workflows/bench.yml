@@ -163,7 +163,7 @@ jobs:
 
       - name: Upload BENCHMARKS.md
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmarks-${{ inputs.suite }}-${{ github.run_id }}
           if-no-files-found: warn
