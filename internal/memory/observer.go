@@ -24,12 +24,3 @@ func extractJSONArray(s string) string {
 	}
 	return s
 }
-
-func canonicalObservationType(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case ObservationDecision, ObservationBugfix, ObservationFeature, ObservationRefactor, ObservationDiscovery, ObservationChange:
-		return strings.ToLower(strings.TrimSpace(raw))
-	default:
-		return ObservationChange
-	}
-}

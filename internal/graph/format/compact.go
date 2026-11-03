@@ -545,10 +545,3 @@ func lineRange(start, end int) string {
 	}
 	return fmt.Sprintf("%d-%d", start, end)
 }
-
-func PackagePrefix(qn string) string {
-	if i := strings.LastIndex(qn, "."); i > 0 {
-		return qn[:i]
-	}
-	return qn
-}

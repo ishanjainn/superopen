@@ -272,10 +272,6 @@ func (s *Store) episodesByIDs(ids []int64, whereSQL string, args []any) []Episod
 	return eps
 }
 
-func (s *Store) FileContext(path string, limit int) ([]Hit, error) {
-	return s.Search(SearchFilter{File: path, Limit: limit, RecordEconomy: false})
-}
-
 type TimelineBucket struct {
 	When  string    `json:"when"`
 	Items []Episode `json:"items"`
@@ -567,11 +563,6 @@ func (s *Store) contradictMaps() (map[int64]bool, map[int64][]int64, map[int64][
 	return stale, outgoing, neighbors
 }
 
-func (s *Store) staleIDs() map[int64]bool {
-	stale, _, _ := s.contradictMaps()
-	return stale
-}
-
 func inventedLearnedFiction(ep Episode) bool {
 	if ep.Source == SourceAgent || ep.Source == SourceTeach {
 		return false
@@ -801,12 +792,4 @@ func echoTerms(s string) map[string]bool {
 		out[p] = true
 	}
 	return out
-}
-
-func (s *Store) Preview(id int64) string {
-	ep, err := s.Get(id)
-	if err != nil {
-		return fmt.Sprintf("memory %d not found", id)
-	}
-	return firstLine(ep.Title, 80)
 }

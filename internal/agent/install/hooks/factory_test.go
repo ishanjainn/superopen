@@ -1,12 +1,12 @@
 package hooks
 
 import (
-	"encoding/json"
-	"github.com/ishanjainn/superopen/internal/agent/install/hooks/testenv"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ishanjainn/superopen/internal/agent/install/hooks/testenv"
 )
 
 func TestInstallFactoryHooksPreservesNonSuperopenHooks(t *testing.T) {
@@ -226,19 +226,6 @@ func TestFactoryHookStatusDetectsInstalled(t *testing.T) {
 	if status.HooksPath != path {
 		t.Fatalf("HooksPath = %q, want %q", status.HooksPath, path)
 	}
-}
-
-// jsonFragment renders a value as it appears inside a JSON document, minus the surrounding quotes.
-//
-// Assertions against marshaled settings must search for the encoded form: a Windows path is full
-// of backslashes, and JSON escapes every one of them.
-func jsonFragment(t *testing.T, value string) string {
-	t.Helper()
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("encode %q: %v", value, err)
-	}
-	return strings.Trim(string(encoded), `"`)
 }
 
 func TestInstallFactoryWritesHookCommand(t *testing.T) {

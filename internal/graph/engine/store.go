@@ -492,17 +492,12 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func (s *Store) Path() string { return s.path }
-
 type Builder struct {
 	tx         *sql.Tx
 	tenant     string
 	projectID  string
 	insertOnly bool
 	nextNodeID int64
-	nodeStmt   *sql.Stmt
-	ftsStmt    *sql.Stmt
-	edgeStmt   *sql.Stmt
 	nodeBatch  [][]any
 	ftsBatch   [][]any
 	edgeBatch  [][]any

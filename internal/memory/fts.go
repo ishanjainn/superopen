@@ -4,15 +4,6 @@ import (
 	"strings"
 )
 
-const plaintextFTSDDL = `CREATE VIRTUAL TABLE memory_episodes_fts USING fts5(
-  title, text, files, tool_name,
-  tokenize='unicode61 remove_diacritics 2'
-)`
-
-const ftsDeleteTrigger = `CREATE TRIGGER IF NOT EXISTS memory_episodes_ad AFTER DELETE ON memory_episodes BEGIN
-  DELETE FROM memory_episodes_fts WHERE rowid = old.id;
-END;`
-
 func (s *Store) ftsLooksSealed() bool {
 	var sample string
 	err := s.db.QueryRow(`SELECT text FROM memory_episodes_fts WHERE text != '' LIMIT 1`).Scan(&sample)

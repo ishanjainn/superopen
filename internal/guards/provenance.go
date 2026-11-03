@@ -1,7 +1,5 @@
 package guards
 
-import "strings"
-
 // Provenance: how came to know a thing, recorded alongside the thing itself.
 //
 // collects from runtimes over four different mechanisms whose fidelity differs by roughly
@@ -76,32 +74,4 @@ func ValidFidelity(value string) bool {
 		return true
 	}
 	return false
-}
-
-// CollectionMethodForPlatform maps a `so --platform` value onto the mechanism that
-// platform actually uses.
-//
-// It lives here, beside NormalizeHarnessName, for the same reason that function does: the hook
-// adapter writes this field from its `--platform` flag and no other code path can see that flag,
-// so a mapping kept anywhere else would be a second definition waiting to disagree. Keying on
-// `--platform` rather than on the normalized harness name is deliberate -- the flag records which
-// integration shape installed, which is exactly the question, while the harness name
-// records which product it was, which is not. VS Code is the case that separates them: hook and
-// OTLP telemetry for it normalize to the same `vscode_copilot` harness, but only one of the two
-// arrives through a hook.
-//
-// Platforms that use a -managed plugin or extension file are enumerated rather than
-// defaulted, because the default has to be something and `hook` is the safer wrong answer: a
-// plugin platform reported as `hook` overstates vendor support, while a hook platform reported as
-// `plugin` would send someone to fix the source for a payload the vendor never sent. New
-// plugin-shaped integrations belong in the list; new hook-shaped ones need no change.
-func CollectionMethodForPlatform(platform string) string {
-	switch strings.ToLower(strings.TrimSpace(platform)) {
-	case "":
-		return ""
-	case "opencode", "cline", "pi", "omp", "openclaw", "prime", "omo":
-		return CollectionMethodPlugin
-	default:
-		return CollectionMethodHook
-	}
 }

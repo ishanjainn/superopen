@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ishanjainn/superopen/internal/compact/engine"
+	"github.com/ishanjainn/superopen/internal/compact/engine/ccr"
 	"github.com/ishanjainn/superopen/internal/paths"
-	"github.com/ishanjainn/superopen/third_party/caveman/engine"
-	"github.com/ishanjainn/superopen/third_party/caveman/engine/ccr"
 )
 
 const (

@@ -113,14 +113,6 @@ func installGenericVendor(vendor string, dryRun bool) ([]string, error) {
 			}
 		}
 	}
-	for _, stale := range staleGenericVendorPaths(home, vendor) {
-		if stale == path {
-			continue
-		}
-		if err := os.RemoveAll(stale); err == nil {
-			written = append(written, "removed-stale:"+stale)
-		}
-	}
 	return written, nil
 }
 
@@ -206,17 +198,6 @@ func installGeminiHooks(path, soBin string) ([]string, error) {
 		existing = append(existing, map[string]any{"hooks": entries, "sequential": true})
 		hooks[event] = existing
 	}
-	// Remove obsolete Superopen event groups written by older releases.
-	for _, event := range []string{"UserPromptSubmit", "PreToolUse"} {
-		if groups, ok := hooks[event].([]any); ok {
-			groups = stripOwnedGeminiGroups(groups)
-			if len(groups) == 0 {
-				delete(hooks, event)
-			} else {
-				hooks[event] = groups
-			}
-		}
-	}
 	doc["hooks"] = hooks
 	body, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
@@ -293,18 +274,4 @@ func patchPluginSoBin(src, soBin string) string {
 		`return process.env.SUPEROPEN_SO_BIN?.trim() || `+quoted+`;`,
 	)
 	return out
-}
-
-// staleGenericVendorPaths are older install locations hosts never load.
-func staleGenericVendorPaths(home, vendor string) []string {
-	switch vendor {
-	case "opencode":
-		return []string{filepath.Join(home, ".opencode", "plugins", "superopen.ts")}
-	case "pi":
-		return []string{filepath.Join(home, ".pi", "extensions", "superopen")}
-	case "copilot-cli":
-		return []string{filepath.Join(home, ".github", "hooks", "superopen.json")}
-	default:
-		return nil
-	}
 }

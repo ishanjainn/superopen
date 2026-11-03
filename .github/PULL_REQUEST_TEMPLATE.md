@@ -9,14 +9,12 @@
 
 ### Checklist
 
-If your change doesn't seem to apply, leave them unchecked.
-
-* [ ] PR title follows Conventional Commit format
-* [ ] I have reviewed the [contributing guidelines](../CONTRIBUTING.md)
-* [ ] I checked for existing open Pull Requests covering the same change
-* [ ] I performed a self-review
-* [ ] Changes have tests (Go and/or web unit tests as applicable)
-* [ ] User-facing docs updated when needed
+- PR title follows Conventional Commit format
+- I have reviewed the contributing guidelines
+- I checked for existing open Pull Requests covering the same change
+- I performed a self-review
+- Changes have tests (Go and/or web unit tests as applicable)
+- User-facing docs updated when needed
 
 ### Acknowledgment
 

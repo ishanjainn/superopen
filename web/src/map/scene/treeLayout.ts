@@ -4,7 +4,7 @@ import type { SessionFile } from "../types";
 // forks, files as leaf slots. Every leaf gets an equal angular share in
 // path-sorted order, so the same commit always grows the same tree.
 
-export interface TreeDir {
+interface TreeDir {
   path: string;
   name: string;
   x: number;
@@ -17,7 +17,7 @@ export interface TreeDir {
   radius: number;
 }
 
-export interface TreeEdge {
+interface TreeEdge {
   childPath?: string;
   childFileId?: number;
   points: { x: number; z: number }[];

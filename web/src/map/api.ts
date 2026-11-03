@@ -29,7 +29,7 @@ export function describeError(err: unknown, doing: string): string {
   return detail ? `Couldn't finish ${doing}: ${detail}` : `Couldn't finish ${doing}`;
 }
 
-export function listSessions(fresh = false): Promise<SessionMeta[]> {
+function listSessions(fresh = false): Promise<SessionMeta[]> {
   return getJSON<SessionMeta[]>(fresh ? "/api/sessions?fresh=1" : "/api/sessions");
 }
 

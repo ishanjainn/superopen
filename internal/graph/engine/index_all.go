@@ -122,7 +122,7 @@ func IndexAllDevelopment(ctx context.Context, request api.BuildRequest, engineVe
 	}
 	clockOverlay("env", func() { indexEnvironmentAccesses(project, root, repository.Files, &graph) })
 	clockOverlay("pkgmap", func() { applyPackageMap(project, repository, &graph) })
-	joinResolvedCalls(&graph, repository.Files, registry)
+	joinResolvedCalls(&graph, repository.Files)
 	clockOverlay("inheritance", func() { indexSyntaxInheritance(project, repository.Files, &graph, registry) })
 	clockOverlay("implements", func() { indexSyntaxGoImplements(&graph) })
 	indexSyntaxExplicitOverrides(&graph)

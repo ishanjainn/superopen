@@ -10,11 +10,11 @@ on:
         options:
           - CLI
       version:
-        description: Stable SemVer without a prefix, for example 0.2.0
+        description: Semantic Version (Eg x.x.x)
         required: true
         type: string
       dry_run:
-        description: Generate notes and a version diff without changing refs or publishing
+        description: Dry Run
         required: true
         default: true
         type: boolean

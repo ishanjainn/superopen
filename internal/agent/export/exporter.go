@@ -38,47 +38,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// drainCounters reads the minimal-mode rolled-up counters off the
-// sessionstate cache (scoped to the emitting vendor) and merges them
-// into the session struct, preferring caller-supplied values when
-// present. We DO NOT clear the counters from disk - sessionEnd may
-// run multiple times across retry, and the GC routine in sessionstate
-// handles eventual cleanup.
-//
-// Split into two functions because the LOC / edit / commit / PR
-// counters are bumped regardless of capture mode (a Cursor user on
-// metadata capture still wants to see their LOC numbers); the
-// tool-call / token / cost counters only need draining in minimal
-// mode where their per-event spans were suppressed.
-func drainCounters(s normalize.Session, vendor string) normalize.Session {
-	if s.SessionID == "" {
-		return s
-	}
-	st := sessionstate.Load(s.SessionID, vendor)
-	if st == nil {
-		return s
-	}
-	if s.ToolCallCount == 0 && st.ToolCallCount > 0 {
-		s.ToolCallCount = st.ToolCallCount
-	}
-	if s.SubagentCount == 0 && st.SubagentCount > 0 {
-		s.SubagentCount = st.SubagentCount
-	}
-	if s.InputTokens == 0 && st.InputTokens > 0 {
-		s.InputTokens = st.InputTokens
-	}
-	if s.OutputTokens == 0 && st.OutputTokens > 0 {
-		s.OutputTokens = st.OutputTokens
-	}
-	if s.CostUSD == 0 && st.CostUSD > 0 {
-		s.CostUSD = st.CostUSD
-	}
-	if s.TotalTokens == 0 {
-		s.TotalTokens = s.InputTokens + s.OutputTokens
-	}
-	return s
-}
-
 // drainCodeCounters folds the cached LOC / edit / commit / PR
 // counters onto the session struct, regardless of capture mode.
 // Called from every EmitSession invocation so the session-root span
@@ -126,7 +85,7 @@ func drainCodeCounters(s normalize.Session, vendor string) normalize.Session {
 // function is normally a single env-var read.
 //
 // The OS-username fallback exists for direct CLI usage outside the
-// hook hot path (e.g. `so configure`); it is the last resort and
+// hook hot path; it is the last resort and
 // will produce a "Username" row in the hub when no email-shaped
 // identity is available.
 func resolveLocalUser() string {
@@ -440,9 +399,6 @@ func NewEmitter(_ context.Context, cfg *config.Resolved, vendor string, extraAtt
 	// version and add `coding_agent.hook.cli.version` for the hook
 	// binary's identity, which can drift from service.version when a
 	// host runs multiple CLIs side-by-side.
-	if extra == nil {
-		extra = map[string]string{}
-	}
 	extra["coding_agent.hook.cli.version"] = version.Version
 	// Stamp the build commit SHA when available so support can pin a
 	// reported behaviour to an exact CLI build. The release workflow
@@ -524,67 +480,8 @@ func (e *Emitter) Shutdown(ctx context.Context) error {
 	return sdk.Shutdown(ctx)
 }
 
-// bumpToolCounter / bumpLLMCounter / bumpSubagentCounter persist
-// rolled-up totals into the sessionstate cache so the next process
-// reading the session (typically sessionEnd, which runs in its own
-// short-lived hook invocation) can stamp them on the session-root
-// span. Minimal capture mode relies on these to keep dashboards
-// useful without per-event spans.
-//
-// These are best-effort: a cross-process race could undercount by a
-// few events. The flock + atomic rename added in D1 keeps the file
-// consistent; a tiny race window remains between Load and Save.
-func (e *Emitter) bumpToolCounter(sessionID string) {
-	if sessionID == "" {
-		return
-	}
-	st := sessionstate.Load(sessionID, e.vendor)
-	if st == nil {
-		st = &sessionstate.State{}
-	}
-	st.ToolCallCount++
-	sessionstate.Save(sessionID, e.vendor, st)
-}
-
-func (e *Emitter) bumpLLMCounter(sessionID string, in, out int64, cost float64) {
-	if sessionID == "" {
-		return
-	}
-	st := sessionstate.Load(sessionID, e.vendor)
-	if st == nil {
-		st = &sessionstate.State{}
-	}
-	if in > 0 {
-		st.InputTokens += in
-	}
-	if out > 0 {
-		st.OutputTokens += out
-	}
-	if cost > 0 {
-		st.CostUSD += cost
-	}
-	sessionstate.Save(sessionID, e.vendor, st)
-}
-
-func (e *Emitter) bumpSubagentCounter(sessionID string) {
-	if sessionID == "" {
-		return
-	}
-	st := sessionstate.Load(sessionID, e.vendor)
-	if st == nil {
-		st = &sessionstate.State{}
-	}
-	st.SubagentCount++
-	sessionstate.Save(sessionID, e.vendor, st)
-}
-
 // EmitSession turns a normalize.Session into a single span with
 // coding_agent.* + gen_ai.* attributes set.
-//
-// In minimal mode, before stamping attributes we drain the
-// sessionstate counters (tool calls, subagents, tokens, cost) and
-// fold them into the session struct so the session-root span carries
-// the rolled-up totals dashboards rely on.
 //
 // F2: we used to emit a session-root span on BOTH sessionStart and
 // sessionEnd. With the deterministic IDGenerator both calls produced

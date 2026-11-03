@@ -310,22 +310,6 @@ func OpenRoot(root string) (*Store, error) {
 	return store, nil
 }
 
-// HasEpisodes is true when this repository's store already has at least one
-// memory moment or rollup. Used to keep cold-clone tool lists graph-only.
-func HasEpisodes(root string) bool {
-	layout := paths.Resolve(root)
-	store, err := OpenQuick(layout.Database)
-	if err != nil {
-		return false
-	}
-	defer store.Close()
-	var n int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM memory_episodes`).Scan(&n); err != nil {
-		return false
-	}
-	return n > 0
-}
-
 func Open(path string) (*Store, error) {
 	return open(path, 10000)
 }
@@ -796,10 +780,6 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-func scanEpisode(row scanner) (Episode, error) {
-	return scanEpisodeWithKey(nil, row)
-}
-
 func (s *Store) scanOne(query string, args ...any) (Episode, error) {
 	row := s.db.QueryRow(query, args...)
 	ep, err := scanEpisodeWithKey(s, row)
@@ -807,10 +787,6 @@ func (s *Store) scanOne(query string, args ...any) (Episode, error) {
 		return Episode{}, fmt.Errorf("memory episode not found")
 	}
 	return ep, err
-}
-
-func scanEpisodes(rows *sql.Rows) ([]Episode, error) {
-	return scanEpisodesKeyed(nil, rows)
 }
 
 func (s *Store) scanEpisodes(rows *sql.Rows) ([]Episode, error) {

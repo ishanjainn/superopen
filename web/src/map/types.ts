@@ -32,11 +32,11 @@ export interface SessionMeta {
   userTurns?: number;
 }
 
-export type AgentKind = "main" | "subagent";
-export type AgentStatus = "main" | "launched" | "failed" | "unknown";
-export type TraceAvailability = "available" | "missing" | "unavailable";
-export type AgentLinkQuality = "exact" | "derived" | "unavailable";
-export type AgentLinkMethod =
+type AgentKind = "main" | "subagent";
+type AgentStatus = "main" | "launched" | "failed" | "unknown";
+type TraceAvailability = "available" | "missing" | "unavailable";
+type AgentLinkQuality = "exact" | "derived" | "unavailable";
+type AgentLinkMethod =
   | "root"
   | "parent_id"
   | "codex-agent-id"
@@ -69,7 +69,7 @@ export interface AgentNode {
   linkMethod: AgentLinkMethod;
 }
 
-export interface Rect {
+interface Rect {
   x: number;
   z: number;
   w: number;
@@ -80,7 +80,7 @@ export interface Rect {
  * A checkout or plain directory the session touched. The map is rooted at one
  * of them; the rest occupy a district named by `prefix`.
  */
-export interface MapRoot {
+interface MapRoot {
   /** Top-level path segment on the map; "" for the repo the map is rooted at. */
   prefix: string;
   name: string;
@@ -120,7 +120,7 @@ export interface SessionFile {
   ghost: boolean;
 }
 
-export interface SessionDir {
+interface SessionDir {
   path: string;
   depth: number;
   rect: Rect;
@@ -167,7 +167,7 @@ export interface Target {
   weak?: boolean;
 }
 
-export interface OutsideTouch {
+interface OutsideTouch {
   scope: "home" | "tmp" | "other";
   path: string;
 }
@@ -178,7 +178,7 @@ export interface Mark {
   note?: string;
 }
 
-export interface Stats {
+interface Stats {
   filesInRepo: number;
   fovea: number;
   parafovea: number;
@@ -205,7 +205,7 @@ export interface Stats {
  * records it structurally, "estimated" when inferred from command or output
  * text, "unavailable" when the log carries no usable signal.
  */
-export interface Observability {
+interface Observability {
   reads: MetricObservability;
   errors: MetricObservability;
 }

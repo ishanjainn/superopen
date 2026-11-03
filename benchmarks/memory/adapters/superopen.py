@@ -260,33 +260,3 @@ def memory_status(so_bin: str, root: Path, env: dict[str, str] | None = None) ->
 
 def embedder_id(so_bin: str, root: Path, env: dict[str, str] | None = None) -> str:
     return str(memory_status(so_bin, root, env=env).get("embedder_id") or "")
-
-
-def get_texts(so_bin: str, root: Path, ids: list[Any], env: dict[str, str] | None = None) -> list[str]:
-    want = [str(i) for i in ids if i is not None]
-    if not want:
-        return []
-    root = root.resolve()
-    proc = _run(
-        [so_bin, "--json", "memory", "get", *want, "--root", str(root)],
-        root,
-        env=env,
-    )
-    if proc.returncode != 0:
-        return []
-    try:
-        payload = json.loads(proc.stdout or "{}")
-    except json.JSONDecodeError:
-        return []
-    data = payload.get("data") or payload.get("items") or payload
-    rows = data if isinstance(data, list) else [data]
-    texts: list[str] = []
-    for row in rows:
-        if isinstance(row, dict):
-            texts.append(str(row.get("text") or ""))
-    return texts
-
-
-def stored_titles(so_bin: str, root: Path, env: dict[str, str] | None = None) -> list[str]:
-    hits = search_hits(so_bin, root, "", limit=200, env=env)
-    return [h["title"] for h in hits if h.get("title")]

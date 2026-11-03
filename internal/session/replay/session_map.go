@@ -54,19 +54,3 @@ func BuildReplayFromSpans(paths paths.Paths, sessionID string, spans []trace.Spa
 	}
 	return r, session.NewStore(paths).WriteDocument(sessionID, func(d *session.Document) { d.Replay = data })
 }
-
-// BuildReplayFromFootprint is a helper when only footprint is available.
-func BuildReplayFromFootprint(paths paths.Paths, meta session.Meta, fp session.Footprint) error {
-	r := Replay{SessionID: meta.ID}
-	t := meta.StartedAt.UnixMilli()
-	for i, f := range fp.Files {
-		r.Events = append(r.Events, ReplayEvent{
-			T: t + int64(i)*1000, Path: f.Path, State: f.State,
-		})
-	}
-	data, err := json.Marshal(r)
-	if err != nil {
-		return err
-	}
-	return session.NewStore(paths).WriteDocument(meta.ID, func(d *session.Document) { d.Replay = data })
-}

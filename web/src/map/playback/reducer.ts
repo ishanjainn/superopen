@@ -1,6 +1,6 @@
 import type { SessionMap, Target, Touch, Trace, TraceEvent } from "../types";
 
-export const touchRank: Record<Touch, number> = {
+const touchRank: Record<Touch, number> = {
   hit: 1,
   read: 2,
   edit: 3

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/ishanjainn/superopen/internal/compact"
-	"github.com/ishanjainn/superopen/third_party/caveman/engine"
+	"github.com/ishanjainn/superopen/internal/compact/engine"
 )
 
 // replaceToolOutput returns a same-shaped tool result when the bytes shrink

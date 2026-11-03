@@ -205,14 +205,6 @@ func UninstallDsh(opts DshOptions) (DshStatus, error) {
 	return dshStatusFromRuntime(status), nil
 }
 
-func DshHookStatus(opts DshOptions) DshStatus {
-	return dshStatusFromRuntime(runtimeHookStatus(dshRuntime, RuntimeOptions(opts)))
-}
-
-func IsDshInstalled(opts DshOptions) bool {
-	return isRuntimeInstalled(dshRuntime, RuntimeOptions(opts))
-}
-
 func dshStatusFromRuntime(status runtimeStatus) DshStatus {
 	dsh := DshStatus{
 		Installed:  status.Installed,

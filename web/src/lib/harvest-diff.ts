@@ -1,4 +1,4 @@
-export type DiffSpan = { text: string; changed: boolean };
+type DiffSpan = { text: string; changed: boolean };
 
 export type DiffLine = {
   kind: "ctx" | "add" | "del" | "chg-del" | "chg-add";

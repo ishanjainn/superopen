@@ -11,7 +11,7 @@ export interface ChurnEntry {
   edits: number;
 }
 
-export type MapSceneView = "tree" | "terrain";
+type MapSceneView = "tree" | "terrain";
 
 export interface HudTool {
   id: string;

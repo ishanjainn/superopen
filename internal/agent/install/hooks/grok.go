@@ -68,14 +68,6 @@ func UninstallGrok(opts GrokOptions) (GrokStatus, error) {
 	return grokStatusFromRuntime(status), nil
 }
 
-func GrokHookStatus(opts GrokOptions) GrokStatus {
-	return grokProjectTrustMessage(grokStatusFromRuntime(runtimeHookStatus(grokRuntime, RuntimeOptions(opts))), opts.Level)
-}
-
-func IsGrokInstalled(opts GrokOptions) bool {
-	return isRuntimeInstalled(grokRuntime, RuntimeOptions(opts))
-}
-
 func grokStatusFromRuntime(status runtimeStatus) GrokStatus {
 	return GrokStatus{
 		Installed:  status.Installed,

@@ -89,26 +89,6 @@ func DevinHookStatus(opts DevinOptions) DevinStatus {
 	return devinStatusFromRuntime(runtimeHookStatus(devinRuntime, RuntimeOptions(opts)))
 }
 
-func IsDevinInstalled(opts DevinOptions) bool {
-	return isRuntimeInstalled(devinRuntime, RuntimeOptions(opts))
-}
-
-func InstallDevinDesktop(opts DevinDesktopOptions) (DevinStatus, error) {
-	status, err := installRuntimeHooks(devinDesktopRuntime, RuntimeOptions(opts))
-	if err != nil {
-		return DevinStatus{}, err
-	}
-	return devinStatusFromRuntime(status), nil
-}
-
-func UninstallDevinDesktop(opts DevinDesktopOptions) (DevinStatus, error) {
-	status, err := uninstallRuntimeHooks(devinDesktopRuntime, RuntimeOptions(opts))
-	if err != nil {
-		return DevinStatus{}, err
-	}
-	return devinStatusFromRuntime(status), nil
-}
-
 func DevinDesktopHookStatus(opts DevinDesktopOptions) DevinStatus {
 	return devinStatusFromRuntime(runtimeHookStatus(devinDesktopRuntime, RuntimeOptions(opts)))
 }

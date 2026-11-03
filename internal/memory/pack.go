@@ -25,59 +25,6 @@ type Pack struct {
 	AskDistill     bool   `json:"ask_distill,omitempty"`
 }
 
-func PackForRoot(root, cue, currentSession string) (Pack, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), packTimeout)
-	defer cancel()
-	store, err := OpenQuick(paths.Resolve(root).Database)
-	if err != nil {
-		return Pack{}, err
-	}
-	defer store.Close()
-	if err := store.Ping(ctx); err != nil {
-		return Pack{}, err
-	}
-	return store.BuildPack(cue, currentSession)
-}
-
-func PackNextForRoot(root, cue, currentSession string) (Pack, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), packTimeout)
-	defer cancel()
-	store, err := OpenQuick(paths.Resolve(root).Database)
-	if err != nil {
-		return Pack{}, err
-	}
-	defer store.Close()
-	if err := store.Ping(ctx); err != nil {
-		return Pack{}, err
-	}
-	return store.BuildNextPack(cue, currentSession)
-}
-
-func (s *Store) BuildNextPack(cue, currentSession string) (Pack, error) {
-	var b strings.Builder
-	budget := nextPackBudget
-	res, _ := s.Recall(cue, nextPackBudget)
-	hits := res.Hits
-	if len(hits) == 0 {
-		hits, _ = s.Search(SearchFilter{Query: cue, Limit: 6})
-	}
-	if len(hits) == 0 {
-		return Pack{}, nil
-	}
-	writeBudget(&b, &budget, "Next:")
-	for _, hit := range hits {
-		if hit.Kind == KindTool {
-			continue
-		}
-		line := fmt.Sprintf("  #%d %s", hit.ID, compactLine(hit.Episode))
-		if !writeBudget(&b, &budget, line) {
-			break
-		}
-	}
-	text := strings.TrimSpace(b.String())
-	return Pack{Text: text, Tokens: EstimateTokens(text)}, nil
-}
-
 func (s *Store) BuildPack(cue, currentSession string) (Pack, error) {
 	var b strings.Builder
 	budget := packBudget

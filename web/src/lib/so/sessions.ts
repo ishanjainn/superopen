@@ -3,7 +3,7 @@ import { readdirSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { fileExists, readJSONFile, readText } from "./nodeio";
-import { processRepoRoot, soRoot } from "./root";
+import { processRepoRoot } from "./root";
 import { projectsForFilter } from "./workspace";
 import {
   parseSessionQuery,
@@ -31,7 +31,7 @@ export type SessionMeta = {
   [key: string]: unknown;
 };
 
-export type ListItem = SessionMeta & {
+type ListItem = SessionMeta & {
   turns?: number;
   files?: string[];
   match?: string;
@@ -100,7 +100,7 @@ function displayTitle(meta: SessionMeta): string {
 }
 
 /** OpenCode defaults to "New session - <iso>"; treat as empty until AI renames. */
-export function isPlaceholderTitle(
+function isPlaceholderTitle(
   title?: string,
   sessionId?: string,
 ): boolean {
@@ -889,10 +889,6 @@ function applySessionQuery(items: ListItem[], q: string): ListItem[] {
   return out;
 }
 
-export function listSessions(q = "", projectFilter = ""): ListItem[] {
-  return applySessionQuery(collectAllSessions(projectFilter), q);
-}
-
 /** Sessions list + facet values for search autocomplete. */
 export function listSessionsPage(
   q = "",
@@ -1006,8 +1002,4 @@ export function getSessionDetail(id: string, projectFilter = "") {
     };
   }
   return null;
-}
-
-export function sessionDir(id: string): string {
-  return join(soRoot(), "sessions", id);
 }

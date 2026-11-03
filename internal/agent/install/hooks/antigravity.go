@@ -74,10 +74,6 @@ func AntigravityHookStatus(opts AntigravityOptions) AntigravityStatus {
 	return antigravityStatusFromRuntime(runtimeHookStatus(antigravityRuntime, RuntimeOptions(opts)))
 }
 
-func IsAntigravityInstalled(opts AntigravityOptions) bool {
-	return isRuntimeInstalled(antigravityRuntime, RuntimeOptions(opts))
-}
-
 func antigravityStatusFromRuntime(status runtimeStatus) AntigravityStatus {
 	return AntigravityStatus{
 		Installed:  status.Installed,

@@ -1086,20 +1086,6 @@ func goObjectQN(object types.Object, locals map[types.Object]string) string {
 	return "external:" + object.Pkg().Path() + "." + object.Name()
 }
 
-func goResolutionStrategy(resolved string) string {
-	if resolved != "" {
-		return "go_types"
-	}
-	return "go_ast_identifier"
-}
-
-func goResolutionConfidence(resolved string) float64 {
-	if resolved != "" {
-		return 1
-	}
-	return 0.9
-}
-
 func externalShortName(qn string) string {
 	if index := strings.LastIndexByte(qn, '.'); index >= 0 {
 		return qn[index+1:]
@@ -1326,21 +1312,6 @@ func goSemanticParamType(fileSet *token.FileSet, expression ast.Expr) string {
 	}
 }
 
-func fieldCount(fields *ast.FieldList) int {
-	if fields == nil {
-		return 0
-	}
-	count := 0
-	for _, field := range fields.List {
-		if len(field.Names) == 0 {
-			count++
-		} else {
-			count += len(field.Names)
-		}
-	}
-	return count
-}
-
 func goComplexity(body *ast.BlockStmt) (complexity, loopCount, maxLoopDepth int) {
 	complexity = 1
 	if body == nil {
@@ -1388,13 +1359,6 @@ func goComplexity(body *ast.BlockStmt) (complexity, loopCount, maxLoopDepth int)
 func localTypeQN(types map[string]string, expr ast.Expr) string {
 	name := receiverName(expr)
 	return types[name]
-}
-
-func qnPackage(qn string) string {
-	if index := strings.LastIndexByte(qn, '.'); index >= 0 {
-		return qn[:index]
-	}
-	return qn
 }
 
 func goPackageQN(rel, packageName string) string {
@@ -1454,13 +1418,6 @@ func separateUnresolvedRelationships(graph *goGraph) {
 	graph.nodes = keptNodes
 	graph.edges = keptEdges
 	sortGraph(graph)
-}
-
-func edgeProject(graph *goGraph) string {
-	if len(graph.nodes) > 0 {
-		return graph.nodes[0].Project
-	}
-	return ""
 }
 
 func nodeAt(project, label, name, qn string, parsed *parsedFile, start, end token.Pos, props api.Properties) api.Node {
@@ -1542,15 +1499,6 @@ func uniqueEdgesHashSet(graph *goGraph) {
 	}
 	graph.edges = unique
 	graph.edgeSeen = seen
-}
-
-func graphEdgeIdentity(edge pendingEdge) string {
-	key := edge.source + "\x00" + edge.kind + "\x00" + edge.target
-	if edge.kind == "IMPORTS" {
-		localName, _ := edge.properties["local_name"].(string)
-		key += "\x00" + localName
-	}
-	return key
 }
 
 func graphEdgeLessPair(a, b pendingEdge) bool {

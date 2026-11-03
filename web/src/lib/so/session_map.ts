@@ -22,7 +22,7 @@ const MAX_FILES = 10_000;
 const ROOT_SIZE = 120;
 const CACHE_VERSION = 2;
 
-export type SessionFile = {
+type SessionFile = {
   id: number;
   path: string;
   dir: string;
@@ -33,7 +33,7 @@ export type SessionFile = {
   ghost: boolean;
 };
 
-export type SessionDir = {
+type SessionDir = {
   path: string;
   depth: number;
   rect: Rect;
@@ -45,7 +45,7 @@ export type SessionDir = {
  * A checkout or plain directory the session touched. The map is rooted at one
  * of them; the rest occupy a district named by `prefix`.
  */
-export type MapRoot = {
+type MapRoot = {
   /** Top-level path segment on the map; "" for the repo the map is rooted at. */
   prefix: string;
   name: string;

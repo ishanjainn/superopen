@@ -1,10 +1,8 @@
 package hooks
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -160,23 +158,6 @@ func TestOmpManagedExtensionMarkerIsStable(t *testing.T) {
 		t.Fatalf("OmpManagedExtensionMarker = %q; changing it strands extensions installed by "+
 			"earlier builds, which uninstall then refuses to remove", OmpManagedExtensionMarker)
 	}
-}
-
-// ompRenderedArgv extracts the argv the installer substituted into the extension.
-//
-// Parsed back out of the source rather than compared as a string: argv is the whole point of this
-// template, and a test that compared text would pass on a file the runtime cannot execute.
-func ompRenderedArgv(t *testing.T, source string) []string {
-	t.Helper()
-	matches := regexp.MustCompile(`const superopenArgv: string\[\] = (\[.*\])`).FindStringSubmatch(source)
-	if len(matches) != 2 {
-		t.Fatalf("rendered extension has no superopenArgv array:\n%s", source)
-	}
-	var argv []string
-	if err := json.Unmarshal([]byte(matches[1]), &argv); err != nil {
-		t.Fatalf("superopenArgv is not a JSON array: %v", err)
-	}
-	return argv
 }
 
 func TestInstallOmpExtensionWritesAnExecutableInvocation(t *testing.T) {

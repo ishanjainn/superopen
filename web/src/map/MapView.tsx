@@ -15,7 +15,7 @@ import { PlaybackEngine } from "./playback/reducer";
 import { TreeScene } from "./scene/TreeScene";
 import { TerrainScene } from "./scene/TerrainScene";
 import { StageViewport } from "@/components/stage/StageViewport";
-import { type PanelDescriptor } from "./ui/Dock";
+import { type PanelDescriptor } from "./ui/panel";
 import { AgentsPanel } from "./ui/AgentsPanel";
 import { Hud, type ChurnEntry, type HudSessionExtras, type HudTool } from "./ui/Hud";
 import { Inspector } from "./ui/Inspector";

@@ -112,7 +112,7 @@ function initialsFrom(label: string): string {
  * personal photo the user did not link to GitHub. The email never leaves the
  * server.
  */
-export function gitAuthorAvatar(repo = repoRoot()): {
+function gitAuthorAvatar(repo = repoRoot()): {
   initials: string;
   avatar_url: string;
 } {

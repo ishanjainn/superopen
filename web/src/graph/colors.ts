@@ -1,5 +1,5 @@
 /** Node-kind colors shared by the scene tooltip, labels UI, and filter chips. */
-export const LABEL_COLORS: Record<string, string> = {
+const LABEL_COLORS: Record<string, string> = {
   Project: "#e11d48",
   Package: "#f97316",
   Module: "#f97316",

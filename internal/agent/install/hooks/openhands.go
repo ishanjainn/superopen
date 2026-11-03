@@ -158,14 +158,6 @@ func UninstallOpenHands(opts OpenHandsOptions) (OpenHandsStatus, error) {
 	return openHandsStatusFromRuntime(status), nil
 }
 
-func OpenHandsHookStatus(opts OpenHandsOptions) OpenHandsStatus {
-	return openHandsStatusFromRuntime(runtimeHookStatus(openHandsRuntime, RuntimeOptions(opts)))
-}
-
-func IsOpenHandsInstalled(opts OpenHandsOptions) bool {
-	return isRuntimeInstalled(openHandsRuntime, RuntimeOptions(opts))
-}
-
 func openHandsStatusFromRuntime(status runtimeStatus) OpenHandsStatus {
 	return OpenHandsStatus{
 		Installed:  status.Installed,

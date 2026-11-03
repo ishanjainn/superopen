@@ -57,9 +57,6 @@ func Compile(rule *Rule) (*CompiledRule, error) {
 	return c, nil
 }
 
-// Rule returns the underlying rule.
-func (c *CompiledRule) Rule() *Rule { return c.rule }
-
 // Evaluate reports whether the rule fires over the given ordered event sequence.
 //
 // A single-event rule matches if any event in the sequence satisfies its expression. A

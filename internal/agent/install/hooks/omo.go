@@ -117,14 +117,6 @@ func UninstallOmo(opts OmoOptions) (OmoStatus, error) {
 	return omoStatusFromRuntime(status), nil
 }
 
-func OmoHookStatus(opts OmoOptions) OmoStatus {
-	return omoStatusFromRuntime(runtimeHookStatus(omoRuntime, RuntimeOptions(opts)))
-}
-
-func IsOmoInstalled(opts OmoOptions) bool {
-	return isRuntimeInstalled(omoRuntime, RuntimeOptions(opts))
-}
-
 // omoStatusFromRuntime reports installed only when the extension can actually reach the binary.
 func omoStatusFromRuntime(status runtimeStatus) OmoStatus {
 	status = omoExtension.reachableStatus(status)

@@ -463,41 +463,6 @@ def grade_predictions(preds_path: Path, run_id: str) -> tuple[dict[str, bool], l
     raise RuntimeError(f"swebench report missing for run_id={run_id}")
 
 
-def regrade_work_dir(out: Path) -> dict[str, Any]:
-    """Grade existing native/superopen prediction files and rewrite swe.json."""
-    payload = json.loads((out / "swe.json").read_text())
-    rows = list(payload.get("rows") or [])
-    work = out / "swe"
-    for arm_name in ("native", "superopen"):
-        path = work / f"{arm_name}.predictions.jsonl"
-        if not path.is_file() or path.stat().st_size == 0:
-            continue
-        print(f"=== swe grade arm={arm_name} ===", flush=True)
-        try:
-            resolved, errors = grade_predictions(path, f"so-{arm_name}-amd64")
-        except Exception as exc:
-            print(f"=== swe grade {arm_name} failed: {exc} ===", flush=True)
-            for row in rows:
-                if row.get("arm") == arm_name:
-                    row["grade_error"] = str(exc)
-            continue
-        apply_resolved(rows, arm_name, resolved, errors)
-        if errors:
-            print(f"=== swe grade {arm_name} errors: {errors} ===", flush=True)
-    payload["rows"] = rows
-    refresh_codex_swe_usage(payload, work)
-    native = [r for r in rows if r.get("arm") == "native"]
-    so_rows = [r for r in rows if r.get("arm") == "superopen"]
-    payload["summary"] = attach_savings(summarize_swe(native, so_rows))
-    (out / "swe.json").write_text(json.dumps(payload, indent=2) + "\n")
-    summary_path = out / "summary.json"
-    if summary_path.is_file():
-        summary = json.loads(summary_path.read_text())
-        summary["swe"] = payload
-        summary_path.write_text(json.dumps(summary, indent=2) + "\n")
-    return payload
-
-
 def run_swe_mode(args: Any, out: Path, so_bin: str, ledger: SpendLedger) -> dict[str, Any]:
     if not ledger.allow_llm():
         payload = {"skipped": "swe requires --max-spend > 0"}

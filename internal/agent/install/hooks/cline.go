@@ -55,14 +55,6 @@ func UninstallCline(opts ClineOptions) (ClineStatus, error) {
 	return clineStatusFromRuntime(status), nil
 }
 
-func ClineHookStatus(opts ClineOptions) ClineStatus {
-	return clineStatusFromRuntime(runtimeHookStatus(clineRuntime, RuntimeOptions(opts)))
-}
-
-func IsClineInstalled(opts ClineOptions) bool {
-	return isRuntimeInstalled(clineRuntime, RuntimeOptions(opts))
-}
-
 // clineStatusFromRuntime reports installed only when the plugin can actually reach the hook binary.
 //
 // The marker alone is not enough. A plugin file survives a Superopen uninstall, a partially applied
@@ -156,21 +148,6 @@ func isClineInstalledAt(path string) bool {
 		return false
 	}
 	return strings.Contains(string(data), clineManagedPluginMarker)
-}
-
-// clinePluginPath is where Cline auto-discovers plugins.
-//
-// Cline reads ~/.cline/plugins for global plugins and .cline/plugins in a repository for
-// project-scoped ones, and discovers a bare .ts file dropped into either. That is why Superopen writes
-// a file rather than running `cline plugin install`: no CLI has to be present, and an install works
-// the same for the VS Code and JetBrains hosts, which ship no `cline` binary at all.
-// ClinePluginPath is where Superopen installs its managed Cline plugin for the given level.
-//
-// Exported so discovery asks the installer where the plugin lives instead of rebuilding the path
-// itself. Two copies of that path is how discovery comes to report on a file the installer does not
-// write.
-func ClinePluginPath(level Level) (string, error) {
-	return clinePluginPath(level)
 }
 
 func clinePluginPath(level Level) (string, error) {
