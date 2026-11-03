@@ -34,6 +34,7 @@ class ReleaseTests(unittest.TestCase):
             "bench.yml",
             "ci-automation.yml",
             "ci-cli.yml",
+            "ci-cli-axi.yml",
             "ci-cross-platform.yml",
             "ci-web.yml",
             "release-cli.yml",
