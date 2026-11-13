@@ -56,6 +56,9 @@ func SeedLinkedWorktree(repoRoot string) {
 	if err := os.WriteFile(filepath.Join(tmpSO, ".gitignore"), []byte(paths.GitignoreContents), 0o644); err != nil {
 		return
 	}
+	if err := os.WriteFile(filepath.Join(tmpSO, "README.md"), []byte(paths.ReadmeContents), 0o644); err != nil {
+		return
+	}
 	if paths.Managed(root) {
 		return
 	}
@@ -70,7 +73,7 @@ func SeedLinkedWorktree(repoRoot string) {
 		}
 	}
 	cleanup = false
-	_ = paths.ExcludeGraphFromGit(root)
+	_ = paths.RemoveRepoIgnore(root)
 }
 
 func seedDisabled() bool {

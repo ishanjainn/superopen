@@ -10,7 +10,7 @@ import (
 	"github.com/ishanjainn/superopen/internal/paths"
 )
 
-func TestWriteInitGitignoresHidesSO(t *testing.T) {
+func TestInitExposesManagedFiles(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
@@ -19,8 +19,6 @@ func TestWriteInitGitignoresHidesSO(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*.pyc\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, root, "add", ".")
-	runGit(t, root, "commit", "-m", "init")
 	if err := paths.Resolve(root).EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +26,7 @@ func TestWriteInitGitignoresHidesSO(t *testing.T) {
 	if err := os.WriteFile(db, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeInitGitignores(root); err != nil {
+	if err := clearLegacyInitIgnores(root); err != nil {
 		t.Fatal(err)
 	}
 	repoIgnore, err := os.ReadFile(filepath.Join(root, ".gitignore"))
@@ -38,15 +36,11 @@ func TestWriteInitGitignoresHidesSO(t *testing.T) {
 	if string(repoIgnore) != "*.pyc\n" {
 		t.Fatalf("init must not edit the repo .gitignore, got %q", repoIgnore)
 	}
-	cmd := exec.Command("git", "-C", root, "status", "--porcelain")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git status: %v %s", err, out)
+	got := strings.Fields(runGitOutput(t, root, "ls-files", "--others", "--exclude-standard", ".so"))
+	if strings.Join(got, ",") != ".so/.gitignore,.so/README.md" {
+		t.Fatalf("only commit-safe files should be visible: %q", got)
 	}
-	if strings.Contains(string(out), ".so/") || strings.Contains(string(out), "so.db") {
-		t.Fatalf("machine-local graph must stay out of git status: %q", out)
-	}
-	if err := writeInitGitignores(root); err != nil {
+	if err := clearLegacyInitIgnores(root); err != nil {
 		t.Fatal(err)
 	}
 	excludePath := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "--git-path", "info/exclude"))
@@ -54,15 +48,40 @@ func TestWriteInitGitignoresHidesSO(t *testing.T) {
 		excludePath = filepath.Join(root, excludePath)
 	}
 	exclude, err := os.ReadFile(excludePath)
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	if strings.Count(string(exclude), "/.so/") != 1 {
-		t.Fatalf("local ignore must be idempotent: %q", exclude)
+	if strings.Contains(string(exclude), "/.so/") {
+		t.Fatalf("local ignore must not hide commit-safe files: %q", exclude)
 	}
 }
 
-func TestWriteInitGitignoresNestedPackage(t *testing.T) {
+func TestInitMigratesLocalExclude(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := t.TempDir()
+	runGitInit(t, root)
+	if err := paths.Resolve(root).EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+	excludePath := strings.TrimSpace(runGitOutput(t, root, "rev-parse", "--git-path", "info/exclude"))
+	if !filepath.IsAbs(excludePath) {
+		excludePath = filepath.Join(root, excludePath)
+	}
+	if err := os.WriteFile(excludePath, []byte("# Superopen machine-local data\n/.so/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := clearLegacyInitIgnores(root); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Fields(runGitOutput(t, root, "ls-files", "--others", "--exclude-standard", ".so"))
+	if strings.Join(got, ",") != ".so/.gitignore,.so/README.md" {
+		t.Fatalf("legacy local exclude must be removed: %q", got)
+	}
+}
+
+func TestInitNestedPackage(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
@@ -72,26 +91,27 @@ func TestWriteInitGitignoresNestedPackage(t *testing.T) {
 	if err := paths.Resolve(root).EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeInitGitignores(root); err != nil {
+	if err := clearLegacyInitIgnores(root); err != nil {
 		t.Fatal(err)
 	}
-	if out := runGitOutput(t, top, "status", "--porcelain"); strings.TrimSpace(out) != "" {
-		t.Fatalf("nested machine-local graph should be ignored: %q", out)
+	got := strings.Fields(runGitOutput(t, top, "ls-files", "--others", "--exclude-standard", "pkg/.so"))
+	if strings.Join(got, ",") != "pkg/.so/.gitignore,pkg/.so/README.md" {
+		t.Fatalf("nested setup should expose only commit-safe files: %q", got)
 	}
 	excludePath := strings.TrimSpace(runGitOutput(t, top, "rev-parse", "--git-path", "info/exclude"))
 	if !filepath.IsAbs(excludePath) {
 		excludePath = filepath.Join(top, excludePath)
 	}
 	content, err := os.ReadFile(excludePath)
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), "/pkg/.so/") {
-		t.Fatalf("nested package path missing from local exclude: %q", content)
+	if strings.Contains(string(content), "/pkg/.so/") {
+		t.Fatalf("nested package must not be hidden by local exclude: %q", content)
 	}
 }
 
-func TestWriteInitGitignoresPreservesExisting(t *testing.T) {
+func TestInitPreservesExistingGitignore(t *testing.T) {
 	root := t.TempDir()
 	layout := paths.Resolve(root)
 	if err := layout.EnsureDirs(); err != nil {
@@ -102,7 +122,7 @@ func TestWriteInitGitignoresPreservesExisting(t *testing.T) {
 	if err := os.WriteFile(ignorePath, []byte(custom), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeInitGitignores(root); err != nil {
+	if err := clearLegacyInitIgnores(root); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(ignorePath)

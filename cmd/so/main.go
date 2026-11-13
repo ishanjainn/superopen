@@ -356,7 +356,7 @@ func cmdInit() *cobra.Command {
 		Short: "Initialize .so/ session storage and the native graph for this repository",
 		Long: `Per-repository setup. Prefer so install (once, user-global) before /so init.
 
-Creates .so/sessions and .so/db, ignores .so/ in the local Git checkout,
+Creates .so/README.md and .so/.gitignore, keeps local data out of Git,
 builds the graph,
 and registers the project in the user-wide Superopen index.
 
@@ -374,7 +374,7 @@ Pass --cursor-rules to also write this repo's .cursor/rules/superopen.mdc.`,
 			if err := layout.EnsureDirs(); err != nil {
 				return err
 			}
-			if err := writeInitGitignores(root); err != nil {
+			if err := clearLegacyInitIgnores(root); err != nil {
 				return err
 			}
 			result := map[string]any{"root": root, "sessions": layout.SessionsDir, "database": layout.Database}

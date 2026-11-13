@@ -35,9 +35,12 @@ func TestSeedLinkedWorktreeCopiesParentDB(t *testing.T) {
 	if _, err := os.Stat(paths.Resolve(wt).Database); err != nil {
 		t.Fatalf("seeded db missing: %v", err)
 	}
-	cmd := exec.Command("git", "-C", wt, "status", "--porcelain")
-	if out, err := cmd.CombinedOutput(); err != nil || len(out) != 0 {
-		t.Fatalf("seeded graph should stay out of git status: %q", out)
+	if readme, err := os.ReadFile(filepath.Join(wt, ".so", "README.md")); err != nil || string(readme) != paths.ReadmeContents {
+		t.Fatalf("seeded readme missing: %q, %v", readme, err)
+	}
+	cmd := exec.Command("git", "-C", wt, "ls-files", "--others", "--exclude-standard", ".so")
+	if out, err := cmd.CombinedOutput(); err != nil || string(out) != ".so/.gitignore\n.so/README.md\n" {
+		t.Fatalf("only commit-safe files should be visible: %q, %v", out, err)
 	}
 	after, err := os.ReadFile(parentDB)
 	if err != nil {

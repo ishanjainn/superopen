@@ -12,32 +12,6 @@ const (
 	repoIgnoreEnd   = "# END SUPEROPEN"
 )
 
-// ExcludeGraphFromGit keeps machine-local graph data out of git status without
-// changing the checkout's tracked .gitignore.
-func ExcludeGraphFromGit(repoRoot string) error {
-	exclude, pattern, err := graphGitExclude(repoRoot)
-	if err != nil || exclude == "" {
-		return err
-	}
-	content, err := os.ReadFile(exclude)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	for _, line := range strings.Split(string(content), "\n") {
-		if strings.TrimSpace(line) == pattern {
-			return nil
-		}
-	}
-	if err := os.MkdirAll(filepath.Dir(exclude), 0o755); err != nil {
-		return err
-	}
-	if len(content) > 0 && content[len(content)-1] != '\n' {
-		content = append(content, '\n')
-	}
-	content = append(content, []byte("# Superopen machine-local data\n"+pattern+"\n")...)
-	return os.WriteFile(exclude, content, 0o644)
-}
-
 func graphGitExclude(repoRoot string) (string, string, error) {
 	top := gitShowTopLevel(repoRoot)
 	if top == "" {
