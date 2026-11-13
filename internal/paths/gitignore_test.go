@@ -59,7 +59,7 @@ func TestRemoveRepoIgnoreCleansOnlyOwnLocalExclude(t *testing.T) {
 	if !filepath.IsAbs(exclude) {
 		exclude = filepath.Join(root, exclude)
 	}
-	if err := paths.ExcludeGraphFromGit(root); err != nil {
+	if err := os.WriteFile(exclude, []byte("# Superopen machine-local data\n/.so/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := paths.RemoveRepoIgnore(root); err != nil {

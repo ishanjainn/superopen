@@ -42,7 +42,7 @@ In agent chat, `/so init` is still the skill command. That is not a PowerShell p
 
 `so install` only wires coding agents on this machine. It does not create project data. A command in a repo without `.so/` prints `not a Superopen repo` and exits 0. It does not create `.so/`.
 
-Each repository still needs `so init` once, from that repo's root, when you want a graph there. That command creates `.so/`, writes `.so/.gitignore`, and builds the graph.
+Each repository still needs `so init` once, from that repo's root, when you want a graph there. That command creates `.so/README.md` and `.so/.gitignore`, then builds the graph.
 
 After init, restart the agent so it sees the new directory.
 
@@ -53,7 +53,7 @@ Linked git worktrees of an inited parent can seed on the first `so graph query`.
 | Command | How often | What it does |
 |---------|-----------|--------------|
 | `so install` | Once per machine (or after you replace the binary) | Writes `/so` skill, hooks, and guidance into user agent config. No files inside a repo. |
-| `so init` | Once per repository | Creates `.so/`, writes `.so/.gitignore`, builds the graph, registers the project. |
+| `so init` | Once per repository | Creates `.so/README.md` and `.so/.gitignore`, builds the graph, registers the project. |
 | `so uninstall` | When you want Superopen gone | Reverse of install. Does not need a source checkout. |
 
 `so init --force` rebuilds an existing graph. `so init --dev` starts `so dev -d` after init. `so init --cursor-rules` also writes `.cursor/rules/superopen.mdc` in that repo.
@@ -116,7 +116,7 @@ Do not pipe `so` through `head` or `tail`. That hides `count` and `help[]`.
 
 Discovery skips `vendor/`, `node_modules/`, and similar generated trees, plus binary suffixes such as `.wasm`. Extra excludes come from `.soignore` in the repo root (gitignore syntax, including `!` negation).
 
-`.so/.gitignore` ignores `sessions/`, `db/`, and `harvest/`.
+`.so/.gitignore` ignores local data in `sessions/`, `db/`, `harvest/`, `extract/`, and `session-state/`.
 
 Symlinks that escape the repository are not indexed.
 

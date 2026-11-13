@@ -43,7 +43,8 @@ server, no daemon, and no API key. Everything below runs locally.
 | `<repo>/.so/sessions/` | `so init`, session hooks | Raw spans, events.jsonl, checkpoints (gitignored) |
 | `<repo>/.so/db/so.db` | graph build, memory writes | One SQLite store: graph tables and memory tables (gitignored) |
 | `<repo>/.so/guards/` | you | Optional `*.rule.yaml` files for `so scan`. Not gitignored. Empty means the built-in baseline. |
-| `<repo>/.so/.gitignore` | `so init` | Ignores `sessions/`, `db/`, and `harvest/` |
+| `<repo>/.so/README.md` | `so init` | Brief guide to the managed folder; can be committed |
+| `<repo>/.so/.gitignore` | `so init` | Ignores `sessions/`, `db/`, `harvest/`, `extract/`, and `session-state/`; can be committed |
 | User skill/config dirs | `so install` | `/so` skill, hooks, durable guidance. Never per-repo (unless `so init --cursor-rules`). |
 | Config dir (`~/.config/superopen` / `%APPDATA%\superopen`) | `so init`, `so gc` | `projects.json` cross-repo index, `config.env` |
 

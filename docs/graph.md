@@ -37,7 +37,7 @@ The walker also skips generated trees such as `vendor/` and `node_modules/`,
 and binary suffixes such as `.wasm`. Symlinks that leave the repository are
 not indexed.
 
-`.so/.gitignore` ignores `sessions/`, `db/`, and `harvest/`.
+`.so/.gitignore` ignores local data in `sessions/`, `db/`, `harvest/`, `extract/`, and `session-state/`.
 
 ## Asking questions
 

@@ -1,25 +1,7 @@
 package main
 
-import (
-	"os"
-	"path/filepath"
+import "github.com/ishanjainn/superopen/internal/paths"
 
-	"github.com/ishanjainn/superopen/internal/paths"
-)
-
-func writeInitGitignores(root string) error {
-	layout := paths.Resolve(root)
-	if err := paths.ExcludeGraphFromGit(root); err != nil {
-		return err
-	}
-	ignorePath := filepath.Join(layout.Root, ".gitignore")
-	if _, err := os.Stat(ignorePath); err != nil {
-		if !os.IsNotExist(err) {
-			return err
-		}
-		if err := os.WriteFile(ignorePath, []byte(paths.GitignoreContents), 0o644); err != nil {
-			return err
-		}
-	}
-	return nil
+func clearLegacyInitIgnores(root string) error {
+	return paths.RemoveRepoIgnore(root)
 }

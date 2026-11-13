@@ -34,7 +34,21 @@ type Paths struct {
 }
 
 // GitignoreContents is written to .so/.gitignore on first init or worktree seed.
-const GitignoreContents = "# Superopen machine-local data (do not commit).\nsessions/\ndb/\nharvest/\n"
+const GitignoreContents = "# Superopen machine-local data (do not commit).\nsessions/\ndb/\nharvest/\nextract/\nsession-state/\n"
+const legacyGitignoreContents = "# Superopen machine-local data (do not commit).\nsessions/\ndb/\nharvest/\n"
+
+// ReadmeContents is the small, commit-safe guide created in .so/ on init.
+const ReadmeContents = "# Superopen workspace\n\n" +
+	"This folder is managed by [Superopen](https://github.com/ishanjainn/superopen?ref=so-init). Its .gitignore keeps local graph and session data out of Git.\n\n" +
+	"From the repository root:\n\n" +
+	"- `so graph status` — check the graph.\n" +
+	"- `so graph query \"<question>\"` — ask about this codebase.\n" +
+	"- `so memory recall \"<topic>\"` — find saved project knowledge.\n" +
+	"- `so sessions list` — browse coding sessions.\n" +
+	"- `so harvest review` — review proposed playbook updates.\n" +
+	"- `so scan` — check recorded tool calls against detection rules.\n" +
+	"- `so dev` — open the local UI.\n\n" +
+	"Run `so --help` for the full command list.\n"
 
 func FindRoot(start string) (string, error) {
 	absolute, err := filepath.Abs(start)
@@ -131,7 +145,10 @@ func (paths Paths) EnsureDirs() error {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
-	return WriteGitignore(paths.RepoRoot)
+	if err := WriteGitignore(paths.RepoRoot); err != nil {
+		return err
+	}
+	return WriteReadme(paths.RepoRoot)
 }
 
 // WriteGitignore creates .so/.gitignore when it is missing. Callers that
@@ -142,7 +159,10 @@ func WriteGitignore(repoRoot string) error {
 		return nil
 	}
 	ignorePath := filepath.Join(Resolve(repoRoot).Root, ".gitignore")
-	if _, err := os.Stat(ignorePath); err == nil {
+	if existing, err := os.ReadFile(ignorePath); err == nil {
+		if string(existing) == legacyGitignoreContents {
+			return os.WriteFile(ignorePath, []byte(GitignoreContents), 0o644)
+		}
 		return nil
 	} else if !os.IsNotExist(err) {
 		return err
@@ -151,6 +171,24 @@ func WriteGitignore(repoRoot string) error {
 		return err
 	}
 	return os.WriteFile(ignorePath, []byte(GitignoreContents), 0o644)
+}
+
+// WriteReadme creates .so/README.md without overwriting local edits.
+func WriteReadme(repoRoot string) error {
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		return nil
+	}
+	readmePath := filepath.Join(Resolve(repoRoot).Root, "README.md")
+	if _, err := os.Stat(readmePath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(readmePath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(readmePath, []byte(ReadmeContents), 0o644)
 }
 
 func (paths Paths) SessionDir(id string) string {

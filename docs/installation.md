@@ -168,11 +168,12 @@ so init
 
 Or `/so init` in the agent chat.
 
-This creates `.so/`, writes `.so/.gitignore`, builds the graph, and registers the project in the machine-wide index.
+This creates `.so/README.md` and `.so/.gitignore`, builds the graph, and registers the project in the machine-wide index. You can commit those two files; local data stays ignored.
 
 ```text
 .so/
-  .gitignore    # sessions/, db/, harvest/ (do not commit)
+  README.md     # brief guide to this workspace
+  .gitignore    # ignores local data directories
   sessions/     # session events, transcripts, checkpoints
   db/so.db      # SQLite: graph + memory
 ```

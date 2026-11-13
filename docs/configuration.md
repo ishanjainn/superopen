@@ -124,7 +124,8 @@ Installer notes: `scripts/install.sh` and `scripts/install.ps1` also honor those
 
 ```text
 .so/
-  .gitignore    # sessions/, db/, harvest/ (do not commit)
+  README.md     # brief guide to this workspace (can be committed)
+  .gitignore    # local data directories (can be committed)
   sessions/     # raw spans, events.jsonl, checkpoints
   db/so.db      # SQLite: graph tables and memory tables
   db/so.db.key  # AES key for sealed memory episode bodies (mode 0600)
